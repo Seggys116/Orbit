@@ -1,0 +1,25 @@
+# Chromium engine — fetched by Scripts/chromium, never committed (hundreds of MB).
+ThirdParty/
+
+# Generated from Chromium/chromium-version.json by Scripts/chromium sync.
+Chromium/Generated/
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
