@@ -1,0 +1,279 @@
+// Copyright 2026 The Orbit Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// chrome.webstorePrivate, trimmed to the functions the real Chrome Web Store
+// page actually calls against Orbit's own install pipeline -- not chrome/
+// common/extensions/api/webstore_private.json's full surface (install,
+// enableAppLauncher, getBrowserLogin, getIsLauncherEnabled,
+// isInIncognitoMode, getMV2DeprecationStatus, the enterprise-promotion
+// functions, supervised-user child-account plumbing), none of which Orbit
+// backs with a real implementation. Compiled by json_schema_compiler -- see
+// BUILD.gn. Types/enums otherwise match the real schema field-for-field so
+// the store's own client JS parses responses identically.
+
+[
+  {
+    "namespace": "webstorePrivate",
+    "description": "none",
+    "types": [
+      {
+        "id": "Result",
+        "type": "string",
+        "enum": [{
+          "name": "",
+          "description": "Empty string, used to indicate success by beginInstallWithManifest3"
+        }, {
+          "name": "unknown_error",
+          "description": "An unknown error occured"
+        }, {
+          "name": "feature_disabled",
+          "description": "The requested feature is not available"
+        }, {
+          "name": "install_error",
+          "description": "An error occured during installation"
+        }, {
+          "name": "user_cancelled",
+          "description": "The user canceled the operation"
+        }, {
+          "name": "invalid_id",
+          "description": "An invalid Chrome Web Store item ID was provided"
+        }, {
+          "name": "install_in_progress",
+          "description": "An installation of the same extension is already in progress"
+        }, {
+          "name": "manifest_error",
+          "description": "Parsing of the extension manifest failed"
+        }, {
+          "name": "already_installed",
+          "description": "The extension is already installed"
+        }],
+        "description": "Whether the API call succeeded, or the reason for failure."
+      },
+      {
+        "id": "WebGlStatus",
+        "type": "string",
+        "enum": ["webgl_allowed", "webgl_blocked"]
+      },
+      {
+        "id": "ExtensionInstallStatus",
+        "type": "string",
+        "enum": [{
+          "name": "installable",
+          "description": "The extension can be installed."
+        }, {
+          "name": "enabled",
+          "description": "The extension has been installed already and it's enabled."
+        }, {
+          "name": "disabled",
+          "description": "The extension has been installed already but it's disabled."
+        }, {
+          "name": "terminated",
+          "description": "The extension has been installed already but it's terminated."
+        }, {
+          "name": "custodian_approval_required",
+          "description": "The existing extension cannot be enabled due to lack of custodian approval for supervised users."
+        }, {
+          "name": "custodian_approval_required_for_installation",
+          "description": "The extension cannot be installed without getting custodian approval for supervised users."
+        }, {
+          "name": "corrupted",
+          "description": "The extension has been installed already but it's corrupted."
+        }]
+      }
+    ],
+    "functions": [
+      {
+        "name": "beginInstallWithManifest3",
+        "description": "Initiates the install process for the given extension.",
+        "parameters": [
+          {
+            "name": "details",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The id of the extension to be installed.",
+                "minLength": 32,
+                "maxLength": 32
+              },
+              "manifest": {
+                "type": "string",
+                "description": "A string with the contents of the extension's manifest.json file. During the install process, the browser will check that the downloaded extension's manifest matches what was passed in here.",
+                "minLength": 1
+              },
+              "iconUrl": {
+                "type": "string",
+                "optional": true,
+                "description": "A URL for the image to display in the confirmation dialog"
+              },
+              "localizedName": {
+                "type": "string",
+                "optional": true,
+                "description": "A string to use instead of the raw value of the 'name' key from manifest.json."
+              },
+              "locale": {
+                "type": "string",
+                "optional": true,
+                "description": "The name of the locale used for generating localizedName."
+              },
+              "appInstallBubble": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Unused by Orbit; accepted for wire compatibility with the real store page."
+              },
+              "enableLauncher": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Unused by Orbit; accepted for wire compatibility with the real store page."
+              },
+              "authuser": {
+                "type": "string",
+                "optional": true,
+                "description": "The authuser index to be included with CRX download requests in multi-login sessions."
+              },
+              "esbAllowlist": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Unused by Orbit; accepted for wire compatibility with the real store page."
+              }
+            },
+            "additionalProperties": { "type": "any" }
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "description": "Resolves when the user has either accepted/rejected the dialog, or rejects if some error occurred (such as invalid manifest or icon image data).",
+          "optional": true,
+          "parameters": [
+            {
+              "name": "result",
+              "$ref": "Result",
+              "description": "A string result code, which will be empty upon success."
+            }
+          ]
+        }
+      },
+      {
+        "name": "completeInstall",
+        "description": "Downloads, verifies and installs the extension a prior beginInstallWithManifest3 call approved.",
+        "parameters": [
+          {
+            "name": "expected_id",
+            "type": "string",
+            "description": "The id of the extension to be installed. This should match a previous call to beginInstallWithManifest3."
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": []
+        }
+      },
+      {
+        "name": "getStoreLogin",
+        "description": "Returns the previous value set by setStoreLogin, or the empty string if there is none.",
+        "parameters": [],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            { "name": "login", "type": "string" }
+          ]
+        }
+      },
+      {
+        "name": "setStoreLogin",
+        "description": "Sets a preference value with the store login.",
+        "parameters": [
+          { "name": "login", "type": "string" }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": []
+        }
+      },
+      {
+        "name": "getWebGLStatus",
+        "description": "Invokes a callback that returns whether WebGL is blacklisted or not.",
+        "parameters": [],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            {
+              "name": "webgl_status",
+              "$ref": "WebGlStatus"
+            }
+          ]
+        }
+      },
+      {
+        "name": "isPendingCustodianApproval",
+        "description": "Checks if an extension installed on a Supervised User profile is pending custodian approval.",
+        "parameters": [
+          {
+            "name": "id",
+            "type": "string",
+            "description": "The extension id of the extension to be checked."
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            { "name": "is_pending_approval", "type": "boolean" }
+          ]
+        }
+      },
+      {
+        "name": "getReferrerChain",
+        "description": "Returns a base-64 encoded referrer chain leading to the webstore page. Should only be used for extension anti-abuse purposes.",
+        "parameters": [],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            { "name": "referrerChain", "type": "string" }
+          ]
+        }
+      },
+      {
+        "name": "getExtensionStatus",
+        "description": "Returns the install status of the extension.",
+        "parameters": [
+          {
+            "name": "id",
+            "type": "string",
+            "description": "The id of the extension"
+          }, {
+            "name": "manifest",
+            "type": "string",
+            "optional": true,
+            "description": "The manifest of the extension"
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            { "name": "status", "$ref": "ExtensionInstallStatus" }
+          ]
+        }
+      },
+      {
+        "name": "getFullChromeVersion",
+        "description": "Returns the full version number, e.g. '123.0.6312.112'.",
+        "parameters": [],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            {
+              "name": "info",
+              "type": "object",
+              "properties": {
+                "version_number": { "type": "string" }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

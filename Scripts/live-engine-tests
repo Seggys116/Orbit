@@ -1,0 +1,536 @@
+#!/bin/bash
+# `ORBIT_LIVE_ENGINE=1 xcodebuild test` cannot work: xcodebuild does not hand its environment to the test host, so every live class skips and the run still exits 0.
+# The patched plan must live in the same products directory as the original: `__TESTROOT__` resolves relative to the plan's own directory.
+# Live suites share one process: the browser process can only be started once, so parallelisation is disabled on the command line and in the patched plan.
+#
+# A suite whose source carries the whole line `// ORBIT-LIVE-ENGINE: DESTRUCTIVE` is one that ends the engine for its process -- engine shutdown cannot be undone --
+# so it gets a test process to itself, run after every shared-engine suite. The marker lives with the suite, not in a list here, so declaring one line is all a new
+# destructive suite has to do. Everything it declares is still counted: the run is only green when every test from every pass executed and passed.
+# Naming a destructive suite together with any other in one `--suite` set is refused outright, because there is no way to run that set as asked.
+#
+# A suite whose source carries the whole line `// ORBIT-LIVE-ENGINE: OWN-PROCESS` is one whose subject is what the engine does at start-up -- something that happens
+# once per process and cannot be repeated -- so it needs a process where no engine has started yet, and gets a test process of its own between the shared pass and
+# the destructive ones. It destroys nothing, so it can be named alongside other suites in a `--suite` set; it is simply run in its own pass. DESTRUCTIVE already
+# implies this (a destructive suite is alone in its process anyway) and stays last, so a suite carrying both markers is still run once, as a destructive one.
+# Its tests are counted with everything else: the run is only green when every test from every pass executed and passed, so a suite that stops running is a failure
+# rather than a silent absence.
+#
+# Every pass runs with XCTest's own per-test timeout switched on (`--test-timeout`, 600s by default; it cannot be switched off). The slowest live test measured locally
+# is 65s, so this only ever fires on a test that has stopped making progress -- and one that has must fail, by name, while the run still reaches its verdict. Without it
+# a test that blocks forever (an engine shutdown that never returns, a navigation that never settles) hangs the whole job to its outer timeout and reports nothing at all.
+#
+# `--expect N` asserts that discovery finds N live tests and fails if it does not. It cannot replace the count, lower it, or relax any check: it used to set the
+# expected total and switch the per-pass check off with it, so `--expect 0` printed a green verdict over a run that executed nothing.
+#
+# A skip is a failure unless the suite declared it. A test that cannot run under a live engine for a reason of the engine's own -- Chromium's autoplay policy rejecting
+# a gesture-less <audio>.play(), say -- says so with a whole-line `// ORBIT-LIVE-ENGINE: MAY-SKIP <testName>` comment in its own source, next to the reason. That
+# declaration never covers a skip on the live-engine gate itself: the gate skipping means the environment never reached the test host, which is the failure this whole
+# script exists to catch. Scripts/test-verdict works the verdict out; it is also what the plain `xcodebuild test` path in CI uses.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
+
+TEST_TARGET="OrbitAppTests"
+SCHEME="Orbit"
+
+DERIVED_DATA="DerivedData"
+DESTINATION="platform=macOS,arch=arm64"
+CONFIGURATIONS="baseline force-pump"
+RESULTS_DIR=""
+SKIP_BUILD=0
+LIST_ONLY=0
+EXPECTED_OVERRIDE=""
+TEST_TIMEOUT=600
+BUILD_ARGS=()
+REQUESTED_SUITES=()
+
+usage() {
+  sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed -e 's/^# \{0,1\}//' -e '$d'
+}
+
+plural() {
+  if [ "$1" -eq 1 ]; then
+    printf '%s %s' "$1" "$2"
+  else
+    printf '%s %ss' "$1" "$2"
+  fi
+}
+
+# Without this, `set -u` reports a valueless flag as "$2: unbound variable".
+need_value() {
+  if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+    echo "error: $1 needs a value. Run '$0 --help'." >&2
+    exit 2
+  fi
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list)             LIST_ONLY=1; shift ;;
+    --skip-build)       SKIP_BUILD=1; shift ;;
+    --derived-data)     need_value "$@"; DERIVED_DATA="$2"; shift 2 ;;
+    --results-dir)      need_value "$@"; RESULTS_DIR="$2"; shift 2 ;;
+    --destination)      need_value "$@"; DESTINATION="$2"; shift 2 ;;
+    --expect)           need_value "$@"; EXPECTED_OVERRIDE="$2"; shift 2 ;;
+    --test-timeout)     need_value "$@"; TEST_TIMEOUT="$2"; shift 2 ;;
+    --suite)            need_value "$@"; REQUESTED_SUITES[${#REQUESTED_SUITES[@]}]="$2"; shift 2 ;;
+    --configurations)   need_value "$@"; CONFIGURATIONS="$(printf '%s' "$2" | tr ',' ' ')"; shift 2 ;;
+    -h|--help)          usage; exit 0 ;;
+    --)                 shift; while [ $# -gt 0 ]; do BUILD_ARGS[${#BUILD_ARGS[@]}]="$1"; shift; done ;;
+    *)
+      echo "error: unknown argument '$1'. Run '$0 --help'." >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "${TEST_TIMEOUT}" in
+  ''|*[!0-9]*)
+    echo "error: --test-timeout takes a whole number of seconds, not '${TEST_TIMEOUT}'." >&2
+    exit 2
+    ;;
+esac
+
+if [ "${TEST_TIMEOUT}" -lt 1 ]; then
+  echo "error: --test-timeout 0 would switch the per-test timeout off, and a test that then never returns hangs this run to its outer timeout with no verdict at all -- the silent outcome this script exists to prevent." >&2
+  echo "note: the default is 600s; pass a larger number if a live test legitimately needs longer." >&2
+  exit 2
+fi
+
+if [ -n "${EXPECTED_OVERRIDE}" ]; then
+  case "${EXPECTED_OVERRIDE}" in
+    ''|*[!0-9]*)
+      echo "error: --expect takes a whole number of tests, not '${EXPECTED_OVERRIDE}'." >&2
+      exit 2
+      ;;
+  esac
+  if [ "${EXPECTED_OVERRIDE}" -lt 1 ]; then
+    echo "error: --expect ${EXPECTED_OVERRIDE} cannot be satisfied by any run: a verdict over zero live tests is not a pass." >&2
+    exit 2
+  fi
+fi
+
+# XCTest's own timeout, not a wrapper around xcodebuild: it fails the individual test that overran, by name, and lets the pass finish and report.
+TIMEOUT_ARGS=(
+  -test-timeouts-enabled YES
+  -default-test-execution-time-allowance "${TEST_TIMEOUT}"
+  -maximum-test-execution-time-allowance "${TEST_TIMEOUT}"
+)
+
+for configuration in ${CONFIGURATIONS}; do
+  case "${configuration}" in
+    baseline|force-pump) ;;
+    *)
+      echo "error: unknown configuration '${configuration}'. Known: baseline, force-pump." >&2
+      exit 2
+      ;;
+  esac
+done
+
+# Full-line `//` comments are stripped first so a file that merely documents the environment variable in prose is not counted as a live suite.
+# Both markers are matched before that strip, and only as an entire line, so a header that discusses either in prose still does not trip it.
+# A suite may subclass a shared base (the corpus suites subclass CorpusLiveTestCase, which restores the shared engine state they borrow), so discovery matches
+# any `...TestCase` superclass rather than XCTestCase alone: a suite that dropped out of discovery would leave the run green over tests it never executed.
+
+SUITES=()
+SUITE_TESTS=()
+SUITE_DESTRUCTIVE=()
+SUITE_OWN_PROCESS=()
+EXPECTED_TESTS=0
+
+for file in OrbitAppTests/*.swift; do
+  found="$(awk '
+    /^[[:space:]]*\/\/[[:space:]]*ORBIT-LIVE-ENGINE:[[:space:]]*DESTRUCTIVE[[:space:]]*$/ { destructive = 1; next }
+    /^[[:space:]]*\/\/[[:space:]]*ORBIT-LIVE-ENGINE:[[:space:]]*OWN-PROCESS[[:space:]]*$/ { own_process = 1; next }
+    /^[[:space:]]*\/\// { next }
+    /LiveChromiumEngineHost\.isEnabled/ { guarded = 1 }
+    /environment\["ORBIT_LIVE_ENGINE"\]/ { guarded = 1 }
+    /^(final )?class [A-Za-z0-9_]+[[:space:]]*:[[:space:]]*[A-Za-z0-9_]*TestCase/ {
+      if (name == "") {
+        name = $0
+        sub(/^(final )?class[[:space:]]+/, "", name)
+        sub(/[[:space:]]*:.*$/, "", name)
+      }
+    }
+    /^[[:space:]]*func test/ { tests++ }
+    END { if (guarded && name != "") printf "%s %d %d %d\n", name, tests + 0, destructive + 0, own_process + 0 }
+  ' "${file}")"
+  [ -n "${found}" ] || continue
+  read -r name count destructive own_process <<< "${found}"
+
+  # `--suite` must narrow the run and the expected count together.
+  if [ ${#REQUESTED_SUITES[@]} -gt 0 ]; then
+    wanted=0
+    for requested in "${REQUESTED_SUITES[@]}"; do
+      if [ "${requested}" = "${name}" ]; then
+        wanted=1
+      fi
+    done
+    [ "${wanted}" -eq 1 ] || continue
+  fi
+
+  SUITES[${#SUITES[@]}]="${name}"
+  SUITE_TESTS[${#SUITE_TESTS[@]}]="${count}"
+  SUITE_DESTRUCTIVE[${#SUITE_DESTRUCTIVE[@]}]="${destructive}"
+  SUITE_OWN_PROCESS[${#SUITE_OWN_PROCESS[@]}]="${own_process}"
+  EXPECTED_TESTS=$((EXPECTED_TESTS + count))
+done
+
+if [ ${#SUITES[@]} -eq 0 ]; then
+  if [ ${#REQUESTED_SUITES[@]} -gt 0 ]; then
+    echo "error: none of the requested suites are live-engine suites: ${REQUESTED_SUITES[*]}" >&2
+    echo "note: run without --suite, or with --list, to see the ones that are." >&2
+  else
+    echo "error: no live-engine suites found under OrbitAppTests/." >&2
+    echo "note: a live suite is a file declaring an XCTestCase subclass that consults" >&2
+    echo "note: the shared live-engine guard. If one was renamed, this script's" >&2
+    echo "note: discovery section says exactly what it looks for." >&2
+  fi
+  exit 1
+fi
+
+if [ -n "${EXPECTED_OVERRIDE}" ] && [ "${EXPECTED_OVERRIDE}" -ne "${EXPECTED_TESTS}" ]; then
+  echo "error: --expect ${EXPECTED_OVERRIDE}, but discovery found ${EXPECTED_TESTS} live tests in the sources." >&2
+  echo "note: --expect asserts what discovery should find; it cannot replace it. Run --list to see the suites and counts, then fix whichever of the two is wrong." >&2
+  exit 1
+fi
+
+# One pass is one xcodebuild test process. Everything that can share an engine shares the first pass; every suite that cannot gets a pass of its own -- an
+# own-process suite because it has to be the one that starts the engine there, a destructive suite because the shutdown it performs ends the engine for whatever
+# process it ran in, which is why those come last.
+SHARED_SUITES=()
+SHARED_EXPECTED=0
+OWN_PROCESS_SUITES=()
+OWN_PROCESS_EXPECTED=()
+DESTRUCTIVE_SUITES=()
+DESTRUCTIVE_EXPECTED=()
+
+index=0
+while [ "${index}" -lt ${#SUITES[@]} ]; do
+  # Destructive first: such a suite is already alone in its process, so it satisfies OWN-PROCESS as it stands and must not also be given a second pass.
+  if [ "${SUITE_DESTRUCTIVE[${index}]}" -eq 1 ]; then
+    DESTRUCTIVE_SUITES[${#DESTRUCTIVE_SUITES[@]}]="${SUITES[${index}]}"
+    DESTRUCTIVE_EXPECTED[${#DESTRUCTIVE_EXPECTED[@]}]="${SUITE_TESTS[${index}]}"
+  elif [ "${SUITE_OWN_PROCESS[${index}]}" -eq 1 ]; then
+    OWN_PROCESS_SUITES[${#OWN_PROCESS_SUITES[@]}]="${SUITES[${index}]}"
+    OWN_PROCESS_EXPECTED[${#OWN_PROCESS_EXPECTED[@]}]="${SUITE_TESTS[${index}]}"
+  else
+    SHARED_SUITES[${#SHARED_SUITES[@]}]="${SUITES[${index}]}"
+    SHARED_EXPECTED=$((SHARED_EXPECTED + SUITE_TESTS[index]))
+  fi
+  index=$((index + 1))
+done
+
+# Asked for explicitly, a destructive suite cannot be honoured alongside anything else, and quietly dropping either half would be a lie about what ran.
+if [ ${#REQUESTED_SUITES[@]} -gt 0 ] && [ ${#DESTRUCTIVE_SUITES[@]} -gt 0 ] && [ ${#SUITES[@]} -gt 1 ]; then
+  echo "error: a destructive live suite cannot share a --suite set with any other suite." >&2
+  printf 'note:   destructive: %s\n' "${DESTRUCTIVE_SUITES[@]}" >&2
+  OTHER_REQUESTED=(
+    ${SHARED_SUITES[@]+"${SHARED_SUITES[@]}"}
+    ${OWN_PROCESS_SUITES[@]+"${OWN_PROCESS_SUITES[@]}"}
+  )
+  if [ ${#OTHER_REQUESTED[@]} -gt 0 ]; then
+    printf 'note:   also requested: %s\n' "${OTHER_REQUESTED[@]}" >&2
+  fi
+  echo "note: a destructive suite shuts the engine down, which ends it for its whole" >&2
+  echo "note: test process and cannot be undone, so every live test that runs after it in" >&2
+  echo "note: that process dies with it -- which reaches you as a mid-run host death with" >&2
+  echo "note: no obvious cause, not as a failure that names the suite responsible." >&2
+  echo "note: run it alone (--suite ${DESTRUCTIVE_SUITES[0]}), or run with no --suite at" >&2
+  echo "note: all: that runs every shared-engine suite first, then each destructive suite in" >&2
+  echo "note: its own test process, and still counts every test from every one of them." >&2
+  exit 2
+fi
+
+PASS_COUNT=$((${#DESTRUCTIVE_SUITES[@]} + ${#OWN_PROCESS_SUITES[@]}))
+if [ ${#SHARED_SUITES[@]} -gt 0 ]; then
+  PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+echo "live-engine-tests: $(plural ${#SUITES[@]} "live suite"), $(plural "${EXPECTED_TESTS}" test), configurations: ${CONFIGURATIONS}"
+index=0
+while [ "${index}" -lt ${#SUITES[@]} ]; do
+  if [ "${SUITE_DESTRUCTIVE[${index}]}" -eq 1 ]; then
+    echo "live-engine-tests:   ${TEST_TARGET}/${SUITES[${index}]} ($(plural "${SUITE_TESTS[${index}]}" test), DESTRUCTIVE: its own test process, after the rest)"
+  elif [ "${SUITE_OWN_PROCESS[${index}]}" -eq 1 ]; then
+    echo "live-engine-tests:   ${TEST_TARGET}/${SUITES[${index}]} ($(plural "${SUITE_TESTS[${index}]}" test), OWN-PROCESS: its own test process, engine unstarted)"
+  else
+    echo "live-engine-tests:   ${TEST_TARGET}/${SUITES[${index}]} ($(plural "${SUITE_TESTS[${index}]}" test))"
+  fi
+  index=$((index + 1))
+done
+
+echo "live-engine-tests: per-test timeout ${TEST_TIMEOUT}s"
+
+if [ "${PASS_COUNT}" -eq 1 ]; then
+  echo "live-engine-tests: 1 test process per configuration"
+else
+  BREAKDOWN=""
+  if [ ${#SHARED_SUITES[@]} -gt 0 ]; then
+    BREAKDOWN="$(plural ${#SHARED_SUITES[@]} "shared-engine suite") together"
+  fi
+  if [ ${#OWN_PROCESS_SUITES[@]} -gt 0 ]; then
+    if [ -n "${BREAKDOWN}" ]; then BREAKDOWN="${BREAKDOWN}, then "; fi
+    BREAKDOWN="${BREAKDOWN}$(plural ${#OWN_PROCESS_SUITES[@]} "own-process suite"), one process each"
+  fi
+  if [ ${#DESTRUCTIVE_SUITES[@]} -gt 0 ]; then
+    if [ -n "${BREAKDOWN}" ]; then BREAKDOWN="${BREAKDOWN}, then "; fi
+    BREAKDOWN="${BREAKDOWN}$(plural ${#DESTRUCTIVE_SUITES[@]} "destructive suite"), one process each"
+  fi
+  echo "live-engine-tests: ${PASS_COUNT} test processes per configuration: ${BREAKDOWN}"
+fi
+
+if [ "${LIST_ONLY}" -eq 1 ]; then
+  exit 0
+fi
+
+if [ "${SKIP_BUILD}" -eq 1 ]; then
+  echo "live-engine-tests: --skip-build, reusing whatever is in ${DERIVED_DATA}/Build/Products"
+else
+  echo "live-engine-tests: building for testing"
+  xcodebuild build-for-testing \
+    -project Orbit.xcodeproj \
+    -scheme "${SCHEME}" \
+    -configuration Debug \
+    -destination "${DESTINATION}" \
+    -derivedDataPath "${DERIVED_DATA}" \
+    ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
+fi
+
+PRODUCTS_DIR="${DERIVED_DATA}/Build/Products"
+
+# xcodebuild's own plan is named "<Scheme>_<platform>-<arch>.xctestrun" -- an
+# underscore right after the scheme name. Everything else in this directory
+# is something else: one of ours (Orbit-live-engine-*, hyphenated), or a
+# stale orphan left by some earlier, now-unrelated flow (also hyphenated --
+# e.g. a probe plan nothing here generates any more). Looking for the
+# underscore name first means an orphan is never a candidate to guess
+# between; it simply doesn't match.
+PRISTINE_PLANS=()
+for plan in "${PRODUCTS_DIR}/${SCHEME}"_*.xctestrun; do
+  [ -e "${plan}" ] || continue
+  PRISTINE_PLANS[${#PRISTINE_PLANS[@]}]="${plan}"
+done
+
+if [ ${#PRISTINE_PLANS[@]} -eq 1 ]; then
+  SOURCE_PLAN="${PRISTINE_PLANS[0]}"
+elif [ ${#PRISTINE_PLANS[@]} -gt 1 ]; then
+  echo "error: ${#PRISTINE_PLANS[@]} plans match xcodebuild's own '${SCHEME}_<platform>-<arch>.xctestrun' naming in ${PRODUCTS_DIR}, so which one to patch is a guess:" >&2
+  printf 'note:   %s\n' "${PRISTINE_PLANS[@]}" >&2
+  echo "note: point --derived-data at a tree built for a single destination, or --destination at the one that matches a single plan." >&2
+  exit 1
+else
+  # Fallback for an xcodebuild that isn't using the underscore naming this
+  # was written against: any single .xctestrun that isn't one of ours. Stale
+  # hyphenated orphans still make this ambiguous -- that's the one case this
+  # script genuinely cannot resolve on its own.
+  PLANS=()
+  for plan in "${PRODUCTS_DIR}"/*.xctestrun; do
+    case "${plan}" in
+      *"-live-engine-"*.xctestrun) continue ;;   # one of ours from a previous run
+    esac
+    [ -e "${plan}" ] || continue
+    PLANS[${#PLANS[@]}]="${plan}"
+  done
+
+  if [ ${#PLANS[@]} -eq 0 ]; then
+    echo "error: no .xctestrun in ${PRODUCTS_DIR}." >&2
+    echo "note: run without --skip-build, or point --derived-data at the tree that has one." >&2
+    exit 1
+  fi
+  if [ ${#PLANS[@]} -gt 1 ]; then
+    echo "error: ${#PLANS[@]} .xctestrun files in ${PRODUCTS_DIR}, none named '${SCHEME}_<platform>-<arch>.xctestrun', so which one to patch is a guess:" >&2
+    printf 'note:   %s\n' "${PLANS[@]}" >&2
+    echo "note: this xcodebuild isn't using the scheme-underscore naming this script looks for first; rebuild with --skip-build off, or point --derived-data at a tree with exactly one non-live-engine plan." >&2
+    exit 1
+  fi
+  SOURCE_PLAN="${PLANS[0]}"
+fi
+echo "live-engine-tests: test plan ${SOURCE_PLAN}"
+
+# Per-run directory: xcodebuild refuses to overwrite an existing result bundle.
+if [ -z "${RESULTS_DIR}" ]; then
+  RESULTS_DIR="${DERIVED_DATA}/LiveEngineResults/$(date +%Y%m%d-%H%M%S)"
+fi
+mkdir -p "${RESULTS_DIR}"
+
+# One xcodebuild test process, over the suites it is given. Each pass appends a row to the configuration's ledger; the verdict is worked out once, over every row,
+# only after all of them have run -- a pass that dies must not stop the others from producing their evidence.
+# Row: label, kind, expected, xcodebuild status, passes seen in the log, skips seen in the log, summary JSON ("-" when it could not be read), the log itself.
+run_pass() {
+  local configuration="$1" label="$2" kind="$3" plan="$4" ledger="$5" expected="$6"
+  shift 6
+  local suite slug result_bundle log summary_json
+  local xcodebuild_status summary_status log_passed log_skipped
+  local only_testing
+  only_testing=()
+  for suite in "$@"; do
+    only_testing[${#only_testing[@]}]="-only-testing:${TEST_TARGET}/${suite}"
+  done
+
+  # The shared pass keeps the plain per-configuration names, so `baseline.log` and `baseline.xcresult` still mean what they have always meant.
+  if [ "${kind}" = "shared" ]; then
+    slug="${configuration}"
+  else
+    slug="${configuration}-${label}"
+  fi
+  result_bundle="${RESULTS_DIR}/${slug}.xcresult"
+  log="${RESULTS_DIR}/${slug}.log"
+  summary_json="${RESULTS_DIR}/${slug}-summary.json"
+
+  echo
+  echo "live-engine-tests: --- ${configuration}: ${label} ($(plural $# suite), $(plural "${expected}" test), ${kind} process) ---"
+
+  set +e
+  xcodebuild test-without-building \
+    -xctestrun "${plan}" \
+    -destination "${DESTINATION}" \
+    -parallel-testing-enabled NO \
+    -resultBundlePath "${result_bundle}" \
+    ${TIMEOUT_ARGS[@]+"${TIMEOUT_ARGS[@]}"} \
+    "${only_testing[@]}" 2>&1 | tee "${log}"
+  xcodebuild_status=${PIPESTATUS[0]}
+  set -e
+
+  log_passed="$(awk '/Test Case .* passed \(/ { n++ } END { print n + 0 }' "${log}")"
+  log_skipped="$(awk '/Test Case .* skipped \(/ { n++ } END { print n + 0 }' "${log}")"
+
+  # --schema-version is pinned so a schema change fails loudly rather than handing back a document with moved field names.
+  set +e
+  xcrun xcresulttool get test-results summary \
+    --schema-version 0.1.0 \
+    --path "${result_bundle}" > "${summary_json}" 2>"${summary_json}.err"
+  summary_status=$?
+  set -e
+
+  if [ "${summary_status}" -ne 0 ]; then
+    echo "error: could not read ${result_bundle}:" >&2
+    cat "${summary_json}.err" >&2
+    echo "note: xcodebuild exited ${xcodebuild_status}; the log is ${log}" >&2
+    summary_json="-"
+  fi
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "${label}" "${kind}" "${expected}" "${xcodebuild_status}" "${log_passed}" "${log_skipped}" "${summary_json}" "${log}" >> "${ledger}"
+}
+
+# Called from an `if !`, which switches `set -e` off for everything it runs, so every step that can fail takes and checks its own status.
+run_configuration() {
+  local configuration="$1"
+  local patched_plan="${PRODUCTS_DIR}/Orbit-live-engine-${configuration}.xctestrun"
+  local ledger="${RESULTS_DIR}/${configuration}-passes.tsv"
+  local patch_status index suite
+
+  echo
+  echo "live-engine-tests: === ${configuration} ==="
+
+  set +e
+  python3 - "${SOURCE_PLAN}" "${patched_plan}" "${TEST_TARGET}" "${configuration}" <<'PY'
+import plistlib
+import sys
+
+source, destination, target_name, configuration = sys.argv[1:5]
+
+variables = {"ORBIT_LIVE_ENGINE": "1"}
+if configuration == "force-pump":
+    variables["ORBIT_LIVE_ENGINE_FORCE_PUMP"] = "1"
+
+with open(source, "rb") as handle:
+    plan = plistlib.load(handle)
+
+# FormatVersion 1 keys targets by name at the top level; 2 and 3 nest them under TestConfigurations. An unhandled shape patches nothing and skips everything silently.
+targets = []
+if "TestConfigurations" in plan:
+    for test_configuration in plan["TestConfigurations"]:
+        targets.extend(test_configuration.get("TestTargets", []))
+else:
+    targets.extend(
+        value for key, value in plan.items()
+        if key != "__xctestrun_metadata__" and isinstance(value, dict)
+    )
+
+patched = 0
+for target in targets:
+    if target.get("BlueprintName") != target_name:
+        continue
+    environment = dict(target.get("EnvironmentVariables") or {})
+    environment.update(variables)
+    target["EnvironmentVariables"] = environment
+    # Both spellings appear depending on whether the target is hosted; either left true splits the live classes across processes, i.e. a second browser process start.
+    for key in ("InProcessParallelizationEnabled", "ParallelizationEnabled"):
+        if key in target:
+            target[key] = False
+    patched += 1
+
+if patched != 1:
+    sys.exit(
+        f"error: expected exactly one '{target_name}' target in {source}, patched {patched}. "
+        "The test plan's shape changed; this script's patcher has to change with it."
+    )
+
+with open(destination, "wb") as handle:
+    plistlib.dump(plan, handle)
+
+print("live-engine-tests: patched " + ", ".join(
+    f"{name}={value}" for name, value in sorted(variables.items())
+) + f" into {destination}")
+PY
+  patch_status=$?
+  set -e
+  if [ "${patch_status}" -ne 0 ]; then
+    return 1
+  fi
+
+  : > "${ledger}"
+
+  if [ ${#SHARED_SUITES[@]} -gt 0 ]; then
+    run_pass "${configuration}" "shared-engine" "shared" "${patched_plan}" "${ledger}" \
+      "${SHARED_EXPECTED}" "${SHARED_SUITES[@]}"
+  fi
+
+  # Its own process, so its engine is unstarted when it begins -- which is the whole reason it is not in the pass above.
+  index=0
+  while [ "${index}" -lt ${#OWN_PROCESS_SUITES[@]} ]; do
+    suite="${OWN_PROCESS_SUITES[${index}]}"
+    run_pass "${configuration}" "${suite}" "own-process" "${patched_plan}" "${ledger}" \
+      "${OWN_PROCESS_EXPECTED[${index}]}" "${suite}"
+    index=$((index + 1))
+  done
+
+  # After every other pass, never before them: this is the one that ends the engine.
+  index=0
+  while [ "${index}" -lt ${#DESTRUCTIVE_SUITES[@]} ]; do
+    suite="${DESTRUCTIVE_SUITES[${index}]}"
+    run_pass "${configuration}" "${suite}" "destructive" "${patched_plan}" "${ledger}" \
+      "${DESTRUCTIVE_EXPECTED[${index}]}" "${suite}"
+    index=$((index + 1))
+  done
+
+  "${SCRIPT_DIR}/test-verdict" live \
+    --ledger "${ledger}" \
+    --configuration "${configuration}" \
+    --expected "${EXPECTED_TESTS}" \
+    --expected-passes "${PASS_COUNT}" \
+    --source-dir "${TEST_TARGET}"
+}
+
+status=0
+for configuration in ${CONFIGURATIONS}; do
+  if ! run_configuration "${configuration}"; then
+    status=1
+    echo "live-engine-tests: ${configuration} FAILED" >&2
+  fi
+done
+
+echo
+if [ "${status}" -eq 0 ]; then
+  echo "live-engine-tests: every configuration green (${CONFIGURATIONS// /, }), ${EXPECTED_TESTS} live tests each, over ${PASS_COUNT} test process(es) each."
+else
+  echo "live-engine-tests: FAILED. Logs and result bundles: ${RESULTS_DIR}" >&2
+fi
+echo "live-engine-tests: results in ${RESULTS_DIR}"
+
+exit "${status}"

@@ -1,0 +1,577 @@
+# Copyright 2026 The Orbit Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+#
+# Orbit's own Chromium embedder. Lives in the Orbit repository at
+# Chromium/Embedder/ and is reached from inside the (gitignored, resynced)
+# Chromium checkout only through a symlink --
+# ThirdParty/chromium/src/orbit -> Chromium/Embedder --
+# that Scripts/chromium (chromium_manager.py: link_embedder_source())
+# recreates after every gclient sync. See Chromium/README.md for why a
+# symlink and not a DEPS entry or checked-in tree: depot_tools'
+# `gclient sync --reset --delete_unversioned_trees` deletes untracked
+# directories under src/ but explicitly skips symlinks
+# (gclient_scm.py: `if not os.path.islink(full_path): ... rmtree`), so this
+# is the one mechanism that survives both a resync and a fresh clone without
+# ever writing into the checkout itself.
+#
+# GN resolves //orbit/... through that symlink exactly like any other
+# on-disk directory; nothing here is special-cased by GN or ninja.
+#
+# Structured after content/shell/BUILD.gn's `is_mac` block, which is the
+# canonical example of an embedder producing a macOS framework + helper
+# .app family from //content. The one deliberate divergence: content_shell's
+# helper template links the framework directly ("+link_nested") in a
+# component build, purely for build speed. Orbit's helper template never
+# does that -- see the process-and-sandbox design note, section 1: the
+# helper must dlopen() the framework strictly after Seatbelt is initialised,
+# and dlopen is what applies in every configuration, component build or not.
+
+import("//build/apple/tweak_info_plist.gni")
+import("//build/config/mac/rules.gni")
+import("//content/public/app/mac_helpers.gni")
+import("//mojo/public/tools/bindings/mojom.gni")
+import("//third_party/icu/config.gni")
+import("//tools/grit/repack.gni")
+import("//tools/v8_context_snapshot/v8_context_snapshot.gni")
+import("//ui/gl/features.gni")
+import("//v8/gni/v8.gni")
+
+assert(is_mac, "Orbit's embedder is macOS-only.")
+
+orbit_product_name = "Orbit"
+orbit_version = "1.0.0.0"
+
+group("orbit") {
+  deps = [
+    ":orbit_framework",
+    ":orbit_selftest",
+  ]
+}
+
+# Build-validation tool only; never embedded in a shipped bundle. See
+# app/orbit_selftest_main.cc.
+executable("orbit_selftest") {
+  sources = [ "app/orbit_selftest_main.cc" ]
+  deps = [ ":orbit_framework" ]
+}
+
+# Browser<->renderer wiring for user-script injection and the page->native
+# message channel -- see common/orbit_mojom.mojom's file comment.
+mojom("mojo_bindings") {
+  cpp_only = true
+  sources = [ "common/orbit_mojom.mojom" ]
+}
+
+orbit_framework_name = "$orbit_product_name Framework"
+orbit_helper_name = "$orbit_product_name Helper"
+
+tweak_info_plist("orbit_framework_plist") {
+  info_plist = "app/framework-Info.plist"
+  args = [
+    "--breakpad=0",
+    "--keystone=0",
+    "--scm=0",
+    "--version",
+    orbit_version,
+    "--branding",
+    orbit_product_name,
+  ]
+}
+
+source_set("orbit_lib") {
+  sources = [
+    "app/orbit_content_main.cc",
+    "app/orbit_content_main.h",
+    "app/orbit_main_delegate.cc",
+    "app/orbit_main_delegate.h",
+    "app/orbit_paths_mac.h",
+    "app/orbit_paths_mac.mm",
+    "bridge/orbit_bridge_api.cc",
+    "bridge/orbit_bridge_api.h",
+    "bridge/orbit_bridge_internal.h",
+    "browser/api/action/orbit_action_api.cc",
+    "browser/api/action/orbit_action_api.h",
+    "browser/api/cookies/orbit_cookies_api.cc",
+    "browser/api/cookies/orbit_cookies_api.h",
+    "browser/api/permissions/orbit_permissions_api.cc",
+    "browser/api/permissions/orbit_permissions_api.h",
+    "browser/api/preference/orbit_preference_api.cc",
+    "browser/api/preference/orbit_preference_api.h",
+    "browser/api/tabs/orbit_tabs_api.cc",
+    "browser/api/tabs/orbit_tabs_api.h",
+    "browser/api/web_navigation/orbit_web_navigation_api.cc",
+    "browser/api/web_navigation/orbit_web_navigation_api.h",
+    "browser/api/webstore_private/orbit_webstore_private_api.cc",
+    "browser/api/webstore_private/orbit_webstore_private_api.h",
+    "browser/api/windows/orbit_windows_api.cc",
+    "browser/api/windows/orbit_windows_api.h",
+    "browser/orbit_browser_context.cc",
+    "browser/orbit_browser_context.h",
+    "browser/orbit_browser_main_parts.cc",
+    "browser/orbit_browser_main_parts.h",
+    "browser/orbit_client_hints_controller_delegate.cc",
+    "browser/orbit_client_hints_controller_delegate.h",
+    "browser/orbit_color_scheme.cc",
+    "browser/orbit_color_scheme.h",
+    "browser/orbit_content_blocking_url_loader_factory.cc",
+    "browser/orbit_content_blocking_url_loader_factory.h",
+    "browser/orbit_content_browser_client.cc",
+    "browser/orbit_content_browser_client.h",
+    "browser/orbit_cookie_bridge.cc",
+    "browser/orbit_cookie_bridge.h",
+    "browser/orbit_cookies_event_router.cc",
+    "browser/orbit_cookies_event_router.h",
+    "browser/orbit_devtools_bindings.cc",
+    "browser/orbit_devtools_bindings.h",
+    "browser/orbit_devtools_frontend.cc",
+    "browser/orbit_devtools_frontend.h",
+    "browser/orbit_devtools_manager_delegate.cc",
+    "browser/orbit_devtools_manager_delegate.h",
+    "browser/orbit_devtools_web_ui.cc",
+    "browser/orbit_devtools_web_ui.h",
+    "browser/orbit_download_bridge.cc",
+    "browser/orbit_download_bridge.h",
+    "browser/orbit_download_manager_delegate.cc",
+    "browser/orbit_download_manager_delegate.h",
+    "browser/orbit_extension_action_dispatcher.cc",
+    "browser/orbit_extension_action_dispatcher.h",
+    "browser/orbit_extension_host_delegate.cc",
+    "browser/orbit_extension_host_delegate.h",
+    "browser/orbit_extension_loader.cc",
+    "browser/orbit_extension_loader.h",
+    "browser/orbit_extension_management_client.cc",
+    "browser/orbit_extension_management_client.h",
+    "browser/orbit_extension_registrar_delegate.cc",
+    "browser/orbit_extension_registrar_delegate.h",
+    "browser/orbit_extension_system.cc",
+    "browser/orbit_extension_system.h",
+    "browser/orbit_extension_web_contents_observer.cc",
+    "browser/orbit_extension_web_contents_observer.h",
+    "browser/orbit_extensions_api_client.cc",
+    "browser/orbit_extensions_api_client.h",
+    "browser/orbit_extensions_browser_api_provider.cc",
+    "browser/orbit_extensions_browser_api_provider.h",
+    "browser/orbit_extensions_browser_client.cc",
+    "browser/orbit_extensions_browser_client.h",
+    "browser/orbit_frame_navigation_state.cc",
+    "browser/orbit_frame_navigation_state.h",
+    "browser/orbit_http_auth_login_delegate.cc",
+    "browser/orbit_http_auth_login_delegate.h",
+    "browser/orbit_managed_value_store_cache.cc",
+    "browser/orbit_managed_value_store_cache.h",
+    "browser/orbit_management_api_delegate.cc",
+    "browser/orbit_management_api_delegate.h",
+    "browser/orbit_messaging_delegate.cc",
+    "browser/orbit_messaging_delegate.h",
+    "browser/orbit_native_nested_loop_guard.h",
+    "browser/orbit_native_nested_loop_guard.mm",
+    "browser/orbit_permission_controller_delegate.cc",
+    "browser/orbit_permission_controller_delegate.h",
+    "browser/orbit_permission_store.cc",
+    "browser/orbit_permission_store.h",
+    "browser/orbit_permissions_event_router.cc",
+    "browser/orbit_permissions_event_router.h",
+    "browser/orbit_preference_event_router.cc",
+    "browser/orbit_preference_event_router.h",
+    "browser/orbit_print_manager.cc",
+    "browser/orbit_print_manager.h",
+    "browser/orbit_protocol_handler_registry_delegate.cc",
+    "browser/orbit_protocol_handler_registry_delegate.h",
+    "browser/orbit_runtime_api_delegate.cc",
+    "browser/orbit_runtime_api_delegate.h",
+    "browser/orbit_ssl_host_state_delegate.cc",
+    "browser/orbit_ssl_host_state_delegate.h",
+    "browser/orbit_sync_value_store_cache.cc",
+    "browser/orbit_sync_value_store_cache.h",
+    "browser/orbit_tab_registry.cc",
+    "browser/orbit_tab_registry.h",
+    "browser/orbit_user_script_registry.cc",
+    "browser/orbit_user_script_registry.h",
+    "browser/orbit_video_overlay_window_mac.h",
+    "browser/orbit_video_overlay_window_mac.mm",
+    "browser/orbit_web_contents_host.h",
+    "browser/orbit_web_contents_host.mm",
+    "browser/orbit_web_navigation_event_router.cc",
+    "browser/orbit_web_navigation_event_router.h",
+    "browser/orbit_webstore_private_bridge.cc",
+    "browser/orbit_webstore_private_bridge.h",
+    "browser/orbit_webstore_private_browser_api_provider.cc",
+    "browser/orbit_webstore_private_browser_api_provider.h",
+    "common/api/orbit_webstore_private_api_provider.cc",
+    "common/api/orbit_webstore_private_api_provider.h",
+    "common/orbit_content_client.cc",
+    "common/orbit_content_client.h",
+    "common/orbit_extensions_api_provider.cc",
+    "common/orbit_extensions_api_provider.h",
+    "common/orbit_extensions_client.cc",
+    "common/orbit_extensions_client.h",
+    "common/orbit_match_pattern.cc",
+    "common/orbit_match_pattern.h",
+    "common/orbit_permission_message_provider.cc",
+    "common/orbit_permission_message_provider.h",
+    "common/orbit_user_agent.cc",
+    "common/orbit_user_agent.h",
+    "common/orbit_user_data_dir.cc",
+    "common/orbit_user_data_dir.h",
+    "common/orbit_user_script_spec.cc",
+    "common/orbit_user_script_spec.h",
+    "renderer/orbit_content_renderer_client.cc",
+    "renderer/orbit_content_renderer_client.h",
+    "renderer/orbit_extensions_renderer_api_provider.cc",
+    "renderer/orbit_extensions_renderer_api_provider.h",
+    "renderer/orbit_extensions_renderer_client.cc",
+    "renderer/orbit_extensions_renderer_client.h",
+    "renderer/orbit_render_frame_observer.cc",
+    "renderer/orbit_render_frame_observer.h",
+    "renderer/orbit_tabs_hooks_delegate.cc",
+    "renderer/orbit_tabs_hooks_delegate.h",
+  ]
+  deps = [
+    ":mojo_bindings",
+    "//base/version_info",
+    "//cc",
+    "//components/keyed_service/content",
+    "//components/keyed_service/core",
+    # os_crypt_async::OSCryptAsync itself, and the mac-only KeychainKeyProvider
+    # -- services/network/public/cpp depends on the former only privately, so
+    # it doesn't come along for free; see orbit_content_browser_client.cc's
+    # constructor for why both are needed the moment a partition gets a
+    # persistent cookie store.
+    "//components/custom_handlers",
+    # embedder_support::BuildUnifiedPlatformUserAgentFromProduct /
+    # GenerateBrandVersionList / GetUserAgentMetadata -- see
+    # common/orbit_user_agent.cc. content/shell depends on this same target,
+    # so it needs nothing from the chrome/ layer.
+    "//components/embedder_support:user_agent",
+    "//components/os_crypt/async/browser",
+    "//components/os_crypt/async/browser:keychain_key_provider",
+    "//components/pref_registry",
+    "//components/prefs",
+    # orbit_print_manager.{h,cc}'s printing::PrintManager base and
+    # print_to_pdf::PdfPrintJob -- see that file's own comment for why this is
+    # reachable without any chrome/-layer code. Mirrors
+    # components/printing/browser/headless/BUILD.gn's own deps list exactly,
+    # the other embedder in this tree using this same component.
+    "//components/printing/browser",
+    "//components/printing/browser/print_to_pdf",
+    "//components/printing/common:mojo_interfaces",
+    "//components/sync/model",
+    "//components/user_prefs",
+    "//components/value_store",
+    "//components/viz/common",
+    "//content/public/app",
+    "//content/public/browser",
+    "//content/public/common",
+    "//content/public/renderer",
+    "//extensions/browser",
+    # chrome.storage.sync and chrome.storage.managed: browser/orbit_sync_value_store_cache.*
+    # and browser/orbit_managed_value_store_cache.* subclass ValueStoreCache
+    # and reuse SettingsStorageQuotaEnforcer and value_store_util, all of
+    # which live in this source_set rather than //extensions/browser itself.
+    "//extensions/browser/api/storage",
+    "//extensions/browser/api/storage:settings_namespace",
+    "//extensions/browser/api/storage:settings_observer",
+    "//extensions/browser/updater",
+    "//extensions/common",
+    # api::runtime::OnStartup::kEventName, for the runtime.onStartup Orbit has
+    # to dispatch itself -- see DispatchOnStartup in
+    # browser/orbit_extension_loader.cc.
+    "//extensions/common/api",
+    "//extensions/common:core_api_provider",
+    "//extensions/renderer",
+
+    # grit() targets are source_sets that compile their own generated
+    # *_resources_map.cc, so this is where kExtensionsRendererGeneratedResources
+    # -- the full path->IDR table renderer/orbit_extensions_renderer_api_provider.cc
+    # walks to prove the pak is complete -- comes from.
+    "//extensions/renderer/resources:extensions_renderer_generated_resources",
+    "//extensions/renderer/resources:extensions_renderer_resources",
+    "//orbit/common/api",
+    "//orbit/common/api:webstore_private_api",
+    "//gin",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/js:resources",
+    "//net",
+    "//printing",
+    "//printing/buildflags",
+    "//printing/mojom",
+    "//services/media_session/public/cpp",
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
+    "//services/service_manager/public/cpp",
+    "//skia",
+    "//third_party/blink/public:blink",
+    "//third_party/blink/public/common",
+
+    # //ui/accelerated_widget_mac, //ui/compositor and //components/viz/common
+    # (above) are orbit_video_overlay_window_mac.mm only: the compositor stack
+    # that puts a viz::SurfaceId on screen in a plain NSWindow with no //views
+    # in sight. Modelled on content/browser/renderer_host/
+    # unbounded_surface_window_mac.mm, the one other place in this tree doing
+    # exactly that.
+    "//ui/accelerated_widget_mac",
+    "//ui/base",
+    "//ui/compositor",
+    "//ui/display",
+    "//ui/gfx",
+    "//ui/gfx/codec",
+    "//ui/gfx/geometry",
+    "//v8",
+  ]
+
+  # common/orbit_user_agent.cc's brand list, so the identity Orbit declares to
+  # websites is the bundle's own name and version rather than a second copy of
+  # them.
+  defines = [
+    "ORBIT_PRODUCT_NAME=\"$orbit_product_name\"",
+    "ORBIT_BROWSER_VERSION=\"$orbit_version\"",
+  ]
+
+  # orbit_paths_mac.mm calls into NSBundle; ARC's objc_release/
+  # objc_claimAutoreleasedReturnValue and friends live in libobjc, which
+  # (unlike Foundation) is not pulled in automatically by this two-phase
+  # compile-then-link shared_library build. See e.g.
+  # third_party/skia/gn/skia/BUILD.gn and build/rust/std/BUILD.gn for the
+  # same fix elsewhere in this tree.
+  libs = [ "objc" ]
+
+  # orbit_native_nested_loop_guard.mm (CFRunLoopObserver, NSEventTrackingRunLoopMode,
+  # NSModalPanelRunLoopMode) and orbit_web_contents_host.mm (NSView) both need
+  # these; same "not pulled in automatically" reasoning as the objc lib above.
+  frameworks = [
+    "AppKit.framework",
+    "CoreFoundation.framework",
+
+    # orbit_video_overlay_window_mac.mm's CALayer/CATransaction.
+    "QuartzCore.framework",
+  ]
+}
+
+mac_framework_bundle("orbit_framework") {
+  output_name = orbit_framework_name
+  framework_version = "A"
+  framework_contents = [
+    "Headers",
+    "Helpers",
+    "Libraries",
+    "Resources",
+  ]
+
+  sources = []
+
+  deps = [
+    ":orbit_lib",
+    "//content/public/app",
+    "//content/public/common",
+    "//third_party/icu:icudata",
+  ]
+
+  bundle_deps = [
+    ":orbit_framework_headers",
+    ":orbit_framework_helpers",
+    ":orbit_framework_libraries",
+    ":orbit_framework_resources",
+  ]
+
+  if (!is_component_build) {
+    ldflags =
+        [ "-Wl,-install_name,@executable_path/../Frameworks/$output_name.framework/$output_name" ]
+  } else {
+    # See the file-level comment: the helper never links the framework, so
+    # this is only about the app-side (never-sandboxed) browser process
+    # finding it conveniently. Matches content_shell's non-helper rationale.
+    ldflags = [
+      "-Wl,-install_name,@rpath/$output_name.framework/$output_name",
+      "-Wl,-rpath,@loader_path/../../../../../..",
+    ]
+  }
+
+  info_plist_target = ":orbit_framework_plist"
+}
+
+tweak_info_plist("orbit_helper_plist") {
+  info_plist = "app/helper-Info.plist"
+  args = [
+    "--breakpad=0",
+    "--keystone=0",
+    "--scm=0",
+    "--version",
+    orbit_version,
+  ]
+}
+
+# Every helper flavour dlopen()s the framework; none of them ever link it,
+# in any build configuration. That is the whole point of this template
+# existing separately from content_shell_helper_app.
+template("orbit_helper_app") {
+  mac_app_bundle(target_name) {
+    assert(defined(invoker.helper_name_suffix))
+    assert(defined(invoker.helper_bundle_id_suffix))
+
+    output_name = orbit_helper_name + invoker.helper_name_suffix
+
+    sources = [ "app/orbit_main_mac.cc" ]
+    defines = [ "HELPER_EXECUTABLE" ]
+    extra_substitutions =
+        [ "ORBIT_HELPER_BUNDLE_ID_SUFFIX=${invoker.helper_bundle_id_suffix}" ]
+    deps = [
+      "//base/allocator:early_zone_registration_apple",
+      "//sandbox/mac:seatbelt",
+    ]
+
+    if (is_component_build) {
+      # //sandbox/mac:seatbelt is linked directly (it runs before the
+      # framework is even dlopen()'d, so it cannot itself come from the
+      # framework) and in a component build it is a loose .dylib sitting in
+      # root_out_dir rather than inside this bundle. This rpath is only
+      # about finding *that* sibling dylib; it must never be widened into
+      # linking or dlopen()ing the framework early -- see the file comment.
+      ldflags = [ "-Wl,-rpath,@executable_path/../../../../../../.." ]
+    }
+
+    info_plist_target = ":orbit_helper_plist"
+  }
+}
+
+foreach(helper_params, content_mac_helpers) {
+  orbit_helper_app("orbit_helper_app_${helper_params[0]}") {
+    helper_name_suffix = helper_params[2]
+    helper_bundle_id_suffix = helper_params[1]
+  }
+}
+
+# Blink's default (user-agent) style sheets, images, localised strings and
+# WebUI/devtools resources, repacked into one archive read by every process
+# through ui::ResourceBundle. Without this,
+# CSSDefaultStyleSheets::EnsureDefaultStyleSheetsForElements() (and every
+# other GetDataResource() caller) has no UA CSS to hand out, so <style>/CSS
+# is never applied and its text is rendered as-is; see also the CHECK in
+# ui::ResourceBundle::GetSharedInstance() that fires the moment anything
+# calls it before InitSharedInstanceWithPakPath(). Mirrors content/shell/
+# BUILD.gn's repack("pak") minus content_shell's own chrome://*-internals,
+# UI-toolkit and test-only pieces, none of which Orbit ships.
+repack("orbit_resources_pak") {
+  sources = [
+    "$root_gen_dir/content/content_resources.pak",
+    "$root_gen_dir/content/gpu_resources.pak",
+    "$root_gen_dir/content/browser/devtools/devtools_resources.pak",
+    "$root_gen_dir/extensions/extensions_browser_resources_100_percent.pak",
+
+    # Every extensions renderer JS module CoreExtensionsRendererAPIProvider::
+    # PopulateSourceMap() registers by name (webRequestEvent, utils, setIcon,
+    # contextMenus, permissions, guestView, ...) lives in this pak, not in
+    # extensions_renderer_resources.pak -- that grd carries only
+    # IDR_EXTENSION_CSS. Omitting it leaves the names registered but their
+    # resource ids absent, so the first ModuleSystem::Require() of any of them
+    # kills the renderer in ResourceBundleSourceMap::GetSource(). Upstream's
+    # own extensions repack (extensions/BUILD.gn's shell_and_test_pak) lists
+    # both. OrbitExtensionsRendererAPIProvider asserts the whole set resolves.
+    "$root_gen_dir/extensions/extensions_renderer_generated_resources.pak",
+    "$root_gen_dir/extensions/extensions_renderer_resources.pak",
+    "$root_gen_dir/extensions/extensions_resources.pak",
+    "$root_gen_dir/extensions/strings/extensions_strings_en-US.pak",
+    "$root_gen_dir/mojo/public/js/mojo_bindings_resources.pak",
+    "$root_gen_dir/net/net_resources.pak",
+    "$root_gen_dir/third_party/blink/public/resources/blink_resources.pak",
+    "$root_gen_dir/third_party/blink/public/resources/blink_scaled_resources_100_percent.pak",
+    "$root_gen_dir/third_party/blink/public/resources/inspector_overlay_resources.pak",
+    "$root_gen_dir/third_party/blink/public/strings/blink_strings_en-US.pak",
+    "$root_gen_dir/third_party/blink/public/strings/permission_element_generated_strings.pak",
+    "$root_gen_dir/third_party/blink/public/strings/permission_element_strings_en-US.pak",
+    "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
+    "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
+    "$root_gen_dir/ui/strings/auto_image_annotation_strings_en-US.pak",
+    "$root_gen_dir/ui/strings/ax_strings_en-US.pak",
+    "$root_gen_dir/ui/strings/ui_strings_en-US.pak",
+    "$root_gen_dir/ui/webui/resources/webui_resources.pak",
+  ]
+  deps = [
+    "//content:content_resources",
+    "//content/browser/devtools:devtools_resources",
+    "//content/browser/resources/gpu:resources_grit",
+    "//extensions:extensions_resources",
+    "//extensions/strings",
+    "//mojo/public/js:resources",
+    "//net:net_resources",
+    "//third_party/blink/public:devtools_inspector_resources",
+    "//third_party/blink/public:resources",
+    "//third_party/blink/public:scaled_resources_100_percent",
+    "//third_party/blink/public/strings",
+    "//third_party/blink/public/strings:permission_element_generated_strings",
+    "//third_party/blink/public/strings:permission_element_strings",
+    "//ui/resources",
+    "//ui/strings",
+    "//ui/webui/resources",
+  ]
+  output = "$root_out_dir/orbit_resources.pak"
+}
+
+# content::ContentMainRunnerImpl::Initialize() CHECK-fails
+# (base/i18n/icu_util.cc) without this -- see content/shell/BUILD.gn's
+# content_shell_framework_resources for the target this mirrors.
+bundle_data("orbit_framework_resources") {
+  sources = [ "$root_out_dir/orbit_resources.pak" ]
+  outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
+  public_deps = [ ":orbit_resources_pak" ]
+  if (icu_use_data_file) {
+    sources += [ "$root_out_dir/icudtl.dat" ]
+    public_deps += [ "//third_party/icu:icudata" ]
+  }
+  if (v8_use_external_startup_data) {
+    # gin::V8Initializer::LoadV8Snapshot() CHECK-fails (gin/v8_initializer.cc)
+    # without these -- see content/shell/BUILD.gn's
+    # content_shell_framework_resources for the target this mirrors.
+    if (use_v8_context_snapshot) {
+      sources += [ "$root_out_dir/$v8_context_snapshot_filename" ]
+      public_deps += [ "//tools/v8_context_snapshot" ]
+    }
+    if (!use_v8_context_snapshot || include_both_v8_snapshots) {
+      sources += [ "$root_out_dir/snapshot_blob.bin" ]
+    }
+  }
+}
+
+# The GPU process CHECK-fails (ui/gl/gl_implementation.cc) without these --
+# see content/shell/BUILD.gn's content_shell_angle_binaries/
+# content_shell_swiftshader_binaries/content_shell_vulkan_binaries, the
+# targets this mirrors.
+bundle_data("orbit_framework_libraries") {
+  sources = []
+  outputs = [ "{{bundle_contents_dir}}/Libraries/{{source_file_part}}" ]
+  public_deps = []
+  if (!use_static_angle) {
+    sources += [
+      "$root_out_dir/egl_intermediates/libEGL.dylib",
+      "$root_out_dir/egl_intermediates/libGLESv2.dylib",
+    ]
+    public_deps += [ "//ui/gl:angle_library_copy" ]
+  }
+  sources += [
+    "$root_out_dir/vk_intermediates/libvk_swiftshader.dylib",
+    "$root_out_dir/vk_intermediates/vk_swiftshader_icd.json",
+  ]
+  public_deps += [ "//ui/gl:swiftshader_vk_library_copy" ]
+  sources += [ "$root_out_dir/vulkan_intermediates/libvulkan.dylib" ]
+  public_deps += [ "//ui/gl:vulkan_loader_library_copy" ]
+}
+
+# Chromium.xcconfig's HEADER_SEARCH_PATHS already points at
+# "Orbit Framework.framework/Headers"; this is the only file that lands
+# there. Swift never #includes it directly (see the file comment in
+# orbit_bridge_api.h) but the C++ side and any future Objective-C++ bridge
+# code can.
+bundle_data("orbit_framework_headers") {
+  sources = [ "bridge/orbit_bridge_api.h" ]
+  outputs = [ "{{bundle_contents_dir}}/Headers/{{source_file_part}}" ]
+}
+
+bundle_data("orbit_framework_helpers") {
+  sources = []
+  outputs = [ "{{bundle_contents_dir}}/Helpers/{{source_file_part}}" ]
+  public_deps = []
+  foreach(helper_params, content_mac_helpers) {
+    sources += [ "$root_out_dir/${orbit_helper_name}${helper_params[2]}.app" ]
+    public_deps += [ ":orbit_helper_app_${helper_params[0]}" ]
+  }
+}

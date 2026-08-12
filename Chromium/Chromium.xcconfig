@@ -1,0 +1,20 @@
+// Committed base configuration for Orbit's embedded Chromium engine. Paths and
+// fallback version values; Scripts/chromium owns everything they describe.
+
+// Debug tests against live DCHECKs; everything that ships has them compiled out.
+ORBIT_ENGINE_CONFIG = shipping
+ORBIT_ENGINE_CONFIG[config=Debug] = dcheck
+
+ORBIT_CHROMIUM_ROOT = $(SRCROOT)/ThirdParty/prebuilt/$(ORBIT_ENGINE_CONFIG)
+
+FRAMEWORK_SEARCH_PATHS = $(inherited) $(ORBIT_CHROMIUM_ROOT)
+HEADER_SEARCH_PATHS = $(inherited) $(ORBIT_CHROMIUM_ROOT)/Orbit\ Framework.framework/Headers
+
+// Overridden by the generated overlay below, which is the authority once
+// Scripts/chromium has run in this checkout.
+ORBIT_CHROMIUM_VERSION = 151.0.7922.138
+ORBIT_CHROMIUM_CHANNEL = stable
+ORBIT_CHROMIUM_MAJOR = 151
+ORBIT_CHROMIUM_BUILD_TARGET = content_shell
+
+#include? "Generated/Chromium.xcconfig"

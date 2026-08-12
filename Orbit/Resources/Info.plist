@@ -1,0 +1,335 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	Orbit/Resources/Info.plist
+
+	Deliberately minimal: `GENERATE_INFOPLIST_FILE = YES` stays on for the
+	`Orbit` target, so every simple key (CFBundleDisplayName, version
+	strings, icon, …) keeps coming from this target's `INFOPLIST_KEY_*`
+	build settings and asset catalog, exactly as before. This file exists
+	only for the handful of dictionary/array-shaped keys `INFOPLIST_KEY_*`
+	has no way to express:
+
+	- `UTExportedTypeDeclarations` — the two custom drag-and-drop
+	  `UTType`s Orbit creates with `UTType(exportedAs:)`
+	  (`Orbit/UI/Sidebar/SidebarDragDrop.swift`,
+	  `Orbit/UI/Spaces/SpaceSwitcherPagerView.swift`) are a promise that
+	  the app declares them here; without a matching entry macOS warns at
+	  runtime ("Type ... was expected to be declared") and only partially
+	  registers the type, which can make drag-and-drop behave
+	  inconsistently.
+	- `CFBundleURLTypes` / `CFBundleDocumentTypes` — what makes macOS
+	  offer Orbit in System Settings' "Default web browser" list at all
+	  (`Orbit/Core/DefaultBrowser.swift`'s own header comment already
+	  documented this dependency before it was wired up).
+	-->
+	<!--
+	`NSCalendarsFullAccessUsageDescription` is what macOS shows in the
+	permission prompt Live Calendars triggers
+	(`Orbit/Features/LiveCalendars/LiveCalendarStore.swift`). It is a plain
+	string and could in principle be an `INFOPLIST_KEY_*` build setting, but
+	it lives here so the whole Live Calendars surface can be added without
+	editing `project.pbxproj`. Without this key, `requestFullAccessToEvents`
+	does not merely fail — TCC terminates the process.
+	-->
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Orbit reads your calendar to show the next meeting and a Join button in the sidebar. Nothing is sent anywhere — it is read on this Mac and shown to you.</string>
+	<!--
+	THE REST OF THE USAGE DESCRIPTIONS BELOW ARE NOT OPTIONAL POLISH.
+
+	Orbit is not sandboxed (`ENABLE_APP_SANDBOX = NO`) and runs under the
+	hardened runtime, so every capability below is gated by TCC. TCC's
+	contract is the one `NSCalendarsFullAccessUsageDescription` above already
+	documents: a process that touches a protected resource with **no usage
+	description for it** is not denied, it is **terminated**. Missing keys
+	here are therefore not "a permission Orbit forgot to ask for" — they are
+	a crash the first time an ordinary user does an ordinary thing.
+
+	Each key below is here because Orbit has the code that reaches the
+	protected resource. Nothing is declared speculatively; a key for a
+	capability Orbit does not have would be its own defect (it makes
+	System Settings offer Orbit a switch that controls nothing).
+
+	Arc declared the same set and for the same stated reason. Read directly
+	off `/Applications/Arc.app/Contents/Info.plist`:
+
+	    NSCameraUsageDescription        "Websites may use your camera for
+	                                     features on their site."
+	    NSMicrophoneUsageDescription    "Websites may use your microphone …"
+	    NSLocationUsageDescription      "Websites may use your location …"
+	    NSLocationWhenInUseUsageDescription   (same string)
+	    NSDownloadsFolderUsageDescription
+	                                    "Access to \"Downloads\" is required
+	                                     for downloading files from the web
+	                                     and to make files accessible from
+	                                     Arc."
+
+	One key Arc declared is deliberately NOT copied here, because Orbit has
+	no code that reaches it and an inert privacy switch is exactly the kind
+	of control this project has shipped and regretted before:
+
+	  - `NSDesktopFolderUsageDescription` — Arc read the Desktop for its own
+	    file surfaces. Nothing in Orbit reads or writes `~/Desktop`
+	    (`grep -rn "desktopDirectory"` across the app returns nothing).
+
+	`NSLocationAlwaysUsageDescription` and
+	`NSLocationAlwaysAndWhenInUseUsageDescription`, which Arc also declared,
+	are likewise omitted: they describe background location, which is an iOS
+	authorisation level. macOS resolves a browser's geolocation request to
+	when-in-use, and the two keys below are the ones CoreLocation actually
+	reads on this platform.
+	-->
+	<!--
+	A page calling `getUserMedia({ video: true })`, mapped to
+	`PermissionKind.camera`. Orbit always asks the user first
+	(`AppEnvironment+WebContentsDelegate.swift`), so this string describes
+	the only thing that can happen: a site asked, and the user said yes.
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>A website you open can ask to use your camera — for a video call, say. Orbit always asks you before letting one, and remembers your answer for that site. No page gets your camera on its own.</string>
+	<!--
+	Same path as camera, for `getUserMedia({ audio: true })`, landing on
+	`PermissionKind.microphone`.
+	-->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>A website you open can ask to use your microphone — for a video call, say. Orbit always asks you before letting one, and remembers your answer for that site. No page gets your microphone on its own.</string>
+	<!--
+	`PermissionKind.geolocation`, surfaced in the Site Control popover as
+	the `Location` row. The macOS position provider is CoreLocation, so
+	granting a site this permission is what reaches TCC.
+	`NSLocationUsageDescription` is the older key macOS still consults
+	alongside the when-in-use one; both carry the same sentence so the
+	panel reads identically whichever the system picks.
+	-->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>A website you open can ask where you are — a map or a store locator, say. Orbit always asks you before telling one, and remembers your answer for that site.</string>
+	<!--
+	Web Bluetooth: a page calling `navigator.bluetooth.requestDevice()`.
+	Not reached through Orbit's own permission bridge — the browser engine
+	can expose this capability on its own, so the key stays declared even
+	though no Orbit Swift code asks for it. Without it, the first page to
+	call that API terminates Orbit, the same crash class as the keys above.
+	-->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>A website you open can ask to talk to a nearby Bluetooth device — a fitness tracker or a games controller, say. Orbit always asks you before letting one, and remembers your answer for that site.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>A website you open can ask where you are — a map or a store locator, say. Orbit always asks you before telling one, and remembers your answer for that site.</string>
+	<!--
+	`AppEnvironment+WebContentsDelegate.swift`'s `willBeginDownload` resolves
+	`FileManager.SearchPathDirectory.downloadsDirectory` and writes the file
+	there. `~/Downloads` is TCC-protected for an unsandboxed app, so without
+	this key the FIRST DOWNLOAD A USER EVER STARTS terminates Orbit. There is
+	no user action that avoids it and no setting that moves the destination.
+	-->
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Orbit saves the files you download from the web into your Downloads folder, the same place every other browser puts them.</string>
+	<!--
+	SPARKLE, THE IN-APP UPDATER.
+
+	The four keys below are plain strings, booleans and numbers, so on the
+	rule stated at the top of this file they could each have been an
+	`INFOPLIST_KEY_*` build setting instead. They are here on purpose. Two of
+	them are not configuration, they are a trust decision: `SUFeedURL` names
+	the one server Orbit will accept new code from, and `SUPublicEDKey` names
+	the one key that code must be signed with. A decision of that shape needs
+	the paragraphs below written beside it, and a build setting has nowhere
+	to put a paragraph. Sparkle reads all four through `SUHost`, which reads
+	the built bundle's Info.plist, so it makes no difference to Sparkle which
+	route they take.
+
+	Everything Sparkle can be told through this file, and is not told here,
+	is deliberately left at its own default:
+
+	  `SUAutomaticallyUpdate` (default NO) stays unset, so Orbit checks for
+	  updates on its own but never installs one without the user agreeing.
+	  Silently replacing a browser under a user who is in the middle of
+	  something is not a thing this app does.
+
+	  `SUShowReleaseNotes` (default YES) stays unset: the appcast carries
+	  release notes and the user should see what is about to change.
+
+	  `SUVerifyUpdateBeforeExtraction`, `SURequireSignedFeed`,
+	  `SUAllowsAutomaticUpdates`, `SUDefaultsDomain` and
+	  `SUEnableSystemProfiling` (all default NO or unset) stay unset. The
+	  last one matters most: system profiling appends a description of this
+	  Mac to every update check, and an updater that reports the machine it
+	  runs on is not something a browser should do without asking.
+
+	  `SUEnableInstallerLauncherService` and `SUEnableDownloaderService`
+	  (both default NO) stay unset, and their two XPC services are stripped
+	  out of the embedded framework entirely. Sparkle needs them only to
+	  reach past an App Sandbox, and Orbit has no App Sandbox
+	  (ENABLE_APP_SANDBOX = NO). See `Scripts/release_manager.py`,
+	  SPARKLE_XPC_NOTE, for the whole argument and for what happens if a
+	  future change turns either key on.
+
+	There is no Info.plist key for update channels, so nothing here opts
+	Orbit into pre-releases. That is done in code, by returning a channel
+	name from `SPUUpdaterDelegate.allowedChannels(for:)` and matching it
+	against a `<sparkle:channel>` element in the appcast.
+	-->
+	<!--
+	Where Orbit looks for new versions.
+
+	A single cumulative appcast, served from GitHub Pages off this
+	repository's `gh-pages` branch, carrying both the stable and the beta
+	items. Sparkle chooses between them on the client, by matching the
+	`<sparkle:channel>` element on an item against the set returned from
+	`SPUUpdaterDelegate.allowedChannels(for:)`. A build that returns nothing
+	from that method sees only the unchannelled, stable items, which is what
+	makes one feed safe to serve to everybody.
+
+	This was NOT the obvious choice, and the obvious choice is wrong. The
+	tempting URL is a GitHub release asset reached through
+	`/releases/latest/download/appcast.xml`, which needs nothing hosted and
+	rewrites itself at every release. It cannot carry a beta. GitHub defines
+	the "latest" release as the most recent one that is neither a draft nor
+	a pre-release, so an appcast attached to a pre-release is unreachable
+	through that path by construction: the beta channel would exist in the
+	code, be advertised in the settings, and never once deliver an update.
+	The redirect is not merely awkward for pre-releases, it excludes them.
+
+	The cost of the cumulative feed is that it has somewhere to be served
+	from. GitHub Pages has to be switched on for this repository, once, by
+	hand, and pointed at `gh-pages`; until that is done this URL returns 404
+	and no copy of Orbit can update. That is a maintainer step, not a build
+	step, and refs/RELEASING.md is where it is written down.
+
+	HTTPS is not optional. Sparkle logs "The feed URL may need to change to
+	use HTTPS" for anything else, and an update feed fetched over plain HTTP
+	is an invitation to serve a user a different browser than the one they
+	installed.
+	-->
+	<key>SUFeedURL</key>
+	<string>https://seggys116.github.io/Orbit/appcast.xml</string>
+	<!--
+	THE ED25519 PUBLIC KEY EVERY UPDATE MUST BE SIGNED WITH.
+
+	Generated 2026-08-12, `generate_keys` account `orbit`. Private half: the
+	maintainer's login keychain, and the SPARKLE_PRIVATE_KEY secret CI signs
+	with. Lose both and no future release can ever update an existing install.
+
+	Never remove it. Sparkle 2.9.5 with no key does not refuse to update: it
+	logs a deprecation, ignores the appcast's EdDSA signature and accepts the
+	download on Apple code signing alone. Absent fails open; a key that will
+	not decode fails closed. Scripts/release doctor and verify reject both.
+	-->
+	<key>SUPublicEDKey</key>
+	<string>6pek9S6kotrKSBRGOKTK6AN2G6sv8FFicpwI6bjWgeY=</string>
+	<!--
+	Check for updates on a schedule, without asking first.
+
+	Left unset, Sparkle asks the user on second launch whether it may check
+	automatically. Orbit answers that question for them, which is a real
+	decision and not a default worth inheriting: Orbit is a browser, the
+	thing it is a wrapper around is Chromium, and Chromium's security fixes
+	are the reason to run a current one. An Orbit that is a version behind
+	is a Chromium that is a version behind, on the process that parses
+	whatever the web hands it. A browser that has to be asked for permission
+	to notice that is the wrong shape.
+
+	This sets the default, not a lock. Sparkle resolves the same key out of
+	the app's user defaults before falling back to this file, so a Settings
+	toggle writing `SPUUpdater.automaticallyChecksForUpdates` persists and
+	wins from then on.
+
+	Checking is all this enables. `SUAutomaticallyUpdate` is unset above, so
+	Orbit still asks before it downloads or installs anything.
+	-->
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<!--
+	Six hours between scheduled checks, rather than Sparkle's default of one
+	day.
+
+	Sparkle only checks while the app is running, and a browser is the
+	application most likely to be left open for days at a time. On the
+	default interval, a Chromium respin published to fix an actively
+	exploited bug could sit unnoticed for the better part of a day by a user
+	who never quits Orbit. Six hours bounds that. The cost is four
+	conditional GETs a day against a static file on GitHub's CDN, which is
+	not a cost.
+
+	Sparkle clamps anything below one hour, so this is well inside what it
+	will honour, and it is the interval between *scheduled* checks only: the
+	menu item still checks on demand.
+	-->
+	<key>SUScheduledCheckInterval</key>
+	<integer>21600</integer>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.orbit.browser.sidebarNode</string>
+			<key>UTTypeDescription</key>
+			<string>Orbit Sidebar Drag Payload</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.orbit.browser.spacePagerPayload</string>
+			<key>UTTypeDescription</key>
+			<string>Orbit Space Pager Drag Payload</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>com.zak-noble-clarke.Orbit.http</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>http</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>com.zak-noble-clarke.Orbit.https</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>https</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>HTML Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.html</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Web Archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.apple.webarchive</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

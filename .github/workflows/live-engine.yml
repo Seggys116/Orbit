@@ -1,0 +1,251 @@
+# Live engine
+#
+# Disabled on 2026-08-09 on the grounds that the direct-Chromium bridge could
+# not start an engine, and re-enabled on 2026-08-10 because it can: the suites
+# start a real browser today, and while it was disabled GitHub rendered the
+# skipped job as a non-red check, so nothing noticed that every live test the
+# plain `xcodebuild test` job skips on the grounds that this job covers them was
+# running in no job at all. A job that is off is not a check.
+#
+# The only job in this repository that runs Orbit's live-engine suites: a real
+# browser process, real helper subprocesses, a real window, real page loads, and
+# assertions on what Chromium's own compositor produced. Everything the main CI
+# job runs stops at or above the `WebContents` seam, which is why four
+# user-visible defects fixed on 2026-08-06 -- every HTML page rendered in quirks
+# mode, document-start scripts blocked by `strict-dynamic` CSP on the sites the
+# now-playing card exists for, a media card that vanished on pause, and a
+# picture-in-picture request Chromium refused every single time -- were all
+# invisible to a fully green suite.
+#
+# The suites existed before this job did. They had never run in CI, for two
+# compounding reasons, both now fixed: the plain `xcodebuild test` job runs
+# without the live-engine switch, and the switch as documented
+# (`ORBIT_LIVE_ENGINE=1 xcodebuild test`) cannot work at all -- xcodebuild does
+# not hand its own environment to a hosted test target's process, so the run
+# skipped and reported success. `Scripts/live-engine-tests`, which this job is a
+# thin wrapper around, has the full account and the measured evidence.
+#
+# ## Why nightly and on a label, rather than on every push
+#
+# Honest accounting of what this job needs and costs:
+#
+#   * A real window server and a real GPU. The suites put an NSWindow on screen
+#     and read frames back through `Page.captureScreenshot`. A runner that gives
+#     Chromium a software rasteriser still passes -- the colour oracle compares
+#     dominant channels, not exact pixels -- but the timing margins are the
+#     runner's, not ours.
+#   * Five helper processes and a browser's whole start-up, before the first
+#     assertion.
+#   * Wall clock. Measured locally on an M-series laptop, 2026-08-06: the whole
+#     live set (twelve tests at the time) ran in about 45 seconds per
+#     configuration, so roughly a minute and a half for both, on top of a
+#     `build-for-testing`. On a shared runner with a software GPU, expect
+#     several times that.
+#   * Timeouts, not assertions, are how a broken engine shows up here. The
+#     oracles wait up to 25 s for a navigation to settle; a slow runner and a
+#     genuinely stalled load look the same for the first 24 of those seconds.
+#
+# That last point is the deciding one. Putting this on every pull request would
+# put a slow, timing-sensitive job on the critical path of every change,
+# including the many that cannot possibly affect the engine, and the first time
+# it flaked people would start re-running red checks by reflex -- which is how a
+# real live failure gets waved through. A required check nobody believes is
+# worse than no check.
+#
+# So: nightly against main, on demand, and on any pull request labelled
+# `live-engine`. The label is the pre-merge route and it is the one to use for
+# anything touching Orbit/Engine/, the injected page scripts, content blocking
+# or WebContentsHostView. The nightly run is what makes sure the suites still
+# work at all, which is precisely what nobody noticed for as long as they were
+# opt-in and undocumented-in-practice.
+#
+# If this job ever earns its place on every pull request -- consistently green
+# for a long stretch, comfortably inside its timeout -- moving it is a one-line
+# change to the triggers below. Do that on evidence, not on principle.
+#
+# ## What has not been measured
+#
+# Everything above about the script, the environment patching and the counting
+# was verified locally, repeatedly, against a real engine. What could not be
+# verified from a laptop is this job itself: whether a GitHub-hosted `macos-26`
+# runner gives Chromium a window server and a GPU it is happy with. That is what
+# the first scheduled run answers. If it does not -- if the engine cannot start,
+# or paints nothing -- the failure will be loud and specific (`Chromium engine
+# failed to start`, or a capture oracle reporting a blank frame) rather than a
+# silent skip, which is the property this whole change was about.
+
+name: Live engine
+
+on:
+  schedule:
+    # 04:30 UTC daily: off-peak, and clear of the 23:00 UTC daily Chromium
+    # update check (which only builds Chromium itself on a self-hosted runner
+    # when the version actually changes, not on this runner).
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    # `labeled` starts a run the moment the label goes on; `synchronize` and
+    # `reopened` keep an already-labelled pull request covered as it changes.
+    types: [labeled, synchronize, reopened]
+
+concurrency:
+  group: live-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: Live engine suites
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'live-engine')
+    runs-on: macos-26
+    # A hung browser must cost an hour, not a day. The suites' own oracles time
+    # out well inside this, and `Scripts/live-engine-tests` now also runs every
+    # pass under XCTest's own per-test timeout (600s), so a single test that
+    # never returns fails by name and the run still reaches a verdict. Hitting
+    # the hour therefore means something went wrong outside any test at all.
+    timeout-minutes: 60
+    env:
+      NSUnbufferedIO: "YES"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      # A live suite added without re-running the synchroniser would not be in
+      # the compiled bundle, while `Scripts/live-engine-tests` would still count
+      # its tests from the working tree -- so the run would fail on the count
+      # check with a confusing message. Fail here instead, where the message
+      # says what is actually wrong.
+      - name: Project file lists match the working tree
+        run: Scripts/xcodeproj-sync --check
+
+      # Same key as build-test.yml's dcheck engine, so this and the pull-request
+      # runs share one entry. See build-test.yml for the restore/save pair.
+      - name: Restore the Chromium engine
+        id: engine
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ThirdParty/prebuilt
+          key: chromium-dcheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Chromium/chromium-version.json') }}
+
+      # These suites are the reason a dcheck engine is built at all.
+      - name: Install the Chromium engine
+        run: Scripts/chromium fetch --config dcheck
+
+      - name: Save the Chromium engine
+        if: steps.engine.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ThirdParty/prebuilt
+          key: ${{ steps.engine.outputs.cache-primary-key }}
+
+      - name: Chromium doctor
+        run: Scripts/chromium doctor --config dcheck
+
+      # A runner restoring a cached ThirdParty/prebuilt/ alongside a stale
+      # generated overlay is a way to end up with no engine and zero live tests
+      # -- the same shape of failure this whole job exists to prevent -- so the
+      # installed build is asserted before anything is built.
+      - name: Confirm the Chromium backend
+        run: |
+          Scripts/chromium status --offline
+          test -d ThirdParty/prebuilt/dcheck
+          Scripts/chromium verify-engine --config dcheck
+
+      - name: Restore the Swift package checkouts
+        id: swiftpm
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Orbit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      # One build, then one test process per configuration for everything that
+      # can share an engine, plus one more per destructive suite, with
+      # ORBIT_LIVE_ENGINE patched into the .xctestrun -- the only route that
+      # actually reaches a hosted test target's process. The script fails the
+      # step if a live test fails, if a pass did not run everything it was
+      # given, or if the number that executed across all of them is not the
+      # number declared in the sources. A skip fails it too, unless the suite
+      # declared that test with `// ORBIT-LIVE-ENGINE: MAY-SKIP <testName>`; a
+      # skip on the live-engine gate itself fails whatever is declared, because
+      # that one means the engine was never switched on. A silent skip is the
+      # failure mode this job was built to end, so it is checked explicitly
+      # rather than inferred from an exit status.
+      #
+      # The split exists because a suite that shuts the engine down ends it for
+      # its whole process, and that cannot be undone: run in
+      # the shared process it would kill every live test scheduled after it, and
+      # the job would report a mid-run host death with no indication of which
+      # suite caused it. A suite declares itself with the line
+      # `// ORBIT-LIVE-ENGINE: DESTRUCTIVE` in its own source -- there is no
+      # list of names in the script or in this file to keep in step -- and
+      # `Scripts/live-engine-tests` then gives it a process of its own, after
+      # the shared ones, and still counts its tests towards the total. This job
+      # therefore needs no `--suite` filter and must not grow one: filtering
+      # here would drop coverage silently, which is the one outcome this whole
+      # job exists to prevent.
+      #
+      # ORBIT_LIVE_ENGINE_FORCE_PUMP=1 is the second configuration: it drives
+      # the engine's message pump at 60 Hz instead of letting the engine
+      # schedule its own work. A pump that
+      # intermittently fails to re-arm reaches a user as input that stops
+      # working, and running both configurations is what tells that apart from
+      # everything else. Both must be green.
+      - name: Run the live-engine suites
+        run: |
+          set -o pipefail
+          Scripts/live-engine-tests \
+            --results-dir "$RUNNER_TEMP/live-engine-results" \
+            --configurations baseline,force-pump \
+            -- \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            2>&1 | tee "$RUNNER_TEMP/live-engine.log"
+
+      - name: Save the Swift package checkouts
+        if: always() && steps.swiftpm.outputs.cache-hit != 'true' && hashFiles('DerivedData/SourcePackages/**') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: ${{ steps.swiftpm.outputs.cache-primary-key }}
+
+      # The counts, in the job summary, whether the run passed or failed. The
+      # line worth reading is the verdict -- "N/N live tests executed and
+      # passed, over M test process(es)"; "0 executed" is the failure this job
+      # exists for, and it should be visible without opening the log. The
+      # per-pass counts above it say which process each number came from, so a
+      # host that died part-way names the suites that were in it. Every line the
+      # script prints carries its own prefix precisely so this grep cannot pick
+      # up a test's own diagnostics by accident.
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Live engine"
+            echo ""
+            echo '```'
+            grep -E 'live-engine-tests:' "$RUNNER_TEMP/live-engine.log" \
+              || echo "no verdict recorded -- the run did not get that far"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Always, not just on failure: a live run that passed is also the record
+      # of what a working engine looked like on this runner, and the next
+      # failure is read against it.
+      - name: Upload the logs and result bundles
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: LiveEngineResults
+          path: ${{ runner.temp }}/live-engine-results
+          retention-days: 14

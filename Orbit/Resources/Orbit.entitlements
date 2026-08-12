@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Orbit.entitlements
+
+  GENERATED FILE. DO NOT EDIT.
+
+  Written by the `entitlements` subcommand of Scripts/release, in write
+  mode, from the role table in Scripts/release_manager.py. That table is
+  the single place the reason for every entitlement in this app is
+  recorded. Editing this file by hand makes the same subcommand's check
+  mode fail; change the table instead. Run `Scripts/release entitlements`
+  with no arguments to see every role at once.
+
+  Nothing in this comment may contain two hyphens in a row: XML forbids
+  it inside a comment, and although `plutil -lint` accepts such a file,
+  codesign rejects it and the build fails.
+
+  The browser process: the only process with a user interface, the one
+  that owns the window, the profile on disk and the network stack, and
+  the one that launches all five helper roles below. It renders no web
+  content itself. Chrome's browser process is signed with no hardened
+  runtime exceptions at all; Orbit keeps allow-jit here because it is
+  the configuration this app has actually been run under, and dropping
+  it is a change no test in this repository can prove safe (nothing here
+  ever starts the engine). See refs/RELEASING.md, 'Entitlements we could
+  not narrow'.
+
+  App Sandbox is intentionally absent: Chromium's multi-process
+  architecture (shared memory, Mach IPC between the browser and its
+  renderer/GPU helpers, direct GPU access) is incompatible with it. The
+  key is omitted rather than set to false, because ENABLE_APP_SANDBOX =
+  NO already keeps it out of the signed entitlements. Chromium's own
+  Seatbelt sandbox still confines every subprocess it launches; how
+  Orbit's own engine bridge wires that in is undecided, since the bridge
+  itself does not exist yet.
+-->
+<plist version="1.0">
+<dict>
+	<!--
+	     V8 compiles JavaScript to native code at runtime
+	     (Ignition/TurboFan), and ANGLE/Metal compiles shaders the
+	     same way. Under the hardened runtime that requires an
+	     explicitly MAP_JIT-mapped region, which is what this
+	     entitlement permits - and only that: it does not allow
+	     arbitrary writable-executable memory. Chromium grants it to
+	     exactly the renderer and the GPU process.
+	-->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+
+	<!--
+	     Turns off the hardened runtime's requirement that every
+	     loaded library be signed by the same Team ID as the
+	     executable loading it. Every role here carries it only
+	     under the ad hoc signing waiver recorded below
+	     (ENTITLEMENT_WAIVERS): two separately ad hoc signed Mach-O
+	     images are treated by AMFI as having different Team IDs, so
+	     a local or CI build (CODE_SIGN_IDENTITY = '-') cannot load
+	     its own code under the hardened runtime without it. A
+	     Developer ID build signs every part with one real Team ID
+	     and needs none of it.
+	-->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

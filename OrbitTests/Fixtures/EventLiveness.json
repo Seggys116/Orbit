@@ -1,0 +1,141 @@
+{
+  "_readme": [
+    "Every event Orbit DECLARES in a schema, and what proves it actually fires.",
+    "",
+    "The rule this file enforces: a registered listener is not a working event.",
+    "Nine existing tests assert only that addListener() did not throw, and",
+    "action.onClicked, tabs.onReplaced and webNavigation.onTabReplaced are all",
+    "declared, all registerable, and none of them is ever dispatched. A schema",
+    "diff cannot see this -- the member IS present -- so it needs its own table.",
+    "",
+    "OrbitTests/ExtensionEventLivenessCoverageTests.swift (host-less) asserts that",
+    "this table covers exactly the events Orbit declares, and that every",
+    "notDispatched entry is also recorded in ExpectedAPIGaps.json.",
+    "OrbitAppTests/ChromiumExtensionEventLivenessLiveTests.swift (live) loads one",
+    "MV3 fixture that listens to all of them, performs each `cause` against a real",
+    "engine, and evaluates each `payload` predicate against the arguments the",
+    "listener was actually handed.",
+    "",
+    "payload is a JavaScript expression over `args`, the real argument list. It",
+    "must assert SHAPE, not arrival: tabs.onCreated was dispatched with the wrong",
+    "argument list entirely (section 8.1), which any invocation count would have",
+    "passed. That is why the coverage test rejects a payload without a typeof.",
+    "",
+    "status:",
+    "  observed       a live test causes it and asserts its payload",
+    "  notDispatched  declared and never fired; must also appear in",
+    "                 ExpectedAPIGaps.json's neverDispatchedEvents",
+    "  blocked        cannot be caused from a test host; requires blockedBy",
+    "",
+    "cause names the step the live suite performs. An unknown cause fails that",
+    "suite by name rather than being silently skipped."
+  ],
+  "events": {
+    "action.onClicked": {
+      "status": "notDispatched",
+      "cause": "none",
+      "why": "Declared in Chromium/Embedder/common/api/action.json and fired by nothing in Orbit. The Swift side knows and refuses to draw a toolbar icon for a popup-less action at all, so every extension whose button is a click handler rather than a popup is invisible and inert."
+    },
+    "cookies.onChanged": {
+      "status": "observed",
+      "cause": "setCookie",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].removed === 'boolean' && typeof args[0].cause === 'string' && typeof args[0].cookie === 'object' && typeof args[0].cookie.name === 'string' && typeof args[0].cookie.domain === 'string'"
+    },
+    "permissions.onAdded": {
+      "status": "observed",
+      "cause": "requestOptionalPermission",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && Array.isArray(args[0].permissions) && args[0].permissions.indexOf('privacy') !== -1"
+    },
+    "permissions.onRemoved": {
+      "status": "observed",
+      "cause": "removeOptionalPermission",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && Array.isArray(args[0].permissions) && args[0].permissions.indexOf('privacy') !== -1"
+    },
+    "tabs.onCreated": {
+      "status": "observed",
+      "cause": "openTab",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].id === 'number' && typeof args[0].windowId === 'number' && typeof args[0].index === 'number'",
+      "why": "This event was dispatched with the wrong argument list -- the payload assertion, not the invocation count, is what catches that."
+    },
+    "tabs.onUpdated": {
+      "status": "observed",
+      "cause": "navigateTab",
+      "payload": "args.length >= 3 && typeof args[0] === 'number' && typeof args[1] === 'object' && args[1] !== null && typeof args[2] === 'object' && args[2] !== null && typeof args[2].id === 'number' && args[2].id === args[0]"
+    },
+    "tabs.onMoved": {
+      "status": "observed",
+      "cause": "moveTab",
+      "payload": "args.length >= 2 && typeof args[0] === 'number' && typeof args[1] === 'object' && args[1] !== null && typeof args[1].windowId === 'number' && typeof args[1].fromIndex === 'number' && typeof args[1].toIndex === 'number'"
+    },
+    "tabs.onActivated": {
+      "status": "observed",
+      "cause": "activateTab",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].tabId === 'number' && typeof args[0].windowId === 'number'"
+    },
+    "tabs.onRemoved": {
+      "status": "observed",
+      "cause": "closeTab",
+      "payload": "args.length >= 2 && typeof args[0] === 'number' && typeof args[1] === 'object' && args[1] !== null && typeof args[1].windowId === 'number' && typeof args[1].isWindowClosing === 'boolean'"
+    },
+    "tabs.onReplaced": {
+      "status": "notDispatched",
+      "cause": "none",
+      "why": "orbit_tab_registry.cc fires onCreated, onUpdated, onRemoved, onActivated and onMoved and nothing else. Declared here so that the day prerendering or a back/forward-cache activation starts swapping tabs, this entry is what has to change."
+    },
+    "webNavigation.onBeforeNavigate": {
+      "status": "observed",
+      "cause": "navigateTab",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].tabId === 'number' && typeof args[0].url === 'string' && typeof args[0].frameId === 'number' && typeof args[0].timeStamp === 'number'"
+    },
+    "webNavigation.onCommitted": {
+      "status": "observed",
+      "cause": "navigateTab",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].tabId === 'number' && typeof args[0].url === 'string' && typeof args[0].transitionType === 'string'"
+    },
+    "webNavigation.onDOMContentLoaded": {
+      "status": "observed",
+      "cause": "navigateTab",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].tabId === 'number' && typeof args[0].url === 'string' && typeof args[0].frameId === 'number'"
+    },
+    "webNavigation.onCompleted": {
+      "status": "observed",
+      "cause": "navigateTab",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].tabId === 'number' && typeof args[0].url === 'string' && typeof args[0].frameId === 'number'"
+    },
+    "webNavigation.onErrorOccurred": {
+      "status": "observed",
+      "cause": "navigateToUnresolvableHost",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].tabId === 'number' && typeof args[0].url === 'string' && typeof args[0].error === 'string' && args[0].error.length > 0"
+    },
+    "webNavigation.onReferenceFragmentUpdated": {
+      "status": "observed",
+      "cause": "navigateToFragment",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].tabId === 'number' && typeof args[0].url === 'string' && args[0].url.indexOf('#') !== -1"
+    },
+    "webNavigation.onHistoryStateUpdated": {
+      "status": "observed",
+      "cause": "pushState",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].tabId === 'number' && typeof args[0].url === 'string' && typeof args[0].transitionType === 'string'"
+    },
+    "webNavigation.onTabReplaced": {
+      "status": "notDispatched",
+      "cause": "none",
+      "why": "orbit_web_navigation_event_router.h says so explicitly: Orbit has no prerender or instant-tab swap to report."
+    },
+    "windows.onCreated": {
+      "status": "observed",
+      "cause": "windowCreated",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].id === 'number' && typeof args[0].focused === 'boolean'"
+    },
+    "windows.onRemoved": {
+      "status": "observed",
+      "cause": "windowRemoved",
+      "payload": "args.length >= 1 && typeof args[0] === 'number' && args[0] >= 0"
+    },
+    "windows.onFocusChanged": {
+      "status": "observed",
+      "cause": "windowFocusChanged",
+      "payload": "args.length >= 1 && typeof args[0] === 'number'"
+    }
+  }
+}

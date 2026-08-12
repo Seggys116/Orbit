@@ -1,0 +1,50 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
+
+BUILD=1
+if [ "${1:-}" = "--no-build" ]; then
+  BUILD=0
+fi
+
+DERIVED="${REPO_ROOT}/build/FolderToggleProbe"
+APP="${DERIVED}/Build/Products/Debug/OrbitDemo.app"
+
+if [ "${BUILD}" = "1" ]; then
+  echo "folder-toggle-probe: building the Demo scheme"
+  xcodebuild \
+    -project Orbit.xcodeproj \
+    -scheme Demo \
+    -configuration Debug \
+    -destination 'platform=macOS,arch=arm64' \
+    -derivedDataPath "${DERIVED}" \
+    build
+fi
+
+if [ ! -d "${APP}" ]; then
+  echo "error: ${APP} does not exist. Run without --no-build." >&2
+  exit 1
+fi
+
+OUT_DIR="${ORBIT_FOLDER_TOGGLE_PROBE_OUT:-${TMPDIR:-/tmp}/orbit-folder-toggle-probe}"
+mkdir -p "${OUT_DIR}"
+
+echo
+echo "folder-toggle-probe: launching the demo with the probe enabled"
+echo "folder-toggle-probe: captures will be written to ${OUT_DIR}"
+set +e
+ORBIT_FOLDER_TOGGLE_PROBE=1 ORBIT_FOLDER_TOGGLE_PROBE_OUT="${OUT_DIR}" "${APP}/Contents/MacOS/OrbitDemo"
+status=$?
+set -e
+
+echo
+if [ "${status}" -eq 0 ]; then
+  echo "folder-toggle-probe: PASS"
+else
+  echo "folder-toggle-probe: FAIL (exit ${status})"
+fi
+exit "${status}"

@@ -1,0 +1,5 @@
+// A test bundle inherits ORBIT_ENGINE_CONFIG from the configuration it is built in,
+// which is the one its host app embedded; overriding it here would move only the
+// bundle's search paths, not the framework the host loads.
+
+#include "Chromium.xcconfig"

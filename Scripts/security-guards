@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Static security invariants (sandbox-disabling switches, entitlement policy,
+# engine DCHECK configuration); run with no argument for all of them.
+# Runtime counterpart OrbitTests/SandboxInvariantTests.swift's real-Orbit test
+# currently skips (OrbitTests isn't the live-engine target), so no run yet
+# measures a real browser's helpers.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON=python3
+elif [ -x /usr/bin/python3 ]; then
+  PYTHON=/usr/bin/python3
+else
+  echo "error: python3 is required. Install the Xcode Command Line Tools with 'xcode-select --install'." >&2
+  exit 1
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/security_guards.py" "$@"

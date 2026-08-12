@@ -1,0 +1,770 @@
+{
+  "_readme": [
+    "The machine-readable form of refs/EXTENSION_CONFORMANCE.md sections 1.3, 1.4 and 1.5:",
+    "every extension API member Orbit is known NOT to have.",
+    "",
+    "OrbitTests/ExtensionSchemaConformanceTests.swift diffs Orbit's own schemas",
+    "(Chromium/Embedder/common/api/*.json) against the vendored upstream snapshot in",
+    "OrbitTests/Fixtures/UpstreamAPISchemas/ and asserts the delta is EXACTLY this file.",
+    "",
+    "That means the test fails in both directions, on purpose:",
+    "  - a member that disappears from Orbit and appears here is a regression;",
+    "  - a member that Orbit IMPLEMENTS also fails, until someone deletes it from",
+    "    this file. Updating the file is the deliberate act that records the win.",
+    "A fixture-based test can only check members its author thought to write down;",
+    "this is the only check in the suite that can detect ABSENCE.",
+    "",
+    "Regenerate with:  Scripts/extension-schemas sync && Scripts/extension-schemas update-expectations",
+    "Then READ THE DIFF. Notes and reasons are preserved across regeneration.",
+    "",
+    "reason, on an absent namespace:",
+    "  notPorted       chrome-layer, in scope, Orbit has not ported it (section 1.4)",
+    "  outOfScope      ChromeOS hardware/shell, enterprise, or the Chrome Apps model",
+    "                  Orbit does not host (section 1.5)",
+    "  chromeInternal  allowlist-only; no third-party extension can reach it",
+    "  unclassified    a new Chromium added it and nobody has triaged it yet -- the",
+    "                  test rejects this value, so the bump forces the triage",
+    "",
+    "neverDispatchedEvents: events Orbit DECLARES in a schema and never fires. These are",
+    "invisible to a schema diff -- the member is present -- and are the failure mode",
+    "OrbitTests/Fixtures/EventLiveness.json plus ChromiumExtensionEventLivenessLiveTests",
+    "exist to catch. An event listed here must also be listed as notDispatched there."
+  ],
+  "chromium_version": "151.0.7922.109",
+  "neverDispatchedEvents": [
+    "action.onClicked",
+    "tabs.onReplaced",
+    "webNavigation.onTabReplaced"
+  ],
+  "namespaces": {
+    "accessibilityFeatures": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "accessibilityPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "accessibilityServicePrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "activityLogPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "appviewTag": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "autofillPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "autotestPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "bookmarkManagerPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "bookmarks": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "brailleDisplayPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "browserAction": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "browsingData": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "certificateProvider": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "certificateProviderInternal": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "chromeWebViewInternal": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "chromeosInfoPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "commandLinePrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "commands": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "contentSettings": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "contextMenus": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "contextualTasksPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "crashReportPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "debugger": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "declarativeContent": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "desktopCapture": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "developerPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "devtools.inspectedWindow": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "devtools.network": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "devtools.panels": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "devtools.performance": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "devtools.recorder": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "dictationPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "documentScan": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "dom": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "downloads": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "downloadsInternal": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "echoPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "enterprise": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "enterprise.deviceAttributes": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "enterprise.hardwarePlatform": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "enterprise.kioskInput": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "enterprise.login": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "enterprise.networkingAttributes": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "enterprise.platformKeys": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "enterprise.platformKeysInternal": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "enterprise.platformKeysPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "enterprise.reportingPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "experimentalActor": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "experimentalAiData": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "extension": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "fileBrowserHandler": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "fileManagerPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "fileManagerPrivateInternal": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "fileSystemProvider": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "fileSystemProviderInternal": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "fontSettings": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "gcm": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "glicPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "history": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "identity": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "idltest": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "imageLoaderPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "imageWriterPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "indigoPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "input.ime": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "inputMethodPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "instanceID": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "languageSettingsPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "login": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "loginScreenStorage": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "loginScreenUi": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "loginState": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "manifestTypes": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "mdns": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "mediaPlayerPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "notifications": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "odfsConfigPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "omnibox": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "pageAction": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "pageCapture": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "passwordsPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "pdfViewerPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "platformKeys": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "platformKeysInternal": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "printing": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "printingMetrics": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "processes": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "proxy": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "proxyOverrideRulesPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "quickUnlockPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "readingList": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "resourcesPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "safeBrowsingPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "search": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "sessions": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "settingsPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "sidePanel": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "smartCardProviderPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "speechRecognitionPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "systemLog": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "systemPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "tabCapture": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "tabGroups": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "terminalPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "topSites": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "tts": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "ttsEngine": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "usersPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "vpnProvider": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "wallpaper": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "webAuthenticationProxy": {
+      "status": "absent",
+      "reason": "notPorted"
+    },
+    "webrtcDesktopCapturePrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "webrtcLoggingPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "webviewTag": {
+      "status": "absent",
+      "reason": "outOfScope"
+    },
+    "wmDesksPrivate": {
+      "status": "absent",
+      "reason": "chromeInternal"
+    },
+    "action": {
+      "status": "partial",
+      "missingFunctions": [
+        "getUserSettings",
+        "openPopup"
+      ],
+      "missingEvents": [
+        "onUserSettingsChanged"
+      ],
+      "missingTypes": [
+        "OpenPopupOptions",
+        "UserSettings",
+        "UserSettingsChange"
+      ],
+      "note": "onClicked is declared and never fired; see neverDispatchedEvents. The missing members here are the separate, schema-level half of the same section 1.3 row."
+    },
+    "cookies": {
+      "status": "partial",
+      "missingFunctions": [
+        "getPartitionKey"
+      ],
+      "missingTypes": [
+        "CookiePartitionKey",
+        "FrameDetails"
+      ],
+      "note": "No CHIPS/partitioned-cookie support."
+    },
+    "permissions": {
+      "status": "partial",
+      "missingFunctions": [
+        "addHostAccessRequest",
+        "removeHostAccessRequest"
+      ],
+      "note": "addHostAccessRequest/removeHostAccessRequest only."
+    },
+    "privacy": {
+      "status": "partial",
+      "missingTypes": [
+        "AutofillBlockedType",
+        "AutofillSettings",
+        "IPHandlingPolicy"
+      ],
+      "missingProperties": [
+        "network",
+        "network.networkPredictionEnabled",
+        "network.webRTCIPHandlingPolicy",
+        "services.alternateErrorPagesEnabled",
+        "services.autofillAddressEnabled",
+        "services.autofillCreditCardEnabled",
+        "services.autofillEnabled",
+        "services.autofillSettings",
+        "services.passwordSavingEnabled",
+        "services.safeBrowsingEnabled",
+        "services.safeBrowsingExtendedReportingEnabled",
+        "services.spellingServiceEnabled",
+        "services.translationServiceEnabled",
+        "websites",
+        "websites.adMeasurementEnabled",
+        "websites.doNotTrackEnabled",
+        "websites.fledgeEnabled",
+        "websites.hyperlinkAuditingEnabled",
+        "websites.protectedContentEnabled",
+        "websites.referrersEnabled",
+        "websites.relatedWebsiteSetsEnabled",
+        "websites.thirdPartyCookiesAllowed",
+        "websites.topicsEnabled"
+      ],
+      "note": "The two absent GROUPS (network, websites) are the dangerous half: chrome.privacy.websites.thirdPartyCookiesAllowed throws TypeError on the group, and a top-level throw during service worker evaluation is the 'Status code: 15' registration failure (section 1.3)."
+    },
+    "tabs": {
+      "status": "partial",
+      "missingFunctions": [
+        "captureVisibleTab",
+        "detectLanguage",
+        "discard",
+        "duplicate",
+        "executeScript",
+        "getAllInWindow",
+        "getSelected",
+        "getZoom",
+        "getZoomSettings",
+        "goBack",
+        "goForward",
+        "group",
+        "highlight",
+        "insertCSS",
+        "move",
+        "removeCSS",
+        "sendRequest",
+        "setZoom",
+        "setZoomSettings",
+        "ungroup"
+      ],
+      "missingEvents": [
+        "onActiveChanged",
+        "onAttached",
+        "onDetached",
+        "onHighlightChanged",
+        "onHighlighted",
+        "onSelectionChanged",
+        "onZoomChange"
+      ],
+      "missingTypes": [
+        "MutedInfoReason",
+        "ZoomSettings",
+        "ZoomSettingsMode",
+        "ZoomSettingsScope"
+      ],
+      "missingProperties": [
+        "MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND",
+        "SPLIT_VIEW_ID_NONE",
+        "TAB_INDEX_NONE"
+      ],
+      "note": "Concurrent work: the tabs/windows defect sweep (section 5.4) owns orbit_tabs_api.cc. sendMessage, connect and reload have already landed and are correctly absent from this list. Deleting more entries here is how that work records itself."
+    },
+    "webNavigation": {
+      "status": "partial",
+      "missingEvents": [
+        "onCreatedNavigationTarget"
+      ],
+      "extraTypes": [
+        "UrlFilter"
+      ],
+      "note": "extraTypes UrlFilter: Orbit declares its own inline UrlFilter type where upstream reuses events.UrlFilter. Orbit-only members are reported, not tolerated silently, so a divergence has to be looked at."
+    },
+    "webstorePrivate": {
+      "status": "partial",
+      "missingFunctions": [
+        "enableAppLauncher",
+        "getBrowserLogin",
+        "getIsLauncherEnabled",
+        "getMV2DeprecationStatus",
+        "install",
+        "isInIncognitoMode",
+        "logEnterprisePromoShown",
+        "onEnterprisePromoClick",
+        "shouldShowEnterprisePromotionBanner"
+      ],
+      "missingTypes": [
+        "MV2DeprecationStatus",
+        "PromotionType"
+      ],
+      "note": "install/getBrowserLogin/isInIncognitoMode and the MV2-deprecation members are deliberately unported: refs memory records that CEF ships a dead webstorePrivate and Orbit implements only the install flow it drives itself."
+    },
+    "windows": {
+      "status": "partial",
+      "missingFunctions": [
+        "create",
+        "remove",
+        "update"
+      ],
+      "missingEvents": [
+        "onBoundsChanged"
+      ],
+      "missingTypes": [
+        "CreateType"
+      ],
+      "note": "create/remove/update are the reason no extension can open a popup window (section 1.3). Under active work in the same sweep as tabs -- do not 'fix' this file, delete the entries when the functions land."
+    }
+  },
+  "unregisteredChromePermissions": [
+    "accessibilityFeatures.modify",
+    "accessibilityFeatures.read",
+    "accessibilityPrivate",
+    "accessibilityServicePrivate",
+    "activityLogPrivate",
+    "autofillPrivate",
+    "autotestPrivate",
+    "background",
+    "bookmarks",
+    "brailleDisplayPrivate",
+    "browsingData",
+    "certificateProvider",
+    "chromePrivate",
+    "chromeosInfoPrivate",
+    "clipboardRead",
+    "clipboardWrite",
+    "commandLinePrivate",
+    "commands.accessibility",
+    "contentSettings",
+    "contextMenus",
+    "contextualTasksPrivate",
+    "crashReportPrivate",
+    "debugger",
+    "declarativeContent",
+    "desktopCapture",
+    "developerPrivate",
+    "dictationPrivate",
+    "documentScan",
+    "downloads",
+    "downloads.open",
+    "downloads.shelf",
+    "downloads.ui",
+    "echoPrivate",
+    "enterprise.deviceAttributes",
+    "enterprise.hardwarePlatform",
+    "enterprise.kioskInput",
+    "enterprise.login",
+    "enterprise.networkingAttributes",
+    "enterprise.platformKeys",
+    "enterprise.platformKeysPrivate",
+    "enterprise.reportingPrivate",
+    "enterprise.reportingPrivate.onDataMaskingRulesTriggered",
+    "experimental",
+    "experimentalActor",
+    "experimentalAiData",
+    "favicon",
+    "fileBrowserHandler",
+    "fileManagerPrivate",
+    "fileSystemProvider",
+    "fontSettings",
+    "gcm",
+    "geolocation",
+    "glicPrivate",
+    "glicPrivate.invoke",
+    "history",
+    "identity",
+    "identity.email",
+    "idltest",
+    "imageLoaderPrivate",
+    "imageWriterPrivate",
+    "indigoPrivate",
+    "input",
+    "inputMethodPrivate",
+    "languageSettingsPrivate",
+    "lockWindowFullscreenPrivate",
+    "login",
+    "loginScreenStorage",
+    "loginScreenUi",
+    "loginState",
+    "mdns",
+    "mediaPlayerPrivate",
+    "notifications",
+    "pageCapture",
+    "passwordsPrivate",
+    "pdfViewerPrivate",
+    "platformKeys",
+    "plugin",
+    "printing",
+    "printingMetrics",
+    "processes",
+    "proxy",
+    "proxyOverrideRulesPrivate",
+    "readingList",
+    "resourcesPrivate",
+    "safeBrowsingPrivate",
+    "search",
+    "sessions",
+    "settingsPrivate",
+    "sidePanel",
+    "smartCardProviderPrivate",
+    "speechRecognitionPrivate",
+    "systemLog",
+    "systemPrivate",
+    "tabCapture",
+    "tabGroups",
+    "terminalPrivate",
+    "topSites",
+    "transientBackground",
+    "tts",
+    "ttsEngine",
+    "usersPrivate",
+    "wallpaper",
+    "webAuthenticationProxy",
+    "webcamPrivate",
+    "webrtcDesktopCapturePrivate",
+    "webrtcLoggingPrivate",
+    "webrtcLoggingPrivate.audioDebug",
+    "wmDesksPrivate"
+  ]
+}

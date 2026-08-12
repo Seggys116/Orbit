@@ -1,0 +1,325 @@
+name: Chromium update
+
+# Daily rather than weekly: Chrome stable ships roughly fortnightly, so most
+# days this is a cheap no-op version check. 23:00 UTC lands same-day (UK time,
+# UTC or UTC+1 depending on DST) so a stable release is picked up within hours.
+on:
+  schedule:
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "What to pin: latest, latest-beta, or an exact Chromium version"
+        required: false
+        default: latest
+
+concurrency:
+  group: chromium-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  # Cheap: a version lookup and a git diff, no Chromium checkout. Safe on a
+  # hosted runner. This is the only job that runs on an ordinary schedule day.
+  check:
+    name: Check for a newer Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      chromium_version: ${{ steps.after.outputs.chromium_version }}
+      pr_number: ${{ steps.pr.outputs.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read the current pin
+        id: before
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          m = json.load(open("Chromium/chromium-version.json"))
+          print(f"chromium_version={m['chromium_version']}")
+          PY
+
+      - name: Pin
+        env:
+          TARGET: ${{ inputs.version || 'latest' }}
+        run: Scripts/chromium pin "$TARGET"
+
+      - name: Refresh the committed xcconfig fallbacks
+        run: |
+          python3 - <<'PY'
+          import json, re
+          m = json.load(open("Chromium/chromium-version.json"))
+          values = {
+              "ORBIT_CHROMIUM_VERSION": m["chromium_version"],
+              "ORBIT_CHROMIUM_CHANNEL": m.get("channel", "stable"),
+              "ORBIT_CHROMIUM_MAJOR": m["chromium_version"].split(".")[0],
+          }
+          path = "Chromium/Chromium.xcconfig"
+          text = open(path, encoding="utf-8").read()
+          for key, value in values.items():
+              text, count = re.subn(rf"(?m)^{key} = .*$", f"{key} = {value}", text)
+              assert count == 1, f"expected exactly one {key} assignment, found {count}"
+          open(path, "w", encoding="utf-8").write(text)
+          PY
+
+      - name: Read the new pin
+        id: after
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          m = json.load(open("Chromium/chromium-version.json"))
+          print(f"chromium_version={m['chromium_version']}")
+          print(f"channel={m.get('channel', 'stable')}")
+          print(f"major={m['chromium_version'].split('.')[0]}")
+          PY
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already on Chromium ${{ steps.after.outputs.chromium_version }}."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat
+          fi
+
+      # CHROMIUM_UPDATE_PR_TOKEN, when set, is what makes the pull request open
+      # as a real user or app rather than as GITHUB_TOKEN, which is the only way
+      # GitHub will start ci.yml for it. An unset secret evaluates to the empty
+      # string, so this falls back to GITHUB_TOKEN and the `verify` job below
+      # becomes the sole check the bump gets.
+      - name: Open a pull request
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.CHROMIUM_UPDATE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: chore/chromium-update
+          delete-branch: true
+          base: main
+          add-paths: |
+            Chromium/chromium-version.json
+            Chromium/Chromium.xcconfig
+            Orbit/Generated/ChromiumVersion.swift
+          commit-message: "Update Chromium to ${{ steps.after.outputs.chromium_version }}"
+          title: "Update Chromium to ${{ steps.after.outputs.chromium_version }}"
+          labels: chromium
+          body: |
+            Moves Orbit's Chromium pin from `${{ steps.before.outputs.chromium_version }}` to `${{ steps.after.outputs.chromium_version }}` (${{ steps.after.outputs.channel }}).
+
+            Produced by `Scripts/chromium pin ${{ inputs.version || 'latest' }}`, which rewrote the manifest and regenerated `Orbit/Generated/ChromiumVersion.swift`; the committed fallbacks in `Chromium/Chromium.xcconfig` were refreshed to match. Sites will now see `Chrome/${{ steps.after.outputs.major }}.0.0.0`.
+
+            This PR pins the version only -- there is no fallback source, so `Scripts/chromium fetch` on this branch has nothing to install until the self-hosted `build-and-publish` job (triggered by this same run) finishes building Orbit's own engine from source and publishes it; a second commit lands here once that happens.
+
+            Verification is reported as the `chromium-update / verify` commit status on this branch's head, not necessarily as an entry in the checks tab: the `verify` job of [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) builds and tests this branch once the prebuilt is attached, and posts the result there. It is pending until then. Do not merge on a pending or red status.
+
+            The checks tab is empty when the pull request was opened with `GITHUB_TOKEN`, which GitHub refuses to let start other workflows. Setting the `CHROMIUM_UPDATE_PR_TOKEN` secret makes ci.yml run here as it does on any other pull request; the commit status above is posted either way.
+
+      # A Chromium bump is the highest-risk change in the repo and the one most
+      # likely to arrive with an empty checks tab, so the pull request carries a
+      # commit status from the moment it opens. It is pending here and only the
+      # `report` job below can turn it green; a cancelled or failed run leaves it
+      # pending, which blocks the merge once the status is a required check.
+      - name: Mark the pull request unverified
+        id: pr
+        if: steps.diff.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TOKEN: ${{ secrets.CHROMIUM_UPDATE_PR_TOKEN }}
+        run: |
+          number=$(gh pr list --repo "$GITHUB_REPOSITORY" --head chore/chromium-update \
+            --state open --json number --jq '.[0].number // empty')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          if [ -z "$number" ]; then
+            echo "No open pull request for chore/chromium-update."
+            exit 0
+          fi
+          if [ -z "$PR_TOKEN" ]; then
+            echo "::warning::CHROMIUM_UPDATE_PR_TOKEN is not set, so pull request #$number carries no ci.yml run. The chromium-update / verify status on it is the only check the bump gets."
+          fi
+          sha=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$sha" \
+            -f state=pending \
+            -f context='chromium-update / verify' \
+            -f description='Waiting for the engine build and the test run' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+          echo "Marked #$number pending on $sha"
+
+  # Hosted-runner guard: fails loudly, before the build job would otherwise
+  # queue forever waiting for a self-hosted runner that was never registered.
+  runner-check:
+    name: Check the self-hosted builder is configured
+    needs: check
+    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require CHROMIUM_BUILDER_RUNNER_LABEL
+        run: |
+          if [ -z "${{ vars.CHROMIUM_BUILDER_RUNNER_LABEL }}" ]; then
+            echo "::error::Repository variable CHROMIUM_BUILDER_RUNNER_LABEL is not set." >&2
+            echo "A Chromium source build needs a persistent, self-hosted macOS runner." >&2
+            echo "Not a cost decision: standard runners are free on public repos. A hosted" >&2
+            echo "macos-26 has 3 cores, 7GB RAM and 14GB of disk, and a hard 6h job cap;" >&2
+            echo "measured, this build needs 54GB (49GB checkout, 8GB per configuration)" >&2
+            echo "and is ephemeral there, so every run would restart from zero." >&2
+            echo "Register a self-hosted runner with a label of your choosing, set it as" >&2
+            echo "the CHROMIUM_BUILDER_RUNNER_LABEL repo variable (Settings > Secrets and" >&2
+            echo "variables > Actions > Variables), and re-run this workflow." >&2
+            exit 1
+          fi
+          echo "Builder runner label: ${{ vars.CHROMIUM_BUILDER_RUNNER_LABEL }}"
+
+  # Expensive: a full Chromium checkout and build (hours). Self-hosted only --
+  # see runner-check. Runs only when the version actually changed, or on a
+  # manual dispatch, so an unchanged day never ties up the builder.
+  build-and-publish:
+    name: Build and publish the prebuilt
+    needs: [check, runner-check]
+    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ vars.CHROMIUM_BUILDER_RUNNER_LABEL }}
+    # A first Chromium build from a cold checkout runs past the 6h default.
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Explicit refspec and -B: on a single-branch clone `git fetch origin
+      # <branch>` writes only FETCH_HEAD, and this runner keeps stale branches.
+      - name: Switch to the pin branch
+        run: |
+          git fetch origin \
+            "+refs/heads/chore/chromium-update:refs/remotes/origin/chore/chromium-update" || true
+          if git rev-parse --verify -q refs/remotes/origin/chore/chromium-update >/dev/null; then
+            git checkout -B chore/chromium-update refs/remotes/origin/chore/chromium-update
+          else
+            git checkout -B chore/chromium-update
+          fi
+
+      # Re-derive the same pin deterministically rather than passing files
+      # between jobs -- check and build-and-publish run on different runners.
+      - name: Pin
+        env:
+          TARGET: ${{ inputs.version || 'latest' }}
+        run: Scripts/chromium pin "$TARGET"
+
+      # Intentionally not run inside a fresh workspace: this runner keeps a
+      # persistent ThirdParty/chromium-build/ and ccache across runs, because a
+      # Chromium version bump touches thousands of files and is near enough a
+      # full rebuild either way -- starting from zero every time would turn a
+      # multi-hour build into a multi-hour build every single day.
+      # Sequentially, never as a matrix: two Chromium builds at once saturate the builder.
+      - name: Build Chromium from source
+        run: |
+          for config in shipping dcheck; do
+            Scripts/chromium build --from-source --config "$config"
+          done
+
+      - name: Package
+        run: |
+          for config in shipping dcheck; do
+            Scripts/chromium package --config "$config"
+          done
+
+      # Named, never globbed: dist/ is persistent and keeps every version.
+      - name: Publish the release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('Chromium/chromium-version.json'))['chromium_version'])")
+          echo "tag=chromium-$version" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_ENV"
+
+          assets=()
+          for config in shipping dcheck; do
+            asset="ThirdParty/dist/orbit-chromium-$version-macosarm64-$config.tar.xz"
+            if [ ! -f "$asset" ]; then
+              echo "::error::Scripts/chromium package produced no $asset"
+              ls -la ThirdParty/dist || true
+              exit 1
+            fi
+            assets+=("$asset" "$asset.sha256")
+          done
+
+          gh release create "chromium-$version" --repo "$GITHUB_REPOSITORY" --title "chromium-$version" \
+            --notes "Prebuilt Chromium engines for Orbit (shipping and dcheck), built from source by this workflow." \
+            "${assets[@]}" || \
+          gh release upload "chromium-$version" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
+
+      - name: Record the prebuilts in the manifest
+        run: |
+          for config in shipping dcheck; do
+            Scripts/chromium record-prebuilt --config "$config" --platform macosarm64 \
+              --asset "ThirdParty/dist/orbit-chromium-$version-macosarm64-$config.tar.xz" \
+              --tag "$tag"
+          done
+
+      - name: Commit and push to the pin PR's branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Chromium/chromium-version.json
+          # git commit on an empty index exits 1; re-publishing changes nothing.
+          if git diff --cached --quiet; then
+            echo "The manifest already records these prebuilts; nothing to commit."
+          else
+            git commit -m "Attach prebuilt Chromium engine ($tag)"
+          fi
+          git push origin HEAD:chore/chromium-update
+
+  # The same verification ci.yml runs, aimed at the pin branch. It waits for
+  # build-and-publish because `Scripts/chromium fetch` has nothing to install
+  # until the prebuilt for the new version exists.
+  verify:
+    name: Verify
+    needs: [check, build-and-publish]
+    if: needs.check.outputs.pr_number != ''
+    uses: ./.github/workflows/build-test.yml
+    permissions:
+      contents: read
+    with:
+      ref: chore/chromium-update
+
+  # Turns the pending status from the check job into the verdict. Runs on any
+  # outcome, including verify never starting, so a bump can never end up with a
+  # stale pending status and no explanation.
+  report:
+    name: Report the verdict to the pull request
+    needs: [check, verify]
+    if: always() && needs.check.outputs.pr_number != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Post the commit status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ needs.check.outputs.pr_number }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+        run: |
+          if [ "$VERIFY_RESULT" = "success" ]; then
+            state=success
+            description="Built and tested on the pin branch"
+          else
+            state=failure
+            description="Verification $VERIFY_RESULT"
+          fi
+
+          sha=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$sha" \
+            -f state="$state" \
+            -f context='chromium-update / verify' \
+            -f description="$description" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+
+          if [ "$state" != "success" ]; then
+            echo "::error::Chromium bump #$PR_NUMBER is unverified (verify job: $VERIFY_RESULT). Do not merge it."
+            exit 1
+          fi
+          echo "Marked #$PR_NUMBER verified on $sha"

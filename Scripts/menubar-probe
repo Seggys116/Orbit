@@ -1,0 +1,56 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
+
+BUILD=1
+OUT_DIR=""
+for arg in "$@"; do
+  case "${arg}" in
+    --no-build) BUILD=0 ;;
+    *) OUT_DIR="${arg}" ;;
+  esac
+done
+
+# The repo shared DerivedData, not a private one: a private one's precompiled bridging header goes stale on the next Bridge edit and fails the build.
+DERIVED="${ORBIT_MENUBAR_PROBE_DERIVED:-${REPO_ROOT}/DerivedData}"
+APP="${DERIVED}/Build/Products/Debug/OrbitDemo.app"
+
+if [ "${BUILD}" = "1" ]; then
+  echo "menubar-probe: building the Demo scheme"
+  xcodebuild \
+    -project Orbit.xcodeproj \
+    -scheme Demo \
+    -configuration Debug \
+    -destination 'platform=macOS,arch=arm64' \
+    -derivedDataPath "${DERIVED}" \
+    build
+fi
+
+if [ ! -x "${APP}/Contents/MacOS/OrbitDemo" ]; then
+  echo "error: ${APP} does not exist or is not executable. Run without --no-build." >&2
+  exit 1
+fi
+
+echo "menubar-probe: launching the demo with the probe enabled"
+set +e
+if [ -n "${OUT_DIR}" ]; then
+  mkdir -p "${OUT_DIR}"
+  echo "menubar-probe: writing captures to ${OUT_DIR}"
+  ORBIT_MENUBAR_PROBE=1 ORBIT_MENUBAR_PROBE_OUT="${OUT_DIR}" "${APP}/Contents/MacOS/OrbitDemo"
+else
+  ORBIT_MENUBAR_PROBE=1 "${APP}/Contents/MacOS/OrbitDemo"
+fi
+status=$?
+set -e
+
+echo
+if [ "${status}" -eq 0 ]; then
+  echo "menubar-probe: PASS"
+else
+  echo "menubar-probe: FAIL (exit ${status})"
+fi
+exit "${status}"

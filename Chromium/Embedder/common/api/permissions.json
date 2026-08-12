@@ -1,0 +1,145 @@
+// Copyright 2026 The Orbit Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// Trimmed from chrome/common/extensions/api/permissions.json. Deliberately
+// omits addHostAccessRequest/removeHostAccessRequest: those drive the
+// chrome://extensions toolbar "this extension wants access" affordance
+// through PermissionsManager::AddHostAccessRequest, and Orbit has no such
+// surface, so they are absent rather than present-and-silently-ineffective.
+
+[
+  {
+    "namespace": "permissions",
+    "description": "Use the <code>chrome.permissions</code> API to request declared optional permissions at run time rather than install time, so users understand why the permissions are needed and grant only those that are necessary.",
+    "types": [
+      {
+        "id": "Permissions",
+        "type": "object",
+        "properties": {
+          "permissions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "optional": true,
+            "description": "List of named permissions (does not include hosts or origins)."
+          },
+          "origins": {
+            "type": "array",
+            "items": {"type": "string"},
+            "optional": true,
+            "description": "The list of host permissions, including those specified in the <code>optional_permissions</code> or <code>permissions</code> keys in the manifest, and those associated with Content Scripts."
+          }
+        }
+      }
+    ],
+    "events": [
+      {
+        "name": "onAdded",
+        "type": "function",
+        "description": "Fired when the extension acquires new permissions.",
+        "parameters": [
+          {
+            "$ref": "Permissions",
+            "name": "permissions",
+            "description": "The newly acquired permissions."
+          }
+        ]
+      },
+      {
+        "name": "onRemoved",
+        "type": "function",
+        "description": "Fired when access to permissions has been removed from the extension.",
+        "parameters": [
+          {
+            "$ref": "Permissions",
+            "name": "permissions",
+            "description": "The permissions that have been removed."
+          }
+        ]
+      }
+    ],
+    "functions": [
+      {
+        "name": "getAll",
+        "type": "function",
+        "description": "Gets the extension's current set of permissions.",
+        "parameters": [],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            {
+              "name": "permissions",
+              "$ref": "Permissions",
+              "description": "The extension's active permissions."
+            }
+          ]
+        }
+      },
+      {
+        "name": "contains",
+        "type": "function",
+        "description": "Checks if the extension has the specified permissions.",
+        "parameters": [
+          {
+            "name": "permissions",
+            "$ref": "Permissions"
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            {
+              "name": "result",
+              "type": "boolean",
+              "description": "True if the extension has the specified permissions."
+            }
+          ]
+        }
+      },
+      {
+        "name": "request",
+        "type": "function",
+        "description": "Requests access to the specified permissions, displaying a prompt to the user if necessary. These permissions must either be defined in the <code>optional_permissions</code> field of the manifest or be required permissions that were withheld by the user. Paths on origin patterns will be ignored. If there are any problems requesting the permissions, the promise will be rejected.",
+        "parameters": [
+          {
+            "name": "permissions",
+            "$ref": "Permissions"
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": [
+            {
+              "name": "granted",
+              "type": "boolean",
+              "description": "True if the user granted the specified permissions."
+            }
+          ]
+        }
+      },
+      {
+        "name": "remove",
+        "type": "function",
+        "description": "Removes access to the specified permissions. If there are any problems removing the permissions, the promise will be rejected.",
+        "parameters": [
+          {
+            "name": "permissions",
+            "$ref": "Permissions"
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": [
+            {
+              "name": "removed",
+              "type": "boolean",
+              "description": "True if the permissions were removed."
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,148 @@
+// Copyright 2026 The Orbit Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// A deliberately small subset of chrome/common/extensions/api/windows.json:
+// read-only (get/getAll/getCurrent/getLastFocused) plus onCreated/onRemoved/
+// onFocusChanged. windows.create/update/remove are NOT implemented -- Orbit
+// windows are real AppKit NSWindows owned by Swift's window-scoped
+// AppEnvironment/OrbitWindowController, and wiring extension-driven window
+// creation/removal through that is out of scope for this pass. See
+// orbit_windows_api.h for exactly which functions exist.
+[
+  {
+    "namespace": "windows",
+    "description": "A focused, read-mostly subset of chrome.windows, backed by Orbit's own window model.",
+    "compiler_options": {
+      "implemented_in": "orbit/browser/api/windows/orbit_windows_api.h"
+    },
+    "types": [
+      {
+        "id": "WindowState",
+        "type": "string",
+        "enum": ["normal", "minimized", "maximized", "fullscreen"],
+        "description": "The state of this browser window."
+      },
+      {
+        "id": "WindowType",
+        "type": "string",
+        "enum": ["normal", "popup", "panel", "app", "devtools"],
+        "description": "The type of browser window. Every Orbit window is \"normal\"."
+      },
+      {
+        "id": "QueryOptions",
+        "type": "object",
+        "properties": {
+          "populate": {
+            "type": "boolean",
+            "optional": true,
+            "description": "If true, the Window object has a tabs property listing its tabs.Tab objects."
+          }
+        }
+      },
+      {
+        "id": "Window",
+        "type": "object",
+        "properties": {
+          "id": {"type": "integer", "optional": true, "minimum": -1, "description": "The id of the window."},
+          "focused": {"type": "boolean", "description": "Whether the window is currently the focused window."},
+          "left": {"type": "integer", "optional": true, "description": "The offset of the window from the left edge of the screen in pixels."},
+          "top": {"type": "integer", "optional": true, "description": "The offset of the window from the top edge of the screen in pixels."},
+          "width": {"type": "integer", "optional": true, "description": "The width of the window in pixels."},
+          "height": {"type": "integer", "optional": true, "description": "The height of the window in pixels."},
+          "tabs": {"type": "array", "items": {"$ref": "tabs.Tab"}, "optional": true, "description": "Present only when QueryOptions.populate is true."},
+          "incognito": {"type": "boolean", "description": "Always false -- Orbit has no incognito profile yet."},
+          "state": {"$ref": "WindowState", "optional": true, "description": "The state of this browser window."},
+          "type": {"$ref": "WindowType", "optional": true, "description": "The type of this browser window."}
+        }
+      }
+    ],
+    "properties": {
+      "WINDOW_ID_NONE": {
+        "value": -1,
+        "description": "The windowId value that represents the absence of an Orbit window."
+      },
+      "WINDOW_ID_CURRENT": {
+        "value": -2,
+        "description": "The windowId value that represents the current window."
+      }
+    },
+    "functions": [
+      {
+        "name": "get",
+        "type": "function",
+        "description": "Gets details about a window.",
+        "parameters": [
+          {"type": "integer", "name": "windowId", "minimum": -2},
+          {"name": "queryOptions", "$ref": "QueryOptions", "optional": true}
+        ],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [{"name": "window", "$ref": "Window"}]
+        }
+      },
+      {
+        "name": "getCurrent",
+        "type": "function",
+        "description": "Gets the window that contains the calling script's tab, or the last-focused Orbit window if called from a non-tab context.",
+        "parameters": [
+          {"name": "queryOptions", "$ref": "QueryOptions", "optional": true}
+        ],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [{"name": "window", "$ref": "Window"}]
+        }
+      },
+      {
+        "name": "getLastFocused",
+        "type": "function",
+        "description": "Gets the Orbit window that was most recently focused.",
+        "parameters": [
+          {"name": "queryOptions", "$ref": "QueryOptions", "optional": true}
+        ],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [{"name": "window", "$ref": "Window"}]
+        }
+      },
+      {
+        "name": "getAll",
+        "type": "function",
+        "description": "Gets every open Orbit window.",
+        "parameters": [
+          {"name": "queryOptions", "$ref": "QueryOptions", "optional": true}
+        ],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [{"name": "windows", "type": "array", "items": {"$ref": "Window"}}]
+        }
+      }
+    ],
+    "events": [
+      {
+        "name": "onCreated",
+        "type": "function",
+        "description": "Fired when an Orbit window is created.",
+        "parameters": [
+          {"$ref": "Window", "name": "window", "description": "Details of the created window."}
+        ]
+      },
+      {
+        "name": "onRemoved",
+        "type": "function",
+        "description": "Fired when an Orbit window is closed.",
+        "parameters": [
+          {"type": "integer", "name": "windowId", "minimum": 0, "description": "ID of the removed window."}
+        ]
+      },
+      {
+        "name": "onFocusChanged",
+        "type": "function",
+        "description": "Fired when the currently focused Orbit window changes. windows.WINDOW_ID_NONE if every Orbit window lost focus (e.g. the app itself resigned active).",
+        "parameters": [
+          {"type": "integer", "name": "windowId", "minimum": -1, "description": "ID of the newly-focused window."}
+        ]
+      }
+    ]
+  }
+]

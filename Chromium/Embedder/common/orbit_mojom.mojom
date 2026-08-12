@@ -1,0 +1,52 @@
+// Copyright 2026 The Orbit Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// Browser<->renderer wiring for two things Orbit's Swift layer needs that
+// content:: has no built-in concept of: pushing Orbit's own document-start/
+// document-end user scripts into a renderer as frames are created, and the
+// page->native message channel those scripts call (window.__orbitPostMessage)
+// to report back into Swift (media session state, page colour, link hover,
+// ...). See Chromium/Embedder/renderer/orbit_render_frame_observer.* and
+// Chromium/Embedder/browser/orbit_user_script_registry.*.
+
+module orbit.mojom;
+
+enum UserScriptKind {
+  kJavaScript,
+  kStylesheet,
+};
+
+enum UserScriptInjectionTime {
+  kDocumentStart,
+  kDocumentEnd,
+};
+
+// Mirrors Orbit/Engine/EngineTypes.swift's UserScript, minus the id's UUID
+// formatting (kept as a plain string here; only ever round-tripped, never
+// parsed on the C++ side).
+struct UserScriptSpec {
+  string id;
+  UserScriptKind kind;
+  string source;
+  UserScriptInjectionTime injection_time;
+  array<string> match_patterns;
+  bool all_frames;
+};
+
+// Browser -> renderer, associated with one RenderFrame's IPC channel (see
+// content::RenderFrame::GetAssociatedInterfaceRegistry /
+// blink::AssociatedInterfaceRegistry). Pushed once when the frame is created
+// and again on every registry change; the renderer replaces its whole set
+// each call rather than diffing.
+interface UserScriptInjector {
+  SetUserScripts(array<UserScriptSpec> scripts);
+};
+
+// Renderer -> browser, associated with the same RenderFrame's IPC channel.
+// `channel` is one of the *ObserverScript.channelName constants (e.g.
+// "orbitMediaSession"); `json` is that channel's own payload shape, opaque to
+// this interface.
+interface ScriptChannel {
+  PostMessage(string channel, string json);
+};

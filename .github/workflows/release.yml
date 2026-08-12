@@ -1,0 +1,480 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # A tag push does not trigger ci.yml, so the same verification runs here.
+  # Nothing is signed, notarised or published until it passes.
+  verify:
+    name: Verify
+    uses: ./.github/workflows/build-test.yml
+    permissions:
+      contents: read
+
+  # Its own job, in parallel with verify, so a stale pin fails the tag in
+  # seconds rather than after a full build and test run.
+  chromium-currency:
+    name: Chromium is the current stable
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: Scripts/chromium check-latest --require-stable
+
+  release:
+    name: Build, notarise and publish
+    needs: [verify, chromium-currency]
+    runs-on: macos-26
+    timeout-minutes: 120
+    environment: release
+    env:
+      NSUnbufferedIO: "YES"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Require the tag to be on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "::error::$GITHUB_REF_NAME points at a commit that is not on main."
+            exit 1
+          fi
+
+      - name: Resolve the version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::$GITHUB_REF_NAME is not a version tag such as v1.2.3 or v1.2.3-beta.1."
+            exit 1
+          fi
+          {
+            echo "version=$VERSION"
+            echo "dmg=Orbit-$VERSION-arm64.dmg"
+            echo "dsyms=Orbit-$VERSION-dSYMs.zip"
+            case "$VERSION" in
+              *-*) echo "prerelease=true" ;;
+              *)   echo "prerelease=false" ;;
+            esac
+          } >> "$GITHUB_OUTPUT"
+
+      # Same key as ci.yml's release-build job. See build-test.yml.
+      - name: Restore the Chromium engine
+        id: engine
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ThirdParty/prebuilt
+          key: chromium-shipping-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Chromium/chromium-version.json') }}
+
+      - name: Install the Chromium engine
+        run: |
+          Scripts/chromium fetch --config shipping
+          Scripts/chromium doctor --config shipping
+          Scripts/chromium verify-engine --config shipping
+
+      - name: Save the Chromium engine
+        if: steps.engine.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ThirdParty/prebuilt
+          key: ${{ steps.engine.outputs.cache-primary-key }}
+
+      - name: Restore the Swift package checkouts
+        id: swiftpm
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Orbit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      - name: Import the signing certificate
+        id: keychain
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/orbit-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+
+          echo "ORIGINAL_KEYCHAINS=$(security list-keychains -d user | tr -d '" ' | tr '\n' ' ')" >> "$GITHUB_ENV"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$CERTIFICATE_PASSWORD" \
+            -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          /bin/rm -f "$CERT_PATH"
+
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" |
+            awk -F'"' '/Developer ID Application/ { print $2; exit }')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No 'Developer ID Application' identity in the imported certificate."
+            security find-identity -v -p codesigning "$KEYCHAIN"
+            exit 1
+          fi
+          echo "Signing as $IDENTITY"
+
+          {
+            echo "keychain=$KEYCHAIN"
+            echo "identity=$IDENTITY"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install the notary key
+        env:
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+        run: printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+
+      - name: Archive
+        env:
+          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project Orbit.xcodeproj \
+            -scheme Orbit \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$RUNNER_TEMP/Orbit.xcarchive" \
+            -derivedDataPath DerivedData \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$IDENTITY" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN"
+
+      - name: Save the Swift package checkouts
+        if: always() && steps.swiftpm.outputs.cache-hit != 'true' && hashFiles('DerivedData/SourcePackages/**') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: ${{ steps.swiftpm.outputs.cache-primary-key }}
+
+      # Nothing is signed or notarised until the engine in the archive has been read.
+      - name: The archive embeds the shipping engine
+        run: Scripts/chromium verify-engine --config shipping --bundle "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app"
+
+      # Rejects a placeholder SUPublicEDKey, a plain-HTTP feed and a broken
+      # Sparkle framework, before the notary submission rather than after.
+      - name: The archive can actually take an update
+        run: Scripts/release verify --app "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app" --structure-only
+
+      - name: Sign for distribution
+        env:
+          ORBIT_SIGN_KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
+        run: |
+          APP="$RUNNER_TEMP/export/Orbit.app"
+          mkdir -p "$RUNNER_TEMP/export"
+          ditto "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app" "$APP"
+          Scripts/sign-app.sh "$APP" "$IDENTITY"
+
+      - name: Notarise and staple the app
+        env:
+          APPLE_NOTARY_KEY_PATH: ${{ runner.temp }}/notary.p8
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          ditto -c -k --keepParent "$RUNNER_TEMP/export/Orbit.app" "$RUNNER_TEMP/Orbit.zip"
+          Scripts/notarize.sh "$RUNNER_TEMP/Orbit.zip" "$RUNNER_TEMP/export/Orbit.app"
+
+      # Again, with the signature and stapled ticket in scope.
+      - name: The signed, notarised app verifies
+        run: |
+          Scripts/release verify \
+            --app "$RUNNER_TEMP/export/Orbit.app" \
+            --require-timestamp \
+            --require-notarised
+
+      - name: Build and sign the disk image
+        env:
+          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
+          DMG: ${{ steps.version.outputs.dmg }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          Scripts/package-dmg.sh "$RUNNER_TEMP/export/Orbit.app" "$RUNNER_TEMP/$DMG" "Orbit $VERSION"
+          codesign --force --timestamp --keychain "$KEYCHAIN" --sign "$IDENTITY" "$RUNNER_TEMP/$DMG"
+
+      - name: Notarise and staple the disk image
+        env:
+          APPLE_NOTARY_KEY_PATH: ${{ runner.temp }}/notary.p8
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          DMG: ${{ steps.version.outputs.dmg }}
+        run: Scripts/notarize.sh "$RUNNER_TEMP/$DMG" "$RUNNER_TEMP/$DMG"
+
+      - name: Verify Gatekeeper acceptance
+        env:
+          DMG: ${{ steps.version.outputs.dmg }}
+        run: |
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$RUNNER_TEMP/$DMG"
+          spctl --assess --type exec --verbose=2 "$RUNNER_TEMP/export/Orbit.app"
+
+      - name: Collect the release assets
+        env:
+          DMG: ${{ steps.version.outputs.dmg }}
+          DSYMS: ${{ steps.version.outputs.dsyms }}
+        run: |
+          mkdir -p artifacts
+          mv "$RUNNER_TEMP/$DMG" "artifacts/$DMG"
+          if [ -d "$RUNNER_TEMP/Orbit.xcarchive/dSYMs" ]; then
+            ditto -c -k --sequesterRsrc "$RUNNER_TEMP/Orbit.xcarchive/dSYMs" "artifacts/$DSYMS"
+          fi
+
+      - name: Download Sparkle tools
+        env:
+          SPARKLE_VERSION: 2.9.5
+          SPARKLE_CHECKSUM: 015336b601493e05c237964954bff6191370003d94edefe663724c88840d73cc
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sL -o "sparkle-${SPARKLE_VERSION}.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+
+          DOWNLOADED_CHECKSUM=$(shasum -a 256 "sparkle-${SPARKLE_VERSION}.tar.xz" | awk '{print $1}')
+          if [ "$DOWNLOADED_CHECKSUM" != "$SPARKLE_CHECKSUM" ]; then
+            echo "::error::Sparkle checksum mismatch. Expected: $SPARKLE_CHECKSUM, got: $DOWNLOADED_CHECKSUM"
+            exit 1
+          fi
+
+          tar -xf "sparkle-${SPARKLE_VERSION}.tar.xz"
+
+      # The step runs under `bash -e`, so the clone has to be the condition of
+      # an `if` rather than something tested afterwards with $?: a failing
+      # command in any other position aborts the step, which used to make the
+      # very first release fail instead of bootstrapping the branch.
+      - name: Fetch existing appcast from gh-pages
+        id: appcast
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/appcast-work"
+          cd "$RUNNER_TEMP/appcast-work"
+
+          if git clone \
+            --quiet \
+            --single-branch \
+            --branch gh-pages \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+          then
+            echo "cloned=true" >> "$GITHUB_OUTPUT"
+            if [ -f gh-pages/appcast.xml ]; then
+              cp gh-pages/appcast.xml existing-appcast.xml
+              echo "Fetched existing appcast from gh-pages"
+            else
+              echo "gh-pages exists but has no appcast.xml; starting a new one"
+              : > existing-appcast.xml
+            fi
+          else
+            echo "cloned=false" >> "$GITHUB_OUTPUT"
+            echo "gh-pages does not exist yet; it will be created on push"
+            : > existing-appcast.xml
+          fi
+
+      # The key has to go in on stdin: with none in the runner keychain,
+      # generate_appcast exits 1 and writes no feed. Output is named after the
+      # basename of SUFeedURL, hence the filename check.
+      - name: Generate appcast for new release
+        env:
+          DMG: ${{ steps.version.outputs.dmg }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -o pipefail
+
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::error::The SPARKLE_PRIVATE_KEY secret is empty. Sparkle cannot sign this update, and an unsigned one will not install."
+            exit 1
+          fi
+
+          APPCAST_GEN_DIR="$RUNNER_TEMP/appcast-new"
+          mkdir -p "$APPCAST_GEN_DIR"
+          cp "artifacts/$DMG" "$APPCAST_GEN_DIR/"
+
+          cd "$APPCAST_GEN_DIR"
+
+          FLAGS=()
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS+=(--channel beta)
+          fi
+
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$RUNNER_TEMP/bin/generate_appcast" \
+            --ed-key-file - \
+            --download-url-prefix "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/" \
+            "${FLAGS[@]}" \
+            .
+
+          if [ ! -f appcast.xml ]; then
+            echo "::error::generate_appcast wrote no appcast.xml. It names the feed after the basename of SUFeedURL in Orbit/Resources/Info.plist; it produced: $(ls ./*.xml 2>/dev/null || echo 'nothing')."
+            exit 1
+          fi
+
+          echo "Generated new appcast item"
+
+      # Redundant on the happy path; the step that fails an unsigned enclosure.
+      - name: Every enclosure is signed
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -o pipefail
+
+          APPCAST_GEN_DIR="$RUNNER_TEMP/appcast-new"
+          SPARKLE_BIN="$RUNNER_TEMP/bin"
+
+          python3 "${{ github.workspace }}/Scripts/add-enclosure-signatures.py" \
+            "$SPARKLE_BIN" \
+            "$APPCAST_GEN_DIR/appcast.xml" \
+            "$APPCAST_GEN_DIR"
+
+          echo "Added enclosure signatures"
+
+      - name: Merge appcast and sign
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          cd "$RUNNER_TEMP/appcast-work"
+
+          python3 "${{ github.workspace }}/Scripts/merge-appcast.py" \
+            existing-appcast.xml \
+            "$RUNNER_TEMP/appcast-new/appcast.xml" \
+            appcast-merged.xml
+
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | \
+            "$RUNNER_TEMP/bin/sign_update" -f - appcast-merged.xml
+
+          cp appcast-merged.xml "$RUNNER_TEMP/appcast.xml"
+
+      # Read out of the finished file. Sparkle fails all of this silently.
+      - name: The published feed offers this release
+        env:
+          DMG: ${{ steps.version.outputs.dmg }}
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          import xml.etree.ElementTree as ET
+
+          ns = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+          dmg = os.environ["DMG"]
+          tag = os.environ["GITHUB_REF_NAME"]
+
+          root = ET.parse(os.path.join(os.environ["RUNNER_TEMP"], "appcast.xml")).getroot()
+          for item in root.findall("channel/item"):
+              enclosure = item.find("enclosure")
+              if enclosure is None:
+                  continue
+              url = enclosure.get("url", "")
+              if url.rsplit("/", 1)[-1] != dmg:
+                  continue
+              problems = []
+              if f"/download/{tag}/" not in url:
+                  problems.append(f"the enclosure URL is not under this tag: {url}")
+              if not enclosure.get(f"{{{ns['sparkle']}}}edSignature"):
+                  problems.append("the enclosure carries no sparkle:edSignature, so Sparkle will reject it")
+              if problems:
+                  sys.exit("appcast.xml: " + "; ".join(problems))
+              print(f"appcast.xml offers {dmg}, signed, at {url}")
+              break
+          else:
+              sys.exit(f"appcast.xml has no item whose enclosure is {dmg}")
+          PY
+
+      - name: Add appcast to release assets
+        run: |
+          cp "$RUNNER_TEMP/appcast.xml" "artifacts/appcast.xml"
+
+      # Written outside artifacts/ first, so it cannot hash itself mid-write.
+      - name: Generate release asset checksums
+        run: |
+          (cd artifacts && find . -maxdepth 1 -type f -exec shasum -a 256 {} + > "$RUNNER_TEMP/SHA256SUMS.txt")
+          mv "$RUNNER_TEMP/SHA256SUMS.txt" artifacts/SHA256SUMS.txt
+          cat artifacts/SHA256SUMS.txt
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --title "Orbit $VERSION" \
+            --generate-notes \
+            --verify-tag \
+            --prerelease="$PRERELEASE"
+
+      # CLONED comes from the fetch step, so the two agree on whether gh-pages
+      # already exists rather than each guessing from the directory layout.
+      # `git init -b gh-pages` matters: an orphan branch initialised under the
+      # default name has no ref called gh-pages for the push below to send.
+      - name: Push appcast to gh-pages
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLONED: ${{ steps.appcast.outputs.cloned }}
+        run: |
+          cd "$RUNNER_TEMP/appcast-work"
+
+          git config --global user.email "noreply@github.com"
+          git config --global user.name "GitHub Actions"
+
+          if [ "$CLONED" != "true" ]; then
+            echo "gh-pages branch not found; creating a new orphan branch"
+            mkdir -p gh-pages
+            git init -b gh-pages gh-pages
+            git -C gh-pages remote add origin \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+
+          cp appcast-merged.xml gh-pages/appcast.xml
+          cd gh-pages
+
+          git add appcast.xml
+          if git rev-parse --verify -q HEAD >/dev/null && git diff --cached --quiet; then
+            echo "appcast.xml is unchanged"
+          else
+            git commit -m "Update appcast for $GITHUB_REF_NAME"
+          fi
+          git push --set-upstream origin gh-pages
+
+      - name: Upload the assets as a workflow artifact
+        if: always() && hashFiles('artifacts/*') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Orbit-${{ steps.version.outputs.version }}
+          path: artifacts
+          retention-days: 30
+
+      - name: Remove the signing material
+        if: always()
+        run: |
+          if [ -n "${ORIGINAL_KEYCHAINS:-}" ]; then
+            # shellcheck disable=SC2086
+            security list-keychains -d user -s $ORIGINAL_KEYCHAINS
+          fi
+          security delete-keychain "$RUNNER_TEMP/orbit-signing.keychain-db" 2>/dev/null || true
+          /bin/rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/notary.p8"

@@ -1,0 +1,379 @@
+// Copyright 2026 The Orbit Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// Feature-availability entries for every manifest permission whose entry lives
+// in chrome/common/extensions/api/_permission_features.json rather than
+// extensions/common/api/_permission_features.json. Two kinds end up here.
+//
+// Permissions Orbit implements itself or that //extensions core implements
+// while only chrome/ registers the name (tabs, cookies, privacy,
+// webNavigation, scripting, management): OrbitExtensionsAPIProvider::
+// RegisterPermissions supplies the name<->id mapping, this file supplies the
+// availability.
+//
+// Permissions CoreExtensionsAPIProvider registers but core states no feature
+// for. extensions/common/manifest_handlers/permissions_parser.cc DCHECKs when
+// a parsed permission has an APIPermissionInfo and no permission feature, so
+// omitting one of these aborts the browser process while parsing an ordinary
+// manifest -- React Developer Tools' "clipboardWrite" did exactly that. Every
+// such entry below is copied verbatim from the pinned Chromium's chrome-layer
+// file and is verified against it by
+// OrbitTests/ExtensionSchemaConformanceTests; the ones Orbit has no
+// implementation of stay unreachable on their own upstream terms (ChromeOS
+// platform, non-stable channel, allowlist, policy location), so they parse to
+// an install warning and a dropped permission instead of a crash.
+{
+  "clipboardRead": {
+    "channel": "stable",
+    "extension_types": [
+      "extension",
+      "legacy_packaged_app",
+      "hosted_app",
+      "platform_app"
+    ]
+  },
+  "clipboardWrite": {
+    "channel": "stable",
+    "extension_types": [
+      "extension",
+      "legacy_packaged_app",
+      "hosted_app",
+      "platform_app"
+    ]
+  },
+  "cookies": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ]
+  },
+  "crashReportPrivate": {
+    "channel": "dev",
+    "extension_types": [
+      "extension",
+      "legacy_packaged_app",
+      "platform_app"
+    ],
+    "allowlist": [
+      "0EA6B717932AD64C469C1CCB6911457733295907",
+      "58B0C2968C335964D5433E89CA4D86628A0E3D4B",
+      "3BC1ED0B3E6EFDC7BD4D3D1D75D44B52DEE0A226",
+      "38C361D4A0726CE45D3572D65071B6BDB3092371",
+      "06BE211D5F014BAB34BC22D9DDA09C63A81D828E",
+      "1B1388598AC9A5608F43DE38316D6FB5FAD3574A"
+    ]
+  },
+  "lockWindowFullscreenPrivate": {
+    "channel": "stable",
+    "component_extensions_auto_granted": false,
+    "extension_types": [
+      "extension"
+    ],
+    "platforms": [
+      "chromeos"
+    ],
+    "allowlist": [
+      "6A4A0389E8D47118E96E6221B0B7221CA3715801",
+      "EC8EA268128FECE14CEC68B90686D87755D87083",
+      "AA1C88257F51F7A9AFB947720AACE8CA7E9CF85C",
+      "A4577D8C2AF4CF26F40CBCA83FFA4251D6F6C8F8",
+      "EFCF5358672FEE04789FD2EC3638A67ADEDB6C8C",
+      "A8208CCC87F8261AFAEB6B85D5E8D47372DDEA6B"
+    ]
+  },
+  "login": [
+    {
+      "channel": "stable",
+      "dependencies": [
+        "behavior:imprivata_extension"
+      ],
+      "extension_types": [
+        "extension",
+        "login_screen_extension"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ]
+    },
+    {
+      "channel": "stable",
+      "extension_types": [
+        "extension",
+        "login_screen_extension"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ],
+      "allowlist": [
+        "93B7178E8C275515C38D4F43D9DF4648F0EA9B03",
+        "7FE4A999359A456C4B0FB7B7AD85CEA29CA50519",
+        "3F5995FE79A861F019C6F093BEF98D73FA9D3A5F",
+        "8ECFC754A70BE499325FA4BB705E62EFEEC1BC80",
+        "C03440D5E6161ED58738ABA11586B1DB4B4DCA8A",
+        "4B7E9789426EBD1BB3F99D72690DAE303FC042DF"
+      ]
+    },
+    {
+      "channel": "stable",
+      "extension_types": [
+        "platform_app"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ],
+      "allowlist": [
+        "ECD28F2B60BDB3B4E566D6C60BD88BE0774044C1"
+      ]
+    }
+  ],
+  "loginScreenStorage": [
+    {
+      "channel": "stable",
+      "dependencies": [
+        "behavior:imprivata_extension"
+      ],
+      "extension_types": [
+        "extension",
+        "login_screen_extension"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ]
+    },
+    {
+      "channel": "canary",
+      "extension_types": [
+        "extension",
+        "login_screen_extension"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ],
+      "allowlist": [
+        "7FE4A999359A456C4B0FB7B7AD85CEA29CA50519",
+        "3F5995FE79A861F019C6F093BEF98D73FA9D3A5F"
+      ]
+    },
+    {
+      "channel": "stable",
+      "extension_types": [
+        "extension",
+        "login_screen_extension"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ],
+      "allowlist": [
+        "93B7178E8C275515C38D4F43D9DF4648F0EA9B03",
+        "4B7E9789426EBD1BB3F99D72690DAE303FC042DF",
+        "36F5326E7683E204CE9CE1532093D8BB9CD5D280"
+      ]
+    }
+  ],
+  "loginScreenUi": [
+    {
+      "channel": "stable",
+      "dependencies": [
+        "behavior:imprivata_login_screen_extension"
+      ],
+      "extension_types": [
+        "login_screen_extension"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ]
+    },
+    {
+      "channel": "stable",
+      "extension_types": [
+        "login_screen_extension"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ],
+      "allowlist": [
+        "7FE4A999359A456C4B0FB7B7AD85CEA29CA50519",
+        "4B7E9789426EBD1BB3F99D72690DAE303FC042DF"
+      ]
+    }
+  ],
+  "loginState": [
+    {
+      "channel": "stable",
+      "extension_types": [
+        "extension"
+      ],
+      "platforms": [
+        "chromeos"
+      ]
+    },
+    {
+      "channel": "stable",
+      "component_extensions_auto_granted": false,
+      "extension_types": [
+        "login_screen_extension"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ],
+      "allowlist": [
+        "93B7178E8C275515C38D4F43D9DF4648F0EA9B03",
+        "EC3DE21E048B67319893889529354DFBFA96FD23",
+        "A19608AC34215B127FF9D7C006D67F5C8ED8146D",
+        "6B748A5C005F21B7CBCF4170C2F883E435DEB511",
+        "075FF17D52ED6E3C2E5EC4D99F188E7A25AF47EA",
+        "5C825E850034490380BCB756D43ABB2CF537AA91",
+        "4B7E9789426EBD1BB3F99D72690DAE303FC042DF"
+      ]
+    },
+    {
+      "channel": "stable",
+      "dependencies": [
+        "behavior:imprivata_login_screen_extension"
+      ],
+      "extension_types": [
+        "login_screen_extension"
+      ],
+      "platforms": [
+        "chromeos"
+      ]
+    },
+    {
+      "channel": "stable",
+      "extension_types": [
+        "platform_app"
+      ],
+      "platforms": [
+        "chromeos"
+      ],
+      "allowlist": [
+        "EC3DE21E048B67319893889529354DFBFA96FD23",
+        "A19608AC34215B127FF9D7C006D67F5C8ED8146D"
+      ]
+    }
+  ],
+  "management": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ]
+  },
+  "printing": {
+    "channel": "stable",
+    "platforms": [
+      "chromeos"
+    ],
+    "extension_types": [
+      "extension",
+      "platform_app"
+    ]
+  },
+  "printingMetrics": {
+    "channel": "stable",
+    "platforms": [
+      "chromeos"
+    ],
+    "extension_types": [
+      "extension"
+    ],
+    "location": "policy"
+  },
+  "privacy": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ]
+  },
+  "scripting": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ],
+    "min_manifest_version": 3
+  },
+  "speechRecognitionPrivate": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ],
+    "location": "component",
+    "platforms": [
+      "chromeos"
+    ],
+    "allowlist": [
+      "371AC6869D2138CE58123741E69F67469206909F"
+    ]
+  },
+  "systemLog": [
+    {
+      "channel": "stable",
+      "extension_types": [
+        "extension",
+        "login_screen_extension",
+        "platform_app"
+      ],
+      "location": "policy",
+      "platforms": [
+        "chromeos"
+      ]
+    },
+    {
+      "channel": "stable",
+      "extension_types": [
+        "extension",
+        "login_screen_extension",
+        "platform_app"
+      ],
+      "platforms": [
+        "chromeos"
+      ],
+      "allowlist": [
+        "EC3DE21E048B67319893889529354DFBFA96FD23",
+        "A19608AC34215B127FF9D7C006D67F5C8ED8146D",
+        "6B748A5C005F21B7CBCF4170C2F883E435DEB511",
+        "075FF17D52ED6E3C2E5EC4D99F188E7A25AF47EA",
+        "5C825E850034490380BCB756D43ABB2CF537AA91"
+      ]
+    }
+  ],
+  "tabs": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ]
+  },
+  "webNavigation": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ]
+  },
+  "wmDesksPrivate": {
+    "channel": "stable",
+    "extension_types": [
+      "extension",
+      "platform_app"
+    ],
+    "platforms": [
+      "chromeos"
+    ],
+    "allowlist": [
+      "74801F84D31D23D08BEA48AB82C6A6120EDB4D45",
+      "6A4D7AEC6414492BD25219C7A479265BF1177D42",
+      "F80B163C896D50A685E0B683BEEEA94217F253D6",
+      "454738352012A22901C55B348E5E530BDE1AF2B0",
+      "7D5A66C88A25019F997E548DEC5E0011E2855591",
+      "F740D260E7E2107B3AE454F512B65AE6CF244433"
+    ]
+  }
+}

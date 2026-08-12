@@ -1,0 +1,90 @@
+# Copyright 2026 The Orbit Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+#
+# Orbit's own chrome.action/chrome.tabs/chrome.webNavigation/chrome.windows
+# schema and feature-availability bundle -- everything
+# extensions/common/api/BUILD.gn does for the //extensions-core APIs, scoped
+# to the handful of chrome/-layer APIs Orbit implements itself. Deliberately
+# does not use the generated_types template: orbit_action_api.cc/
+# orbit_tabs_api.cc/orbit_windows_api.cc parse ExtensionFunction::args() by
+# hand rather than through json_schema_compiler-generated Params structs, so
+# there is no generated_api_types target here, only the compiled schema
+# strings (so the renderer's binding generator knows these APIs exist and
+# their signatures) and the two features files.
+
+import("//tools/json_schema_compiler/json_features.gni")
+import("//tools/json_schema_compiler/json_schema_api.gni")
+
+group("api") {
+  public_deps = [
+    ":generated_api_json_strings",
+    ":api_features",
+    ":permission_features",
+  ]
+}
+
+generated_json_strings("generated_api_json_strings") {
+  sources = [
+    "action.json",
+    "cookies.json",
+    "permissions.json",
+    "privacy.json",
+    "tabs.json",
+    "web_navigation.json",
+    "webstore_private.json",
+    "windows.json",
+  ]
+  bundle_name = "Orbit"
+  root_namespace = "orbit::api::%(namespace)s"
+  deps = [
+    "//base",
+    "//extensions/buildflags",
+  ]
+  visibility = [ ":api" ]
+}
+
+json_features("api_features") {
+  feature_type = "APIFeature"
+  method_name = "AddOrbitAPIFeatures"
+  sources = [ "_api_features.json" ]
+  visibility = [ ":api" ]
+}
+
+json_features("permission_features") {
+  feature_type = "PermissionFeature"
+  method_name = "AddOrbitPermissionFeatures"
+  sources = [ "_permission_features.json" ]
+  visibility = [ ":api" ]
+}
+
+# webstorePrivate's own C++ Params/Result types (unlike tabs/windows above,
+# webstore_private_api.cc uses json_schema_compiler-generated types rather
+# than hand-parsing ExtensionFunction::args()) and its own feature-
+# availability entry -- kept out of :generated_api_json_strings/:api_features
+# above only because those are two-schema, tabs/windows-shaped bundles
+# already; webstore_private.json's own compiled JSON string still comes from
+# :generated_api_json_strings (see its "sources" above), so
+# OrbitWebstorePrivateAPIProvider depends on :api, not this group, for that
+# half. See orbit_webstore_private_api_provider.cc.
+group("webstore_private_api") {
+  public_deps = [
+    ":api",
+    ":webstore_private_api_features",
+    ":webstore_private_api_types",
+  ]
+}
+
+generated_types("webstore_private_api_types") {
+  sources = [ "webstore_private.json" ]
+  root_namespace = "orbit::api::%(namespace)s"
+  deps = [ "//base" ]
+  visibility = [ ":webstore_private_api" ]
+}
+
+json_features("webstore_private_api_features") {
+  feature_type = "APIFeature"
+  method_name = "AddOrbitWebstorePrivateAPIFeatures"
+  sources = [ "_webstore_private_api_features.json" ]
+  visibility = [ ":webstore_private_api" ]
+}

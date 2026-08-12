@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Launches the real app bundles, repeatedly; fails unless every launch reaches a painted
+# page and quits cleanly -- the one check no XCTest-hosted suite can make.
+#
+#   Scripts/app-launch-smoke                     both schemes, 5 launches each
+#   Scripts/app-launch-smoke --attempts 10       for an intermittent crash
+#   Scripts/app-launch-smoke --scheme Demo --skip-build
+#   Scripts/app-launch-smoke declared            the stages and checks the sources declare
+#
+# Requires ORBIT_SMOKE_PROBE=1 (Orbit/Core/AppSmokeProbe.swift), which also redirects the
+# data root off ~/Library/Application Support/Orbit -- verified before/after here.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON=python3
+elif [ -x /usr/bin/python3 ]; then
+  PYTHON=/usr/bin/python3
+else
+  echo "error: python3 is required. Install the Xcode Command Line Tools with 'xcode-select --install'." >&2
+  exit 1
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/app_launch_smoke.py" "$@"

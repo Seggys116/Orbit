@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	OrbitDemo/Info.plist
+
+	`INFOPLIST_FILE` for the `OrbitDemo` target. `GENERATE_INFOPLIST_FILE`
+	stays on, exactly as it does for the `Orbit` target, so every simple key
+	(CFBundleDisplayName, version strings, icon) still comes from this
+	target's `INFOPLIST_KEY_*` build settings and its asset catalog. This
+	file exists for the keys `INFOPLIST_KEY_*` cannot express, and for one
+	class of key that is not cosmetic at all.
+
+	## Why the demo needs a real Info.plist now
+
+	The demo used to run the WebKit backend and carried no Info.plist of its
+	own; `Orbit/Resources/Info.plist` was copied into it as an ordinary
+	resource, which lands at `Contents/Resources/Info.plist` and is read by
+	nothing. That was survivable only because the engine it ran was not the
+	one Orbit ships.
+
+	The demo now embeds and runs the same Chromium the `Orbit` target does,
+	which brings the same TCC surface with it, and TCC's contract is the one
+	`Orbit/Resources/Info.plist` documents at length: a process that touches
+	a protected resource with **no usage description for it** is not denied,
+	it is **terminated**. Web Bluetooth is the clearest case, because it is
+	reachable in the demo through the framework alone with no Orbit code
+	involved — the pinned distribution links CoreBluetooth and carries the
+	API (measured in `Orbit/Resources/Info.plist`'s own comment: `otool -L`
+	shows CoreBluetooth.framework and IOBluetooth.framework, and `strings`
+	matches `navigator.bluetooth` 30 times). A demo that dies the first time
+	a page calls one of these APIs is worse than a demo that cannot browse.
+
+	The strings below are copied verbatim from `Orbit/Resources/Info.plist`,
+	because they describe the same behaviour in the same product; that file
+	is where the argument for each one is written down and is the place to
+	change the wording.
+
+	## Why this is a separate file rather than pointing `INFOPLIST_FILE` at
+	## the app's
+
+	Two keys in the app's plist must not be in a demo build:
+
+	  - `CFBundleURLTypes` declares Orbit an http/https handler, which is
+	    what puts it in System Settings' "Default web browser" list
+	    (`Orbit/Core/DefaultBrowser.swift`). A screenshot build has no
+	    business offering itself there, and a user who picked "Orbit Demo"
+	    from that list would have every link in macOS open a browser whose
+	    entire profile is a scratch directory that is thrown away.
+	  - `SUFeedURL` / `SUPublicEDKey` / the Sparkle scheduling keys name the
+	    one server this app accepts new code from. The demo is not built with
+	    `ORBIT_SPARKLE` and has no updater in it, so those keys would
+	    describe machinery that is not present.
+
+	`CFBundleDocumentTypes` is omitted for the same reason as
+	`CFBundleURLTypes`: it registers the demo as a handler for .html and
+	.webarchive files in Finder.
+	-->
+	<!--
+	The two custom drag-and-drop `UTType`s the production sidebar and Space
+	switcher create with `UTType(exportedAs:)`
+	(`Orbit/UI/Sidebar/SidebarDragDrop.swift`,
+	`Orbit/UI/Spaces/SpaceSwitcherPagerView.swift`). The demo builds both
+	files and its screenshots show both surfaces, so it needs the same
+	declaration: without it macOS warns ("Type ... was expected to be
+	declared") and only partially registers the type, which makes
+	drag-and-drop behave inconsistently in the very app the pictures are
+	taken from.
+	-->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.orbit.browser.sidebarNode</string>
+			<key>UTTypeDescription</key>
+			<string>Orbit Sidebar Drag Payload</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.orbit.browser.spacePagerPayload</string>
+			<key>UTTypeDescription</key>
+			<string>Orbit Space Pager Drag Payload</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
+	<!--
+	TCC usage descriptions. Every one of these is reachable from the demo,
+	because the demo runs the same engine as the app; see the header above
+	for what happens without them. Kept in the same order as
+	`Orbit/Resources/Info.plist` so the two files diff cleanly.
+	-->
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Orbit reads your calendar to show the next meeting and a Join button in the sidebar. Nothing is sent anywhere — it is read on this Mac and shown to you.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>A website you open can ask to use your camera — for a video call, say. Orbit always asks you before letting one, and remembers your answer for that site. No page gets your camera on its own.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>A website you open can ask to use your microphone — for a video call, say. Orbit always asks you before letting one, and remembers your answer for that site. No page gets your microphone on its own.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>A website you open can ask where you are — a map or a store locator, say. Orbit always asks you before telling one, and remembers your answer for that site.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>A website you open can ask to talk to a nearby Bluetooth device — a fitness tracker or a games controller, say. Orbit always asks you before letting one, and remembers your answer for that site.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>A website you open can ask where you are — a map or a store locator, say. Orbit always asks you before telling one, and remembers your answer for that site.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Orbit saves the files you download from the web into your Downloads folder, the same place every other browser puts them.</string>
+</dict>
+</plist>

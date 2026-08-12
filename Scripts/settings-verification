@@ -1,0 +1,54 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
+
+BUILD=1
+OUT_DIR=""
+for arg in "$@"; do
+  case "${arg}" in
+    --no-build) BUILD=0 ;;
+    *) OUT_DIR="${arg}" ;;
+  esac
+done
+
+DERIVED="${REPO_ROOT}/build/SettingsProbe"
+APP="${DERIVED}/Build/Products/Debug/OrbitDemo.app"
+
+if [ "${BUILD}" = "1" ]; then
+  echo "settings-verification: building the Demo scheme"
+  xcodebuild \
+    -project Orbit.xcodeproj \
+    -scheme Demo \
+    -configuration Debug \
+    -destination 'platform=macOS,arch=arm64' \
+    -derivedDataPath "${DERIVED}" \
+    build
+fi
+
+if [ ! -x "${APP}/Contents/MacOS/OrbitDemo" ]; then
+  echo "error: ${APP} does not exist or is not executable. Run without --no-build." >&2
+  exit 1
+fi
+
+if [ -z "${OUT_DIR}" ]; then
+  OUT_DIR="${REPO_ROOT}/DerivedData/SettingsVerification/$(date +%Y%m%d-%H%M%S)"
+fi
+mkdir -p "${OUT_DIR}"
+
+echo "settings-verification: launching the demo with the probe enabled, writing captures to ${OUT_DIR}"
+set +e
+ORBIT_SETTINGS_PROBE=1 ORBIT_SETTINGS_PROBE_OUT="${OUT_DIR}" "${APP}/Contents/MacOS/OrbitDemo"
+status=$?
+set -e
+
+echo
+if [ "${status}" -eq 0 ]; then
+  echo "settings-verification: PASS (state-based checks only -- read the PNGs in ${OUT_DIR})"
+else
+  echo "settings-verification: FAIL (exit ${status})"
+fi
+exit "${status}"

@@ -1,0 +1,50 @@
+{
+  "_readme": [
+    "SINGLE SOURCE OF TRUTH for the Chromium version Orbit builds against.",
+    "",
+    "Orbit embeds Chromium directly, built from real source -- no third-party",
+    "prebuilt. There are two ways to get a working build:",
+    "",
+    "  Scripts/chromium fetch              download Orbit's own published build",
+    "                                       (fast; what CI and a normal clone use,",
+    "                                       once the publish pipeline has run)",
+    "  Scripts/chromium build --from-source gclient + gn + ninja a real Chromium",
+    "                                       checkout under ThirdParty/chromium",
+    "                                       (hours, tens of GB; opt-in)",
+    "",
+    "The prebuilt that `fetch` downloads is produced by `build --from-source` on",
+    "a release machine and published as a GitHub Release asset -- see 'prebuilt'",
+    "below.",
+    "",
+    "Each is built twice, in two configurations that differ only in gn's",
+    "dcheck_always_on: 'shipping' (false, what users get and what every",
+    "packaging path embeds) and 'dcheck' (true, what the Debug configuration",
+    "and the live-engine suites run against). Pass --config to any command.",
+    "",
+    "To move to the newest Chromium: Scripts/chromium pin latest",
+    "To pin an exact version:        Scripts/chromium pin 151.0.7922.109",
+    "To see current state:           Scripts/chromium status",
+    "",
+    "Nothing else in the codebase hardcodes a Chromium version. Every consumer",
+    "(xcconfig, Swift, Info.plist, user agent string) is generated from this file",
+    "by `Scripts/chromium sync`, which `pin`, `fetch` and `build` run automatically."
+  ],
+  "chromium_repo_url": "https://chromium.googlesource.com/chromium/src.git",
+  "channel": "stable",
+  "chromium_version": "151.0.7922.138",
+  "chromium_checkout": "refs/tags/151.0.7922.138",
+  "build_target": "orbit",
+  "pinned_at": "2026-08-12",
+  "prebuilt": {
+    "_readme": "Filled in per configuration by `Scripts/chromium record-prebuilt` after the release machine publishes a build for this pin. An empty platforms map means: fetch has nothing to download for that configuration yet -- run `Scripts/chromium build --from-source --config <name>` locally, or wait for the publish job.",
+    "release_tag": "chromium-151.0.7922.138",
+    "configs": {
+      "dcheck": {
+        "platforms": {}
+      },
+      "shipping": {
+        "platforms": {}
+      }
+    }
+  }
+}

@@ -1,0 +1,337 @@
+// Copyright 2026 The Orbit Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// A subset of chrome/common/extensions/api/web_navigation.json: getFrame,
+// getAllFrames, and every event except onCreatedNavigationTarget (see
+// orbit_web_navigation_event_router.h for why). onTabReplaced is declared
+// but has no dispatch source, for the reason its own description states.
+// Each
+// event declares a "url" filter, purely so addListener(callback, filter)
+// doesn't throw (extensions/renderer/bindings/event_emitter.cc throws
+// unless the event's own schema declares "filters"); the actual per-listener
+// URL matching is done by extensions::EventFilter/url_matcher, generic
+// browser-side machinery neither this schema nor Orbit's own code needs to
+// implement -- see OrbitWebNavigationEventRouter's DispatchEvent.
+[
+  {
+    "namespace": "webNavigation",
+    "description": "A focused subset of chrome.webNavigation.",
+    "compiler_options": {
+      "implemented_in": "orbit/browser/api/web_navigation/orbit_web_navigation_api.h"
+    },
+    "types": [
+      {
+        "id": "TransitionType",
+        "type": "string",
+        "enum": ["link", "typed", "auto_bookmark", "auto_subframe", "manual_subframe", "generated", "start_page", "form_submit", "reload", "keyword", "keyword_generated"]
+      },
+      {
+        "id": "TransitionQualifier",
+        "type": "string",
+        "enum": ["client_redirect", "server_redirect", "forward_back", "from_address_bar"]
+      },
+      {
+        "id": "UrlFilter",
+        "type": "object",
+        "description": "Matches chrome.events.UrlFilter's own shape; interpreted by extensions::url_matcher, not by this schema.",
+        "properties": {
+          "hostContains": {"type": "string", "optional": true},
+          "hostEquals": {"type": "string", "optional": true},
+          "hostPrefix": {"type": "string", "optional": true},
+          "hostSuffix": {"type": "string", "optional": true},
+          "pathContains": {"type": "string", "optional": true},
+          "pathEquals": {"type": "string", "optional": true},
+          "pathPrefix": {"type": "string", "optional": true},
+          "pathSuffix": {"type": "string", "optional": true},
+          "queryContains": {"type": "string", "optional": true},
+          "queryEquals": {"type": "string", "optional": true},
+          "queryPrefix": {"type": "string", "optional": true},
+          "querySuffix": {"type": "string", "optional": true},
+          "urlContains": {"type": "string", "optional": true},
+          "urlEquals": {"type": "string", "optional": true},
+          "urlMatches": {"type": "string", "optional": true},
+          "originAndPathMatches": {"type": "string", "optional": true},
+          "urlPrefix": {"type": "string", "optional": true},
+          "urlSuffix": {"type": "string", "optional": true},
+          "schemes": {"type": "array", "optional": true, "items": {"type": "string"}},
+          "ports": {"type": "array", "optional": true, "items": {"choices": [{"type": "integer"}, {"type": "array", "items": {"type": "integer"}}]}}
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "getFrame",
+        "type": "function",
+        "description": "Retrieves information about the given frame.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer", "optional": true, "minimum": 0},
+              "frameId": {"type": "integer", "optional": true, "minimum": 0},
+              "documentId": {"type": "string", "optional": true}
+            }
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            {
+              "type": "object",
+              "name": "details",
+              "optional": true,
+              "properties": {
+                "errorOccurred": {"type": "boolean"},
+                "url": {"type": "string"},
+                "parentFrameId": {"type": "integer"},
+                "documentId": {"type": "string"},
+                "parentDocumentId": {"type": "string", "optional": true},
+                "documentLifecycle": {"type": "string"},
+                "frameType": {"type": "string"}
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "getAllFrames",
+        "type": "function",
+        "description": "Retrieves information about every frame of the given tab.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer", "minimum": 0}
+            }
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "parameters": [
+            {
+              "name": "details",
+              "type": "array",
+              "optional": true,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "errorOccurred": {"type": "boolean"},
+                  "processId": {"type": "integer"},
+                  "frameId": {"type": "integer"},
+                  "parentFrameId": {"type": "integer"},
+                  "url": {"type": "string"},
+                  "documentId": {"type": "string"},
+                  "parentDocumentId": {"type": "string", "optional": true},
+                  "documentLifecycle": {"type": "string"},
+                  "frameType": {"type": "string"}
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "events": [
+      {
+        "name": "onBeforeNavigate",
+        "type": "function",
+        "filters": [
+          {"name": "url", "type": "array", "items": {"$ref": "UrlFilter"}}
+        ],
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer"},
+              "url": {"type": "string"},
+              "processId": {"type": "integer"},
+              "frameId": {"type": "integer"},
+              "parentFrameId": {"type": "integer"},
+              "parentDocumentId": {"type": "string", "optional": true},
+              "documentLifecycle": {"type": "string"},
+              "frameType": {"type": "string"},
+              "timeStamp": {"type": "number"}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onCommitted",
+        "type": "function",
+        "filters": [
+          {"name": "url", "type": "array", "items": {"$ref": "UrlFilter"}}
+        ],
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer"},
+              "url": {"type": "string"},
+              "processId": {"type": "integer"},
+              "frameId": {"type": "integer"},
+              "parentFrameId": {"type": "integer"},
+              "transitionType": {"$ref": "TransitionType"},
+              "transitionQualifiers": {"type": "array", "items": {"$ref": "TransitionQualifier"}},
+              "documentId": {"type": "string"},
+              "parentDocumentId": {"type": "string", "optional": true},
+              "documentLifecycle": {"type": "string"},
+              "frameType": {"type": "string"},
+              "timeStamp": {"type": "number"}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onDOMContentLoaded",
+        "type": "function",
+        "filters": [
+          {"name": "url", "type": "array", "items": {"$ref": "UrlFilter"}}
+        ],
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer"},
+              "url": {"type": "string"},
+              "processId": {"type": "integer"},
+              "frameId": {"type": "integer"},
+              "parentFrameId": {"type": "integer"},
+              "documentId": {"type": "string"},
+              "parentDocumentId": {"type": "string", "optional": true},
+              "documentLifecycle": {"type": "string"},
+              "frameType": {"type": "string"},
+              "timeStamp": {"type": "number"}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onCompleted",
+        "type": "function",
+        "filters": [
+          {"name": "url", "type": "array", "items": {"$ref": "UrlFilter"}}
+        ],
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer"},
+              "url": {"type": "string"},
+              "processId": {"type": "integer"},
+              "frameId": {"type": "integer"},
+              "parentFrameId": {"type": "integer"},
+              "documentId": {"type": "string"},
+              "parentDocumentId": {"type": "string", "optional": true},
+              "documentLifecycle": {"type": "string"},
+              "frameType": {"type": "string"},
+              "timeStamp": {"type": "number"}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onErrorOccurred",
+        "type": "function",
+        "filters": [
+          {"name": "url", "type": "array", "items": {"$ref": "UrlFilter"}}
+        ],
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer"},
+              "url": {"type": "string"},
+              "processId": {"type": "integer"},
+              "frameId": {"type": "integer"},
+              "parentFrameId": {"type": "integer"},
+              "error": {"type": "string"},
+              "documentId": {"type": "string"},
+              "parentDocumentId": {"type": "string", "optional": true},
+              "documentLifecycle": {"type": "string"},
+              "frameType": {"type": "string"},
+              "timeStamp": {"type": "number"}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onReferenceFragmentUpdated",
+        "type": "function",
+        "filters": [
+          {"name": "url", "type": "array", "items": {"$ref": "UrlFilter"}}
+        ],
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer"},
+              "url": {"type": "string"},
+              "processId": {"type": "integer"},
+              "frameId": {"type": "integer"},
+              "parentFrameId": {"type": "integer"},
+              "transitionType": {"$ref": "TransitionType"},
+              "transitionQualifiers": {"type": "array", "items": {"$ref": "TransitionQualifier"}},
+              "documentId": {"type": "string"},
+              "parentDocumentId": {"type": "string", "optional": true},
+              "documentLifecycle": {"type": "string"},
+              "frameType": {"type": "string"},
+              "timeStamp": {"type": "number"}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onTabReplaced",
+        "type": "function",
+        "description": "Fired when the contents of a tab is replaced by a different (usually previously pre-rendered) tab. Orbit never does this -- no prerendering, no NoStatePrefetch, no in-place tab discarding -- so this event has no source and never fires. It is declared because that is the truth Chrome's own API expresses: the condition simply does not occur here.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "replacedTabId": {"type": "integer", "description": "The ID of the tab that was replaced."},
+              "tabId": {"type": "integer", "description": "The ID of the tab that replaced the old tab."},
+              "timeStamp": {"type": "number", "description": "The time when the replacement happened, in milliseconds since the epoch."}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onHistoryStateUpdated",
+        "type": "function",
+        "filters": [
+          {"name": "url", "type": "array", "items": {"$ref": "UrlFilter"}}
+        ],
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer"},
+              "url": {"type": "string"},
+              "processId": {"type": "integer"},
+              "frameId": {"type": "integer"},
+              "parentFrameId": {"type": "integer"},
+              "transitionType": {"$ref": "TransitionType"},
+              "transitionQualifiers": {"type": "array", "items": {"$ref": "TransitionQualifier"}},
+              "documentId": {"type": "string"},
+              "parentDocumentId": {"type": "string", "optional": true},
+              "documentLifecycle": {"type": "string"},
+              "frameType": {"type": "string"},
+              "timeStamp": {"type": "number"}
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

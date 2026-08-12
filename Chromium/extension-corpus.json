@@ -1,0 +1,115 @@
+{
+  "_readme": [
+    "SINGLE SOURCE OF TRUTH for the corpus of real Chrome extensions Orbit's",
+    "live-engine suite loads.",
+    "",
+    "Fixtures encode the fixture author's assumptions, so they pass against",
+    "whatever subset of an API happens to exist. Real extensions encode",
+    "reality: this corpus is the layer that catches 'every binding is present",
+    "and the extension still does nothing'. See refs/EXTENSION_CONFORMANCE.md",
+    "section 7.5.",
+    "",
+    "  Scripts/extension-corpus status        what is pinned, present and verified",
+    "  Scripts/extension-corpus fetch         download + verify + unpack every pin",
+    "  Scripts/extension-corpus fetch vimium  just one, by id or by name",
+    "  Scripts/extension-corpus verify        re-hash what is on disk against the pins",
+    "  Scripts/extension-corpus pin           move the pins to the current store version",
+    "",
+    "`fetch` downloads the pinned CRX from the Chrome Web Store update service",
+    "with exactly the request Orbit's own ChromeWebStoreClient builds, verifies",
+    "the SHA-256 and fails closed on a mismatch -- it never unpacks unverified",
+    "code -- then unpacks into ThirdParty/extension-corpus/<id>-<version>/.",
+    "ThirdParty/* is gitignored, so nothing large is committed and a fresh",
+    "clone rebuilds the corpus from this file.",
+    "",
+    "Pins move only when someone runs `pin`, never as a side effect of",
+    "`fetch`. An extension that silently updates underneath the suite turns it",
+    "into a flake generator, and the whole point of a corpus entry is that its",
+    "expectation was verified against that exact build.",
+    "",
+    "`prodversion` on the download request comes from Chromium/chromium-version.json,",
+    "so bumping Chromium changes which build the store serves; re-run `pin`",
+    "after a Chromium bump if a fetch starts returning a different version."
+  ],
+  "update_service_url": "https://clients2.google.com/service/update2/crx",
+  "unpack_root": "ThirdParty/extension-corpus",
+  "pinned_at": "2026-08-11",
+  "extensions": [
+    {
+      "id": "gppongmhjkpfnbhagpmjfkannfbllamg",
+      "name": "Wappalyzer",
+      "version": "6.12.5",
+      "sha256": "961fb509c1ab23d0e9731156fd986b87330fd570bf2e035f10433d2a157e40e3",
+      "crx_bytes": 34776956,
+      "exercises": "content script, web-accessible resources, page-world globals, cookies, tabs, webRequest, storage, popup, _locales, options_ui",
+      "expectation": "on a page carrying a generator meta tag and a page-world window.jQuery, the popup lists both technologies by name",
+      "driver_note": "RealWappalyzerLiveTests.swift predates this manifest and loads Wappalyzer from a /private/tmp staging directory, not from ThirdParty/extension-corpus, so this pin currently verifies nothing for it. Recorded as an enforced exception in ExtensionCorpusCoverageGuardTests.unpinnedDriverExceptions."
+    },
+    {
+      "id": "ddkjiahejlhfcafbddmgiahcphecmpfh",
+      "name": "uBlock Origin Lite",
+      "version": "2026.804.1652",
+      "sha256": "e8179d6d6b70165b375127a50337768a4f37d4f8ac9156f878cd05a0f9ad10b2",
+      "crx_bytes": 9921339,
+      "exercises": "declarativeNetRequest static rulesets, updateEnabledRulesets, MV3 service worker",
+      "expectation": "a request the enabled ruleset blocks never reaches LiveHTTPTestServer, while a control request does"
+    },
+    {
+      "id": "cjpalhdlnbpafiaacddbaicdaomjafmn",
+      "name": "uBlock Origin",
+      "version": null,
+      "sha256": null,
+      "crx_bytes": null,
+      "unavailable": "HTTP 404 error-unknownApplication",
+      "exercises": "MV2 background page, blocking webRequest, WebSocket filtering",
+      "expectation": "same server-side oracle as the Lite entry; the WebSocket case is an expected failure recorded in ExpectedAPIGaps.json until WebSocket filtering lands"
+    },
+    {
+      "id": "eimadpbcbfnmbkopoojfekhnkhdbieeh",
+      "name": "Dark Reader",
+      "version": "4.9.129",
+      "sha256": "9dcb1bd6dcad43892ddc028ff65f982df3edba135a9a6445e4fa71671e37aa13",
+      "crx_bytes": 839237,
+      "exercises": "content script CSS injection, storage.sync, runtime messaging",
+      "expectation": "the computed background-color of a white test page becomes dark"
+    },
+    {
+      "id": "dbepggeogbaibhgnhhndojpepiihcmeb",
+      "name": "Vimium",
+      "version": "2.4.2",
+      "sha256": "3198c26aa719be462dea585050fbed9b8b80628d57ea88a113babf5334c5517c",
+      "crx_bytes": 209213,
+      "exercises": "popup-less action, commands, tabs, content scripts, keyboard handling",
+      "expectation": "pressing j scrolls the page and the toolbar icon exists"
+    },
+    {
+      "id": "pkehgijcmpdhfbdbbnkijodmdjhbjlgp",
+      "name": "Privacy Badger",
+      "version": "2026.8.7",
+      "sha256": "b3ef5ba7a11175425f9b8defa0c4d3c7226bc1392d3cf53e7604d82a112fdf27",
+      "crx_bytes": 3303199,
+      "exercises": "webRequest observation, storage, privacy, heuristic third-party tracking state",
+      "expectation": "its popup, opened through the production toolbar path on a real tab, reaches a terminal state rendered from its own service worker's getPopupData answer",
+      "unreached_expectation": "after three visits carrying the same third-party tracker, the tracker is listed in its popup",
+      "blocked_by": "LiveHTTPTestServer binds 127.0.0.1 only, so it cannot serve three first-party sites with distinct eTLD+1s and Privacy Badger's heuristic never sees a third party. Needs a host-resolver-rules mapping or a second loopback hostname before the tracker assertion is meaningful."
+    },
+    {
+      "id": "clngdbkpkpeebahjckkjfobafhncgmne",
+      "name": "Stylus",
+      "version": "2.4.9",
+      "sha256": "a8c53b3e2577f3e742207f8d6d6bf53c0e0fa125f7b2298241e4f8b13aa65c63",
+      "crx_bytes": 1203584,
+      "exercises": "userScripts/scripting, storage, content script style injection",
+      "expectation": "an installed user style changes a computed style on the target page"
+    },
+    {
+      "id": "fmkadmapgofadopljbjfkapdkoienihi",
+      "name": "React Developer Tools",
+      "version": "7.0.1",
+      "sha256": "5f70c8966dfd372173f1b18a563b9b17c246792e7c122aea7844ce064f077e07",
+      "crx_bytes": 808425,
+      "exercises": "devtools_page, devtools_panels, chrome.devtools.* bindings",
+      "expectation": "known-unsupported canary: the devtools page iframe is never created, so the test asserts the current broken behaviour and fails the day it starts working"
+    }
+  ]
+}
