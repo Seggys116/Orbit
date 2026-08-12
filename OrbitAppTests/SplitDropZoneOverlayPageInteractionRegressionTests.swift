@@ -401,6 +401,10 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         walk(contentView, depth: 0)
     }
 
+    // Excluded on GitHub-hosted runners: a print-only calibration aid that stalls past two minutes there.
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_diagnostic_calibrateDraggingLocationToEdgeMapping
+
     func test_diagnostic_calibrateDraggingLocationToEdgeMapping() throws {
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
