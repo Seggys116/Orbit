@@ -279,10 +279,12 @@ final class SpaceThemePaletteTests: XCTestCase {
     }
 
     func test_spaceThemePalettePresetsPreviewGrid_dark() async {
+        executionTimeAllowance = 280
         await renderAndSavePaletteGrid(name: "space-theme-palette-presets", appearance: .darkAqua)
     }
 
     func test_spaceThemePalettePresetsPreviewGrid_light() async {
+        executionTimeAllowance = 280
         await renderAndSavePaletteGrid(name: "space-theme-palette-presets-light", appearance: .aqua)
     }
 

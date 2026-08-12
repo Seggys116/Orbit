@@ -2,6 +2,7 @@
 //  engine view), never just resolved != nil. Negative cases are deliberate unclickable-page controls.
 
 import AppKit
+import QuartzCore
 import SwiftUI
 import XCTest
 @testable import Orbit
@@ -64,14 +65,22 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         return window
     }
 
-    // Re-checks `condition` every slice instead of trusting one forced layout pass, up to `timeout`.
+    // Forces layout + an explicit CATransaction commit every slice, not just a RunLoop spin: the
+    // XCTest host has no window-server session of its own (build-test.yml), so the display-link-driven
+    // commit that would ordinarily flush a pending SwiftUI transaction never arrives on its own here.
     private func settleUntil(_ window: NSWindow, timeout: TimeInterval = 5, _ condition: () -> Bool) {
+        func settle() {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            CATransaction.flush()
+        }
+        settle()
         if condition() { return }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.displayIfNeeded()
+            settle()
             if condition() { return }
         }
     }

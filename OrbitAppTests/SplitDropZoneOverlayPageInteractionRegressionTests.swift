@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 import UniformTypeIdentifiers
 import XCTest
@@ -110,14 +111,22 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         return hit === engine || (hit.map { $0.isDescendant(of: engine) } ?? false)
     }
 
-    // Re-checks `condition` every slice instead of trusting one fixed-duration pump, up to `timeout`.
+    // Forces layout + an explicit CATransaction commit every slice, not just a RunLoop spin: the
+    // XCTest host has no window-server session of its own (build-test.yml), so the display-link-driven
+    // commit that would ordinarily flush a pending SwiftUI transaction never arrives on its own here.
     private func settleUntil(_ window: NSWindow, timeout: TimeInterval = 8, _ condition: () -> Bool) {
+        func settle() {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            CATransaction.flush()
+        }
+        settle()
         if condition() { return }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.contentView?.displayIfNeeded()
+            settle()
             if condition() { return }
         }
     }

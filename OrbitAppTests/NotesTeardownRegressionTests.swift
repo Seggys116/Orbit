@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 import XCTest
 @testable import Orbit
@@ -42,13 +43,23 @@ final class NotesTeardownRegressionTests: XCTestCase {
         }
     }
 
-    // Re-checks `condition` every slice instead of sleeping blind, up to `timeout`.
+    // Forces layout + an explicit CATransaction commit every slice, not just a RunLoop spin: the
+    // XCTest host has no window-server session of its own (build-test.yml), so the display-link-driven
+    // commit that would ordinarily flush a pending SwiftUI transaction never arrives on its own here.
     @discardableResult
-    private func pumpUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) -> Bool {
+    private func pumpUntil(window: NSWindow, timeout: TimeInterval = 10, _ condition: () -> Bool) -> Bool {
+        func settle() {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            CATransaction.flush()
+        }
+        settle()
         if condition() { return true }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            settle()
             if condition() { return true }
         }
         return condition()
@@ -198,7 +209,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
         let noteB = makeNote(title: "Note B — the one being opened", body: "Note B original body — must survive being opened.")
 
         let (window, host) = hostNoteIdentityDirectly(noteID: noteA.id, size: CGSize(width: 900, height: 700))
-        pumpUntil { bodyTextView(in: window)?.string == noteA.body }
+        pumpUntil(window: window) { bodyTextView(in: window)?.string == noteA.body }
 
         guard let firstTextView = bodyTextView(in: window) else {
             XCTFail("No NSTextView was found in the hosted tree while showing Note A; the harness itself is broken.")
@@ -210,13 +221,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
 
         host.rootView = NoteIdentityHost(noteID: noteB.id, env: env)
-        pumpUntil {
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.displayIfNeeded()
-            return bodyTextView(in: window)?.string == noteB.body
-        }
-        window.contentView?.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
+        pumpUntil(window: window) { bodyTextView(in: window)?.string == noteB.body }
 
         guard let secondTextView = bodyTextView(in: window) else {
             XCTFail("No NSTextView was found in the hosted tree after reassigning rootView to Note B's noteID.")
@@ -352,7 +357,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
         env.activateTab(noteTab)
         let window = hostLikeProduction(ContentCardView().environment(env), size: CGSize(width: 900, height: 700))
-        pumpUntil { bodyTextView(in: window)?.string == note.body }
+        pumpUntil(window: window) { bodyTextView(in: window)?.string == note.body }
 
         guard let textView = bodyTextView(in: window) else {
             XCTFail("Fixture check: the note's NSTextView never mounted.")
@@ -370,13 +375,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
         pump(seconds: 0.1)
 
         env.activateTab(webTab)
-        pumpUntil {
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.displayIfNeeded()
-            return bodyTextView(in: window) == nil
-        }
-        window.contentView?.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
+        pumpUntil(window: window) { bodyTextView(in: window) == nil }
 
         XCTAssertNil(
             bodyTextView(in: window),
@@ -384,13 +383,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
 
         env.activateTab(noteTab)
-        pumpUntil {
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.displayIfNeeded()
-            return bodyTextView(in: window)?.string == typedMarker
-        }
-        window.contentView?.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
+        pumpUntil(window: window) { bodyTextView(in: window)?.string == typedMarker }
 
         guard let textViewAfterReturn = bodyTextView(in: window) else {
             XCTFail("No NSTextView was found after switching back to the note's own tab — the pane, not just its content, failed to come back.")
@@ -486,7 +479,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
         env.activateTab(noteTab)
         let window = hostLikeProduction(ContentCardView().environment(env), size: CGSize(width: 900, height: 700))
-        pumpUntil { bodyTextView(in: window)?.string == note.body }
+        pumpUntil(window: window) { bodyTextView(in: window)?.string == note.body }
 
         XCTAssertEqual(
             DocumentEditorFlushRegistry.shared.registeredCount, baselineCount + 1,
@@ -525,13 +518,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
 
         env.activateTab(webTab)
-        pumpUntil {
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.displayIfNeeded()
-            return DocumentEditorFlushRegistry.shared.registeredCount == baselineCount
-        }
-        window.contentView?.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
+        pumpUntil(window: window) { DocumentEditorFlushRegistry.shared.registeredCount == baselineCount }
 
         XCTAssertEqual(
             DocumentEditorFlushRegistry.shared.registeredCount, baselineCount,
