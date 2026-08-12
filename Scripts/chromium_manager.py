@@ -888,10 +888,7 @@ def extract_tar(archive_path: str, install_root: str, artifact: str | None = Non
                 die(f"Archive contains an unsafe path: {member.name}")
         tar.extractall(staging)
 
-    # A single top-level directory is unwrapped, unless it is the artifact itself:
-    # `package` tars the framework directly, so unwrapping made the install root
-    # *become* the framework instead of containing it, and the artifact check
-    # then failed on a download that was perfectly good.
+    # Not unwrapped when the single entry is the artifact: it is tarred directly.
     entries = [e for e in os.listdir(staging) if not e.startswith(".")]
     source = staging
     if len(entries) == 1 and entries[0] != artifact and os.path.isdir(os.path.join(staging, entries[0])):
@@ -1179,8 +1176,9 @@ def cmd_package(args: argparse.Namespace) -> int:
     asset_name = f"orbit-chromium-{manifest['chromium_version']}-{platform_key}-{config}.tar.xz"
     dest = os.path.join(DIST_DIR, asset_name)
 
+    # Never dereference: a framework is its symlinks, and codesign rejects it without them.
     info(f"Packaging {os.path.relpath(artifact, REPO_ROOT)} -> {os.path.relpath(dest, REPO_ROOT)}")
-    with tarfile.open(dest, "w:xz", dereference=True) as tar:
+    with tarfile.open(dest, "w:xz") as tar:
         tar.add(artifact, arcname=os.path.basename(artifact))
 
     checksum = sha256_of(dest)
