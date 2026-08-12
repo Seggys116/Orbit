@@ -281,6 +281,8 @@ final class SpaceThemePaletteTests: XCTestCase {
         await renderAndSavePaletteGrid(name: "space-theme-palette-presets", appearance: .darkAqua)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_spaceThemePalettePresetsPreviewGrid_light
+
     func test_spaceThemePalettePresetsPreviewGrid_light() async throws {
         if !CapabilityProbe.metalMeshGradientRenderingIsAvailable {
             throw XCTSkip("A single real-size MeshGradient swatch did not render within budget on this XCTest host's Metal path.")
