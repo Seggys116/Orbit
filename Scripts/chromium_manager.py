@@ -876,7 +876,7 @@ def sha256_of(path: str) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
-def extract_tar(archive_path: str, install_root: str) -> None:
+def extract_tar(archive_path: str, install_root: str, artifact: str | None = None) -> None:
     staging = install_root + ".staging"
     if os.path.isdir(staging):
         shutil.rmtree(staging)
@@ -888,8 +888,14 @@ def extract_tar(archive_path: str, install_root: str) -> None:
                 die(f"Archive contains an unsafe path: {member.name}")
         tar.extractall(staging)
 
+    # A single top-level directory is unwrapped, unless it is the artifact itself:
+    # `package` tars the framework directly, so unwrapping made the install root
+    # *become* the framework instead of containing it, and the artifact check
+    # then failed on a download that was perfectly good.
     entries = [e for e in os.listdir(staging) if not e.startswith(".")]
-    source = os.path.join(staging, entries[0]) if len(entries) == 1 and os.path.isdir(os.path.join(staging, entries[0])) else staging
+    source = staging
+    if len(entries) == 1 and entries[0] != artifact and os.path.isdir(os.path.join(staging, entries[0])):
+        source = os.path.join(staging, entries[0])
 
     if os.path.isdir(install_root):
         shutil.rmtree(install_root)
@@ -945,7 +951,7 @@ def install_prebuilt(manifest: dict, config: str) -> None:
             )
 
     step(f"Extracting to {os.path.relpath(install_root, REPO_ROOT)}")
-    extract_tar(archive_path, install_root)
+    extract_tar(archive_path, install_root, artifact_name(manifest["build_target"]))
     write_engine_markers(install_root, "prebuilt", config)
     relink_config(config, install_root)
     do_sync(manifest, quiet=True)
