@@ -411,7 +411,10 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         expectReachesEngine("12 real SplitDropZoneOverlay, activeTabID=nil (allowsHitTesting false)", probe(window, at: Self.centre, engine: engine))
     }
 
-    func test_13_realOverlayWithActiveTab_atManyPoints() {
+    func test_13_realOverlayWithActiveTab_atManyPoints() throws {
+        if !CapabilityProbe.windowServerCommitsAreAvailable {
+            throw XCTSkip("This XCTest host has no window-server session, so a GeometryReader's second layout pass never commits into the AppKit view tree here.")
+        }
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
         let window = hostLikeProduction(
@@ -537,6 +540,9 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
     }
 
     func test_14_realContentCardView_wholeTree() throws {
+        if !CapabilityProbe.windowServerCommitsAreAvailable {
+            throw XCTSkip("This XCTest host has no window-server session, so a GeometryReader's second layout pass never commits into the AppKit view tree here.")
+        }
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
         let tabID = try XCTUnwrap(env.activeTabID, "The demo environment has no active tab, so ContentCardView would render the no-tab placeholder instead of a pane.")

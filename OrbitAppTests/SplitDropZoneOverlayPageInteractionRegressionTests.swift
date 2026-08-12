@@ -172,6 +172,9 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
     }
 
     func test_realContentCardTree_paneHeaderBand_catchersStillWin_nonCatchersReachTheEngine() throws {
+        if !CapabilityProbe.windowServerCommitsAreAvailable {
+            throw XCTSkip("This XCTest host has no window-server session, so a GeometryReader's second layout pass never commits into the AppKit view tree here.")
+        }
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
         let tabID = try XCTUnwrap(env.activeTabID)

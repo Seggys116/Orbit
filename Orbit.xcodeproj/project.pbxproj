@@ -1106,6 +1106,7 @@
 		E36B17E4FFEC9DEB88CB755C /* ContentBlockerRuleSet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D03C4D4986F396BA4B68A89F /* ContentBlockerRuleSet.swift */; };
 		E3A1B30270B74C7A534B66A9 /* NotesTeardownRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F585CFEAD378D74366D2F8C /* NotesTeardownRegressionTests.swift */; };
 		E3CC8BBC9BA1DDEF059BA35D /* BoostsGlobalSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA93BE75085AA1EC71BAB7A /* BoostsGlobalSettings.swift */; };
+		E3DC64A1FE33B89C0FC7B61B /* CapabilityProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA6AD1C01F6A51B75901E70 /* CapabilityProbe.swift */; };
 		E3E26AA265CB7F0CA9FCC074 /* TodaySectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD80D77281184BC1DAC1BA9F /* TodaySectionView.swift */; };
 		E40D3755085626A22866EDEA /* GitHubLiveFolderSidebarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 193ED814A0E03118CF80FB17 /* GitHubLiveFolderSidebarTests.swift */; };
 		E45AF158F430D742E06CDFDE /* LibraryPreviewPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BEC0AD65E0C0CED1AAA426 /* LibraryPreviewPaneView.swift */; };
@@ -1910,6 +1911,7 @@
 		BDBCF892AAF9C031E898CBCF /* OrbitContextMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitContextMenu.swift; sourceTree = "<group>"; };
 		BDD3D3084817D1FD4F58EF8A /* SpaceSwipeProgressEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceSwipeProgressEnvironment.swift; sourceTree = "<group>"; };
 		BDDE93906B0A96FBEFD092D9 /* BlockingModalTestHazardGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockingModalTestHazardGuardTests.swift; sourceTree = "<group>"; };
+		BEA6AD1C01F6A51B75901E70 /* CapabilityProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityProbe.swift; sourceTree = "<group>"; };
 		BEA71299362552006972B565 /* EngineTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineTypes.swift; sourceTree = "<group>"; };
 		BEAC278B7ECAF0671DE450F5 /* FindBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindBarView.swift; sourceTree = "<group>"; };
 		BECA9CED130AD15DDDF1DF3B /* RenderHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderHarness.swift; sourceTree = "<group>"; };
@@ -2974,6 +2976,7 @@
 		A208EF8FE8E328F4C83897CE /* Support */ = {
 			isa = PBXGroup;
 			children = (
+				BEA6AD1C01F6A51B75901E70 /* CapabilityProbe.swift */,
 				3B65EE01B5BD4AFDC4D53AB2 /* CorpusLiveTestCase.swift */,
 				D46E363535568459F466FA50 /* ExtensionCorpus.swift */,
 				12D81AF067ED68830D3E2DA1 /* LiveChromiumEngineHost.swift */,
@@ -4606,6 +4609,7 @@
 				96709A5A7CFE21BBF1AC431D /* SplitGroupRowContainerTests.swift in Sources */,
 				98B8F65BB3EA2AD65A2F5695 /* SplitLayoutMenuTests.swift in Sources */,
 				29A52E0AD5E50210E4750E6D /* SplitPaneCloseControlTests.swift in Sources */,
+				E3DC64A1FE33B89C0FC7B61B /* CapabilityProbe.swift in Sources */,
 				E7DDD881403ACB9B45A1C105 /* CorpusLiveTestCase.swift in Sources */,
 				253886A07941D0E6DE47ACDF /* ExtensionCorpus.swift in Sources */,
 				B06E40C754CC52C9A3E3CEA4 /* LiveChromiumEngineHost.swift in Sources */,

@@ -204,7 +204,10 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
     // MARK: - Render carryover (H1, structural half)
 
-    func test_theRichTextNSTextViewSurvivesUnchangedAcrossASwitchToADifferentNoteTab() {
+    func test_theRichTextNSTextViewSurvivesUnchangedAcrossASwitchToADifferentNoteTab() throws {
+        if !CapabilityProbe.windowServerCommitsAreAvailable {
+            throw XCTSkip("This XCTest host has no window-server session, so a SwiftUI state write made inside .task never commits into the AppKit view tree here.")
+        }
         let noteA = makeNote(title: "Note A — must stay closed", body: "Note A original body — must never be shown for Note B.")
         let noteB = makeNote(title: "Note B — the one being opened", body: "Note B original body — must survive being opened.")
 
@@ -345,7 +348,10 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
     // MARK: - Single-note pane switch (the user's report, verbatim, with no second note involved)
 
-    func test_singleNote_typedContentSurvivesSwitchingThePaneAwayToAWebTabAndBack() {
+    func test_singleNote_typedContentSurvivesSwitchingThePaneAwayToAWebTabAndBack() throws {
+        if !CapabilityProbe.windowServerCommitsAreAvailable {
+            throw XCTSkip("This XCTest host has no window-server session, so a SwiftUI state write made inside .task never commits into the AppKit view tree here.")
+        }
         let note = makeNote(title: "Solo Note", body: "Original body.")
         let noteTab = openNoteTab(note)
         let webTab = env.openTab(
@@ -465,7 +471,10 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
     // MARK: - Quit-time flush registration (F2)
 
-    func test_flushRegistryRegistersOnAppearAndDeregistersOnDisappear_andAQuitTimeFlushReachesDisk() {
+    func test_flushRegistryRegistersOnAppearAndDeregistersOnDisappear_andAQuitTimeFlushReachesDisk() throws {
+        if !CapabilityProbe.windowServerCommitsAreAvailable {
+            throw XCTSkip("This XCTest host has no window-server session, so a SwiftUI state write made inside .task never commits into the AppKit view tree here.")
+        }
         let note = makeNote(title: "Quit Flush Check", body: "Original body.")
         let noteTab = openNoteTab(note)
         let webTab = env.openTab(
