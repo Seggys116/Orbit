@@ -118,7 +118,7 @@ jobs:
   test:
     name: Build and test
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 150
     env:
       NSUnbufferedIO: "YES"
     steps:
@@ -237,6 +237,9 @@ jobs:
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 120 \
+            -maximum-test-execution-time-allowance 300 \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_STYLE=Manual \
