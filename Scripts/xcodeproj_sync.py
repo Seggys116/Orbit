@@ -215,7 +215,12 @@ def scan(rel: str) -> Node:
         is_dir = os.path.isdir(child_abs)
         ext = os.path.splitext(name)[1].lower()
         if is_dir and ext not in BUNDLE_DIR_EXTS:
-            node.children.append(scan(child_rel))
+            # Dropped when it holds nothing: git cannot track an empty directory,
+            # so a group for one exists in a working tree and not in a clone, and
+            # --check then fails in CI on a project that is correct locally.
+            child = scan(child_rel)
+            if child.children:
+                node.children.append(child)
         else:
             node.children.append(Node(name, child_rel, is_dir))
     return node

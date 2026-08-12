@@ -2691,9 +2691,7 @@
 				19CEA8750F0D0CBBFB3C90E0 /* Media */,
 				26A8F8D310E88E6F5082371E /* Notes */,
 				D1FF68F9E7B10B726B04C625 /* Peek */,
-				DA8A39DACD8A11426656B5F9 /* Reader */,
 				E829582D790CEC925C144700 /* RecentPages */,
-				E2072DD5BD2551D332247D0A /* Routing */,
 				DFC4A7FD450ED63C4426A953 /* Spaces */,
 				84FD3554FF1DD2B58F0B525A /* TaskManager */,
 			);
@@ -3431,26 +3429,12 @@
 			path = ContentBlocking;
 			sourceTree = "<group>";
 		};
-		DA8A39DACD8A11426656B5F9 /* Reader */ = {
-			isa = PBXGroup;
-			children = (
-				);
-			path = Reader;
-			sourceTree = "<group>";
-		};
 		DFC4A7FD450ED63C4426A953 /* Spaces */ = {
 			isa = PBXGroup;
 			children = (
 				1EC942278E213C2E2A2BD440 /* SpaceThemeEditorWindowController.swift */,
 			);
 			path = Spaces;
-			sourceTree = "<group>";
-		};
-		E2072DD5BD2551D332247D0A /* Routing */ = {
-			isa = PBXGroup;
-			children = (
-				);
-			path = Routing;
 			sourceTree = "<group>";
 		};
 		E319A1126DDD158044670BC4 /* DevTools */ = {
