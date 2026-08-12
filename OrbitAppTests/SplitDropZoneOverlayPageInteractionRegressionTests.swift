@@ -374,6 +374,10 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
 
     // MARK: - 3. DIAGNOSTIC ONLY — locating the real NSDraggingDestination view
 
+    // Excluded on GitHub-hosted runners: a print-only tree dump that stalls past two minutes there.
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_diagnostic_locateDragDestinationViewAndFrame
+
     func test_diagnostic_locateDragDestinationViewAndFrame() throws {
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
