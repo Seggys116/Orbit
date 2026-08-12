@@ -630,7 +630,7 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         )
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        if let contentView = window.contentView { _ = settleFrameUntilStable(window, of: contentView) }
         window.contentView?.displayIfNeeded()
 
         for (label, point) in [("centre", NSPoint(x: 450, y: 300)), ("upper-left", NSPoint(x: 200, y: 450))] {

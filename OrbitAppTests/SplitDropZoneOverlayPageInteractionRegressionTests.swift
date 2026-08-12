@@ -160,7 +160,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        if let contentView = window.contentView { _ = settleFrameUntilStable(window, of: contentView) }
         window.contentView?.displayIfNeeded()
 
         let points: [(String, NSPoint)] = [
@@ -231,7 +231,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        if let contentView = window.contentView { _ = settleFrameUntilStable(window, of: contentView) }
         window.contentView?.displayIfNeeded()
 
         guard let contentView = window.contentView else {
@@ -385,7 +385,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        if let contentView = window.contentView { _ = settleFrameUntilStable(window, of: contentView) }
         window.contentView?.displayIfNeeded()
 
         guard let contentView = window.contentView else { return XCTFail("No content view.") }
@@ -416,7 +416,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        if let contentView = window.contentView { _ = settleFrameUntilStable(window, of: contentView) }
         window.contentView?.displayIfNeeded()
 
         guard let contentView = window.contentView,
@@ -455,7 +455,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        if let contentView = window.contentView { _ = settleFrameUntilStable(window, of: contentView) }
         window.contentView?.displayIfNeeded()
 
         guard let contentView = window.contentView,
@@ -508,7 +508,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        if let contentView = window.contentView { _ = settleFrameUntilStable(window, of: contentView) }
         window.contentView?.displayIfNeeded()
 
         guard let contentView = window.contentView,
@@ -552,7 +552,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         )
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        if let contentView = window.contentView { _ = settleFrameUntilStable(window, of: contentView) }
         window.contentView?.displayIfNeeded()
 
         guard let contentView = window.contentView,
