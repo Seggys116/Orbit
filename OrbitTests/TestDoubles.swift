@@ -166,13 +166,12 @@ final class AppEnvironment {
         state.spaces.first { $0.id == spaceID }?.pinned ?? []
     }
 
-    // A line-for-line mirror of the real isIncognito(_:), not a simplification: checking
-    // only space.isEphemeral would miss the legacy Profile-only case and let a privacy
-    // test pass while that guard clause went unexercised.
+    // Mirrors the real isIncognito(_:) except its torn-off-window clause, which this double has no window to represent.
     func isIncognito(_ space: Space) -> Bool {
-        if space.isEphemeral { return true }
-        guard let profile = state.profiles.first(where: { $0.id == space.profileID }) else { return false }
-        return OrbitState.isEphemeral(profile)
+        if let profile = state.profiles.first(where: { $0.id == space.profileID }), OrbitState.isEphemeral(profile) {
+            return true
+        }
+        return space.isEphemeral
     }
 
     func renameFolder(_ id: FolderID, to name: String, in spaceID: SpaceID) { recordedActions.append("renameFolder") }

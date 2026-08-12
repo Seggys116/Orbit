@@ -11,10 +11,10 @@ final class TestFileCoverageGuardTests: XCTestCase {
     }
 
     // ModalHangGuardObserver.swift is a true positive for check 1's heuristic; CorpusLiveTestCase.swift
-    // is the corpus suites' base class and carries no test of its own.
+    // and LiveEnvironmentTestCase.swift are base classes their suites subclass and carry no test of their own.
     private static let knownSupportFileNames: Set<String> = [
         "RenderHarness.swift", "MockWebContents.swift", "ModalHangGuardObserver.swift",
-        "CorpusLiveTestCase.swift",
+        "CorpusLiveTestCase.swift", "LiveEnvironmentTestCase.swift",
     ]
 
     private static let shadowCheckExemptFileNames: Set<String> = []

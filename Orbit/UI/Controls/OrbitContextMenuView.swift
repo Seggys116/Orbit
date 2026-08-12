@@ -105,7 +105,7 @@ private struct OrbitContextMenuRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!item.isEnabled)
-        .help(item.tooltip ?? "")
+        .orbitTooltip(item.tooltip ?? "")
         .onHover { hovering in
             guard item.isEnabled else { return }
             if hovering {

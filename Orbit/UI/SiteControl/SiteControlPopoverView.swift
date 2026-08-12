@@ -254,7 +254,7 @@ struct SiteControlPopoverView: View {
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-        .help(disabled ? (unavailableReason ?? "") : "")
+        .orbitTooltip(disabled ? (unavailableReason ?? "") : "")
         .accessibilityLabel(disabled ? "\(accessibilityLabel): unavailable" : accessibilityLabel)
     }
 
@@ -420,7 +420,7 @@ struct SiteControlPopoverView: View {
             .buttonStyle(.plain)
             .disabled(!entry.actionState.isEnabled)
             .accessibilityLabel(entry.accessibleTitle)
-            .help(entry.accessibleTitle)
+            .orbitTooltip(entry.accessibleTitle)
             .orbitHoverPopover(isPresented: extensionPopupBinding(for: entry.id, kind: .action), preferredEdge: .minY) {
                 extensionPopupContent(entry: entry, kind: .action)
             }
@@ -504,7 +504,7 @@ struct SiteControlPopoverView: View {
             }
         }
         .accessibilityLabel("\(entry.extensionInfo.name) options")
-        .help("\(entry.extensionInfo.name) options")
+        .orbitTooltip("\(entry.extensionInfo.name) options")
     }
 
     private var extensionOptionsGlyph: some View {
@@ -672,7 +672,7 @@ struct SiteControlPopoverView: View {
         }
         .buttonStyle(.plain)
         .disabled(!available)
-        .help(available ? "" : developerToolsUnavailableReason)
+        .orbitTooltip(available ? "" : developerToolsUnavailableReason)
         .accessibilityLabel(available ? "Developer Tools" : "Developer Tools: unavailable — \(developerToolsUnavailableReason)")
     }
 
@@ -905,7 +905,7 @@ struct SiteControlPopoverView: View {
                 #endif
             }
             .accessibilityLabel(isAvailable ? "Share" : "Share: unavailable")
-            .help(isAvailable ? "" : "No page is open to share.")
+            .orbitTooltip(isAvailable ? "" : "No page is open to share.")
     }
 }
 

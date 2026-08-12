@@ -6,7 +6,7 @@ import XCTest
 
 enum ExtensionCorpus {
 
-    struct Entry: Decodable, Sendable {
+    struct CorpusEntry: Decodable, Sendable {
         let id: String
         let name: String
         let version: String?
@@ -19,7 +19,7 @@ enum ExtensionCorpus {
 
     private struct Manifest: Decodable {
         let unpackRoot: String
-        let extensions: [Entry]
+        let extensions: [CorpusEntry]
     }
 
     private struct Marker: Decodable {
@@ -31,17 +31,12 @@ enum ExtensionCorpus {
     private struct UnpackedManifest: Decodable {
         let version: String
         let manifestVersion: Int
-
-        private enum CodingKeys: String, CodingKey {
-            case version
-            case manifestVersion = "manifest_version"
-        }
     }
 
     enum CorpusError: LocalizedError {
         case manifestUnreadable(URL, String)
         case unknownEntry(String, [String])
-        case stale(Entry, URL, String)
+        case stale(CorpusEntry, URL, String)
 
         var errorDescription: String? {
             switch self {
@@ -82,14 +77,14 @@ enum ExtensionCorpus {
         }
     }
 
-    static func all() throws -> [Entry] {
+    static func all() throws -> [CorpusEntry] {
         try loadManifest().extensions
     }
 
     /// The pinned `id`, `version`, `expectation` and notes for one entry,
     /// matched on the manifest's `name` (case- and punctuation-insensitive) or
     /// its exact extension id.
-    static func entry(for name: String) throws -> Entry {
+    static func entry(for name: String) throws -> CorpusEntry {
         let entries = try all()
         let wanted = slug(name)
         guard let match = entries.first(where: { $0.id == name || slug($0.name) == wanted }) else {
@@ -178,7 +173,9 @@ enum ExtensionCorpus {
         let unpackedManifestURL = directory.appendingPathComponent("manifest.json")
 
         let data = try Data(contentsOf: unpackedManifestURL)
-        let unpacked = try JSONDecoder().decode(UnpackedManifest.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let unpacked = try decoder.decode(UnpackedManifest.self, from: data)
 
         XCTAssertEqual(
             unpacked.version,

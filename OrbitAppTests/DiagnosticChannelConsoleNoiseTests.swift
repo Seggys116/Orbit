@@ -58,6 +58,7 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
             .contentCard: ("ORBIT_LOG_CONTENT_CARD", "OrbitLogContentCard"),
             .webContentsAttachment: ("ORBIT_LOG_WEB_CONTENTS_ATTACHMENT", "OrbitLogWebContentsAttachment"),
             .contentColumn: ("ORBIT_LOG_CONTENT_COLUMN", "OrbitLogContentColumn"),
+            .webStoreBridge: ("ORBIT_LOG_WEB_STORE_BRIDGE", "OrbitLogWebStoreBridge"),
         ]
         XCTAssertEqual(
             Set(expected.keys), Set(DiagnosticChannel.allCases),

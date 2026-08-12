@@ -6,6 +6,14 @@ import XCTest
 @MainActor
 final class SpaceThemePaletteTests: XCTestCase {
 
+    // Pays MeshGradient/CoreImage's one-time GPU pipeline warm-up here, outside any single test's time allowance.
+    override class func setUp() {
+        super.setUp()
+        _ = GrainTexture.tile
+        let warmupTheme = SpaceTheme(style: .mesh, colors: SpaceTheme.defaultPalette)
+        _ = render(ThemeBackgroundView(theme: warmupTheme), size: CGSize(width: 8, height: 8))
+    }
+
     // MARK: - Determinism and the shipped default
 
     func test_nextDefaultTheme_withNothingInUse_isExactlyTheShippedDefault() {

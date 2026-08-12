@@ -42,6 +42,18 @@ final class NotesTeardownRegressionTests: XCTestCase {
         }
     }
 
+    // Re-checks `condition` every slice instead of sleeping blind, up to `timeout`.
+    @discardableResult
+    private func pumpUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) -> Bool {
+        if condition() { return true }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            if condition() { return true }
+        }
+        return condition()
+    }
+
     private func hostLikeProduction<V: View>(_ content: V, size: CGSize) -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -186,7 +198,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
         let noteB = makeNote(title: "Note B — the one being opened", body: "Note B original body — must survive being opened.")
 
         let (window, host) = hostNoteIdentityDirectly(noteID: noteA.id, size: CGSize(width: 900, height: 700))
-        pump(seconds: 0.3)
+        pumpUntil { bodyTextView(in: window)?.string == noteA.body }
 
         guard let firstTextView = bodyTextView(in: window) else {
             XCTFail("No NSTextView was found in the hosted tree while showing Note A; the harness itself is broken.")
@@ -198,7 +210,11 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
 
         host.rootView = NoteIdentityHost(noteID: noteB.id, env: env)
-        pump(seconds: 0.3)
+        pumpUntil {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            return bodyTextView(in: window)?.string == noteB.body
+        }
         window.contentView?.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
 
@@ -336,7 +352,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
         env.activateTab(noteTab)
         let window = hostLikeProduction(ContentCardView().environment(env), size: CGSize(width: 900, height: 700))
-        pump(seconds: 0.3)
+        pumpUntil { bodyTextView(in: window)?.string == note.body }
 
         guard let textView = bodyTextView(in: window) else {
             XCTFail("Fixture check: the note's NSTextView never mounted.")
@@ -354,7 +370,11 @@ final class NotesTeardownRegressionTests: XCTestCase {
         pump(seconds: 0.1)
 
         env.activateTab(webTab)
-        pump(seconds: 0.3)
+        pumpUntil {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            return bodyTextView(in: window) == nil
+        }
         window.contentView?.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
 
@@ -364,7 +384,11 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
 
         env.activateTab(noteTab)
-        pump(seconds: 0.3)
+        pumpUntil {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            return bodyTextView(in: window)?.string == typedMarker
+        }
         window.contentView?.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
 
@@ -462,7 +486,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
         env.activateTab(noteTab)
         let window = hostLikeProduction(ContentCardView().environment(env), size: CGSize(width: 900, height: 700))
-        pump(seconds: 0.3)
+        pumpUntil { bodyTextView(in: window)?.string == note.body }
 
         XCTAssertEqual(
             DocumentEditorFlushRegistry.shared.registeredCount, baselineCount + 1,
@@ -477,6 +501,10 @@ final class NotesTeardownRegressionTests: XCTestCase {
             XCTFail("Fixture check: the note's NSTextView never mounted.")
             return
         }
+        XCTAssertEqual(
+            textView.string, note.body,
+            "Fixture check: the note's real body never loaded before the flush-registry assertions below, via load(for:)'s .task(id:) — nothing below is testing a genuine debounced edit."
+        )
         let typedMarker = "TYPED JUST BEFORE A SIMULATED QUIT"
         window.makeFirstResponder(textView)
         pump(seconds: 0.1)
@@ -497,7 +525,11 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
 
         env.activateTab(webTab)
-        pump(seconds: 0.3)
+        pumpUntil {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            return DocumentEditorFlushRegistry.shared.registeredCount == baselineCount
+        }
         window.contentView?.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
 

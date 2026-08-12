@@ -220,7 +220,7 @@ struct SidebarNewItemMenuRow: View {
         .buttonStyle(.plain)
         .disabled(!isAvailable)
         .onHover { isHovering = $0 }
-        .help(unavailableReason ?? "")
+        .orbitTooltip(unavailableReason ?? "")
         .accessibilityLabel(isAvailable ? option.title : "\(option.title): unavailable — \(unavailableReason ?? "")")
     }
 }

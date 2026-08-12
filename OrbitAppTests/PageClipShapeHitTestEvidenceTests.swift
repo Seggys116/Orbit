@@ -64,6 +64,18 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         return window
     }
 
+    // Re-checks `condition` every slice instead of trusting one forced layout pass, up to `timeout`.
+    private func settleUntil(_ window: NSWindow, timeout: TimeInterval = 5, _ condition: () -> Bool) {
+        if condition() { return }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            if condition() { return }
+        }
+    }
+
     private func probe(_ window: NSWindow, at point: NSPoint, engine: NSView) -> Probe {
         guard let themeFrame = window.contentView?.superview else {
             return Probe(resolved: nil, chain: [], reachedEngine: false)
@@ -412,6 +424,7 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
             ("near bottom edge", NSPoint(x: 450, y: 20)),
             ("upper-left quadrant", NSPoint(x: 200, y: 500)),
         ]
+        settleUntil(window) { points.allSatisfy { probe(window, at: $0.1, engine: engine).reachedEngine } }
         for (label, point) in points {
             expectReachesEngine("13 real overlay + active tab @ \(label) \(point)", probe(window, at: point, engine: engine))
         }
@@ -526,16 +539,21 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
-        window.contentView?.displayIfNeeded()
-
-        print("[PAGE-HIT-EVIDENCE] 14 engine stand-in inWindow=\(engine.window != nil) frameInWindow=\(engine.convert(engine.bounds, to: nil)) superview=\(engine.superview.map { "\(type(of: $0))" } ?? "nil")")
 
         let points: [(String, NSPoint)] = [
             ("centre", NSPoint(x: 450, y: 300)),
             ("upper-left quadrant", NSPoint(x: 200, y: 450)),
             ("lower-right quadrant", NSPoint(x: 700, y: 150)),
         ]
+        settleUntil(window, timeout: 8) {
+            points.allSatisfy { probe(window, at: $0.1, engine: engine).reachedEngine }
+                && [690.0, 680.0].allSatisfy { !probe(window, at: NSPoint(x: 450, y: $0), engine: engine).reachedEngine }
+                && [670.0, 660.0].allSatisfy { probe(window, at: NSPoint(x: 450, y: $0), engine: engine).reachedEngine }
+        }
+        window.contentView?.displayIfNeeded()
+
+        print("[PAGE-HIT-EVIDENCE] 14 engine stand-in inWindow=\(engine.window != nil) frameInWindow=\(engine.convert(engine.bounds, to: nil)) superview=\(engine.superview.map { "\(type(of: $0))" } ?? "nil")")
+
         for (label, point) in points {
             expectReachesEngine("14 REAL ContentCardView @ \(label) \(point)", probe(window, at: point, engine: engine))
         }

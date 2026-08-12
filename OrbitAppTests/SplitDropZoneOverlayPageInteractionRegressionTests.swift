@@ -110,6 +110,18 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         return hit === engine || (hit.map { $0.isDescendant(of: engine) } ?? false)
     }
 
+    // Re-checks `condition` every slice instead of trusting one fixed-duration pump, up to `timeout`.
+    private func settleUntil(_ window: NSWindow, timeout: TimeInterval = 8, _ condition: () -> Bool) {
+        if condition() { return }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.contentView?.displayIfNeeded()
+            if condition() { return }
+        }
+    }
+
     private func anyViewRegistersDraggedTypes(_ view: NSView) -> Bool {
         if !view.registeredDraggedTypes.isEmpty { return true }
         return view.subviews.contains { anyViewRegistersDraggedTypes($0) }
@@ -161,7 +173,10 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        settleUntil(window) {
+            [690.0, 680.0].allSatisfy { window.contentView?.superview?.hitTest(NSPoint(x: 450, y: $0)) is OrbitActionButtonClickCatchingView }
+                && [670.0, 660.0].allSatisfy { reachedEngine(window, at: NSPoint(x: 450, y: $0), engine: engine) }
+        }
         window.contentView?.displayIfNeeded()
 
         guard let themeFrame = window.contentView?.superview else {

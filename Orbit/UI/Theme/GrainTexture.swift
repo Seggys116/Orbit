@@ -5,8 +5,9 @@ import SwiftUI
 enum GrainTexture {
     static let tile: CGImage? = generate(size: 256)
 
+    // Software, not GPU: a one-time 256x256 tile isn't worth a slow Metal device negotiation.
     private static func generate(size: Int) -> CGImage? {
-        let context = CIContext(options: [.workingColorSpace: NSNull()])
+        let context = CIContext(options: [.workingColorSpace: NSNull(), .useSoftwareRenderer: true])
         let generator = CIFilter.randomGenerator()
         guard let noise = generator.outputImage else { return nil }
 

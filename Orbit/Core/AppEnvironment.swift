@@ -702,15 +702,13 @@ final class AppEnvironment {
         return searchEngine.searchURL(for: trimmed)
     }
 
-    // True when the Space's Profile is itself non-persistent. space.isEphemeral alone is NOT checked: a torn-off window's Space is also .ephemeral but sits on the origin tab's persistent Profile.
-    // Treating isEphemeral alone as Incognito would make every torn-off window look private.
+    // A non-persistent Profile always wins; otherwise a torn-off Space's own .ephemeral flag doesn't count, or every torn-off window would look private.
     func isIncognito(_ space: Space) -> Bool {
-        guard let profile = state.profiles.first(where: { $0.id == space.profileID }) else {
-            // No resolvable Profile — more likely a stale legacy Incognito
-            // Space than a torn-off one (whose Profile is never removed while its window is open).
-            return space.isEphemeral
+        if let profile = state.profiles.first(where: { $0.id == space.profileID }), OrbitState.isEphemeral(profile) {
+            return true
         }
-        return OrbitState.isEphemeral(profile)
+        guard !isTornOffWindow(for: space) else { return false }
+        return space.isEphemeral
     }
 
     func isPrivateBrowsingContext(spaceID: SpaceID?, profileID: ProfileID) -> Bool {
