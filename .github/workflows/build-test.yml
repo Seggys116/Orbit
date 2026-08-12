@@ -256,11 +256,6 @@ jobs:
           path: DerivedData/SourcePackages
           key: ${{ steps.swiftpm.outputs.cache-primary-key }}
 
-      # ORBIT-DIAG temporary, remove with the instrumentation it prints.
-      - name: Popover crash diagnostics
-        if: always()
-        run: cat /tmp/orbit-diag.txt || echo "no diagnostics written"
-
       # xcodebuild exits 0 for a run that built and executed nothing, so the
       # step above cannot tell a green suite from an absent one. This compares
       # the executed tests against the tests declared in the sources, and runs
