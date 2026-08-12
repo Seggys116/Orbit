@@ -35,8 +35,8 @@ final class ContentBlockingDeferredLoadCompositionGuardTests: XCTestCase {
     func test_makeWebContentsIsCalledWithTheContentBlockingReadinessTernary() throws {
         let text = try text(at: appEnvironmentSourceURL())
         XCTAssertTrue(
-            text.contains("initialURL: contentBlockingReadiness == nil ? url : nil"),
-            "materializeWebContents must create a session content blocking has not gated as ready with `initialURL: nil`, and one it has not gated with the real url. Deleting or altering this ternary is exactly the leak the deferred load below exists to close."
+            text.contains("contents = try engine.makeWebContents(session: session, initialURL: nil)"),
+            "materializeWebContents must create every session with initialURL: nil, even one content blocking has already gated as ready — passing the real url here starts navigation inside engine.makeWebContents itself, before adoptWebContents has registered the tab, so WillCreateURLLoaderFactory fires first and every webRequest event for that navigation reports tabId -1. Reintroducing a readiness ternary here reopens exactly that leak."
         )
     }
 

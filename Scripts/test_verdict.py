@@ -37,7 +37,11 @@ MAY_SKIP_LINE = re.compile(r"^\s*//\s*" + re.escape(MAY_SKIP_MARKER) + r"\s+([A-
 CONDITIONAL = re.compile(r"^\s*#(if|elseif|else|endif)\b\s*(.*)$")
 
 LOG_SKIP = re.compile(r"^.*?:\s*-\[[A-Za-z0-9_.]+\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]\s*:\s*Test skipped\s*-\s*(.*)$")
+# Same wording as LOG_SKIP's suffix, but as an xcresult "Failure Message" child of a skipped Test Case.
+BUNDLE_SKIP_PREFIX = "Test skipped - "
 LOG_CASE = re.compile(r"^Test Case '-\[[A-Za-z0-9_.]+\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]' (passed|failed|skipped)\b")
+# Parallel-runner reporter (OrbitTests): lower-case "case", no module prefix, no skip reason at all.
+LOG_CASE_PARALLEL = re.compile(r"^Test case '([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\(\)' (passed|failed|skipped)\b")
 
 
 class VerdictError(Exception):
@@ -199,10 +203,17 @@ def bundle_tests(path: str) -> dict[str, list[dict[str, str]]]:
             suite = node.get("name")
         elif node_type == "Test Case":
             name = (node.get("name") or "").split("(")[0]
+            reason = None
+            for child in node.get("children") or []:
+                text = child.get("name") or ""
+                if child.get("nodeType") == "Failure Message" and text.startswith(BUNDLE_SKIP_PREFIX):
+                    reason = text[len(BUNDLE_SKIP_PREFIX):]
+                    break
             grouped.setdefault(bundle or "?", []).append({
                 "suite": suite or "?",
                 "name": name,
                 "result": node.get("result") or "?",
+                "reason": reason,
             })
             return
         for child in node.get("children") or []:
@@ -224,6 +235,10 @@ def log_events(path: str) -> tuple[dict[tuple[str, str], str], dict[str, int]]:
             reasons[(suite, method)] = reason.strip()
             continue
         match = LOG_CASE.match(line)
+        if match:
+            counts[match.group(3)] += 1
+            continue
+        match = LOG_CASE_PARALLEL.match(line)
         if match:
             counts[match.group(3)] += 1
     return reasons, counts
@@ -269,6 +284,7 @@ def command_check(arguments) -> int:
         declared = declared_tests(target)
         executed = grouped.get(target, [])
         seen = {(row["suite"], row["name"]): row["result"] for row in executed}
+        bundle_reasons = {(row["suite"], row["name"]): row["reason"] for row in executed if row.get("reason")}
         total_executed += len(executed)
         total_passed += sum(1 for row in executed if row["result"] == "Passed")
 
@@ -312,11 +328,12 @@ def command_check(arguments) -> int:
             if result != "Skipped":
                 continue
             suite, method = key
-            reason = reasons.get(key)
+            # The log is cheap and already parsed; the result bundle always has it, so fall back to that.
+            reason = reasons.get(key) or bundle_reasons.get(key)
             if reason is None:
                 problems.append(
-                    f"{target}: {suite}.{method} was skipped and no reason for it is in the log. "
-                    "Pass --log so a skip can be told apart from a test that never ran."
+                    f"{target}: {suite}.{method} was skipped and no reason for it is in the log or the "
+                    "result bundle. Pass --log so a skip can be told apart from a test that never ran."
                 )
                 continue
             print(f"test-verdict:   skipped {suite}.{method}: {reason}")

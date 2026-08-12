@@ -299,7 +299,8 @@ final class SpaceThemePaletteTests: XCTestCase {
 
 // MARK: - Screenshot-only preview grid
 
-private struct SpaceThemePalettePreviewGrid: View {
+// Not private: CapabilityProbe reuses this exact view so its warm-up matches the real workload.
+struct SpaceThemePalettePreviewGrid: View {
     var themes: [SpaceTheme]
 
     private static let columns = 2

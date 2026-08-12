@@ -451,7 +451,7 @@ final class ZipArchiveExtractorTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         createdPaths.append(root)
 
-        var random = SeededGenerator(seed: 0x0B17_5EED)
+        var random = FixtureWordGenerator(seed: 0x0B17_5EED)
         var entryCount = 0
 
         try FileManager.default.createDirectory(at: root.appendingPathComponent("_locales"), withIntermediateDirectories: true)
@@ -502,7 +502,7 @@ final class ZipArchiveExtractorTests: XCTestCase {
         )
     }
 
-    private static func wordSoup(bytes: Int, using generator: inout SeededGenerator) -> String {
+    private static func wordSoup(bytes: Int, using generator: inout FixtureWordGenerator) -> String {
         let words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu"]
         var result = ""
         result.reserveCapacity(bytes + 16)
@@ -514,8 +514,9 @@ final class ZipArchiveExtractorTests: XCTestCase {
     }
 
     // Deterministic, so a failure here is a real regression and not a fixture
-    // that happened to compress differently this run.
-    private struct SeededGenerator {
+    // that happened to compress differently this run. Named distinctly from
+    // Orbit's own SeededGenerator: unrelated types, same tiny xorshift shape.
+    private struct FixtureWordGenerator {
         private var state: UInt64
         init(seed: UInt64) { state = seed | 1 }
         mutating func next() -> UInt64 {

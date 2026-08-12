@@ -8,7 +8,7 @@ final class ExtensionEventLivenessCoverageTests: XCTestCase {
 
     private typealias Schema = ExtensionAPISchemaSurface
 
-    private struct Entry {
+    private struct LivenessTableEntry {
         var status: String
         var cause: String
         var payload: String?
@@ -16,13 +16,13 @@ final class ExtensionEventLivenessCoverageTests: XCTestCase {
         var why: String?
     }
 
-    private func readTable() throws -> [String: Entry] {
+    private func readTable() throws -> [String: LivenessTableEntry] {
         let object = try Schema.readObject(Schema.eventLivenessFile)
         guard let events = object["events"] as? [String: [String: Any]] else {
             throw Schema.SchemaError.malformed(Schema.eventLivenessFile, "missing \"events\" object")
         }
         return events.mapValues {
-            Entry(
+            LivenessTableEntry(
                 status: $0["status"] as? String ?? "",
                 cause: $0["cause"] as? String ?? "",
                 payload: $0["payload"] as? String,

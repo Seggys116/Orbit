@@ -47,6 +47,27 @@ final class ExtensionPermissionRegistrationGuardTests: XCTestCase {
         return names
     }
 
+    /// Permissions `//extensions` core registers an `APIPermissionID` for on its
+    /// own -- CoreExtensionsAPIProvider gives Orbit these unconditionally, so an
+    /// entry for one of them here needs no `kOrbitPermissionsToRegister` row.
+    /// Read from the vendored upstream snapshot, not ThirdParty/chromium, so this
+    /// stays host-less; OrbitTests/ExtensionSchemaConformanceTests keeps it synced
+    /// to the pinned Chromium version.
+    private func coreRegisteredPermissionNames() throws -> Set<String> {
+        let url = repositoryFile("OrbitTests/Fixtures/UpstreamAPISchemas/_index.json")
+        let data = try Data(contentsOf: url)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let registered = object["core_registered_permissions"] as? [String],
+              let internalOnly = object["core_internal_permissions"] as? [String]
+        else {
+            XCTFail("could not read core_registered_permissions/core_internal_permissions from \(url.path)")
+            return []
+        }
+        // kFlagInternal permissions are dropped by APIPermissionSet::ParseFromJSON
+        // before the feature lookup, so they need no feature entry either.
+        return Set(registered).subtracting(internalOnly)
+    }
+
     /// The keys of `_permission_features.json`, which is JSON with // comments.
     private func permissionFeatureNames() throws -> Set<String> {
         let source = try text(at: repositoryFile("Chromium/Embedder/common/api/_permission_features.json"))
@@ -69,14 +90,14 @@ final class ExtensionPermissionRegistrationGuardTests: XCTestCase {
     }
 
     func test_everyPermissionFeatureEntryHasAMatchingNameToIDRegistration() throws {
-        let registered = try registeredPermissionNames()
+        let registered = try registeredPermissionNames().union(try coreRegisteredPermissionNames())
         let features = try permissionFeatureNames()
         XCTAssertFalse(features.isEmpty, "parsed no permission feature entries")
 
         let unregistered = features.subtracting(registered).sorted()
         XCTAssertEqual(
             unregistered, [],
-            "_permission_features.json declares \(unregistered) but OrbitExtensionsAPIProvider::RegisterPermissions never maps those names to an APIPermissionID. Chromium drops an unknown permission from the manifest without an error, so every API feature depending on it resolves to nothing and its whole namespace is undefined at runtime."
+            "_permission_features.json declares \(unregistered) but neither OrbitExtensionsAPIProvider::RegisterPermissions nor //extensions core's own permissions_to_register maps those names to an APIPermissionID. Chromium drops an unknown permission from the manifest without an error, so every API feature depending on it resolves to nothing and its whole namespace is undefined at runtime."
         )
     }
 
