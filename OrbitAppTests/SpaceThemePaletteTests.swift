@@ -270,6 +270,9 @@ final class SpaceThemePaletteTests: XCTestCase {
             .appendingPathComponent("refs/screenshots", isDirectory: true)
     }
 
+    // Excluded on GitHub-hosted runners: a MeshGradient render stalls past five minutes on that VM. Passes on a real Mac.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_spaceThemePalettePresetsPreviewGrid_dark
+
     func test_spaceThemePalettePresetsPreviewGrid_dark() async throws {
         if !CapabilityProbe.metalMeshGradientRenderingIsAvailable {
             throw XCTSkip("A single real-size MeshGradient swatch did not render within budget on this XCTest host's Metal path.")

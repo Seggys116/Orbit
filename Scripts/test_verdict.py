@@ -21,6 +21,7 @@ REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
 GATE_MARKER = "ORBIT_LIVE_ENGINE"
 MAY_SKIP_MARKER = "ORBIT-LIVE-ENGINE: MAY-SKIP"
+CANNOT_RUN_MARKER = "ORBIT-HOSTED-RUNNER: CANNOT-RUN"
 SCHEMA_VERSION = "0.1.0"
 
 TYPE_HEADER = re.compile(
@@ -34,6 +35,7 @@ TEST_FUNC = re.compile(
     r"func\s+(test[A-Za-z0-9_]*)\s*\(\s*\)"
 )
 MAY_SKIP_LINE = re.compile(r"^\s*//\s*" + re.escape(MAY_SKIP_MARKER) + r"\s+([A-Za-z0-9_]+)\s*$")
+CANNOT_RUN_LINE = re.compile(r"^\s*//\s*" + re.escape(CANNOT_RUN_MARKER) + r"\s+([A-Za-z0-9_]+)\s*$")
 CONDITIONAL = re.compile(r"^\s*#(if|elseif|else|endif)\b\s*(.*)$")
 
 LOG_SKIP = re.compile(r"^.*?:\s*-\[[A-Za-z0-9_.]+\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]\s*:\s*Test skipped\s*-\s*(.*)$")
@@ -177,6 +179,38 @@ def may_skip_declarations(target_dir: str) -> dict[tuple[str, str], str]:
     return allowed
 
 
+def hosted_runner_exclusions(target_dir: str) -> dict[tuple[str, str], str]:
+    """Tests a target declares cannot run on a GitHub-hosted runner, as (class, method) -> file."""
+    root = os.path.join(REPO_ROOT, target_dir)
+    declared = declared_tests(target_dir)
+
+    excluded: dict[tuple[str, str], str] = {}
+    for directory, _, names in os.walk(root):
+        for name in sorted(names):
+            if not name.endswith(".swift"):
+                continue
+            path = os.path.join(directory, name)
+            relative = os.path.relpath(path, REPO_ROOT)
+            for line in _lines(path):
+                match = CANNOT_RUN_LINE.match(line)
+                if not match:
+                    continue
+                method = match.group(1)
+                matches = [
+                    key for key in declared
+                    if key[1] == method and declared[key] == relative
+                ]
+                if not matches:
+                    raise VerdictError(
+                        f"{relative} declares '{CANNOT_RUN_MARKER} {method}' but has no test method "
+                        f"of that name. A marker naming a test that does not exist would let a real "
+                        f"exclusion go unnoticed."
+                    )
+                for key in matches:
+                    excluded[key] = relative
+    return excluded
+
+
 def bundle_tests(path: str) -> dict[str, list[dict[str, str]]]:
     """Every test case in a result bundle, grouped by test bundle name."""
     try:
@@ -265,6 +299,14 @@ def command_declared(arguments) -> int:
     return 0
 
 
+def command_excluded(arguments) -> int:
+    # No test-verdict: prefix here: the output is meant to be captured straight into xcodebuild args.
+    for target in arguments.target:
+        for suite, method in sorted(hosted_runner_exclusions(target)):
+            print(f"-skip-testing:{target}/{suite}/{method}")
+    return 0
+
+
 def command_check(arguments) -> int:
     problems: list[str] = []
     grouped = bundle_tests(arguments.result_bundle)
@@ -280,6 +322,8 @@ def command_check(arguments) -> int:
 
     total_executed = 0
     total_passed = 0
+    total_excluded = 0
+    all_excluded: set[tuple[str, str]] = set()
     for target in arguments.target:
         declared = declared_tests(target)
         executed = grouped.get(target, [])
@@ -287,6 +331,10 @@ def command_check(arguments) -> int:
         bundle_reasons = {(row["suite"], row["name"]): row["reason"] for row in executed if row.get("reason")}
         total_executed += len(executed)
         total_passed += sum(1 for row in executed if row["result"] == "Passed")
+
+        hosted_exclusions: dict[tuple[str, str], str] = {}
+        if arguments.allow_hosted_runner_exclusions:
+            hosted_exclusions = hosted_runner_exclusions(target)
 
         print(f"test-verdict: {target}: {len(executed)} executed, {len(declared)} declared in the sources")
         by_result: dict[str, int] = {}
@@ -306,6 +354,29 @@ def command_check(arguments) -> int:
 
         missing = set(declared) - set(seen)
         unexpected = set(seen) - set(declared)
+
+        excluded_missing = missing & set(hosted_exclusions)
+        if excluded_missing:
+            missing = missing - excluded_missing
+            total_excluded += len(excluded_missing)
+            all_excluded |= excluded_missing
+            for suite, method in sorted(excluded_missing):
+                print(
+                    f"test-verdict:   excluded {suite}.{method}: declared "
+                    f"'// {CANNOT_RUN_MARKER}' in {hosted_exclusions[(suite, method)]}, not run on a "
+                    "GitHub-hosted runner"
+                )
+
+        for key, result in sorted(seen.items()):
+            if key not in hosted_exclusions or result != "Passed":
+                continue
+            suite, method = key
+            print(
+                f"test-verdict:   note: {suite}.{method} ran and passed here despite being declared "
+                f"'// {CANNOT_RUN_MARKER}' in {hosted_exclusions[key]}; the declaration looks stale "
+                "and worth removing."
+            )
+
         if missing:
             problems.append(
                 f"{target}: {len(missing)} declared test(s) never executed: {_sample(missing)}. "
@@ -370,6 +441,12 @@ def command_check(arguments) -> int:
             )
 
     print(f"test-verdict: {total_executed} test(s) executed over {len(arguments.target)} target(s)")
+    if arguments.allow_hosted_runner_exclusions:
+        detail = f": {_sample(all_excluded)}" if all_excluded else ""
+        print(
+            f"test-verdict: {total_excluded} test(s) excluded from this run under "
+            f"'// {CANNOT_RUN_MARKER}'{detail}"
+        )
 
     if problems:
         print()
@@ -569,6 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--log")
     check.add_argument("--target", action="append", default=[], required=True)
     check.add_argument("--allow-live-engine-gate-skips", action="store_true")
+    check.add_argument("--allow-hosted-runner-exclusions", action="store_true")
     check.set_defaults(handler=command_check)
 
     live = subparsers.add_parser("live", help="verdict for one Scripts/live-engine-tests configuration")
@@ -583,6 +661,12 @@ def build_parser() -> argparse.ArgumentParser:
     declared.add_argument("--target", action="append", default=[], required=True)
     declared.add_argument("--list", action="store_true")
     declared.set_defaults(handler=command_declared)
+
+    excluded = subparsers.add_parser(
+        "excluded", help="xcodebuild -skip-testing args for tests declared cannot run on a hosted runner"
+    )
+    excluded.add_argument("--target", action="append", default=[], required=True)
+    excluded.set_defaults(handler=command_excluded)
 
     return parser
 

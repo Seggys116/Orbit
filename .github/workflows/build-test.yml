@@ -230,7 +230,13 @@ jobs:
       - name: Test
         run: |
           set -o pipefail
+          # Generated from the '// ORBIT-HOSTED-RUNNER: CANNOT-RUN' declarations in the
+          # sources, so the excluded set lives next to the tests rather than in this file.
+          mapfile -t SKIP_ARGS < <(Scripts/test-verdict excluded --target OrbitTests --target OrbitAppTests)
+          printf 'skipping %d test(s) declared unrunnable on a hosted runner\n' "${#SKIP_ARGS[@]}"
+
           xcodebuild test \
+            "${SKIP_ARGS[@]}" \
             -project Orbit.xcodeproj \
             -scheme Orbit \
             -configuration Debug \
@@ -268,7 +274,8 @@ jobs:
             --log TestResults.log \
             --target OrbitTests \
             --target OrbitAppTests \
-            --allow-live-engine-gate-skips
+            --allow-live-engine-gate-skips \
+            --allow-hosted-runner-exclusions
 
       - name: Upload the result bundle
         if: failure()
