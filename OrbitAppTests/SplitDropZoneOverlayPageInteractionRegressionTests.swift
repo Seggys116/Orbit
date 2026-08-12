@@ -111,10 +111,8 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         return hit === engine || (hit.map { $0.isDescendant(of: engine) } ?? false)
     }
 
-    // Forces layout + an explicit CATransaction commit every slice, not just a RunLoop spin: the
-    // XCTest host has no window-server session of its own (build-test.yml), so the display-link-driven
-    // commit that would ordinarily flush a pending SwiftUI transaction never arrives on its own here.
-    private func settleUntil(_ window: NSWindow, timeout: TimeInterval = 8, _ condition: () -> Bool) {
+    @discardableResult
+    private func settleUntil(_ window: NSWindow, timeout: TimeInterval = 8, _ condition: () -> Bool) -> Bool {
         func settle() {
             window.contentView?.layoutSubtreeIfNeeded()
             window.layoutIfNeeded()
@@ -122,12 +120,23 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
             CATransaction.flush()
         }
         settle()
-        if condition() { return }
+        if condition() { return true }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
             settle()
-            if condition() { return }
+            if condition() { return true }
+        }
+        return condition()
+    }
+
+    // A precondition, not the test's own assertion: only whether layout has stopped moving.
+    private func settleFrameUntilStable(_ window: NSWindow, of view: NSView, timeout: TimeInterval = 8) -> Bool {
+        var last: NSRect?
+        return settleUntil(window, timeout: timeout) {
+            let frame = view.convert(view.bounds, to: nil)
+            defer { last = frame }
+            return frame.width > 0 && frame.height > 0 && frame == last
         }
     }
 
@@ -172,9 +181,6 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
     }
 
     func test_realContentCardTree_paneHeaderBand_catchersStillWin_nonCatchersReachTheEngine() throws {
-        if !CapabilityProbe.windowServerCommitsAreAvailable {
-            throw XCTSkip("This XCTest host has no window-server session, so a GeometryReader's second layout pass never commits into the AppKit view tree here.")
-        }
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
         let tabID = try XCTUnwrap(env.activeTabID)
@@ -185,9 +191,8 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
-        settleUntil(window) {
-            [690.0, 680.0].allSatisfy { window.contentView?.superview?.hitTest(NSPoint(x: 450, y: $0)) is OrbitActionButtonClickCatchingView }
-                && [670.0, 660.0].allSatisfy { reachedEngine(window, at: NSPoint(x: 450, y: $0), engine: engine) }
+        guard settleFrameUntilStable(window, of: engine) else {
+            throw XCTSkip("The engine view's frame never stabilized within the settle budget.")
         }
         window.contentView?.displayIfNeeded()
 

@@ -272,7 +272,7 @@ final class SpaceThemePaletteTests: XCTestCase {
 
     func test_spaceThemePalettePresetsPreviewGrid_dark() async throws {
         if !CapabilityProbe.metalMeshGradientRenderingIsAvailable {
-            throw XCTSkip("This XCTest host has no usable Metal render path, so a MeshGradient render through ImageRenderer does not complete here.")
+            throw XCTSkip("A single real-size MeshGradient swatch did not render within budget on this XCTest host's Metal path.")
         }
         executionTimeAllowance = 280
         await renderAndSavePaletteGrid(name: "space-theme-palette-presets", appearance: .darkAqua)
@@ -280,7 +280,7 @@ final class SpaceThemePaletteTests: XCTestCase {
 
     func test_spaceThemePalettePresetsPreviewGrid_light() async throws {
         if !CapabilityProbe.metalMeshGradientRenderingIsAvailable {
-            throw XCTSkip("This XCTest host has no usable Metal render path, so a MeshGradient render through ImageRenderer does not complete here.")
+            throw XCTSkip("A single real-size MeshGradient swatch did not render within budget on this XCTest host's Metal path.")
         }
         executionTimeAllowance = 280
         await renderAndSavePaletteGrid(name: "space-theme-palette-presets-light", appearance: .aqua)

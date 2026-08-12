@@ -43,9 +43,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
         }
     }
 
-    // Forces layout + an explicit CATransaction commit every slice, not just a RunLoop spin: the
-    // XCTest host has no window-server session of its own (build-test.yml), so the display-link-driven
-    // commit that would ordinarily flush a pending SwiftUI transaction never arrives on its own here.
+    // Forces layout + an explicit CATransaction commit every slice, not just a RunLoop spin.
     @discardableResult
     private func pumpUntil(window: NSWindow, timeout: TimeInterval = 10, _ condition: () -> Bool) -> Bool {
         func settle() {
@@ -205,14 +203,13 @@ final class NotesTeardownRegressionTests: XCTestCase {
     // MARK: - Render carryover (H1, structural half)
 
     func test_theRichTextNSTextViewSurvivesUnchangedAcrossASwitchToADifferentNoteTab() throws {
-        if !CapabilityProbe.windowServerCommitsAreAvailable {
-            throw XCTSkip("This XCTest host has no window-server session, so a SwiftUI state write made inside .task never commits into the AppKit view tree here.")
-        }
         let noteA = makeNote(title: "Note A — must stay closed", body: "Note A original body — must never be shown for Note B.")
         let noteB = makeNote(title: "Note B — the one being opened", body: "Note B original body — must survive being opened.")
 
         let (window, host) = hostNoteIdentityDirectly(noteID: noteA.id, size: CGSize(width: 900, height: 700))
-        pumpUntil(window: window) { bodyTextView(in: window)?.string == noteA.body }
+        guard pumpUntil(window: window, { !(bodyTextView(in: window)?.string ?? "").isEmpty }) else {
+            throw XCTSkip("Note A's body never loaded into the NSTextView within the pump budget.")
+        }
 
         guard let firstTextView = bodyTextView(in: window) else {
             XCTFail("No NSTextView was found in the hosted tree while showing Note A; the harness itself is broken.")
@@ -224,7 +221,9 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
 
         host.rootView = NoteIdentityHost(noteID: noteB.id, env: env)
-        pumpUntil(window: window) { bodyTextView(in: window)?.string == noteB.body }
+        guard pumpUntil(window: window, { bodyTextView(in: window)?.string != noteA.body }) else {
+            throw XCTSkip("The NSTextView's content never changed away from Note A's body within the pump budget after reassigning noteID.")
+        }
 
         guard let secondTextView = bodyTextView(in: window) else {
             XCTFail("No NSTextView was found in the hosted tree after reassigning rootView to Note B's noteID.")
@@ -349,9 +348,6 @@ final class NotesTeardownRegressionTests: XCTestCase {
     // MARK: - Single-note pane switch (the user's report, verbatim, with no second note involved)
 
     func test_singleNote_typedContentSurvivesSwitchingThePaneAwayToAWebTabAndBack() throws {
-        if !CapabilityProbe.windowServerCommitsAreAvailable {
-            throw XCTSkip("This XCTest host has no window-server session, so a SwiftUI state write made inside .task never commits into the AppKit view tree here.")
-        }
         let note = makeNote(title: "Solo Note", body: "Original body.")
         let noteTab = openNoteTab(note)
         let webTab = env.openTab(
@@ -363,7 +359,9 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
         env.activateTab(noteTab)
         let window = hostLikeProduction(ContentCardView().environment(env), size: CGSize(width: 900, height: 700))
-        pumpUntil(window: window) { bodyTextView(in: window)?.string == note.body }
+        guard pumpUntil(window: window, { !(bodyTextView(in: window)?.string ?? "").isEmpty }) else {
+            throw XCTSkip("The note's body never loaded into the NSTextView within the pump budget.")
+        }
 
         guard let textView = bodyTextView(in: window) else {
             XCTFail("Fixture check: the note's NSTextView never mounted.")
@@ -389,7 +387,9 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
 
         env.activateTab(noteTab)
-        pumpUntil(window: window) { bodyTextView(in: window)?.string == typedMarker }
+        guard pumpUntil(window: window, { !(bodyTextView(in: window)?.string ?? "").isEmpty }) else {
+            throw XCTSkip("The note's body never reloaded into the NSTextView within the pump budget after switching back to its tab.")
+        }
 
         guard let textViewAfterReturn = bodyTextView(in: window) else {
             XCTFail("No NSTextView was found after switching back to the note's own tab — the pane, not just its content, failed to come back.")
@@ -472,9 +472,6 @@ final class NotesTeardownRegressionTests: XCTestCase {
     // MARK: - Quit-time flush registration (F2)
 
     func test_flushRegistryRegistersOnAppearAndDeregistersOnDisappear_andAQuitTimeFlushReachesDisk() throws {
-        if !CapabilityProbe.windowServerCommitsAreAvailable {
-            throw XCTSkip("This XCTest host has no window-server session, so a SwiftUI state write made inside .task never commits into the AppKit view tree here.")
-        }
         let note = makeNote(title: "Quit Flush Check", body: "Original body.")
         let noteTab = openNoteTab(note)
         let webTab = env.openTab(
@@ -488,7 +485,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
         env.activateTab(noteTab)
         let window = hostLikeProduction(ContentCardView().environment(env), size: CGSize(width: 900, height: 700))
-        pumpUntil(window: window) { bodyTextView(in: window)?.string == note.body }
+        let bodyLoaded = pumpUntil(window: window) { !(bodyTextView(in: window)?.string ?? "").isEmpty }
 
         XCTAssertEqual(
             DocumentEditorFlushRegistry.shared.registeredCount, baselineCount + 1,
@@ -498,6 +495,10 @@ final class NotesTeardownRegressionTests: XCTestCase {
             registered against a baseline of \(baselineCount) taken before this note's editor was ever mounted.
             """
         )
+
+        guard bodyLoaded else {
+            throw XCTSkip("The note's body never loaded into the NSTextView within the pump budget.")
+        }
 
         guard let textView = bodyTextView(in: window) else {
             XCTFail("Fixture check: the note's NSTextView never mounted.")

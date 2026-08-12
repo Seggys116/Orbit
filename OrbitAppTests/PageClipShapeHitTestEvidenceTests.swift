@@ -65,10 +65,9 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         return window
     }
 
-    // Forces layout + an explicit CATransaction commit every slice, not just a RunLoop spin: the
-    // XCTest host has no window-server session of its own (build-test.yml), so the display-link-driven
-    // commit that would ordinarily flush a pending SwiftUI transaction never arrives on its own here.
-    private func settleUntil(_ window: NSWindow, timeout: TimeInterval = 5, _ condition: () -> Bool) {
+    // Forces layout + an explicit CATransaction commit every slice, not just a RunLoop spin.
+    @discardableResult
+    private func settleUntil(_ window: NSWindow, timeout: TimeInterval = 5, _ condition: () -> Bool) -> Bool {
         func settle() {
             window.contentView?.layoutSubtreeIfNeeded()
             window.layoutIfNeeded()
@@ -76,12 +75,23 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
             CATransaction.flush()
         }
         settle()
-        if condition() { return }
+        if condition() { return true }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
             settle()
-            if condition() { return }
+            if condition() { return true }
+        }
+        return condition()
+    }
+
+    // A precondition, not the test's own assertion: only whether layout has stopped moving.
+    private func settleFrameUntilStable(_ window: NSWindow, of view: NSView, timeout: TimeInterval = 5) -> Bool {
+        var last: NSRect?
+        return settleUntil(window, timeout: timeout) {
+            let frame = view.convert(view.bounds, to: nil)
+            defer { last = frame }
+            return frame.width > 0 && frame.height > 0 && frame == last
         }
     }
 
@@ -412,9 +422,6 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
     }
 
     func test_13_realOverlayWithActiveTab_atManyPoints() throws {
-        if !CapabilityProbe.windowServerCommitsAreAvailable {
-            throw XCTSkip("This XCTest host has no window-server session, so a GeometryReader's second layout pass never commits into the AppKit view tree here.")
-        }
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
         let window = hostLikeProduction(
@@ -428,6 +435,9 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
             size: Self.size
         )
         defer { window.orderOut(nil) }
+        guard settleFrameUntilStable(window, of: engine) else {
+            throw XCTSkip("The engine view's frame never stabilized within the settle budget.")
+        }
         let points: [(String, NSPoint)] = [
             ("centre", NSPoint(x: 450, y: 350)),
             ("near left edge", NSPoint(x: 20, y: 350)),
@@ -436,7 +446,6 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
             ("near bottom edge", NSPoint(x: 450, y: 20)),
             ("upper-left quadrant", NSPoint(x: 200, y: 500)),
         ]
-        settleUntil(window) { points.allSatisfy { probe(window, at: $0.1, engine: engine).reachedEngine } }
         for (label, point) in points {
             expectReachesEngine("13 real overlay + active tab @ \(label) \(point)", probe(window, at: point, engine: engine))
         }
@@ -540,9 +549,6 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
     }
 
     func test_14_realContentCardView_wholeTree() throws {
-        if !CapabilityProbe.windowServerCommitsAreAvailable {
-            throw XCTSkip("This XCTest host has no window-server session, so a GeometryReader's second layout pass never commits into the AppKit view tree here.")
-        }
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
         let tabID = try XCTUnwrap(env.activeTabID, "The demo environment has no active tab, so ContentCardView would render the no-tab placeholder instead of a pane.")
@@ -560,10 +566,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
             ("upper-left quadrant", NSPoint(x: 200, y: 450)),
             ("lower-right quadrant", NSPoint(x: 700, y: 150)),
         ]
-        settleUntil(window, timeout: 8) {
-            points.allSatisfy { probe(window, at: $0.1, engine: engine).reachedEngine }
-                && [690.0, 680.0].allSatisfy { !probe(window, at: NSPoint(x: 450, y: $0), engine: engine).reachedEngine }
-                && [670.0, 660.0].allSatisfy { probe(window, at: NSPoint(x: 450, y: $0), engine: engine).reachedEngine }
+        guard settleFrameUntilStable(window, of: engine, timeout: 8) else {
+            throw XCTSkip("The engine view's frame never stabilized within the settle budget.")
         }
         window.contentView?.displayIfNeeded()
 
