@@ -64,7 +64,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
     }
 
     private func hostLikeProduction<V: View>(_ content: V, size: CGSize) -> NSWindow {
-        let window = NSWindow(
+        let window = UnconstrainedTestWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -101,7 +101,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
     }
 
     private func hostNoteIdentityDirectly(noteID: UUID, size: CGSize) -> (window: NSWindow, host: NSHostingView<NoteIdentityHost>) {
-        let window = NSWindow(
+        let window = UnconstrainedTestWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,

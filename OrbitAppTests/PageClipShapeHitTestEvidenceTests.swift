@@ -41,7 +41,7 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
     }
 
     private func hostLikeProduction<V: View>(_ content: V, size: CGSize) -> NSWindow {
-        let window = NSWindow(
+        let window = UnconstrainedTestWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,

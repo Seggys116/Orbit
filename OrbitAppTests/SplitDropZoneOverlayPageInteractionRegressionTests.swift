@@ -81,7 +81,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
     // MARK: - Harness (mirrors `OrbitWindowController.installContentView(window:)`)
 
     private func hostLikeProduction<V: View>(_ content: V, size: CGSize) -> NSWindow {
-        let window = NSWindow(
+        let window = UnconstrainedTestWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
