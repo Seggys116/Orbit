@@ -9,6 +9,16 @@ import XCTest
 @MainActor
 final class OrbitContextMenuVisualTests: XCTestCase {
 
+    // ImageRenderer paints a placeholder for OrbitTooltipBacking; this is the flag that skips it.
+    private func renderFlagged<V: View>(
+        _ view: V,
+        size: CGSize,
+        appearance: NSAppearance.Name = .darkAqua,
+        scale: CGFloat = 2.0
+    ) -> RenderedImage {
+        render(view.environment(\.orbitScreenshotModeDragDisabled, true), size: size, appearance: appearance, scale: scale)
+    }
+
     private static let canvasSize = CGSize(width: 400, height: 400)
 
     private static let appearances: [NSAppearance.Name] = [.aqua, .darkAqua]
@@ -21,7 +31,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
     /// through, so an expectation is never a hand-converted colour-space guess.
     private func renderedSwatch<V: View>(_ view: V, appearance: NSAppearance.Name) -> RGBA {
         let size = CGSize(width: 40, height: 40)
-        return render(view.frame(width: size.width, height: size.height), size: size, appearance: appearance)
+        return renderFlagged(view.frame(width: size.width, height: size.height), size: size, appearance: appearance)
             .averageColor(in: CGRect(x: 10, y: 10, width: 20, height: 20))
     }
 
@@ -53,7 +63,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
                 .divider(),
                 .item(OrbitContextMenuItem(title: "Reload", systemImage: "arrow.clockwise") {}),
             ]
-            let rendered = render(
+            let rendered = renderFlagged(
                 OrbitContextMenuView(entries: entries, onSelect: {}), size: Self.canvasSize, appearance: appearance
             )
             XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
@@ -85,14 +95,14 @@ final class OrbitContextMenuVisualTests: XCTestCase {
 
             let selection = OrbitMenuSelectionModel(entries: rightClick)
             selection.selectedItemID = rightClick.first(titled: "Copy Link")?.id
-            let contextRendered = render(
+            let contextRendered = renderFlagged(
                 OrbitContextMenuView(entries: rightClick, onSelect: {}, selection: selection),
                 size: CGSize(width: 300, height: 360), appearance: appearance
             )
             XCTAssertNotNil(contextRendered.boundingBoxOfContent(), "right-click menu, \(suffix)")
             contextRendered.writeDiagnosticPNG(named: "OrbitContextMenu-rightclick-\(suffix)")
 
-            let plusRendered = render(
+            let plusRendered = renderFlagged(
                 OrbitContextMenuView(
                     entries: plusMenu, onSelect: {},
                     arrow: OrbitMenuArrow(edge: .bottom, offset: OrbitMetrics.contextMenuWidth / 2)
@@ -108,7 +118,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
 
     func test_container_isDrawnInOrbitsOwnMenuSurfaceColour_lightAndDark() {
         for appearance in Self.appearances {
-            let rendered = render(
+            let rendered = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
@@ -125,7 +135,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
     }
 
     func test_container_paintsNothingOutsideItsOwnRoundedRect() {
-        let rendered = render(
+        let rendered = renderFlagged(
             OrbitContextMenuView(entries: singleItemEntries(), onSelect: {}),
             size: Self.canvasSize, appearance: .darkAqua
         )
@@ -140,7 +150,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
     // MARK: - Width tracks OrbitMetrics.contextMenuWidth, the tokens contract
 
     func test_menu_rendersAtTheDeclaredContextMenuWidth() {
-        let rendered = render(
+        let rendered = renderFlagged(
             OrbitContextMenuView(entries: singleItemEntries(), onSelect: {}),
             size: Self.canvasSize, appearance: .darkAqua
         )
@@ -155,7 +165,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
 
     func test_rightClickMenu_drawsNoAnchorArrow_whileAnAnchoredMenuDoes() {
         for appearance in Self.appearances {
-            let plain = render(
+            let plain = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
@@ -165,7 +175,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
                 "The right-click menu is exactly its rows plus its own padding -- an anchor arrow would make it taller (appearance \(appearance.rawValue))."
             )
 
-            let beaked = render(
+            let beaked = renderFlagged(
                 OrbitContextMenuView(
                     entries: singleItemEntries(), onSelect: {},
                     arrow: OrbitMenuArrow(edge: .bottom, offset: OrbitMetrics.contextMenuWidth / 2)
@@ -213,7 +223,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
         let beakHeight = Int(OrbitMetrics.contextMenuArrowHeight)
 
         for appearance in Self.appearances {
-            let rendered = render(
+            let rendered = renderFlagged(
                 OrbitContextMenuView(
                     entries: singleItemEntries(), onSelect: {},
                     arrow: OrbitMenuArrow(edge: .bottom, offset: OrbitMetrics.contextMenuWidth / 2)
@@ -247,7 +257,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
         let entries = singleItemEntries(title: "Highlighted")
         let selection = OrbitMenuSelectionModel(entries: entries)
         selection.selectedItemID = entries.flattenedItems.first?.id
-        return render(
+        return renderFlagged(
             OrbitContextMenuView(entries: entries, onSelect: {}, selection: selection),
             size: Self.canvasSize, appearance: appearance
         )
@@ -375,7 +385,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
     // MARK: - The container's corners are generous, not a tight system radius
 
     func test_container_hasAGenerousCornerRadius() {
-        let rendered = render(
+        let rendered = renderFlagged(
             OrbitContextMenuView(entries: singleItemEntries(), onSelect: {}),
             size: Self.canvasSize, appearance: .darkAqua
         )
@@ -412,9 +422,9 @@ final class OrbitContextMenuVisualTests: XCTestCase {
             .item(OrbitContextMenuItem(title: "Two") {}),
         ]
 
-        let shortHeight = render(OrbitContextMenuView(entries: withoutDivider, onSelect: {}), size: Self.canvasSize, appearance: .darkAqua)
+        let shortHeight = renderFlagged(OrbitContextMenuView(entries: withoutDivider, onSelect: {}), size: Self.canvasSize, appearance: .darkAqua)
             .boundingBoxOfContent()?.height ?? 0
-        let tallHeight = render(OrbitContextMenuView(entries: withDivider, onSelect: {}), size: Self.canvasSize, appearance: .darkAqua)
+        let tallHeight = renderFlagged(OrbitContextMenuView(entries: withDivider, onSelect: {}), size: Self.canvasSize, appearance: .darkAqua)
             .boundingBoxOfContent()?.height ?? 0
 
         XCTAssertGreaterThan(
@@ -436,7 +446,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
         let inset = OrbitMetrics.contextMenuRowHorizontalInset + OrbitMetrics.contextMenuRowHorizontalPadding
 
         for appearance in Self.appearances {
-            let rendered = render(OrbitContextMenuView(entries: entries, onSelect: {}), size: Self.canvasSize, appearance: appearance)
+            let rendered = renderFlagged(OrbitContextMenuView(entries: entries, onSelect: {}), size: Self.canvasSize, appearance: appearance)
             let surface = surface(for: appearance)
 
             let line = rendered.averageColor(
@@ -462,11 +472,11 @@ final class OrbitContextMenuVisualTests: XCTestCase {
         let trailingRegion = CGRect(x: OrbitMetrics.contextMenuWidth - 50, y: 10, width: 32, height: 18)
 
         for appearance in Self.appearances {
-            let without = render(
+            let without = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(title: "New Tab"), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
-            let with = render(
+            let with = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(title: "New Tab", shortcut: "⌘T"), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
@@ -484,7 +494,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
 
     func test_shortcutHint_readsDimmerThanTheTitleItSitsBeside() {
         for appearance in Self.appearances {
-            let rendered = render(
+            let rendered = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(title: "New Tab", shortcut: "⌘T"), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
@@ -511,11 +521,11 @@ final class OrbitContextMenuVisualTests: XCTestCase {
 
     func test_destructiveItem_readsVisiblyDifferentFromANormalItem() {
         for appearance in Self.appearances {
-            let normal = render(
+            let normal = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(title: "Delete", isDestructive: false), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
-            let destructive = render(
+            let destructive = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(title: "Delete", isDestructive: true), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
@@ -530,7 +540,7 @@ final class OrbitContextMenuVisualTests: XCTestCase {
 
     func test_destructiveItem_isDrawnInRed_notMerelyDifferent() {
         for appearance in Self.appearances {
-            let rendered = render(
+            let rendered = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(title: "Delete", isDestructive: true), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
@@ -547,11 +557,11 @@ final class OrbitContextMenuVisualTests: XCTestCase {
 
     func test_disabledItem_readsVisiblyDimmerThanAnEnabledItem() {
         for appearance in Self.appearances {
-            let enabled = render(
+            let enabled = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(title: "Inspect Element", isEnabled: true), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
-            let disabled = render(
+            let disabled = renderFlagged(
                 OrbitContextMenuView(entries: singleItemEntries(title: "Inspect Element", isEnabled: false), onSelect: {}),
                 size: Self.canvasSize, appearance: appearance
             )
