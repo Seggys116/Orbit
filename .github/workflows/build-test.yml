@@ -232,7 +232,10 @@ jobs:
           set -o pipefail
           # Generated from the '// ORBIT-HOSTED-RUNNER: CANNOT-RUN' declarations in the
           # sources, so the excluded set lives next to the tests rather than in this file.
-          mapfile -t SKIP_ARGS < <(Scripts/test-verdict excluded --target OrbitTests --target OrbitAppTests)
+          # while-read, not mapfile: the runner's /bin/bash is 3.2 and has no mapfile.
+          SKIP_ARGS=()
+          while IFS= read -r arg; do SKIP_ARGS+=("$arg"); done \
+            < <(Scripts/test-verdict excluded --target OrbitTests --target OrbitAppTests)
           printf 'skipping %d test(s) declared unrunnable on a hosted runner\n' "${#SKIP_ARGS[@]}"
 
           xcodebuild test \
