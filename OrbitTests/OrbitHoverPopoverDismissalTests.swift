@@ -10,8 +10,11 @@ final class OrbitHoverPopoverDismissalTests: XCTestCase {
 
     private var window: NSWindow!
 
+
+
     override func setUp() {
         super.setUp()
+        orbitInstallDiagHandler()
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
             styleMask: [.titled, .closable, .resizable],
@@ -19,6 +22,7 @@ final class OrbitHoverPopoverDismissalTests: XCTestCase {
             defer: false
         )
         window.orderFront(nil)
+        orbitDiag("window visible=\(window.isVisible) screen=\(window.screen != nil) screens=\(NSScreen.screens.count) main=\(NSScreen.main != nil) size=\(window.contentView?.bounds.size ?? .zero)")
     }
 
     override func tearDown() {
@@ -184,5 +188,24 @@ final class OrbitHoverPopoverDismissalTests: XCTestCase {
         XCTAssertEqual(visiblePopoverWindowCount, before + 1, "A click inside the popover's own window must never be treated as an outside click.")
         XCTAssertTrue(presented)
         coordinator.dismiss()
+    }
+}
+
+// ORBIT-DIAG temporary, remove once the CI crash reason is captured.
+func orbitDiag(_ line: String) {
+    let path = "/tmp/orbit-diag.txt"
+    if let handle = FileHandle(forWritingAtPath: path) {
+        handle.seekToEndOfFile()
+        handle.write(Data((line + "\n").utf8))
+        try? handle.close()
+    } else {
+        try? (line + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+    }
+}
+
+func orbitInstallDiagHandler() {
+    NSSetUncaughtExceptionHandler { exception in
+        orbitDiag("uncaught \(exception.name.rawValue): \(exception.reason ?? "no reason")")
+        orbitDiag("stack " + exception.callStackSymbols.prefix(24).joined(separator: " | "))
     }
 }
