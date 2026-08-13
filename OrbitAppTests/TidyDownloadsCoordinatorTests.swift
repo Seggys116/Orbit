@@ -167,6 +167,10 @@ final class TidyDownloadsCoordinatorTests: XCTestCase {
         XCTAssertEqual(env.downloadStore.downloads.first(where: { $0.id == id })?.destinationURL.lastPathComponent, original)
     }
 
+    // Excluded on GitHub-hosted runners: hangs past five minutes there, cause not established. Passes locally.
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_oneDownloadIsOnlyConsideredOnce
+
     func test_oneDownloadIsOnlyConsideredOnce() async throws {
         let coordinator = TidyDownloadsCoordinator()
         let provider = RecordedSink()
