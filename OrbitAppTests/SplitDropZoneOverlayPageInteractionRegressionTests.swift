@@ -8,6 +8,12 @@ import XCTest
 @MainActor
 final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
 
+    // The first test to build the real card tree pays a large one-off cost on a slow runner.
+    override func setUp() {
+        super.setUp()
+        executionTimeAllowance = 280
+    }
+
     private final class EngineStandInView: NSView {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     }

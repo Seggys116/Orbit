@@ -255,10 +255,13 @@ final class ExtensionInstallerTests: XCTestCase {
         guard case .installed = result else {
             return XCTFail("Expected .installed, got \(result)")
         }
-        XCTAssertGreaterThan(
-            ticker.count, 5,
-            "the main actor ticked only \(ticker.count) time(s) in \(elapsed)s while a 1,500-entry install ran — "
-                + "it was blocked instead of staying free for the UI"
+        // Scaled to elapsed time, not a fixed count: a blocked actor ticks ~0 however long the
+        // install takes, while a fast install legitimately affords few ticks.
+        let requiredTicks = max(2, Int(elapsed / 0.05))
+        XCTAssertGreaterThanOrEqual(
+            ticker.count, requiredTicks,
+            "the main actor ticked only \(ticker.count) time(s) in \(elapsed)s while a 1,500-entry install ran, "
+                + "expected at least \(requiredTicks) — it was blocked instead of staying free for the UI"
         )
     }
 
