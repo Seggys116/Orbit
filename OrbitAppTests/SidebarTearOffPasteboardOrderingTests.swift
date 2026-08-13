@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 @testable import Orbit
 
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class SidebarTearOffPasteboardOrderingTests: XCTestCase {
 
     private final class InertDraggingSource: NSObject, NSDraggingSource {
@@ -11,6 +12,7 @@ final class SidebarTearOffPasteboardOrderingTests: XCTestCase {
     }
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_beginDraggingSession_bumpsChangeCount
     func test_beginDraggingSession_bumpsChangeCount() {
         let pasteboard = NSPasteboard(name: .drag)
         let beforeAnything = pasteboard.changeCount

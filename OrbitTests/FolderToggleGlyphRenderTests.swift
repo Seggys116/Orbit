@@ -3,6 +3,7 @@ import SwiftUI
 import AppKit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class FolderToggleGlyphRenderTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -16,6 +17,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
     }
 
     // MARK: - Requirement 1: closed vs. open produce measurably different ink
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_closedAndOpenGlyphShapes_produceMeasurablyDifferentInkAtProductionSize
 
     func test_closedAndOpenGlyphShapes_produceMeasurablyDifferentInkAtProductionSize() {
         let closed = render(
@@ -46,6 +49,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_folderToggleGlyph_closedAndOpenStates_produceMeasurablyDifferentInk
+
     func test_folderToggleGlyph_closedAndOpenStates_produceMeasurablyDifferentInk() {
         let closed = render(
             FolderToggleGlyph(isOpen: false).foregroundStyle(.black),
@@ -75,6 +80,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
 
     // MARK: - Requirement 2: both shapes draw a real folder-like silhouette
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_closedGlyphShape_drawsNonEmptyInkMatchingItsDocumentedBoundingBox
+
     func test_closedGlyphShape_drawsNonEmptyInkMatchingItsDocumentedBoundingBox() {
         let rendered = render(
             FolderClosedGlyphShape().fill(.black),
@@ -98,6 +105,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_openGlyphShape_drawsNonEmptyInkMatchingItsDocumentedBoundingBox
+
     func test_openGlyphShape_drawsNonEmptyInkMatchingItsDocumentedBoundingBox() {
         let rendered = render(
             FolderOpenGlyphShape().fill(.black),
@@ -120,6 +129,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
             rendered: rendered
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_closedAndOpenGlyphShapes_shareVerticalCentreAndHaveNearIdenticalWidth
 
     func test_closedAndOpenGlyphShapes_shareVerticalCentreAndHaveNearIdenticalWidth() {
         let closed = render(
@@ -167,6 +178,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
 
     // MARK: - Requirement 3: a custom icon is never overridden by the new default glyph
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_control_pinnedFolderRowView_withNoCustomIcon_rendersDifferentInkAcrossExpandedStates
+
     func test_control_pinnedFolderRowView_withNoCustomIcon_rendersDifferentInkAcrossExpandedStates() {
         let env = AppEnvironment()
         let theme = SpaceTheme()
@@ -199,6 +212,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
             "tests below meaningless."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinnedFolderRowView_withCustomEmojiIcon_rendersUnchangedAcrossExpandedStates
 
     func test_pinnedFolderRowView_withCustomEmojiIcon_rendersUnchangedAcrossExpandedStates() {
         let env = AppEnvironment()
@@ -246,6 +261,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
             "underneath it in one of the two states."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinnedFolderRowView_withCustomSFSymbolIcon_rendersUnchangedAcrossExpandedStates
 
     func test_pinnedFolderRowView_withCustomSFSymbolIcon_rendersUnchangedAcrossExpandedStates() {
         let env = AppEnvironment()
@@ -295,9 +312,13 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
 
     // MARK: - Requirement 4: FolderIconInput.resolve(typed:)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_emptyString_clearsToDefault
+
     func test_resolve_emptyString_clearsToDefault() {
         XCTAssertEqual(FolderIconInput.resolve(typed: ""), .clearToDefault)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_whitespaceOnlyString_clearsToDefault
 
     func test_resolve_whitespaceOnlyString_clearsToDefault() {
         XCTAssertEqual(
@@ -308,9 +329,13 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_singleEmoji_resolvesToEmojiCase
+
     func test_resolve_singleEmoji_resolvesToEmojiCase() {
         XCTAssertEqual(FolderIconInput.resolve(typed: "🔥"), .emoji("🔥"))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_emojiWithSurroundingWhitespace_isTrimmedBeforeClassification
 
     func test_resolve_emojiWithSurroundingWhitespace_isTrimmedBeforeClassification() {
         XCTAssertEqual(
@@ -321,13 +346,19 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_validSFSymbolName_resolvesToSymbolCase
+
     func test_resolve_validSFSymbolName_resolvesToSymbolCase() {
         XCTAssertEqual(FolderIconInput.resolve(typed: "tray.full"), .symbol("tray.full"))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_validSFSymbolNameWithSurroundingWhitespace_isTrimmed
+
     func test_resolve_validSFSymbolNameWithSurroundingWhitespace_isTrimmed() {
         XCTAssertEqual(FolderIconInput.resolve(typed: "  tray.full  "), .symbol("tray.full"))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_unrecognisedNonEmojiText_leavesIconUnchanged
 
     func test_resolve_unrecognisedNonEmojiText_leavesIconUnchanged() {
         XCTAssertEqual(
@@ -339,6 +370,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_lowRangeDingbatishScalar_isNotClassifiedAsEmoji
+
     func test_resolve_lowRangeDingbatishScalar_isNotClassifiedAsEmoji() {
         XCTAssertEqual(
             FolderIconInput.resolve(typed: "#"), .unchanged,
@@ -349,6 +382,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
     }
 
     // MARK: - Requirement 5: AppEnvironment.setFolderIcon reaches BrowserStore.setFolderIcon
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_browserStoreSetFolderIcon_setsIconAndPersistsIntoTheFolderTree
 
     func test_browserStoreSetFolderIcon_setsIconAndPersistsIntoTheFolderTree() {
         let scratchDirectory = FileManager.default.temporaryDirectory
@@ -365,6 +400,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
         XCTAssertEqual(afterSet?.icon, "🔥")
         XCTAssertEqual(afterSet?.iconIsEmoji, true)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_browserStoreSetFolderIcon_switchingFromEmojiToSFSymbol_updatesBothFields
 
     func test_browserStoreSetFolderIcon_switchingFromEmojiToSFSymbol_updatesBothFields() {
         let scratchDirectory = FileManager.default.temporaryDirectory
@@ -387,6 +424,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_browserStoreSetFolderIcon_clearingBackToNil_removesTheCustomIcon
+
     func test_browserStoreSetFolderIcon_clearingBackToNil_removesTheCustomIcon() {
         let scratchDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("OrbitTests-FolderIcon-\(UUID().uuidString)", isDirectory: true)
@@ -403,6 +442,8 @@ final class FolderToggleGlyphRenderTests: XCTestCase {
         XCTAssertNil(cleared?.icon, "Passing nil must clear the custom icon back to the default drawn glyph.")
         XCTAssertEqual(cleared?.iconIsEmoji, false)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_browserStoreSetFolderIcon_mutationIsVisibleThroughThePinnedTree
 
     func test_browserStoreSetFolderIcon_mutationIsVisibleThroughThePinnedTree() {
         let scratchDirectory = FileManager.default.temporaryDirectory

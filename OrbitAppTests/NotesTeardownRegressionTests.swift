@@ -5,6 +5,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class NotesTeardownRegressionTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -202,6 +203,8 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
     // MARK: - Render carryover (H1, structural half)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theRichTextNSTextViewSurvivesUnchangedAcrossASwitchToADifferentNoteTab
+
     func test_theRichTextNSTextViewSurvivesUnchangedAcrossASwitchToADifferentNoteTab() throws {
         let noteA = makeNote(title: "Note A — must stay closed", body: "Note A original body — must never be shown for Note B.")
         let noteB = makeNote(title: "Note B — the one being opened", body: "Note B original body — must survive being opened.")
@@ -252,6 +255,8 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theTitleFieldCorrectlyReloadsForASecondNoteTabDespiteReusingTheSameViewIdentity
+
     func test_theTitleFieldCorrectlyReloadsForASecondNoteTabDespiteReusingTheSameViewIdentity() {
         let noteA = makeNote(title: "Note A Title — must stay closed", body: "Note A body.")
         let noteB = makeNote(title: "Note B Title — the one being opened", body: "Note B body.")
@@ -285,6 +290,8 @@ final class NotesTeardownRegressionTests: XCTestCase {
     }
 
     // MARK: - Save corruption (H1, disk half)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_typingWhileNoteBsTabIsActive_revealsWhichNotesFileActuallyReceivesTheEdit
 
     func test_typingWhileNoteBsTabIsActive_revealsWhichNotesFileActuallyReceivesTheEdit() {
         let noteA = makeNote(title: "Note A — must stay closed", body: "Note A original body.")
@@ -346,6 +353,8 @@ final class NotesTeardownRegressionTests: XCTestCase {
     }
 
     // MARK: - Single-note pane switch (the user's report, verbatim, with no second note involved)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_singleNote_typedContentSurvivesSwitchingThePaneAwayToAWebTabAndBack
 
     func test_singleNote_typedContentSurvivesSwitchingThePaneAwayToAWebTabAndBack() throws {
         let note = makeNote(title: "Solo Note", body: "Original body.")
@@ -419,6 +428,8 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
     // MARK: - Retain cycle (F1)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theControllerNoLongerRetainsThisViewAfterATeardown_breakingTheF1RetainCycle
+
     func test_theControllerNoLongerRetainsThisViewAfterATeardown_breakingTheF1RetainCycle() {
         let note = makeNote(
             title: "Leak Check",
@@ -470,6 +481,8 @@ final class NotesTeardownRegressionTests: XCTestCase {
     }
 
     // MARK: - Quit-time flush registration (F2)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_flushRegistryRegistersOnAppearAndDeregistersOnDisappear_andAQuitTimeFlushReachesDisk
 
     func test_flushRegistryRegistersOnAppearAndDeregistersOnDisappear_andAQuitTimeFlushReachesDisk() throws {
         let note = makeNote(title: "Quit Flush Check", body: "Original body.")
@@ -541,6 +554,8 @@ final class NotesTeardownRegressionTests: XCTestCase {
     }
 
     // MARK: - Opening a note must not itself edit it (F5)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_mountingANoteEditorDoesNotRewriteItOrChangeUpdatedAt
 
     func test_mountingANoteEditorDoesNotRewriteItOrChangeUpdatedAt() {
         let note = makeNote(

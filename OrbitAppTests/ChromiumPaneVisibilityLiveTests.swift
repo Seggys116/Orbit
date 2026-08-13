@@ -7,6 +7,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ChromiumPaneVisibilityLiveTests: XCTestCase {
 
     private static let pageHTML = "<html><body style=\"margin:0;background:#112233\"></body></html>"
@@ -85,6 +86,7 @@ final class ChromiumPaneVisibilityLiveTests: XCTestCase {
 
     /// Carries its own negative control: `wentDark` proves AppKit really does
     /// take the frame away, so `cameBack` proves the declaration works, not that nothing went wrong.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAdoptionIntoAWindowlessContainerDarkensTheTabUntilThePaneDeclaresItVisible
     func testAdoptionIntoAWindowlessContainerDarkensTheTabUntilThePaneDeclaresItVisible() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
 
@@ -132,6 +134,7 @@ final class ChromiumPaneVisibilityLiveTests: XCTestCase {
 
     /// The defect is intermittent in the app since it depends on where the
     /// engine view happens to be when AppKit decides; repeating it makes the ordering happen every time.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTwentyConsecutiveWindowlessAdoptionsAllKeepTheTabRendering
     func testTwentyConsecutiveWindowlessAdoptionsAllKeepTheTabRendering() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
 

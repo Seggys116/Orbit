@@ -10,6 +10,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class PageLinkNavigationLiveTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -255,6 +256,8 @@ final class PageLinkNavigationLiveTests: XCTestCase {
 
     // MARK: - 1. A plain same-tab link, clicked for real
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testARealClickOnAPlainLinkReachesTheEngineAndFollowsIt
+
     func testARealClickOnAPlainLinkReachesTheEngineAndFollowsIt() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")
         try LiveChromiumEngineHost.runLive(timeout: 90) {
@@ -301,6 +304,8 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     }
 
     // MARK: - 2. The route with nothing built yet: OpenURLFromTab
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testACmdClickAsksSwiftForANewBackgroundTabInsteadOfDoingNothing
 
     func testACmdClickAsksSwiftForANewBackgroundTabInsteadOfDoingNothing() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")
@@ -357,6 +362,8 @@ final class PageLinkNavigationLiveTests: XCTestCase {
 
     // MARK: - 3. The route the engine already built: target="_blank"
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testATargetBlankLinkOpensARealSecondTabAtTheLinkedURL
+
     func testATargetBlankLinkOpensARealSecondTabAtTheLinkedURL() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")
         try LiveChromiumEngineHost.runLive(timeout: 90) {
@@ -369,6 +376,8 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     }
 
     // MARK: - 4. window.open()
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testWindowOpenOpensARealSecondTabAtTheRequestedURL
 
     func testWindowOpenOpensARealSecondTabAtTheRequestedURL() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")
@@ -429,6 +438,8 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     }
 
     // MARK: - 5. The C ABI both routes answer through
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTheLoadedFrameworkExportsTheNewContentCallback
 
     func testTheLoadedFrameworkExportsTheNewContentCallback() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")

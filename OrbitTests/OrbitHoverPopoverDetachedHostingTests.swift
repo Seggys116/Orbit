@@ -3,6 +3,7 @@ import SwiftUI
 import AppKit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class OrbitHoverPopoverDetachedHostingTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -90,6 +91,7 @@ final class OrbitHoverPopoverDetachedHostingTests: XCTestCase {
 
     /// On the pre-fix source this terminates the whole `xctest` process with
     /// "Fatal error: No Observable object of type AppEnvironment found."
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_folderHoverPreview_presentedThroughARealPopover_rendersInsteadOfTrapping
     func test_folderHoverPreview_presentedThroughARealPopover_rendersInsteadOfTrapping() {
         let env = makeEnvironment()
         let state = makeFolderPreviewState()
@@ -111,6 +113,8 @@ final class OrbitHoverPopoverDetachedHostingTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tabHoverPreview_presentedThroughARealPopover_rendersInsteadOfTrapping
+
     func test_tabHoverPreview_presentedThroughARealPopover_rendersInsteadOfTrapping() {
         let env = makeEnvironment()
         let tab = Tab(spaceID: env.state.spaces[0].id, url: URL(string: "https://www.figma.com")!, title: "Q4 Roadmap")
@@ -128,6 +132,8 @@ final class OrbitHoverPopoverDetachedHostingTests: XCTestCase {
         }
         XCTAssertTrue(drewAnything(contentView), "The tab hover preview presented but drew nothing.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_recentPagesPreview_presentedThroughARealPopover_rendersInsteadOfTrapping
 
     func test_recentPagesPreview_presentedThroughARealPopover_rendersInsteadOfTrapping() {
         let env = makeEnvironment()
@@ -163,6 +169,8 @@ final class OrbitHoverPopoverDetachedHostingTests: XCTestCase {
 
     // MARK: - Requirement 2: the mechanism, not just the three instances
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hostedContent_carriesThePresentingTreesOwnAppEnvironmentIntoTheDetachedTree
+
     func test_hostedContent_carriesThePresentingTreesOwnAppEnvironmentIntoTheDetachedTree() {
         let env = makeEnvironment(spaceCount: 4)
 
@@ -182,6 +190,8 @@ final class OrbitHoverPopoverDetachedHostingTests: XCTestCase {
             "enough — the preview has to see the app's real state, or it will render the wrong content."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hostedContent_carriesOrdinaryEnvironmentValuesToo_notJustObservableObjects
 
     func test_hostedContent_carriesOrdinaryEnvironmentValuesToo_notJustObservableObjects() {
         let env = makeEnvironment()

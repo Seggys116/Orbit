@@ -8,6 +8,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class DevToolsDockingLiveTests: XCTestCase {
 
     private static let pageHTML = "<html><body style=\"margin:0;background:#112233\">orbit-dock-test</body></html>"
@@ -171,6 +172,8 @@ final class DevToolsDockingLiveTests: XCTestCase {
 
     // MARK: - Docked mode really hosts the inspector inside the window
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dockedInspectorLivesInsideTheBrowserWindowAndShrinksThePage
+
     func test_dockedInspectorLivesInsideTheBrowserWindowAndShrinksThePage() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         try LiveChromiumEngineHost.runLive(timeout: 180) {
@@ -241,6 +244,8 @@ final class DevToolsDockingLiveTests: XCTestCase {
             page.closeDeveloperTools()
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dockingToTheBottomAndLeftMovesThePageRatherThanRebuildingTheInspector
 
     func test_dockingToTheBottomAndLeftMovesThePageRatherThanRebuildingTheInspector() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
@@ -313,6 +318,8 @@ final class DevToolsDockingLiveTests: XCTestCase {
     }
 
     // MARK: - Both modes, both ways
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_undockingMovesTheInspectorToItsOwnWindowAndRedockingBringsItBack
 
     func test_undockingMovesTheInspectorToItsOwnWindowAndRedockingBringsItBack() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
@@ -391,6 +398,8 @@ final class DevToolsDockingLiveTests: XCTestCase {
     }
 
     // MARK: - The choice is remembered
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dockSideSurvivesClosingAndReopeningTheInspectorAndIsWrittenToTheProfile
 
     func test_dockSideSurvivesClosingAndReopeningTheInspectorAndIsWrittenToTheProfile() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
@@ -477,6 +486,8 @@ final class DevToolsDockingLiveTests: XCTestCase {
 
     // MARK: - Teardown
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_closingADockedInspectorGivesThePaneBackAndLeavesNoFrontendBehind
+
     func test_closingADockedInspectorGivesThePaneBackAndLeavesNoFrontendBehind() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         try LiveChromiumEngineHost.runLive(timeout: 180) {
@@ -530,6 +541,8 @@ final class DevToolsDockingLiveTests: XCTestCase {
 
     // MARK: - Geometry the docked pane derives, without an engine
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolvedPageRectMatchesChromesOwnResizingStrategy
+
     func test_resolvedPageRectMatchesChromesOwnResizingStrategy() {
         let container = CGSize(width: 1000, height: 700)
 
@@ -552,6 +565,8 @@ final class DevToolsDockingLiveTests: XCTestCase {
             CGRect(x: 445, y: 0, width: 555, height: 700)
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_inferredSideReadsTheDockSideBackOutOfTheRectangle
 
     func test_inferredSideReadsTheDockSideBackOutOfTheRectangle() {
         let container = CGSize(width: 1000, height: 700)

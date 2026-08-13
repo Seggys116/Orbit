@@ -3,17 +3,24 @@ import AppKit
 import SwiftUI
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class PinnedFolderRowClickBehaviorTests: XCTestCase {
 
     // MARK: - Pure arbitration (PinnedFolderNameLabelClick.resolve)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_singleClick_schedulesDeferredToggle
 
     func test_resolve_singleClick_schedulesDeferredToggle() {
         XCTAssertEqual(PinnedFolderNameLabelClick.resolve(clickCount: 1), .scheduleDeferredToggle)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_doubleClick_cancelsPendingToggleAndBeginsRename
+
     func test_resolve_doubleClick_cancelsPendingToggleAndBeginsRename() {
         XCTAssertEqual(PinnedFolderNameLabelClick.resolve(clickCount: 2), .cancelPendingToggleAndBeginRename)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolve_tripleClickAndBeyond_stillResolvesToCancelAndRename
 
     func test_resolve_tripleClickAndBeyond_stillResolvesToCancelAndRename() {
         XCTAssertEqual(PinnedFolderNameLabelClick.resolve(clickCount: 3), .cancelPendingToggleAndBeginRename)
@@ -36,6 +43,8 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         )!
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_clickCatcher_withClickCountActionSet_deliversRealClickCountsAndNeverRunsAction
+
     func test_clickCatcher_withClickCountActionSet_deliversRealClickCountsAndNeverRunsAction() {
         let view = OrbitActionButtonClickCatchingView(frame: NSRect(x: 0, y: 0, width: 40, height: 20))
         var delivered: [Int] = []
@@ -49,6 +58,8 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         XCTAssertEqual(delivered, [1, 2], "clickCountAction must be called with the real NSEvent.clickCount for each mouseDown, in order.")
         XCTAssertFalse(actionCalled, "When clickCountAction is set, the plain action must never also run.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_clickCatcher_withNoClickCountAction_stillRunsThePlainActionOnEveryMouseDown
 
     func test_clickCatcher_withNoClickCountAction_stillRunsThePlainActionOnEveryMouseDown() {
         let view = OrbitActionButtonClickCatchingView(frame: NSRect(x: 0, y: 0, width: 40, height: 20))
@@ -122,6 +133,8 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         return nil
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_liveRow_exposesExactlyFourClickCatchersInLeadingToTrailingOrder
+
     func test_liveRow_exposesExactlyFourClickCatchersInLeadingToTrailingOrder() {
         let folder = Folder(name: "Reading", isExpanded: false)
         let (env, spaceID) = makeSpace(pinned: [.folder(folder)])
@@ -140,6 +153,8 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_liveRow_clickCatchersLeaveARealUncoveredMarginAboveAndBelowForDragging
 
     func test_liveRow_clickCatchersLeaveARealUncoveredMarginAboveAndBelowForDragging() {
         let folder = Folder(name: "Reading", isExpanded: false)
@@ -167,6 +182,8 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_singleClickOnNameLabel_toggleCollapsedFolderToExpanded
+
     func test_singleClickOnNameLabel_toggleCollapsedFolderToExpanded() async throws {
         let folder = Folder(name: "Reading", isExpanded: false)
         let (env, spaceID) = makeSpace(pinned: [.folder(folder)])
@@ -187,6 +204,8 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         XCTAssertTrue(env.recordedActions.contains("toggleFolderExpanded"), "The single click must have reached the real toggleFolderExpanded action.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_singleClickOnEmptySpace_togglesCollapsedFolderToExpandedImmediately
+
     func test_singleClickOnEmptySpace_togglesCollapsedFolderToExpandedImmediately() throws {
         let folder = Folder(name: "Reading", isExpanded: false)
         let (env, spaceID) = makeSpace(pinned: [.folder(folder)])
@@ -201,6 +220,8 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
             "A single click on the empty space between the name and the trailing controls must collapse/expand the folder, immediately — this region previously had no handler of any kind."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_doubleClickOnNameLabel_neverTogglesTheFolder_evenAfterWaitingPastTheDoubleClickInterval
 
     func test_doubleClickOnNameLabel_neverTogglesTheFolder_evenAfterWaitingPastTheDoubleClickInterval() async throws {
         let folder = Folder(name: "Reading", isExpanded: false)
@@ -230,6 +251,8 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
             "A double click on the folder's name must never leave it in a different collapsed/expanded state than before either click — the CRITICAL requirement: no flip, not even transiently reverted."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_doubleClickOnNameLabel_beginsARealRenameTextField
 
     func test_doubleClickOnNameLabel_beginsARealRenameTextField() throws {
         let folder = Folder(name: "Reading", isExpanded: false)

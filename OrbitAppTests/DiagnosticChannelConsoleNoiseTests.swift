@@ -5,6 +5,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
 
     private var writtenPreferenceKeys: Set<String> = []
@@ -34,6 +35,8 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
 
     // MARK: - 1. The switching contract
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyChannelIsOffByDefault
+
     func test_everyChannelIsOffByDefault() {
         let channels = channelsNotForcedByEnvironment()
         XCTAssertFalse(
@@ -48,6 +51,8 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_documentedEnvironmentNamesAndPreferenceKeysAreStable
 
     func test_documentedEnvironmentNamesAndPreferenceKeysAreStable() {
         let expected: [DiagnosticChannel: (String, String)] = [
@@ -70,6 +75,8 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_preferenceSwitchesOnOneChannelAndNoOther
+
     func test_preferenceSwitchesOnOneChannelAndNoOther() {
         guard let subject = channelsNotForcedByEnvironment().first(where: { $0 == .toolbarColour })
             ?? channelsNotForcedByEnvironment().first
@@ -89,6 +96,8 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
         XCTAssertFalse(subject.isEnabled, "\(subject.rawValue) stayed on after its preference was removed.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_masterPreferenceSwitchesEveryChannelOn
+
     func test_masterPreferenceSwitchesEveryChannelOn() {
         let channels = channelsNotForcedByEnvironment()
         guard !channels.isEmpty else { return XCTFail("No measurable channel in this environment.") }
@@ -101,6 +110,8 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
             XCTAssertFalse(channel.isEnabled, "\(channel.rawValue) stayed on after the OrbitLogUI master switch was removed.")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_legacyProbeTreeEnvironmentSpellingIsStillAccepted
 
     func test_legacyProbeTreeEnvironmentSpellingIsStillAccepted() {
         XCTAssertEqual(
@@ -116,6 +127,8 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
     }
 
     // MARK: - 2. The noisy path is actually wired to the gate
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_toolbarColourProbe_isSilentByDefaultAndSpeaksWhenAskedFor
 
     func test_toolbarColourProbe_isSilentByDefaultAndSpeaksWhenAskedFor() throws {
         #if DEBUG

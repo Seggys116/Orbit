@@ -3,6 +3,7 @@ import SwiftUI
 import AppKit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -28,6 +29,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
 
     // MARK: - Requirement 1: the resolvability test itself
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_orbitSymbolName_isResolvable_rejectsANameThatIsNotAnSFSymbol
+
     func test_orbitSymbolName_isResolvable_rejectsANameThatIsNotAnSFSymbol() {
         XCTAssertFalse(
             OrbitSymbolName.isResolvable(unresolvableSymbolName),
@@ -37,6 +40,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
             "silent-blank behaviour it pins down is a property of Image(systemName:), not of this one string."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_orbitSymbolName_isResolvable_acceptsRealSFSymbols
 
     func test_orbitSymbolName_isResolvable_acceptsRealSFSymbols() {
         for name in ["folder", "tray.full", "paperplane.fill", "airplane", "book.closed"] {
@@ -49,6 +54,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_orbitSymbolName_isResolvable_rejectsEmptyAndWhitespaceOnlyNames
+
     func test_orbitSymbolName_isResolvable_rejectsEmptyAndWhitespaceOnlyNames() {
         XCTAssertFalse(OrbitSymbolName.isResolvable(""))
         XCTAssertFalse(
@@ -58,6 +65,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_orbitSymbolName_isResolvable_isStableAcrossRepeatedCalls
+
     func test_orbitSymbolName_isResolvable_isStableAcrossRepeatedCalls() {
         for _ in 0..<3 {
             XCTAssertTrue(OrbitSymbolName.isResolvable("folder"))
@@ -66,6 +75,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
     }
 
     // MARK: - Requirement 2: the defect itself, in real rendered pixels
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinnedFolderRow_withUnresolvableSymbolIcon_stillDrawsInkInTheGlyphColumn
 
     func test_pinnedFolderRow_withUnresolvableSymbolIcon_stillDrawsInkInTheGlyphColumn() {
         for isExpanded in [false, true] {
@@ -81,6 +92,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinnedFolderRow_withUnresolvableSymbolIcon_rendersTheSameGlyphAsNoIconAtAll
 
     func test_pinnedFolderRow_withUnresolvableSymbolIcon_rendersTheSameGlyphAsNoIconAtAll() {
         for isExpanded in [false, true] {
@@ -98,6 +111,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
 
     // MARK: - Requirement 3: every configuration that already worked, still works
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinnedFolderRow_withNoCustomIcon_drawsInkInTheGlyphColumn_inBothExpandStates
+
     func test_pinnedFolderRow_withNoCustomIcon_drawsInkInTheGlyphColumn_inBothExpandStates() {
         for isExpanded in [false, true] {
             XCTAssertGreaterThan(
@@ -109,6 +124,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinnedFolderRow_withResolvableSymbolIcon_drawsInkInTheGlyphColumn
+
     func test_pinnedFolderRow_withResolvableSymbolIcon_drawsInkInTheGlyphColumn() {
         XCTAssertGreaterThan(
             glyphColumnInkCount(icon: "tray.full", iconIsEmoji: false, isExpanded: false), 0,
@@ -116,6 +133,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
             "bought by rejecting valid symbols."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinnedFolderRow_withEmojiIcon_drawsInkInTheGlyphColumn
 
     func test_pinnedFolderRow_withEmojiIcon_drawsInkInTheGlyphColumn() {
         XCTAssertGreaterThan(
@@ -126,6 +145,8 @@ final class FolderGlyphBlankSlotRegressionTests: XCTestCase {
     }
 
     // MARK: - Requirement 4: the fixture that shipped the bad name
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyNonEmojiIconNameInTheDemoFixture_resolvesToARealSFSymbol
 
     func test_everyNonEmojiIconNameInTheDemoFixture_resolvesToARealSFSymbol() {
         let state = OrbitState.demo

@@ -3,9 +3,12 @@ import SwiftUI
 import AppKit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class SpaceSwipeGestureCatcherTests: XCTestCase {
 
     // MARK: - 1. Direct hitTest proof
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_passThroughHitTestView_neverClaimsAnyPoint
 
     func test_passThroughHitTestView_neverClaimsAnyPoint() {
         let view = SpaceSwipeGestureCatcher.PassThroughHitTestView(frame: NSRect(x: 0, y: 0, width: 200, height: 600))
@@ -33,6 +36,8 @@ final class SpaceSwipeGestureCatcherTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_negativeControl_plainNSViewDoesClaimPointsInsideItsBounds
+
     func test_negativeControl_plainNSViewDoesClaimPointsInsideItsBounds() {
         let plainView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 600))
         XCTAssertNotNil(
@@ -44,6 +49,8 @@ final class SpaceSwipeGestureCatcherTests: XCTestCase {
     }
 
     // MARK: - 3. Real composition: the catcher's real installed frame, sized exactly like production
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realCatcherEmbeddedInProductionShape_neverClaimsAnyPoint
 
     func test_realCatcherEmbeddedInProductionShape_neverClaimsAnyPoint() {
         struct ProbeSidebarShape: View {

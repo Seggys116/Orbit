@@ -9,6 +9,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ChromiumPictureInPictureLiveTests: XCTestCase {
 
     private static func pageHTML(videoAttributes: String = "") -> String {
@@ -186,6 +187,8 @@ final class ChromiumPictureInPictureLiveTests: XCTestCase {
 
     // MARK: - Entering
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTogglingEntersRealPictureInPictureAndReportsItThroughMediaState
+
     func testTogglingEntersRealPictureInPictureAndReportsItThroughMediaState() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let outcome = try LiveChromiumEngineHost.runLive(timeout: 90) { () -> (
@@ -221,6 +224,8 @@ final class ChromiumPictureInPictureLiveTests: XCTestCase {
     }
 
     // MARK: - Leaving
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTogglingAgainLeavesPictureInPictureAndClearsMediaState
 
     func testTogglingAgainLeavesPictureInPictureAndClearsMediaState() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
@@ -258,6 +263,8 @@ final class ChromiumPictureInPictureLiveTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testPageInitiatedExitPictureInPictureIsReportedNatively
+
     func testPageInitiatedExitPictureInPictureIsReportedNatively() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let outcome = try LiveChromiumEngineHost.runLive(timeout: 90) { () -> (
@@ -294,6 +301,7 @@ final class ChromiumPictureInPictureLiveTests: XCTestCase {
 
     /// Refused twice over: the picker script skips any video carrying it,
     /// and requestPictureInPicture() would throw kDisablePictureInPicturePresent anyway.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testDisablePictureInPictureAttributeKeepsTheVideoOutOfPictureInPicture
     func testDisablePictureInPictureAttributeKeepsTheVideoOutOfPictureInPicture() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let outcome = try LiveChromiumEngineHost.runLive(timeout: 90) { () -> (
@@ -344,6 +352,8 @@ final class ChromiumPictureInPictureLiveTests: XCTestCase {
 
     // MARK: - No media at all
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTogglingOnAPageWithNoVideoIsAHarmlessNoOp
+
     func testTogglingOnAPageWithNoVideoIsAHarmlessNoOp() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let outcome = try LiveChromiumEngineHost.runLive(timeout: 90) { () -> (
@@ -388,6 +398,7 @@ final class ChromiumPictureInPictureLiveTests: XCTestCase {
 
     /// A real NSPanel this process owns, so it's in NSApp.windows.
     /// contentAspectRatio only updates once the real decoded natural size is known, so 96:64 proves the real fixture.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEnteringOpensARealFloatingPanelSizedToTheRealVideoAndClosesItOnExit
     func testEnteringOpensARealFloatingPanelSizedToTheRealVideoAndClosesItOnExit() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let outcome = try LiveChromiumEngineHost.runLive(timeout: 90) { () -> (
@@ -472,6 +483,8 @@ final class ChromiumPictureInPictureLiveTests: XCTestCase {
     }
 
     // MARK: - Teardown
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testNavigatingAwayWhileFloatingTearsPictureInPictureDownCleanly
 
     func testNavigatingAwayWhileFloatingTearsPictureInPictureDownCleanly() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")

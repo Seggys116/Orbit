@@ -5,6 +5,7 @@ import SwiftUI
 import XCTest
 @testable import Orbit
 
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class DropDestinationHitTestEvidenceTests: XCTestCase {
 
     private final class RecordingView: NSView {}
@@ -29,6 +30,7 @@ final class DropDestinationHitTestEvidenceTests: XCTestCase {
     // MARK: - 1. Baseline: no .dropDestination
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_baseline_noDropDestination_hitTestResolvesToTheRepresentableItself
     func test_baseline_noDropDestination_hitTestResolvesToTheRepresentableItself() {
         let recording = RecordingView()
         let size = CGSize(width: 120, height: 120)
@@ -49,6 +51,7 @@ final class DropDestinationHitTestEvidenceTests: XCTestCase {
     // MARK: - 2. Does a gesture-less .dropDestination change what hitTest resolves to?
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dropDestinationWithNoGesture_changesWhatHitTestResolvesTo
     func test_dropDestinationWithNoGesture_changesWhatHitTestResolvesTo() {
         let recording = RecordingView()
         let size = CGSize(width: 120, height: 120)
@@ -83,6 +86,7 @@ final class DropDestinationHitTestEvidenceTests: XCTestCase {
     // MARK: - 3. Does .allowsHitTesting(false) restore pass-through?
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_allowsHitTestingFalse_onDropDestination_restoresPassThroughToTheRepresentable
     func test_allowsHitTestingFalse_onDropDestination_restoresPassThroughToTheRepresentable() {
         let recording = RecordingView()
         let size = CGSize(width: 120, height: 120)
@@ -120,6 +124,7 @@ final class DropDestinationHitTestEvidenceTests: XCTestCase {
     // MARK: - 4. Does AppKit drag-destination registration survive allowsHitTesting(false)?
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_registeredDraggedTypes_withAndWithoutAllowsHitTestingFalse
     func test_registeredDraggedTypes_withAndWithoutAllowsHitTestingFalse() {
         func draggedTypesRegisteredSomewhere(allowsHitTesting: Bool) -> Bool {
             let recording = RecordingView()

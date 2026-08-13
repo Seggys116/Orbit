@@ -3,6 +3,7 @@ import SwiftUI
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class CommandBarLiveTypingTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -210,6 +211,8 @@ final class CommandBarLiveTypingTests: XCTestCase {
 
     // MARK: - The reported scenario
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_typingATermThatMatchesNothingAndPressingReturnSearchesForIt
+
     func test_typingATermThatMatchesNothingAndPressingReturnSearchesForIt() {
         guard recordVisit(url: URL(string: "https://www.figma.com/file/abc123/Q4-Roadmap")!, title: "Q4 Roadmap — Figma") else { return }
         guard recordVisit(url: URL(string: "https://mail.google.com/mail/u/0/")!, title: "Gmail") else { return }
@@ -234,6 +237,8 @@ final class CommandBarLiveTypingTests: XCTestCase {
             "Return must have committed the typed term, as a search or an address. Opened: \(opened.absoluteString)"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_fastTypingOverALargeHistoryStillCommitsWhatWasTyped
 
     func test_fastTypingOverALargeHistoryStillCommitsWhatWasTyped() {
         for index in 1...240 {
@@ -300,6 +305,8 @@ final class CommandBarLiveTypingTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_typingATermThatMatchesHistoryAndPressingReturnOpensThatPage
+
     func test_typingATermThatMatchesHistoryAndPressingReturnOpensThatPage() {
         let wikipedia = URL(string: "https://en.wikipedia.org/wiki/Orbital_mechanics")!
         guard recordVisit(url: URL(string: "https://www.figma.com/file/abc123/Q4-Roadmap")!, title: "Q4 Roadmap — Figma") else { return }
@@ -317,6 +324,8 @@ final class CommandBarLiveTypingTests: XCTestCase {
     }
 
     // MARK: - Appearing
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_thePanelDoesNotGrowIntoPlaceWhileItAppears
 
     func test_thePanelDoesNotGrowIntoPlaceWhileItAppears() {
         guard recordVisit(url: URL(string: "https://www.figma.com/file/abc123/Q4-Roadmap")!, title: "Q4 Roadmap — Figma") else { return }

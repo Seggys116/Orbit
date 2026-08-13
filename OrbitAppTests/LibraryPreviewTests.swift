@@ -3,6 +3,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class LibraryPreviewTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -27,6 +28,8 @@ final class LibraryPreviewTests: XCTestCase {
     }
 
     // MARK: - Downloads
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testCompletedDownloadResolvesToItsRealFileAndAMissingFileResolvesToNothing
 
     func testCompletedDownloadResolvesToItsRealFileAndAMissingFileResolvesToNothing() throws {
         let fileURL = scratchDirectory.appendingPathComponent("orbit-preview-fixture.txt")
@@ -68,6 +71,8 @@ final class LibraryPreviewTests: XCTestCase {
 
     // MARK: - Archived tabs
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testArchivedTabResolvesToALiveWebPreviewOfItsRealURL
+
     func testArchivedTabResolvesToALiveWebPreviewOfItsRealURL() throws {
         let spaceID = try XCTUnwrap(env.activeSpace?.id ?? env.spaces.first?.id, "demo environment has no space to open a tab in")
         let url = URL(string: "https://news.ycombinator.com/item?id=42")!
@@ -95,6 +100,8 @@ final class LibraryPreviewTests: XCTestCase {
 
     // MARK: - Notes
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testNoteResolvesToItsRealDecodedBody
+
     func testNoteResolvesToItsRealDecodedBody() throws {
         let text = "Orbit Library preview — the real note body, not a summary of it."
         let note = env.noteStore.createNote(title: "Preview fixture")
@@ -112,6 +119,8 @@ final class LibraryPreviewTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testNoteWithNoBodyResolvesToNothing
+
     func testNoteWithNoBodyResolvesToNothing() {
         let note = env.noteStore.createNote(title: "Empty fixture")
 
@@ -123,6 +132,8 @@ final class LibraryPreviewTests: XCTestCase {
     }
 
     // MARK: - Easels
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEaselResolvesToItsRealItems
 
     func testEaselResolvesToItsRealItems() throws {
         let easel = env.easelStore.createEasel(title: "Preview fixture")
@@ -141,6 +152,8 @@ final class LibraryPreviewTests: XCTestCase {
         XCTAssertEqual(Set(resolved.map(\.id)), Set(items.map(\.id)), "The previewed items must be the easel's own items.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEmptyEaselResolvesToNothing
+
     func testEmptyEaselResolvesToNothing() {
         let easel = env.easelStore.createEasel(title: "Empty fixture")
 
@@ -152,6 +165,8 @@ final class LibraryPreviewTests: XCTestCase {
     }
 
     // MARK: - Media
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testPlayingTabResolvesToItsRealMediaState
 
     func testPlayingTabResolvesToItsRealMediaState() throws {
         let spaceID = try XCTUnwrap(env.activeSpace?.id ?? env.spaces.first?.id)
@@ -177,6 +192,8 @@ final class LibraryPreviewTests: XCTestCase {
             "A tab that has stopped playing must no longer drive the Media preview."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTheMediaSectionListsAPausedTabAndDrawsNothingForATabWithNoMedia
 
     func testTheMediaSectionListsAPausedTabAndDrawsNothingForATabWithNoMedia() async throws {
         let spaceID = try XCTUnwrap(env.activeSpace?.id ?? env.spaces.first?.id)
@@ -208,6 +225,8 @@ final class LibraryPreviewTests: XCTestCase {
 
     // MARK: - Boosts
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testBoostHostResolvesToALiveWebPreviewOfThatHost
+
     func testBoostHostResolvesToALiveWebPreviewOfThatHost() {
         let boost = env.boostStore.createBoost(name: "Avatar Twitter", host: "twitter.com")
         XCTAssertEqual(boost.host, "twitter.com", "test precondition")
@@ -226,6 +245,8 @@ final class LibraryPreviewTests: XCTestCase {
     }
 
     // MARK: - Live web session lifecycle
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testLiveWebSessionOpensExactlyOneTabAndClosesThePreviousOne
 
     func testLiveWebSessionOpensExactlyOneTabAndClosesThePreviousOne() {
         var opened: [URL] = []
@@ -275,6 +296,8 @@ final class LibraryPreviewTests: XCTestCase {
 
     // MARK: - Which sections get a preview column
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testSpacesHasNoPreviewColumnAndEveryOtherSectionDoes
+
     func testSpacesHasNoPreviewColumnAndEveryOtherSectionDoes() {
         XCTAssertFalse(
             LibrarySection.spaces.supportsPreview,
@@ -291,6 +314,8 @@ final class LibraryPreviewTests: XCTestCase {
 
     // MARK: - Router
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testChangingSectionClearsTheSelection
+
     func testChangingSectionClearsTheSelection() {
         LibraryRouter.shared.selectedSection = .downloads
         let id = UUID()
@@ -304,6 +329,8 @@ final class LibraryPreviewTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testSelectingTheSameRowTwiceClearsTheSelection
+
     func testSelectingTheSameRowTwiceClearsTheSelection() {
         let id = UUID()
 
@@ -314,6 +341,8 @@ final class LibraryPreviewTests: XCTestCase {
         XCTAssertNil(LibraryRouter.shared.selection, "Clicking the already-selected row must clear the selection.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEverySelectionKnowsItsOwnSection
+
     func testEverySelectionKnowsItsOwnSection() {
         XCTAssertEqual(LibrarySelection.download(UUID()).section, .downloads)
         XCTAssertEqual(LibrarySelection.archivedTab(TabID()).section, .archivedTabs)
@@ -322,6 +351,8 @@ final class LibraryPreviewTests: XCTestCase {
         XCTAssertEqual(LibrarySelection.easel(UUID()).section, .easelsAndNotes)
         XCTAssertEqual(LibrarySelection.media(TabID()).section, .media)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testNoSelectionResolvesToNothing
 
     func testNoSelectionResolvesToNothing() {
         XCTAssertEqual(

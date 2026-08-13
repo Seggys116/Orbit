@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // One environment per test: AppEnvironment.demo is a factory, so evaluating it twice in a
@@ -46,12 +47,16 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // MARK: - ExtensionInstallStagePresenter: single source of truth for progress copy (zero coverage before this file)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_stagePresenter_downloading_showsByteProgressWhenTotalIsKnown
+
     func test_stagePresenter_downloading_showsByteProgressWhenTotalIsKnown() {
         let presentation = ExtensionInstallStagePresenter.present(.downloading(receivedBytes: 2_400_000, totalBytes: 6_100_000))
         XCTAssertEqual(presentation.title, "Downloading extension…")
         XCTAssertNotNil(presentation.detail)
         XCTAssertEqual(presentation.fraction ?? -1, 2_400_000.0 / 6_100_000.0, accuracy: 0.0001)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_stagePresenter_downloading_omitsProgressWhenTotalIsUnknown
 
     func test_stagePresenter_downloading_omitsProgressWhenTotalIsUnknown() {
         // Reported honestly as 0/0 the instant a download starts, before Content-Length is known.
@@ -60,6 +65,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         XCTAssertNil(presentation.fraction, "A download with no known total must not fabricate a progress fraction.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_stagePresenter_verifying_hasNoProgressFraction
+
     func test_stagePresenter_verifying_hasNoProgressFraction() {
         let presentation = ExtensionInstallStagePresenter.present(.verifying)
         XCTAssertEqual(presentation.title, "Verifying…")
@@ -67,12 +74,16 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         XCTAssertNil(presentation.fraction)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_stagePresenter_extracting_showsEntryProgressWhenTotalIsKnown
+
     func test_stagePresenter_extracting_showsEntryProgressWhenTotalIsKnown() {
         let presentation = ExtensionInstallStagePresenter.present(.extracting(completedEntries: 340, totalEntries: 812))
         XCTAssertEqual(presentation.title, "Unpacking…")
         XCTAssertNotNil(presentation.detail)
         XCTAssertEqual(presentation.fraction ?? -1, 340.0 / 812.0, accuracy: 0.0001)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_stagePresenter_awaitingConsentAndInstalling_haveFixedTitlesAndNoProgress
 
     func test_stagePresenter_awaitingConsentAndInstalling_haveFixedTitlesAndNoProgress() {
         let awaiting = ExtensionInstallStagePresenter.present(.awaitingConsent)
@@ -86,17 +97,23 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // MARK: - ExtensionInstallFailurePresentation: categorised, human-readable failures (zero coverage before this file)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_failurePresentation_categorisesCancellation
+
     func test_failurePresentation_categorisesCancellation() {
         let presentation = ExtensionInstallFailurePresentation.present(CancellationError())
         XCTAssertEqual(presentation.category, .cancelled)
         XCTAssertEqual(presentation.title, "Installation Cancelled")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_failurePresentation_categorisesANetworkFailure
+
     func test_failurePresentation_categorisesANetworkFailure() {
         let presentation = ExtensionInstallFailurePresentation.present(ExtensionInstallError.webStoreFailure(.network("offline")))
         XCTAssertEqual(presentation.category, .network)
         XCTAssertEqual(presentation.title, "Couldn't Reach the Chrome Web Store")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_failurePresentation_categorisesAnAlreadyInstalledFailure
 
     func test_failurePresentation_categorisesAnAlreadyInstalledFailure() {
         let presentation = ExtensionInstallFailurePresentation.present(
@@ -106,11 +123,15 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         XCTAssertEqual(presentation.title, "Already Installed")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_failurePresentation_categorisesAVerificationFailure
+
     func test_failurePresentation_categorisesAVerificationFailure() {
         let presentation = ExtensionInstallFailurePresentation.present(ExtensionInstallError.verificationFailed(.invalidMagic))
         XCTAssertEqual(presentation.category, .verification)
         XCTAssertEqual(presentation.title, "Couldn't Verify This Extension")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_failurePresentation_categorisesAnUnsupportedManifest
 
     func test_failurePresentation_categorisesAnUnsupportedManifest() {
         let presentation = ExtensionInstallFailurePresentation.present(
@@ -120,12 +141,16 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         XCTAssertEqual(presentation.title, "Unsupported Extension")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_failurePresentation_fallsBackToOtherForAnUnrecognisedError
+
     func test_failurePresentation_fallsBackToOtherForAnUnrecognisedError() {
         struct SomeOtherError: Error {}
         let presentation = ExtensionInstallFailurePresentation.present(SomeOtherError())
         XCTAssertEqual(presentation.category, .other)
         XCTAssertEqual(presentation.title, "Installation Failed")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_failureCategory_everyCaseCarriesANonEmptyTitleAndGlyph
 
     func test_failureCategory_everyCaseCarriesANonEmptyTitleAndGlyph() {
         for category in [
@@ -144,6 +169,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             .deletingLastPathComponent()   // repo root
             .appendingPathComponent("refs/screenshots", isDirectory: true)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_consentSheet_reportsItsOwnDeclaredWidth_inBothAppearances
 
     func test_consentSheet_reportsItsOwnDeclaredWidth_inBothAppearances() {
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
@@ -175,6 +202,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             await renderAndSave(view, name: "extension-consent-warnings\(suffix)", size: CGSize(width: 460, height: 420), appearance: appearance)
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_consentSheet_withChromiumVersionWarning_paintsTheNoticeRow
 
     func test_consentSheet_withChromiumVersionWarning_paintsTheNoticeRow() async {
         let size = CGSize(width: 460, height: 420)
@@ -210,6 +239,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // MARK: - Shared install-flow components (zero coverage before this file)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_extensionIconBadge_rendersAtItsDeclaredSize
+
     func test_extensionIconBadge_rendersAtItsDeclaredSize() {
         let rendered = render(
             ExtensionIconBadge(iconURL: nil).background(Color.red),
@@ -221,6 +252,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         XCTAssertEqual(box?.height ?? -1, OrbitMetrics.extensionInstallIconSize, accuracy: 1)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_orbitInlineNotice_paintsInBothAppearances
+
     func test_orbitInlineNotice_paintsInBothAppearances() {
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
             let rendered = render(
@@ -231,6 +264,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installStageRow_rendersDistinctContentForEachStage
 
     func test_installStageRow_rendersDistinctContentForEachStage() {
         let stages: [ExtensionInstallStage] = [
@@ -270,6 +305,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         return false
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installFailureRow_paintsInBothAppearances
+
     func test_installFailureRow_paintsInBothAppearances() {
         let presentation = ExtensionInstallFailurePresentation.present(ExtensionInstallError.webStoreFailure(.network("offline")))
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
@@ -296,6 +333,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             onAnswerConsent: { _ in }, onCancel: {}, onDismiss: {}
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installProgressModal_occupiesTheConsentDialogsOwnFrame_inBothAppearances
 
     func test_installProgressModal_occupiesTheConsentDialogsOwnFrame_inBothAppearances() {
         let canvas = CGSize(width: 700, height: 700)
@@ -327,6 +366,7 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // The defect verbatim: progress was an .overlay(alignment: .top) strip on
     // the tab, not the sheet the consent dialog uses.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_singleTabContentView_presentsInstallProgressThroughTheSheet_notATopAlignedStrip
     func test_singleTabContentView_presentsInstallProgressThroughTheSheet_notATopAlignedStrip() throws {
         let source = try Self.productionSource(named: "ContentCardView.swift")
 
@@ -343,6 +383,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             "ContentCardView must present the install flow through ExtensionInstallModalView."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installModal_rendersEachStageDistinctly_inBothAppearances
 
     func test_installModal_rendersEachStageDistinctly_inBothAppearances() {
         let stages: [ExtensionInstallStage] = [
@@ -367,6 +409,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             }
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installModal_namesTheExtensionOnceItIsKnown
 
     func test_installModal_namesTheExtensionOnceItIsKnown() {
         let size = CGSize(width: OrbitMetrics.extensionInstallSheetWidth, height: 140)
@@ -410,6 +454,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // MARK: - Colours: taken from the tokens, correct in both appearances
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installProgressBar_takesItsFillAndTrackFromTokens_inBothAppearances
+
     func test_installProgressBar_takesItsFillAndTrackFromTokens_inBothAppearances() {
         let size = CGSize(width: 200, height: OrbitMetrics.extensionInstallProgressBarHeight)
         let sampleBand = CGRect(x: 0, y: 1, width: 40, height: 2)
@@ -451,6 +497,7 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // Verifying/installing cannot report a fraction; a bar stopping part-way
     // would imply progress nothing measured.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installProgressBar_withNoMeasurableFraction_claimsNoPosition
     func test_installProgressBar_withNoMeasurableFraction_claimsNoPosition() {
         let size = CGSize(width: 200, height: OrbitMetrics.extensionInstallProgressBarHeight)
         let rendered = render(OrbitInstallProgressBar(fraction: nil), size: size, appearance: .darkAqua)
@@ -464,6 +511,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installFlowSurfaces_useNoRawOpacityLiterals
+
     func test_installFlowSurfaces_useNoRawOpacityLiterals() throws {
         for file in ["ExtensionInstallModalView.swift", "ExtensionInstallStatusViews.swift", "ExtensionConsentSheetView.swift"] {
             let source = try Self.productionSource(named: file)
@@ -474,6 +523,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installProgressBar_resolvesItsColoursPerColorScheme
 
     func test_installProgressBar_resolvesItsColoursPerColorScheme() throws {
         let source = try Self.productionSource(named: "ExtensionInstallStatusViews.swift")
@@ -496,6 +547,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installOutcomes_paintInTheSameFrame_inBothAppearances
+
     func test_installOutcomes_paintInTheSameFrame_inBothAppearances() {
         let canvas = CGSize(width: 700, height: 700)
         let failure = ExtensionInstallOutcome.failed(
@@ -514,6 +567,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             }
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installOutcome_successAndFailure_renderDistinctly
 
     func test_installOutcome_successAndFailure_renderDistinctly() {
         let size = CGSize(width: OrbitMetrics.extensionInstallSheetWidth, height: 160)
@@ -536,6 +591,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // MARK: - Dismissal: no state can leave the sheet up or strand the installer
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dismissingTheInstallModal_clearsEveryStateThatKeepsItPresented
+
     func test_dismissingTheInstallModal_clearsEveryStateThatKeepsItPresented() {
         let env = self.env
         let tabID = UUID()
@@ -551,6 +608,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         XCTAssertTrue(cancelled, "Dismissing an in-flight install must cancel it, not just hide it.")
         XCTAssertNil(env.extensionInstallModalPhase(for: tabID), "The sheet is still presented after being dismissed.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aStaleStageAfterCancellation_doesNotReopenTheModal
 
     func test_aStaleStageAfterCancellation_doesNotReopenTheModal() {
         let env = self.env
@@ -573,6 +632,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anOutcomeOutranksProgress_andConsentOutranksProgress
+
     func test_anOutcomeOutranksProgress_andConsentOutranksProgress() {
         let env = self.env
         let tabID = UUID()
@@ -591,6 +652,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // MARK: - Architecture: consent and progress states must not drift back onto separate designs
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installProgressRow_andConsentSheet_shareTheSameIconBadgeAndStagePresenter
+
     func test_installProgressRow_andConsentSheet_shareTheSameIconBadgeAndStagePresenter() throws {
         let consentSource = try Self.productionSource(named: "ExtensionConsentSheetView.swift")
         let paneSource = try Self.productionSource(named: "ExtensionsSettingsPane.swift")
@@ -604,6 +667,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             "ExtensionsSettingsPane's install-progress block must render through the shared ExtensionInstallStageRow (itself built from ExtensionIconBadge and OrbitMetrics.extensionInstall* tokens), not a private, independently hardcoded progress row."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_extensionInstallFlowSurfaces_useNoRawFontSizeLiterals
 
     func test_extensionInstallFlowSurfaces_useNoRawFontSizeLiterals() throws {
         for file in ["ExtensionConsentSheetView.swift", "ExtensionInstallStatusViews.swift"] {

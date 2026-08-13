@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ToolbarInternalPageChromeTests: XCTestCase {
 
     // MARK: - Harness
@@ -189,11 +190,15 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
 
     // MARK: - 0. `isDocumentPage` itself
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_isDocumentPage_acceptsARealUUIDUnderNoteOrEasel
+
     func test_isDocumentPage_acceptsARealUUIDUnderNoteOrEasel() {
         let realID = UUID().uuidString
         XCTAssertTrue(OrbitInternalPageChrome.isDocumentPage(URL(string: "orbit://note/\(realID)")!))
         XCTAssertTrue(OrbitInternalPageChrome.isDocumentPage(URL(string: "orbit://easel/\(realID)")!))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_isDocumentPage_rejectsMalformedOrUnrelatedInput
 
     func test_isDocumentPage_rejectsMalformedOrUnrelatedInput() {
         let cases = [
@@ -217,6 +222,8 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
 
     // MARK: - 1a. Address text — the pure function
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_addressText_isUntitledForNoteAndEaselDocuments_inBothFullURLModes
+
     func test_addressText_isUntitledForNoteAndEaselDocuments_inBothFullURLModes() {
         let noteURL = URL(string: "orbit://note/\(UUID().uuidString)")!
         let easelURL = URL(string: "orbit://easel/\(UUID().uuidString)")!
@@ -230,6 +237,8 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
             }
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_addressText_newTabAndViewSource_areUnchanged
 
     func test_addressText_newTabAndViewSource_areUnchanged() {
         for raw in ["orbit://new-tab", "view-source:https://example.com"] {
@@ -248,6 +257,7 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
     // Both tabs are forced to the same header background, so any difference
     // measured below is attributable only to the two strings' foreground
     // opacity, never to the two tabs painting different backgrounds.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noteAndEaselAddressText_rendersAtContentOpacity_notThePlaceholderDim
     func test_noteAndEaselAddressText_rendersAtContentOpacity_notThePlaceholderDim() {
         let forcedBackground = ThemeColor(red: 0.9, green: 0.9, blue: 0.92)
         let noteTab = makeTab(url: "orbit://note/\(UUID().uuidString)")
@@ -317,6 +327,8 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
         return nil
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_addressLeadingControl_neverMountsOverADocumentPage_evenIfSecurityResolves
+
     func test_addressLeadingControl_neverMountsOverADocumentPage_evenIfSecurityResolves() {
         let noteTab = makeTab(url: "orbit://note/\(UUID().uuidString)")
         let easelTab = makeTab(url: "orbit://easel/\(UUID().uuidString)")
@@ -356,6 +368,7 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
     }
 
     // Positive control for the test above, proving the walker finds a real catcher rather than always returning nil; security must be .secure, since .unknown never mounts a real, walkable NSView.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_addressLeadingControl_mountsOverAnOrdinaryLoadedPage
     func test_addressLeadingControl_mountsOverAnOrdinaryLoadedPage() {
         let webTab = makeTab(url: "https://example.com")
         defer { cleanup([webTab.id]) }
@@ -375,6 +388,8 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
     }
 
     // MARK: - 2a. Header background matches the document surface colour
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_headerBackground_forNoteOrEaselTab_equalsTheInternalSurfaceColour_inBothAppearances
 
     func test_headerBackground_forNoteOrEaselTab_equalsTheInternalSurfaceColour_inBothAppearances() {
         let noteTab = makeTab(url: "orbit://note/\(UUID().uuidString)")
@@ -408,6 +423,7 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
     }
 
     // F8's own regression guard: reproduces the same Tab.id showing a web page (with a pushed theme colour) first, then being sent to a Note, with nothing ever clearing the stale entry.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_headerBackground_forDocumentPage_winsOverAStaleThemeColorLeftFromThatSameTabsPriorPage
     func test_headerBackground_forDocumentPage_winsOverAStaleThemeColorLeftFromThatSameTabsPriorPage() {
         let tab = makeTab(url: "https://example.com")
         defer { cleanup([tab.id]) }
@@ -449,6 +465,8 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
     }
 
     // MARK: - 2b. Glyph/text contrast is readable against that background
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_addressTextContrast_isReadableAgainstTheDocumentSurfaceColour_inBothAppearances
 
     func test_addressTextContrast_isReadableAgainstTheDocumentSurfaceColour_inBothAppearances() {
         let noteTab = makeTab(url: "orbit://note/\(UUID().uuidString)")
@@ -505,6 +523,8 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
             return NSColor(hue: hue, saturation: 0.85, brightness: 0.85, alpha: 1)
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_paneIdentity_switchingActiveTabBetweenTwoNoteDocuments_producesAGenuinelyDifferentRenderedPane
 
     func test_paneIdentity_switchingActiveTabBetweenTwoNoteDocuments_producesAGenuinelyDifferentRenderedPane() {
         let idA = UUID()

@@ -4,6 +4,7 @@ import SwiftUI
 
 @MainActor
 // Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class BrowserWindowHoverPanelRenderTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -47,6 +48,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
         return nil
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_R8_panel_leavesTopLeftAndBottomEdgesTransparent
+
     func test_R8_panel_leavesTopLeftAndBottomEdgesTransparent() {
         let rendered = renderPanel()
 
@@ -69,6 +72,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
         XCTAssertNil(surfaceAtBottomEdge, "refs/DEFECTS.md R8: the hover panel must be inset from the window's bottom edge, not flush — found panel surface (not shadow) at the bottom row: \(String(describing: surfaceAtBottomEdge)). See the diagnostic PNG path RenderHarness printed to the console.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_R8_panel_actuallyDrawsContentWellInsideTheInset
+
     func test_R8_panel_actuallyDrawsContentWellInsideTheInset() {
         let rendered = renderPanel()
 
@@ -87,6 +92,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
             "Expected the hover panel to actually draw content at \(interior) — just inside OrbitHoverPanelMetrics.edgeInset (\(OrbitHoverPanelMetrics.edgeInset)pt) from the top and left. See the diagnostic PNG path RenderHarness printed to the console."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_R8_panel_widthMatchesSidebarWidthPlusLeadingInset
 
     func test_R8_panel_widthMatchesSidebarWidthPlusLeadingInset() {
         let rendered = renderPanel()
@@ -149,6 +156,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_windowSlicedBackground_matchesTheWindowGradientAtItsOwnCoordinates
+
     func test_windowSlicedBackground_matchesTheWindowGradientAtItsOwnCoordinates() {
         let window = renderWindowGradient()
         let slice = renderSlice()
@@ -163,6 +172,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_ownBoundsCopy_divergesFromTheWindowGradient_soThePreviousTestIsMeaningful
 
     func test_ownBoundsCopy_divergesFromTheWindowGradient_soThePreviousTestIsMeaningful() {
         let window = renderWindowGradient()
@@ -235,6 +246,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
 
     // MARK: - R7: the window controls are inset with the panel, not flush at the window's true corner
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_R7_windowControls_doNotRenderAtTheWindowsTrueTopLeftCorner
+
     func test_R7_windowControls_doNotRenderAtTheWindowsTrueTopLeftCorner() {
         let rendered = renderPanel()
 
@@ -249,6 +262,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
             "refs/DEFECTS.md R7/R8: the window controls live inside the inset hover panel, so nothing but the panel's shadow should reach the window's true top-left corner \(corner) — found \(String(describing: surface)). See the diagnostic PNG path RenderHarness printed to the console."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_R7_windowControls_renderInsideThePanelAtTheExpectedOffset
 
     func test_R7_windowControls_renderInsideThePanelAtTheExpectedOffset() {
         let rendered = renderPanel()
@@ -272,6 +287,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
 
     // MARK: - Contrast: `PositionedWindowControls` alone is flush (no R8 inset applied)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dockedOverlay_positionedWindowControls_rendersFlushAtTheTrueCorner
+
     func test_dockedOverlay_positionedWindowControls_rendersFlushAtTheTrueCorner() {
         let rendered = render(PositionedWindowControls(), size: size)
 
@@ -292,6 +309,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dockedOverlay_positionedWindowControls_boundingBoxStartsAtLeadingInset_notShiftedByHoverInset
+
     func test_dockedOverlay_positionedWindowControls_boundingBoxStartsAtLeadingInset_notShiftedByHoverInset() {
         let rendered = render(PositionedWindowControls(), size: size)
         guard let box = rendered.boundingBoxOfContent(tolerance: 0.03) else {
@@ -305,6 +324,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
     }
 
     // MARK: - `HoverRevealSidebarLayer` itself (HoverEdgeDetector included)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoverRevealSidebarLayer_showsPanelOnlyWhenRevealed
 
     func test_hoverRevealSidebarLayer_showsPanelOnlyWhenRevealed() {
         env.isSidebarHoverRevealed = false

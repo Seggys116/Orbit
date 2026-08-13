@@ -79,6 +79,7 @@ private final class RecordingMediaWebContents: NSObject, WebContents {
 
 @MainActor
 // Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class SidebarMiniPlayerTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -135,6 +136,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
     // MARK: - Which tabs are in the tray
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aTabPlayingInTheBackground_appearsInTheTray
+
     func test_aTabPlayingInTheBackground_appearsInTheTray() throws {
         let tabs = try twoTabs()
         _ = makePlaying(tabs.playing)
@@ -144,6 +147,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
             "Arc adds the Audio Player when you leave an audio tab; this is that tab."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theTabYouAreLookingAt_isNotInTheTray
 
     func test_theTabYouAreLookingAt_isNotInTheTray() throws {
         let tabs = try twoTabs()
@@ -156,6 +161,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aSilentTab_isNotInTheTray
+
     func test_aSilentTab_isNotInTheTray() throws {
         let tabs = try twoTabs()
         let contents = RecordingMediaWebContents()
@@ -164,6 +171,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
         XCTAssertTrue(env.nowPlayingTabs.isEmpty)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theTrayHoldsEveryBackgroundTabProducingMedia
 
     func test_theTrayHoldsEveryBackgroundTabProducingMedia() throws {
         let tabs = try twoTabs()
@@ -179,6 +188,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
     // MARK: - Dismissal
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dismissing_removesTheCardWithoutStoppingPlayback
+
     func test_dismissing_removesTheCardWithoutStoppingPlayback() throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
@@ -193,6 +204,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         XCTAssertTrue(contents.evaluatedScripts.isEmpty, "Dismissing must not send a transport action.")
         XCTAssertTrue(contents.muteCalls.isEmpty, "Dismissing must not mute the tab either.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_whenTheMediaStops_theDismissalIsLiftedAndTheCardCanReturn
 
     func test_whenTheMediaStops_theDismissalIsLiftedAndTheCardCanReturn() throws {
         let tabs = try twoTabs()
@@ -213,6 +226,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
     // MARK: - Pause
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pausing_keepsTheCardSoItsPlayButtonCanResume
+
     func test_pausing_keepsTheCardSoItsPlayButtonCanResume() throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
@@ -225,6 +240,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
             "Pausing removed the card, so its play button could never be used to resume."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_whenTheMediaEnds_theCardGoes
 
     func test_whenTheMediaEnds_theCardGoes() throws {
         let tabs = try twoTabs()
@@ -241,6 +258,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aTabWithAVideoNobodyEverPlayed_isNotInTheTray
+
     func test_aTabWithAVideoNobodyEverPlayed_isNotInTheTray() throws {
         let tabs = try twoTabs()
         let contents = RecordingMediaWebContents()
@@ -252,6 +271,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
             "hasVideo alone must not summon a card; nothing has ever played in this tab."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pausing_doesNotLiftADismissal
 
     func test_pausing_doesNotLiftADismissal() throws {
         let tabs = try twoTabs()
@@ -266,6 +287,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
             "A pause resurrected a card the user had explicitly dismissed."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aPausedTabIsStillExemptFromAutoArchive
 
     func test_aPausedTabIsStillExemptFromAutoArchive() throws {
         let tabs = try twoTabs()
@@ -286,6 +309,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aPausedTabIsStillProtectedFromRendererRelease
+
     func test_aPausedTabIsStillProtectedFromRendererRelease() throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
@@ -304,6 +329,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pausing_doesNotFireThePictureInPictureDismissal
+
     func test_pausing_doesNotFireThePictureInPictureDismissal() throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
@@ -321,6 +348,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_thePlayGlyphIsReachable_aTabCanBeInTheTrayWhileNotPlaying
+
     func test_thePlayGlyphIsReachable_aTabCanBeInTheTrayWhileNotPlaying() throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
@@ -335,6 +364,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dismissingOneCard_leavesTheOtherAlone
+
     func test_dismissingOneCard_leavesTheOtherAlone() throws {
         let tabs = try twoTabs()
         let third = env.openTab(url: URL(string: "https://music.youtube.com/")!, in: tabs.spaceID, activate: false)
@@ -348,6 +379,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
     // MARK: - The label
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theLabelIsTitleThenArtist_asArcRendersIt
+
     func test_theLabelIsTitleThenArtist_asArcRendersIt() throws {
         let tabs = try twoTabs()
         _ = makePlaying(tabs.playing)
@@ -355,12 +388,16 @@ final class SidebarMiniPlayerTests: XCTestCase {
         XCTAssertEqual(env.nowPlayingLabel(for: tabs.playing), "Saturdays (feat. HAIM) • Twin Shadow")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withNoArtist_theLabelIsJustTheTitle
+
     func test_withNoArtist_theLabelIsJustTheTitle() throws {
         let tabs = try twoTabs()
         _ = makePlaying(tabs.playing, artist: nil)
 
         XCTAssertEqual(env.nowPlayingLabel(for: tabs.playing), "Saturdays (feat. HAIM)")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withNoMediaSessionMetadata_theLabelFallsBackToTheTabsOwnTitle
 
     func test_withNoMediaSessionMetadata_theLabelFallsBackToTheTabsOwnTitle() throws {
         let tabs = try twoTabs()
@@ -371,6 +408,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
     }
 
     // MARK: - Transport
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_nextTrack_sendsTheNextTrackInvocationToThatTabsPage
 
     func test_nextTrack_sendsTheNextTrackInvocationToThatTabsPage() async throws {
         let tabs = try twoTabs()
@@ -388,6 +427,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_whenThePageHasNothingToDo_transportReportsFailure
+
     func test_whenThePageHasNothingToDo_transportReportsFailure() async throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
@@ -399,6 +440,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         XCTAssertEqual(contents.evaluatedScripts.count, 1, "It still asked the page — it just got told no.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_transportOnATabWithNoLiveContents_doesNothing
+
     func test_transportOnATabWithNoLiveContents_doesNothing() async throws {
         let tabs = try twoTabs()
 
@@ -406,6 +449,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
         XCTAssertFalse(handled)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_playPause_sendsPauseWhilePlayingAndPlayWhilePaused
 
     func test_playPause_sendsPauseWhilePlayingAndPlayWhilePaused() async throws {
         let tabs = try twoTabs()
@@ -425,6 +470,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         XCTAssertEqual(contents.evaluatedScripts.last, MediaTransportScript.invocation(for: .play))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_transportGoesToTheTabItWasSentTo_notWhicheverTabIsActive
+
     func test_transportGoesToTheTabItWasSentTo_notWhicheverTabIsActive() async throws {
         let tabs = try twoTabs()
         let playing = makePlaying(tabs.playing)
@@ -442,6 +489,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
     // MARK: - Mute
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theSpeakerControl_mutesTheTabForReal
+
     func test_theSpeakerControl_mutesTheTabForReal() throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
@@ -454,6 +503,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
     // MARK: - Picture-in-picture
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withoutTheEngineCapability_thePictureInPictureControlIsNotDrawn
+
     func test_withoutTheEngineCapability_thePictureInPictureControlIsNotDrawn() throws {
         let tabs = try twoTabs()
         _ = makePlaying(tabs.playing)
@@ -461,6 +512,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
         XCTAssertFalse(env.canDrivePictureInPicture(for: tabs.playing))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withTheCapabilityButNoLiveContents_thePictureInPictureControlIsNotDrawn
 
     func test_withTheCapabilityButNoLiveContents_thePictureInPictureControlIsNotDrawn() throws {
         let tabs = try twoTabs()
@@ -471,6 +524,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
             "There is nothing to send the toggle to."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withTheCapability_theControlIsDrawnAndReachesTheEngine
 
     func test_withTheCapability_theControlIsDrawnAndReachesTheEngine() throws {
         let tabs = try twoTabs()
@@ -601,6 +656,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
     }
 
     // MARK: - Both engines install the transport script
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_bothBackendsInstallTheSameTransportSource
 
     func test_bothBackendsInstallTheSameTransportSource() {
         XCTAssertTrue(

@@ -4,6 +4,7 @@ import SwiftUI
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class WindowControllerResizeRegressionTests: XCTestCase {
 
     private var window: NSWindow?
@@ -45,6 +46,8 @@ final class WindowControllerResizeRegressionTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realWindowAndRealContentView_acceptsBeingResizedTo800x500ContentSize
+
     func test_realWindowAndRealContentView_acceptsBeingResizedTo800x500ContentSize() {
         let window = makeRealWindow()
 
@@ -61,6 +64,8 @@ final class WindowControllerResizeRegressionTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realWindowAndRealContentView_canBeShrunkBelowItsOwnOpeningHeight
+
     func test_realWindowAndRealContentView_canBeShrunkBelowItsOwnOpeningHeight() {
         let window = makeRealWindow()
 
@@ -75,6 +80,8 @@ final class WindowControllerResizeRegressionTests: XCTestCase {
             "The window must actually shrink when asked to, and still be shrunk once layout has run."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realWindow_shrinksMonotonically_underASimulatedLiveResizeDrag
 
     func test_realWindow_shrinksMonotonically_underASimulatedLiveResizeDrag() {
         let window = makeRealWindow()
@@ -102,6 +109,8 @@ final class WindowControllerResizeRegressionTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realWindow_hostingViewStillFillsTheFullContentArea_noTitlebarInset
 
     func test_realWindow_hostingViewStillFillsTheFullContentArea_noTitlebarInset() {
         let window = makeRealWindow()
@@ -134,6 +143,8 @@ final class WindowControllerResizeRegressionTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realWindow_hostingViewTracksTheWindowByAutoresizing_notConstraints
+
     func test_realWindow_hostingViewTracksTheWindowByAutoresizing_notConstraints() {
         let window = makeRealWindow()
         guard let container = window.contentView,
@@ -162,6 +173,8 @@ final class WindowControllerResizeRegressionTests: XCTestCase {
             "The hosting view must publish no size of its own. Left at AppKit's default (.standardBounds) it publishes the SwiftUI tree's ideal size as required Auto Layout constraints, which pins the window open at that height."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noAbandonedHostingViewIsLeftInAnyWindow
 
     func test_noAbandonedHostingViewIsLeftInAnyWindow() {
         let window = makeRealWindow()

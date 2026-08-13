@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class EaselTeardownRegressionTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -128,6 +129,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
 
     // MARK: - Render carryover (structural half)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theTitleFieldReloadsAfterSwitchingToADifferentEaselTab
+
     func test_theTitleFieldReloadsAfterSwitchingToADifferentEaselTab() {
         let easelA = makeEasel(title: "Easel A — must close cleanly")
         let easelB = makeEasel(title: "Easel B — the one being opened")
@@ -161,6 +164,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
     }
 
     // MARK: - Save correctness (disk half)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_editingTheTitleWhileEaselBsTabIsActive_writesTheEditToEaselBsOwnFile
 
     func test_editingTheTitleWhileEaselBsTabIsActive_writesTheEditToEaselBsOwnFile() throws {
         let easelA = makeEasel(title: "Easel A — must stay untouched")
@@ -225,6 +230,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
 
     // MARK: - Rebuild mid-gesture
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_rebuildingModelForADifferentEasel_commitsTheOutgoingModelsInFlightStrokeAndFlushesItsViewport
+
     func test_rebuildingModelForADifferentEasel_commitsTheOutgoingModelsInFlightStrokeAndFlushesItsViewport() throws {
         let easelA = makeEasel(title: "Rebuild Source")
         let easelB = makeEasel(title: "Rebuild Destination")
@@ -281,6 +288,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
             "no sufficiently saturated blue swatch in EaselPalette to use as an unambiguous on-screen marker"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_singleEasel_itemsSurviveSwitchingThePaneAwayToAWebTabAndBack
 
     func test_singleEasel_itemsSurviveSwitchingThePaneAwayToAWebTabAndBack() throws {
         let easel = makeEasel(title: "Single Easel")
@@ -372,6 +381,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
 
     // MARK: - Rendering: real pixels, not just a green assertion
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_easelCanvasView_actuallyPaintsARealItemAtItsRealFrame
+
     func test_easelCanvasView_actuallyPaintsARealItemAtItsRealFrame() throws {
         let easel = makeEasel(title: "Render Check")
         let model = EaselCanvasModel(easelID: easel.id, store: env.easelStore)
@@ -408,6 +419,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
 
     // MARK: - Drag / resize / rotate commit paths
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_moveGesture_commitPathWritesTheDraggedFrameToTheStoreAndToDisk
+
     func test_moveGesture_commitPathWritesTheDraggedFrameToTheStoreAndToDisk() throws {
         let easel = makeEasel(title: "Move Test")
         let model = EaselCanvasModel(easelID: easel.id, store: env.easelStore)
@@ -439,6 +452,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
         let onDisk = try XCTUnwrap(diskStore.easel(easel.id)?.items.first { $0.id == itemID })
         XCTAssertEqual(onDisk.frame, persisted.frame, "the moved frame must reach the file on disk, not only the in-memory store cache")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resizeGesture_bottomRightHandle_commitPathWritesTheResizedFrameToTheStoreAndToDisk
 
     func test_resizeGesture_bottomRightHandle_commitPathWritesTheResizedFrameToTheStoreAndToDisk() throws {
         let easel = makeEasel(title: "Resize Test")
@@ -474,6 +489,7 @@ final class EaselTeardownRegressionTests: XCTestCase {
 
     /// Regression: `rotateGesture` never called `beginDrag()`, so
     /// `commitDrag()` skipped `persist()` and the rotation never reached disk.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_rotateGesture_commitPathWritesTheRotationToTheStoreAndToDisk
     func test_rotateGesture_commitPathWritesTheRotationToTheStoreAndToDisk() throws {
         let easel = makeEasel(title: "Rotate Test")
         let model = EaselCanvasModel(easelID: easel.id, store: env.easelStore)
@@ -518,6 +534,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
 
     // MARK: - Undo after deleting a mid-edit item
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_undoingAfterDeletingAMidEditTextItem_restoresItOnTheFirstUndo
+
     func test_undoingAfterDeletingAMidEditTextItem_restoresItOnTheFirstUndo() throws {
         let easel = makeEasel(title: "Undo After Delete")
         let model = EaselCanvasModel(easelID: easel.id, store: env.easelStore)
@@ -553,6 +571,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
 
     // MARK: - Quit-time flush (`DocumentEditorFlushRegistry`)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_easelCanvas_registersWithFlushRegistryOnMountAndDeregistersOnUnmount
+
     func test_easelCanvas_registersWithFlushRegistryOnMountAndDeregistersOnUnmount() {
         let easel = makeEasel(title: "Registry Lifecycle")
         let easelTab = openEaselTab(easel)
@@ -585,6 +605,8 @@ final class EaselTeardownRegressionTests: XCTestCase {
             "flushAll() would call into a torn-down view's state"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_quitTimeFlush_commitsAPendingTitleEditBeforeItsOwnDebounceWindowElapses
 
     func test_quitTimeFlush_commitsAPendingTitleEditBeforeItsOwnDebounceWindowElapses() throws {
         let easel = makeEasel(title: "Pending Title Edit")

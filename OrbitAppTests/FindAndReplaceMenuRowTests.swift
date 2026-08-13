@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class FindAndReplaceMenuRowTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -34,6 +35,8 @@ final class FindAndReplaceMenuRowTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theRowIsAStandardResponderChainActionAndNotAnOrbitCommand
+
     func test_theRowIsAStandardResponderChainActionAndNotAnOrbitCommand() throws {
         let row = try findAndReplaceRow()
 
@@ -59,6 +62,8 @@ final class FindAndReplaceMenuRowTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theRowStillCarriesTheRegistrysBindingForFindAndReplace
+
     func test_theRowStillCarriesTheRegistrysBindingForFindAndReplace() throws {
         let row = try findAndReplaceRow()
         let binding = try XCTUnwrap(
@@ -69,6 +74,8 @@ final class FindAndReplaceMenuRowTests: XCTestCase {
         XCTAssertEqual(row.keyEquivalent, binding.menuKeyEquivalent, "The row must show the key the registry currently holds, not a literal baked in at build time.")
         XCTAssertEqual(row.keyEquivalentModifierMask, binding.modifierFlags)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_openingTheFindMenuRefreshesTheRowsKeyEquivalentAfterARemap
 
     func test_openingTheFindMenuRefreshesTheRowsKeyEquivalentAfterARemap() throws {
         let findItem = try XCTUnwrap(
@@ -97,6 +104,8 @@ final class FindAndReplaceMenuRowTests: XCTestCase {
     }
 
     // MARK: - 2 and 3. A real Note editor answers it; a default NSTextView does not
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aMountedNoteEditorValidatesTheRowAndABareTextViewDoesNot
 
     func test_aMountedNoteEditorValidatesTheRowAndABareTextViewDoesNot() throws {
         let row = try findAndReplaceRow()
@@ -137,6 +146,8 @@ final class FindAndReplaceMenuRowTests: XCTestCase {
     }
 
     // MARK: - 4. The keyboard path is unchanged
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theCommandItselfStillReportsFindAndReplaceUnhandled
 
     func test_theCommandItselfStillReportsFindAndReplaceUnhandled() {
         XCTAssertFalse(

@@ -8,6 +8,7 @@ private final class InsetProbe {
 }
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class HostingViewWindowSizingMechanismTests: XCTestCase {
 
     private var windows: [NSWindow] = []
@@ -77,6 +78,8 @@ final class HostingViewWindowSizingMechanismTests: XCTestCase {
         return window.frame.height
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_mechanism_hostingViewAsContentViewWithNoSafeAreaRegions_growsDuringLayout
+
     func test_mechanism_hostingViewAsContentViewWithNoSafeAreaRegions_growsDuringLayout() {
         let (window, _) = makeWindow(wrapped: false, zeroSafeAreaRegions: true)
         let settled = settledHeight(after: 500, on: window)
@@ -86,6 +89,8 @@ final class HostingViewWindowSizingMechanismTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_mechanism_wrappedHostingViewWithNoSafeAreaRegions_holdsTheRequestedHeight
+
     func test_mechanism_wrappedHostingViewWithNoSafeAreaRegions_holdsTheRequestedHeight() {
         let (window, _) = makeWindow(wrapped: true, zeroSafeAreaRegions: true)
         XCTAssertEqual(
@@ -93,6 +98,8 @@ final class HostingViewWindowSizingMechanismTests: XCTestCase {
             "A wrapped hosting view must let the window hold exactly the height it was asked for, through repeated layout passes."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_mechanism_wrappedHostingViewWithDefaultSafeAreaRegions_alsoHoldsTheRequestedHeight
 
     func test_mechanism_wrappedHostingViewWithDefaultSafeAreaRegions_alsoHoldsTheRequestedHeight() {
         let (window, _) = makeWindow(wrapped: true, zeroSafeAreaRegions: false)
@@ -102,6 +109,8 @@ final class HostingViewWindowSizingMechanismTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_mechanism_hostingViewAsContentViewWithDefaultSafeAreaRegions_alsoHoldsTheRequestedHeight
+
     func test_mechanism_hostingViewAsContentViewWithDefaultSafeAreaRegions_alsoHoldsTheRequestedHeight() {
         let (window, _) = makeWindow(wrapped: false, zeroSafeAreaRegions: false)
         XCTAssertEqual(
@@ -109,6 +118,8 @@ final class HostingViewWindowSizingMechanismTests: XCTestCase {
             "Leaving safeAreaRegions at its default also stops the growth — which is exactly why it is a tempting non-fix, and why the inset tests below exist to rule it out."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_mechanism_defaultSafeAreaRegions_pushesSwiftUIContentDownByTheTitlebar
 
     func test_mechanism_defaultSafeAreaRegions_pushesSwiftUIContentDownByTheTitlebar() {
         let (window, probe) = makeWindow(wrapped: true, zeroSafeAreaRegions: false)
@@ -121,6 +132,8 @@ final class HostingViewWindowSizingMechanismTests: XCTestCase {
             "Expected the default safeAreaRegions to give SwiftUI a non-zero top inset — that cost is the whole reason installContentView keeps safeAreaRegions = [] instead of dropping it to stop the growth."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_mechanism_wrappedWithNoSafeAreaRegions_givesSwiftUIZeroTopInset
 
     func test_mechanism_wrappedWithNoSafeAreaRegions_givesSwiftUIZeroTopInset() {
         let (window, probe) = makeWindow(wrapped: true, zeroSafeAreaRegions: true)

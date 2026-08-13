@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class TornOffWindowSessionTests: XCTestCase {
 
     private lazy var host: AppEnvironment = AppEnvironment.demo
@@ -66,6 +67,8 @@ final class TornOffWindowSessionTests: XCTestCase {
 
     // MARK: - 1. The ephemeral Space reuses the origin tab's own persistent Profile
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tornOffSession_reusesTheOriginTabsProfile_createsNoNewProfile
+
     func test_tornOffSession_reusesTheOriginTabsProfile_createsNoNewProfile() throws {
         let profileCountBefore = host.state.profiles.count
         let originProfileID = try XCTUnwrap(host.store.space(personalSpaceID)?.profileID)
@@ -88,6 +91,8 @@ final class TornOffWindowSessionTests: XCTestCase {
 
     // MARK: - 2. Opening a torn-off session leaves the document's activeSpaceID alone
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_openingATornOffSession_leavesTheDocumentsActiveSpaceIDAlone
+
     func test_openingATornOffSession_leavesTheDocumentsActiveSpaceIDAlone() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
 
@@ -102,6 +107,8 @@ final class TornOffWindowSessionTests: XCTestCase {
 
     // MARK: - 3. The torn-off window and the main window show different Spaces simultaneously
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theTornOffWindowAndTheMainWindowShowDifferentSpacesSimultaneously
+
     func test_theTornOffWindowAndTheMainWindowShowDifferentSpacesSimultaneously() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
         let tornOffSpace = try XCTUnwrap(session.environment.activeSpace)
@@ -113,6 +120,8 @@ final class TornOffWindowSessionTests: XCTestCase {
     }
 
     // MARK: - 4. Switching Space in one window never moves the other
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_switchingSpaceInEitherWindow_doesNotMoveTheOther
 
     func test_switchingSpaceInEitherWindow_doesNotMoveTheOther() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
@@ -138,6 +147,8 @@ final class TornOffWindowSessionTests: XCTestCase {
     }
 
     // MARK: - 5. `dispose()` removes the ephemeral Space and its tabs, leaves the Profile alive
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dispose_removesTheEphemeralSpaceAndItsTabs_leavesTheProfileAlive
 
     func test_dispose_removesTheEphemeralSpaceAndItsTabs_leavesTheProfileAlive() throws {
         let originProfileID = try XCTUnwrap(host.store.space(personalSpaceID)?.profileID)
@@ -170,6 +181,8 @@ final class TornOffWindowSessionTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_disposingTwice_isANoOp
+
     func test_disposingTwice_isANoOp() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
         let spaceCountAfterOpening = host.state.spaces.count
@@ -185,6 +198,8 @@ final class TornOffWindowSessionTests: XCTestCase {
     }
 
     // MARK: - 6. The exact misclassification the integration pass fixed
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tornOffEnvironment_reportsIsTornOffWindowTrue_andIsIncognitoFalse
 
     func test_tornOffEnvironment_reportsIsTornOffWindowTrue_andIsIncognitoFalse() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
@@ -202,6 +217,8 @@ final class TornOffWindowSessionTests: XCTestCase {
         XCTAssertFalse(host.isTornOffWindow, "the main window's own (unscoped) environment must not itself report as a torn-off window")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_incognitoEnvironment_stillReportsIsIncognitoTrue_andIsTornOffWindowFalse
+
     func test_incognitoEnvironment_stillReportsIsIncognitoTrue_andIsTornOffWindowFalse() throws {
         let incognito = WindowSession.incognito(on: host)
         let incognitoSpace = try XCTUnwrap(incognito.environment.activeSpace)
@@ -214,6 +231,8 @@ final class TornOffWindowSessionTests: XCTestCase {
     }
 
     // MARK: - 7. `pagerSpaces` contains exactly the torn-off window's own Space
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pagerSpaces_inATornOffWindow_containsExactlyItsOwnSpace
 
     func test_pagerSpaces_inATornOffWindow_containsExactlyItsOwnSpace() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
@@ -232,6 +251,8 @@ final class TornOffWindowSessionTests: XCTestCase {
     }
 
     // MARK: - 8. A `.tornOff` session and an `.incognito` session opened together stay independent
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aTornOffSessionAndAnIncognitoSession_openedTogether_stayIndependent
 
     func test_aTornOffSessionAndAnIncognitoSession_openedTogether_stayIndependent() throws {
         let tornOff = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
@@ -258,6 +279,8 @@ final class TornOffWindowSessionTests: XCTestCase {
 
     // MARK: - 9. `moveTabToMainWindow` moves the tab into a persistent Space so it survives the window closing
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_moveTabToMainWindow_movesTheTabIntoAPersistentSpace_survivingDisposal
+
     func test_moveTabToMainWindow_movesTheTabIntoAPersistentSpace_survivingDisposal() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
         let tornOffSpaceID = try XCTUnwrap(session.environment.activeSpace?.id)
@@ -280,6 +303,8 @@ final class TornOffWindowSessionTests: XCTestCase {
         XCTAssertNil(host.store.space(tornOffSpaceID), "the now-empty torn-off Space must still be removed")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_moveTabToMainWindow_carriesTheLiveRendererAcrossWithoutClosingIt
+
     func test_moveTabToMainWindow_carriesTheLiveRendererAcrossWithoutClosingIt() throws {
         let contents = MockWebContents()
         host._test_attachWebContents(contents, for: originTabID)
@@ -297,12 +322,16 @@ final class TornOffWindowSessionTests: XCTestCase {
 
     // MARK: - 10. A stale tab id is a no-op, not a crash
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tornOff_withATabIDThatDoesNotResolve_returnsNil
+
     func test_tornOff_withATabIDThatDoesNotResolve_returnsNil() {
         let session = WindowSession.tornOff(on: host, adopting: UUID())
         XCTAssertNil(session, "a drag that raced a tab close, or a stale id, must produce no session at all")
     }
 
     // MARK: - 11. Closing the torn-off window through the real path leaves nothing in memory
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_closingTheTornOffWindowThroughTheRealPath_disposesTheSession
 
     func test_closingTheTornOffWindowThroughTheRealPath_disposesTheSession() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
@@ -323,6 +352,7 @@ final class TornOffWindowSessionTests: XCTestCase {
 
     /// Regression: closing the origin Incognito window used to reassign the torn-off Space
     /// onto the user's real, persistent Profile, silently de-privatising the session.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tearingOffFromAnIncognitoOrigin_mintsAndOwnsItsOwnPrivateProfile
     func test_tearingOffFromAnIncognitoOrigin_mintsAndOwnsItsOwnPrivateProfile() throws {
         let incognito = WindowSession.incognito(on: host)
         let incognitoSpaceID = try XCTUnwrap(incognito.environment.activeSpace?.id)
@@ -359,6 +389,8 @@ final class TornOffWindowSessionTests: XCTestCase {
             "recordVisit's own suppression guard reads this — it must agree the session is private"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tearingOffFromAnIncognitoOrigin_disposesCleanly_closingOriginFirst
 
     func test_tearingOffFromAnIncognitoOrigin_disposesCleanly_closingOriginFirst() throws {
         let incognito = WindowSession.incognito(on: host)
@@ -399,6 +431,8 @@ final class TornOffWindowSessionTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tearingOffFromAnIncognitoOrigin_disposesCleanly_closingTornOffFirst
+
     func test_tearingOffFromAnIncognitoOrigin_disposesCleanly_closingTornOffFirst() throws {
         let incognito = WindowSession.incognito(on: host)
         let incognitoSpaceID = try XCTUnwrap(incognito.environment.activeSpace?.id)
@@ -438,6 +472,7 @@ final class TornOffWindowSessionTests: XCTestCase {
 
     /// Regression: the rescue control used to move the tab but never bring the destination
     /// window forward or close the now-tabless torn-off one.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_moveTabToMainWindow_bringsDestinationForward_andClosesTheNowEmptyTornOffWindow
     func test_moveTabToMainWindow_bringsDestinationForward_andClosesTheNowEmptyTornOffWindow() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
         let tornOffSpaceID = try XCTUnwrap(session.environment.activeSpace?.id)
@@ -483,6 +518,8 @@ final class TornOffWindowSessionTests: XCTestCase {
         XCTAssertFalse(tornOffWindow.isVisible, "the torn-off window must actually have closed, not merely lost key status")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_moveTabToMainWindow_doesNotCloseTheTornOffWindow_whenOtherTabsRemain
+
     func test_moveTabToMainWindow_doesNotCloseTheTornOffWindow_whenOtherTabsRemain() throws {
         let session = try XCTUnwrap(WindowSession.tornOff(on: host, adopting: originTabID))
         let tornOffSpaceID = try XCTUnwrap(session.environment.activeSpace?.id)
@@ -513,6 +550,7 @@ final class TornOffWindowSessionTests: XCTestCase {
 
     /// Regression: tearing off a pinned tab used to move it (not a copy) into the ephemeral
     /// Space, so closing the torn-off window destroyed the durable, user-created bookmark.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tearingOffAPinnedTab_keepsTheBookmarkInTheOriginSpace_survivingDisposal
     func test_tearingOffAPinnedTab_keepsTheBookmarkInTheOriginSpace_survivingDisposal() throws {
         host.pinTab(originTabID)
         XCTAssertEqual(host.store.tab(originTabID)?.section, .pinned, "test precondition: the tab is pinned")

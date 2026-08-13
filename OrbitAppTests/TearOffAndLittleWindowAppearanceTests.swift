@@ -8,6 +8,7 @@ import XCTest
 
 @MainActor
 // Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class TearOffAndLittleWindowAppearanceTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -208,6 +209,8 @@ final class TearOffAndLittleWindowAppearanceTests: XCTestCase {
     }
 
     // MARK: - 3. Source-level guards: the replica still matches what ships
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_littleWindowReplica_stillMatchesTheShippingComposition
 
     func test_littleWindowReplica_stillMatchesTheShippingComposition() throws {
         let source = try String(

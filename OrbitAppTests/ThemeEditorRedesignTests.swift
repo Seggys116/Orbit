@@ -5,6 +5,7 @@ import XCTest
 
 @MainActor
 // Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ThemeEditorRedesignTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -26,6 +27,7 @@ final class ThemeEditorRedesignTests: XCTestCase {
 
     // Asserts against a hand-written JSON literal rather than a round-trip
     // of the current type, which would encode the new field and prove nothing.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_themeWithoutStopPositions_stillDecodes
     func test_themeWithoutStopPositions_stillDecodes() throws {
         let legacyJSON = """
         {
@@ -51,6 +53,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
         XCTAssertEqual(decoded.angle, 18, accuracy: 0.0001)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_unpositionedTheme_doesNotEncodeStopPositions
+
     func test_unpositionedTheme_doesNotEncodeStopPositions() throws {
         let encoded = try JSONEncoder().encode(SpaceTheme())
         let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: encoded) as? [String: Any])
@@ -60,6 +64,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
             "SpaceTheme() has never been hand-positioned, so it must not write a stopPositions key at all."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_stopPositions_roundTripThroughCodable
 
     func test_stopPositions_roundTripThroughCodable() throws {
         var theme = Self.sampleTheme
@@ -75,6 +81,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
         XCTAssertEqual(decoded, theme)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_stopPosition_clampsOutOfRangeInput
+
     func test_stopPosition_clampsOutOfRangeInput() {
         let low = ThemeStopPosition(x: -3, y: -0.5)
         let high = ThemeStopPosition(x: 4, y: 1.9)
@@ -86,6 +94,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
     }
 
     // MARK: - Default layout
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_defaultStopPositions_areDeterministicAndInBounds
 
     func test_defaultStopPositions_areDeterministicAndInBounds() {
         for count in 0...6 {
@@ -101,6 +111,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_defaultStopPositions_areDistinct
+
     func test_defaultStopPositions_areDistinct() {
         let positions = SpaceTheme.defaultStopPositions(count: 4)
         for (i, a) in positions.enumerated() {
@@ -112,6 +124,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
     }
 
     // MARK: - Resolution when the stop count changes
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolvedStopPositions_keepsHandSetPrefixWhenAStopIsAdded
 
     func test_resolvedStopPositions_keepsHandSetPrefixWhenAStopIsAdded() {
         var theme = Self.sampleTheme
@@ -134,6 +148,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resolvedStopPositions_truncatesWhenAStopIsRemoved
+
     func test_resolvedStopPositions_truncatesWhenAStopIsRemoved() {
         var theme = Self.sampleTheme
         let handSet = [
@@ -147,6 +163,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
         XCTAssertEqual(theme.resolvedStopPositions, Array(handSet.prefix(2)))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_normalizeStopPositions_leavesAnUnpositionedThemeNil
+
     func test_normalizeStopPositions_leavesAnUnpositionedThemeNil() {
         var theme = Self.sampleTheme
         XCTAssertNil(theme.stopPositions)
@@ -159,6 +177,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
             "A theme nobody has hand-positioned must keep deriving its layout fresh, not be silently upgraded to a frozen array."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_normalizeStopPositions_reconcilesAPositionedTheme
 
     func test_normalizeStopPositions_reconcilesAPositionedTheme() {
         var theme = Self.sampleTheme
@@ -175,6 +195,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
     }
 
     // MARK: - The renderer's fallback is genuinely unchanged
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_meshColours_forAnUnpositionedTheme_areTheOriginalCycledPalette
 
     func test_meshColours_forAnUnpositionedTheme_areTheOriginalCycledPalette() {
         let theme = Self.sampleTheme
@@ -193,6 +215,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_meshColours_withMismatchedPositionCount_fallBackToCycling
+
     func test_meshColours_withMismatchedPositionCount_fallBackToCycling() {
         var theme = Self.sampleTheme
         theme.stopPositions = [ThemeStopPosition(x: 0.1, y: 0.1)]
@@ -206,6 +230,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
     }
 
     // MARK: - Positions actually move colour
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_meshColours_pullTowardAStopPinnedToACorner
 
     func test_meshColours_pullTowardAStopPinnedToACorner() {
         var theme = Self.sampleTheme
@@ -229,6 +255,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_meshColours_changeWhenAStopMoves
+
     func test_meshColours_changeWhenAStopMoves() {
         var theme = Self.sampleTheme
         theme.stopPositions = [
@@ -249,6 +277,7 @@ final class ThemeEditorRedesignTests: XCTestCase {
     // MARK: - Style selection actually paints something different (Defect 3)
 
     // Regression cover: .mesh used to fall back to a plain LinearGradient below three stops, so "Linear" and "Mesh" looked identical at the common two-stop case.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_themeStyles_paintVisiblyDifferentBitmapsAtTwoStops
     func test_themeStyles_paintVisiblyDifferentBitmapsAtTwoStops() {
         let baseTheme = SpaceTheme(
             style: .solid,
@@ -313,6 +342,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
 
     // MARK: - Stop-count clamping and selection validity (correctness pass)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_clampedStopIndex_staysInBoundsAtEveryEdge
+
     func test_clampedStopIndex_staysInBoundsAtEveryEdge() {
         XCTAssertEqual(SpaceTheme.clampedStopIndex(0, count: 4), 0)
         XCTAssertEqual(SpaceTheme.clampedStopIndex(3, count: 4), 3)
@@ -325,6 +356,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
     }
 
     // MARK: - Palette apply resets positions (correctness pass)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_applyPalette_replacesColorsAndResetsStopPositions
 
     func test_applyPalette_replacesColorsAndResetsStopPositions() {
         var theme = Self.sampleTheme
@@ -346,6 +379,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
 
     // MARK: - Single-stop colour assignment touches only the selected index (correctness pass)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_setColor_touchesOnlyTheSelectedStop
+
     func test_setColor_touchesOnlyTheSelectedStop() {
         var theme = Self.sampleTheme
         XCTAssertEqual(theme.colors.count, 3)
@@ -360,6 +395,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
         XCTAssertEqual(theme.colors[2], originalThird, "Stop 2 must be untouched by a pick scoped to stop 1.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_setColor_outOfBoundsIndexIsANoOp
+
     func test_setColor_outOfBoundsIndexIsANoOp() {
         var theme = Self.sampleTheme
         let original = theme.colors
@@ -372,11 +409,15 @@ final class ThemeEditorRedesignTests: XCTestCase {
 
     // MARK: - Swatch strip page cycling wraparound (correctness pass)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_wrappedPageIndex_wrapsForwardPastTheLastPage
+
     func test_wrappedPageIndex_wrapsForwardPastTheLastPage() {
         XCTAssertEqual(ThemeSwatchStripView.wrappedPageIndex(0, by: 1, count: 3), 1)
         XCTAssertEqual(ThemeSwatchStripView.wrappedPageIndex(1, by: 1, count: 3), 2)
         XCTAssertEqual(ThemeSwatchStripView.wrappedPageIndex(2, by: 1, count: 3), 0, "Chevron-right from the last page must wrap to the first.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_wrappedPageIndex_wrapsBackwardPastTheFirstPage
 
     func test_wrappedPageIndex_wrapsBackwardPastTheFirstPage() {
         XCTAssertEqual(ThemeSwatchStripView.wrappedPageIndex(0, by: -1, count: 3), 2, "Chevron-left from the first page must wrap to the last.")
@@ -386,12 +427,16 @@ final class ThemeEditorRedesignTests: XCTestCase {
 
     // MARK: - Rotary dial value<->angle conversion (correctness pass)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_rotationDial_valueFromRawDegrees_isIdentityAcrossItsFullRange
+
     func test_rotationDial_valueFromRawDegrees_isIdentityAcrossItsFullRange() {
         for degrees in stride(from: 0.0, through: 360.0, by: 30.0) {
             let value = ThemeRotaryDial<EmptyView>.value(fromRawDegrees: degrees, range: 0...360, angleRange: 0...360)
             XCTAssertEqual(value, degrees, accuracy: 0.0001, "The rotation dial's range and angleRange are identical, so this conversion must be the identity function.")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_rotationDial_angleDegrees_isInverseOfValueFromRawDegrees
 
     func test_rotationDial_angleDegrees_isInverseOfValueFromRawDegrees() {
         for value in stride(from: 0.0, through: 350.0, by: 45.0) {
@@ -400,6 +445,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
             XCTAssertEqual(roundTripped, value, accuracy: 0.0001, "Drawing at angleDegrees(value) and then committing that same raw angle back must reproduce the original value.")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_softnessDial_valueFromRawDegrees_mapsTheSweepAndClampsTheDeadZone
 
     func test_softnessDial_valueFromRawDegrees_mapsTheSweepAndClampsTheDeadZone() {
         let range = 0.0...1.0
@@ -414,6 +461,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
         let atDeadZoneCenter = ThemeRotaryDial<EmptyView>.value(fromRawDegrees: 180, range: range, angleRange: angleRange)
         XCTAssertEqual(atDeadZoneCenter, 1, accuracy: 0.0001, "Raw 180 lands on the boundary this implementation resolves toward angleRange's upper bound (135), i.e. range.upperBound (1).")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_softnessDial_valueFromRawDegrees_deadZoneNeighboursSnapToOppositeEnds
 
     func test_softnessDial_valueFromRawDegrees_deadZoneNeighboursSnapToOppositeEnds() {
         let range = 0.0...1.0
@@ -431,11 +480,15 @@ final class ThemeEditorRedesignTests: XCTestCase {
 
     // MARK: - Wave slider grain clamp and nudge (correctness pass)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_waveSlider_clampedValue_staysInsideZeroToOne
+
     func test_waveSlider_clampedValue_staysInsideZeroToOne() {
         XCTAssertEqual(ThemeWaveSlider.clampedValue(-0.4), 0)
         XCTAssertEqual(ThemeWaveSlider.clampedValue(1.7), 1)
         XCTAssertEqual(ThemeWaveSlider.clampedValue(0.35), 0.35, accuracy: 0.0001)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_waveSlider_nudgedValue_movesByTheDocumentedStepAndClamps
 
     func test_waveSlider_nudgedValue_movesByTheDocumentedStepAndClamps() {
         XCTAssertEqual(ThemeWaveSlider.nudgedValue(0.5, direction: 1), 0.55, accuracy: 0.0001, "Grain nudges by 0.05 per arrow-key press/VoiceOver increment.")

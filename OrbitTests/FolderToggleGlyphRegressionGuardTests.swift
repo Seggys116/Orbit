@@ -6,9 +6,12 @@ import SwiftUI
 import AppKit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class FolderToggleGlyphRegressionGuardTests: XCTestCase {
 
     // MARK: - Guard 1: the toggle stays an OrbitNSActionButton
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinnedFolderRowToggle_staysAnOrbitNSActionButton_neverAPlainButton
 
     func test_pinnedFolderRowToggle_staysAnOrbitNSActionButton_neverAPlainButton() throws {
         let url = URL(fileURLWithPath: #filePath)
@@ -67,6 +70,8 @@ final class FolderToggleGlyphRegressionGuardTests: XCTestCase {
         return (env, space.id)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_folderRowLabel_startsAtTheSameXRegardlessOfGlyphKind
+
     func test_folderRowLabel_startsAtTheSameXRegardlessOfGlyphKind() {
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarRowHeight)
         let theme = SpaceTheme()
@@ -118,13 +123,19 @@ final class FolderToggleGlyphRegressionGuardTests: XCTestCase {
 
     // MARK: - Guard 3: a live toggle neither crashes nor blanks the glyph
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_liveToggle_defaultGlyph_survivesRepeatedRealClicksAndKeepsDrawingContent
+
     func test_liveToggle_defaultGlyph_survivesRepeatedRealClicksAndKeepsDrawingContent() async throws {
         try await assertLiveToggleSurvivesRealClicks(icon: nil, isEmoji: false, label: "default")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_liveToggle_customEmojiIcon_survivesRepeatedRealClicksAndKeepsDrawingContent
+
     func test_liveToggle_customEmojiIcon_survivesRepeatedRealClicksAndKeepsDrawingContent() async throws {
         try await assertLiveToggleSurvivesRealClicks(icon: "🔥", isEmoji: true, label: "emoji")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_liveToggle_customSFSymbolIcon_survivesRepeatedRealClicksAndKeepsDrawingContent
 
     func test_liveToggle_customSFSymbolIcon_survivesRepeatedRealClicksAndKeepsDrawingContent() async throws {
         try await assertLiveToggleSurvivesRealClicks(icon: "tray.full", isEmoji: false, label: "SF Symbol")

@@ -8,6 +8,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class PageClipShapeHitTestEvidenceTests: XCTestCase {
 
     private final class EngineStandInView: NSView {
@@ -151,6 +152,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
 
     // MARK: - 1. Baseline
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_1_baseline_representableAlone
+
     func test_1_baseline_representableAlone() {
         let engine = EngineStandInView()
         let window = hostLikeProduction(
@@ -166,6 +169,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
 
     // MARK: - 2. The clip alone
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_2_clipShapeAlone
+
     func test_2_clipShapeAlone() {
         let engine = EngineStandInView()
         let window = hostLikeProduction(
@@ -179,6 +184,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
     }
 
     // MARK: - 3. The border overlay alone
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_3_strokeBorderOverlayAlone
 
     func test_3_strokeBorderOverlayAlone() {
         let engine = EngineStandInView()
@@ -198,6 +205,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
 
     // MARK: - 4. The real modifier, unchanged
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_4_realPaneCardChrome
+
     func test_4_realPaneCardChrome() {
         let engine = EngineStandInView()
         let window = hostLikeProduction(
@@ -211,6 +220,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
     }
 
     // MARK: - 5. The real modifier plus the real drop-zone sibling
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_5_paneCardChromePlusSplitDropZoneOverlay
 
     func test_5_paneCardChromePlusSplitDropZoneOverlay() {
         let engine = EngineStandInView()
@@ -234,6 +245,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
 
     // MARK: - 6. Nested exactly as production nests it
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_6_vStackWithHeaderThenChrome
+
     func test_6_vStackWithHeaderThenChrome() {
         let engine = EngineStandInView()
         let window = hostLikeProduction(
@@ -252,6 +265,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
     }
 
     // MARK: - 7. The overlay sibling the page really carries
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_7_fullPageSiblingHostingViewAboveTheEngineView
 
     func test_7_fullPageSiblingHostingViewAboveTheEngineView() {
         let engine = EngineStandInView()
@@ -304,6 +319,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
 
     // MARK: - 8. What each level of the descent answers
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_8_perLevelHitTestWalk
+
     func test_8_perLevelHitTestWalk() {
         let engine = EngineStandInView()
         let window = hostLikeProduction(
@@ -348,6 +365,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_9_geometryReaderPlusContentShapeOnly_noDropModifier
+
     func test_9_geometryReaderPlusContentShapeOnly_noDropModifier() {
         let engine = EngineStandInView()
         let window = hostLikeProduction(
@@ -364,6 +383,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         defer { window.orderOut(nil) }
         expectBlocked("9 GeometryReader + Color.clear.contentShape, NO drop modifier", probe(window, at: Self.centre, engine: engine))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_10_sameShellWithDropDestinationFor
 
     func test_10_sameShellWithDropDestinationFor() {
         let engine = EngineStandInView()
@@ -384,6 +405,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         expectBlocked("10 same shell + .dropDestination(for:) [contentShape control]", probe(window, at: Self.centre, engine: engine))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_11_sameShellWithSidebarPayloadDropDestination
+
     func test_11_sameShellWithSidebarPayloadDropDestination() {
         let engine = EngineStandInView()
         let window = hostLikeProduction(
@@ -403,6 +426,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         expectBlocked("11 same shell + .sidebarPayloadDropDestination [contentShape control]", probe(window, at: Self.centre, engine: engine))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_12_realOverlayWithNoActiveTab
+
     func test_12_realOverlayWithNoActiveTab() {
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
@@ -420,6 +445,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         defer { window.orderOut(nil) }
         expectReachesEngine("12 real SplitDropZoneOverlay, activeTabID=nil (allowsHitTesting false)", probe(window, at: Self.centre, engine: engine))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_13_realOverlayWithActiveTab_atManyPoints
 
     func test_13_realOverlayWithActiveTab_atManyPoints() throws {
         let engine = EngineStandInView()
@@ -453,6 +480,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
 
     // MARK: - ROUND 2b: which line of the drop zone claims the point
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_15_colorClearAloneInsideGeometryReader
+
     func test_15_colorClearAloneInsideGeometryReader() {
         let engine = EngineStandInView()
         let window = hostLikeProduction(
@@ -468,6 +497,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         expectReachesEngine("15 GeometryReader + bare Color.clear (no contentShape, no drop)", probe(window, at: Self.centre, engine: engine))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_16_contentShapeWithoutGeometryReader
+
     func test_16_contentShapeWithoutGeometryReader() {
         let engine = EngineStandInView()
         let window = hostLikeProduction(
@@ -482,6 +513,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         defer { window.orderOut(nil) }
         expectBlocked("16 Color.clear.contentShape(Rectangle()), no GeometryReader", probe(window, at: Self.centre, engine: engine))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_17_geometryReaderAloneWithEmptyContent
 
     func test_17_geometryReaderAloneWithEmptyContent() {
         let engine = EngineStandInView()
@@ -547,6 +580,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         func close() { isClosed = true }
         lazy var view: NSView = standIn
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_14_realContentCardView_wholeTree
 
     func test_14_realContentCardView_wholeTree() throws {
         let engine = EngineStandInView()
@@ -614,6 +649,8 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
 
         env._test_detachWebContents(for: tabID)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_18_realContentCardView_withTheDropZoneNeutralised
 
     func test_18_realContentCardView_withTheDropZoneNeutralised() throws {
         let engine = EngineStandInView()

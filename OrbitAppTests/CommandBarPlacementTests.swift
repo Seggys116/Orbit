@@ -4,6 +4,7 @@ import SwiftUI
 
 @MainActor
 // Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class CommandBarPlacementTests: XCTestCase {
 
     // MARK: - Helpers
@@ -19,6 +20,8 @@ final class CommandBarPlacementTests: XCTestCase {
     }
 
     // MARK: - 1. The panel's centre is the window's centre, on both axes
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testPanelCentreMatchesWindowCentreOnBothAxesAtEveryWindowSize
 
     func testPanelCentreMatchesWindowCentreOnBothAxesAtEveryWindowSize() {
         let windowSizes: [CGSize] = [
@@ -52,6 +55,8 @@ final class CommandBarPlacementTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testGapsAroundThePanelAreSymmetricOnBothAxes
+
     func testGapsAroundThePanelAreSymmetricOnBothAxes() {
         let windowSize = CGSize(width: 1100, height: 780)
         let rendered = renderCentringProbe(containerSize: windowSize)
@@ -72,6 +77,8 @@ final class CommandBarPlacementTests: XCTestCase {
 
     // MARK: - 2. Width is a proportion of the window, capped by the token
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testWidthTracksTheMeasuredArcProportionWhileBelowTheCap
+
     func testWidthTracksTheMeasuredArcProportionWhileBelowTheCap() {
         for windowWidth in [560.0, 640.0, 720.0, 800.0, 900.0] as [CGFloat] {
             let resolved = CommandBarPlacement.width(forAvailableWidth: windowWidth)
@@ -83,12 +90,16 @@ final class CommandBarPlacementTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testBarNeverExceedsTheWindowItFloatsIn
+
     func testBarNeverExceedsTheWindowItFloatsIn() {
         for windowWidth in [400.0, 500.0, 620.0, 700.0, 1200.0, 2400.0] as [CGFloat] {
             let resolved = CommandBarPlacement.width(forAvailableWidth: windowWidth)
             XCTAssertLessThanOrEqual(resolved, windowWidth, "Bar (\(resolved)pt) is wider than its \(windowWidth)pt window.")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testWidthIsMonotonicInWindowWidthAndCappedByTheToken
 
     func testWidthIsMonotonicInWindowWidthAndCappedByTheToken() {
         let widths: [CGFloat] = [320, 500, 700, 900, 1100, 1440, 1920, 3840]
@@ -102,6 +113,8 @@ final class CommandBarPlacementTests: XCTestCase {
         }
         XCTAssertEqual(resolved.last, OrbitMetrics.commandBarWidth, "A very wide window should land exactly on the cap.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testDegenerateAvailableWidthFallsBackToTheToken
 
     func testDegenerateAvailableWidthFallsBackToTheToken() {
         XCTAssertEqual(CommandBarPlacement.width(forAvailableWidth: 0), OrbitMetrics.commandBarWidth)
@@ -124,6 +137,8 @@ final class CommandBarPlacementTests: XCTestCase {
         .pane(rightTab): rightPane,
     ]
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testNewTabModeCentresOnTheWholeContentRegionEvenInASplit
+
     func testNewTabModeCentresOnTheWholeContentRegionEvenInASplit() {
         let resolved = CommandBarPlacement.targetRect(
             mode: .newTab, activeTabID: Self.rightTab, anchors: Self.splitAnchors
@@ -134,6 +149,8 @@ final class CommandBarPlacementTests: XCTestCase {
         XCTAssertGreaterThan(resolved.midX, Self.leftPane.maxX, "Centre is inside the left pane rather than between the panes.")
         XCTAssertLessThan(resolved.midX, Self.rightPane.minX, "Centre is inside the right pane rather than between the panes.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testResolvedRegionNeverIncludesTheSidebarColumn
 
     func testResolvedRegionNeverIncludesTheSidebarColumn() {
         for mode in [CommandBarMode.newTab, .chatGPT, .editURL(nil)] {
@@ -147,6 +164,8 @@ final class CommandBarPlacementTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEditURLModeCentresOnTheFocusedPane
+
     func testEditURLModeCentresOnTheFocusedPane() {
         XCTAssertEqual(
             CommandBarPlacement.targetRect(mode: .editURL(nil), activeTabID: Self.leftTab, anchors: Self.splitAnchors),
@@ -158,12 +177,16 @@ final class CommandBarPlacementTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testChatGPTModeCentresOnTheContentRegion
+
     func testChatGPTModeCentresOnTheContentRegion() {
         XCTAssertEqual(
             CommandBarPlacement.targetRect(mode: .chatGPT, activeTabID: Self.rightTab, anchors: Self.splitAnchors),
             Self.contentRegion
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testBlankPaneModeCentresOnTheNamedPaneNotTheFocusedOne
 
     func testBlankPaneModeCentresOnTheNamedPaneNotTheFocusedOne() {
         XCTAssertEqual(
@@ -177,6 +200,8 @@ final class CommandBarPlacementTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testBlankPaneWithNoPaneAnchorFallsBackToTheContentRegion
+
     func testBlankPaneWithNoPaneAnchorFallsBackToTheContentRegion() {
         let anchors: [CommandBarAnchorID: CGRect] = [.contentRegion: Self.contentRegion]
 
@@ -185,6 +210,8 @@ final class CommandBarPlacementTests: XCTestCase {
             Self.contentRegion
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEditURLWithNoPaneAnchorFallsBackToTheContentRegion
 
     func testEditURLWithNoPaneAnchorFallsBackToTheContentRegion() {
         let anchors: [CommandBarAnchorID: CGRect] = [.contentRegion: Self.contentRegion]
@@ -199,6 +226,8 @@ final class CommandBarPlacementTests: XCTestCase {
             "No active tab means no pane to be editing the URL of."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testDegenerateAnchorsAreIgnoredRatherThanCentredOn
 
     func testDegenerateAnchorsAreIgnoredRatherThanCentredOn() {
         let degenerate: [CommandBarAnchorID: CGRect] = [
@@ -218,11 +247,15 @@ final class CommandBarPlacementTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testNoAnchorsResolvesToNoRegion
+
     func testNoAnchorsResolvesToNoRegion() {
         XCTAssertNil(CommandBarPlacement.targetRect(mode: .newTab, activeTabID: Self.leftTab, anchors: [:]))
     }
 
     // MARK: - 4. The resolved region is what the rendered panel actually lands on
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testRenderedPanelCentresOnTheTargetRegionRatherThanTheContainer
 
     func testRenderedPanelCentresOnTheTargetRegionRatherThanTheContainer() {
         let containerSize = CGSize(width: 1400, height: 900)
@@ -237,6 +270,8 @@ final class CommandBarPlacementTests: XCTestCase {
         XCTAssertEqual(box.midX, region.midX, accuracy: 2, "Panel is not centred on the target region horizontally — it is at \(box.midX), the region's centre is \(region.midX), the window's is \(containerSize.width / 2).")
         XCTAssertEqual(box.midY, region.midY, accuracy: 2, "Panel is not centred on the target region vertically — it is at \(box.midY), the region's centre is \(region.midY), the window's is \(containerSize.height / 2).")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testPanelIsSizedToTheRegionSoItNeverOverhangsIt
 
     func testPanelIsSizedToTheRegionSoItNeverOverhangsIt() {
         let containerSize = CGSize(width: 1400, height: 900)
@@ -443,6 +478,8 @@ extension CommandBarPlacementTests {
         return render(layout, size: containerSize)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTheDimCoversTheTargetRegionAndNothingElse
+
     func testTheDimCoversTheTargetRegionAndNothingElse() {
         let rendered = renderDimOnly(targetRect: Self.dimRegion)
         guard let box = rendered.boundingBoxOfContent(tolerance: 0.02) else {
@@ -455,6 +492,8 @@ extension CommandBarPlacementTests {
         XCTAssertEqual(box.minY, Self.dimRegion.minY, accuracy: 2, "The dim starts at y=\(box.minY); the region does at \(Self.dimRegion.minY).")
         XCTAssertEqual(box.maxY, Self.dimRegion.maxY, accuracy: 2, "The dim ends at y=\(box.maxY); the region does at \(Self.dimRegion.maxY).")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTheSidebarColumnIsNotDimmed
 
     func testTheSidebarColumnIsNotDimmed() {
         let rendered = renderDimOnly(targetRect: Self.dimRegion)
@@ -471,6 +510,8 @@ extension CommandBarPlacementTests {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTheDimIsRoundedLikeThePaneCardItCovers
+
     func testTheDimIsRoundedLikeThePaneCardItCovers() {
         let rendered = renderDimOnly(targetRect: Self.dimRegion)
         let probe: CGFloat = 6
@@ -482,6 +523,8 @@ extension CommandBarPlacementTests {
             "The corner is as covered as the edge (\(corner.a) vs \(edge.a)), i.e. the dim is a square patch. `OrbitMetrics.cardCornerRadius` is \(OrbitMetrics.cardCornerRadius)pt, so it should be visibly clipped there."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testWithNoRegionTheDimStillCoversEverything
 
     func testWithNoRegionTheDimStillCoversEverything() {
         let rendered = renderDimOnly(targetRect: nil)

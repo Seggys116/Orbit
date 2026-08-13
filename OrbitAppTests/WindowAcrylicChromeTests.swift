@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class WindowAcrylicChromeTests: XCTestCase {
 
     private var window: NSWindow?
@@ -49,6 +50,8 @@ final class WindowAcrylicChromeTests: XCTestCase {
 
     // MARK: - (1) The window paints nothing opaque of its own
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_window_isNotOpaqueAndPaintsNoBackgroundOfItsOwn
+
     func test_window_isNotOpaqueAndPaintsNoBackgroundOfItsOwn() {
         let window = makeRealWindow()
 
@@ -63,6 +66,8 @@ final class WindowAcrylicChromeTests: XCTestCase {
     }
 
     // MARK: - (2) A real blur fills the content area, under the SwiftUI tree
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installContentView_putsTheAcrylicBackdropUnderTheHostingView
 
     func test_installContentView_putsTheAcrylicBackdropUnderTheHostingView() throws {
         let window = makeRealWindow()
@@ -88,6 +93,8 @@ final class WindowAcrylicChromeTests: XCTestCase {
             "The backdrop must track the window by autoresizing, like the hosting view above it — otherwise resizing the window leaves un-blurred content outside its stale frame."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acrylicBackdrop_isConfiguredAsABehindWindowBlurThatStaysActive
 
     func test_acrylicBackdrop_isConfiguredAsABehindWindowBlurThatStaysActive() throws {
         let window = makeRealWindow()
@@ -115,6 +122,7 @@ final class WindowAcrylicChromeTests: XCTestCase {
 
     /// `NSVisualEffectView` answers hit tests with itself by default, which would swallow a
     /// click rather than falling through to the window background.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acrylicBackdrop_neverClaimsAClick
     func test_acrylicBackdrop_neverClaimsAClick() throws {
         let window = makeRealWindow()
         let backdrop = try self.backdrop(in: window)
@@ -125,6 +133,7 @@ final class WindowAcrylicChromeTests: XCTestCase {
     // MARK: - (3) The tint over it is genuinely translucent
 
     /// Ranges, not values: both numbers are tuned by eye.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acrylicTints_areTranslucentButStillPaintTheSpaceTheme
     func test_acrylicTints_areTranslucentButStillPaintTheSpaceTheme() {
         for (name, value) in [
             ("OrbitAcrylic.windowTintOpacity", OrbitAcrylic.windowTintOpacity),

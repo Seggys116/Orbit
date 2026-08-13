@@ -7,6 +7,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class OrbitMenuPanelTests: XCTestCase {
 
     // A 1440x900 primary display with the menu bar accounted for.
@@ -24,6 +25,8 @@ final class OrbitMenuPanelTests: XCTestCase {
 
     // MARK: - The right-click menu never grows an anchor arrow
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_rightClickMenu_neverPlacesAnAnchorArrow
+
     func test_rightClickMenu_neverPlacesAnAnchorArrow() {
         XCTAssertFalse(
             OrbitContextMenuPresenter.showsArrow,
@@ -37,6 +40,8 @@ final class OrbitMenuPanelTests: XCTestCase {
 
     // MARK: - Corner placement, flipping and clamping
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_rightClickMenu_growsDownAndRightFromTheClickPoint
+
     func test_rightClickMenu_growsDownAndRightFromTheClickPoint() {
         let point = CGPoint(x: 400, y: 600)
         let frame = OrbitContextMenuPresenter.geometry(contentSize: contentSize, at: point, visibleFrame: primary).containerFrame
@@ -44,12 +49,16 @@ final class OrbitMenuPanelTests: XCTestCase {
         XCTAssertEqual(frame.maxY, point.y, accuracy: 0.5, "The menu's top edge belongs on the click point.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_rightClickMenu_flipsUpwardWhenThereIsNoRoomBelowTheClick
+
     func test_rightClickMenu_flipsUpwardWhenThereIsNoRoomBelowTheClick() {
         let point = CGPoint(x: 400, y: 60)
         let geometry = OrbitContextMenuPresenter.geometry(contentSize: contentSize, at: point, visibleFrame: primary)
         XCTAssertEqual(geometry.direction, .up, "With only 60pt below the click, a 300pt menu must flip upward.")
         XCTAssertGreaterThanOrEqual(geometry.containerFrame.minY, point.y)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_rightClickMenu_clampsInsideTheScreenNearEveryEdge
 
     func test_rightClickMenu_clampsInsideTheScreenNearEveryEdge() {
         let bounds = primary.insetBy(dx: OrbitMetrics.contextMenuScreenEdgeInset, dy: OrbitMetrics.contextMenuScreenEdgeInset)
@@ -61,6 +70,8 @@ final class OrbitMenuPanelTests: XCTestCase {
             XCTAssertLessThanOrEqual(frame.maxY, bounds.maxY + 0.5, "Ran off the top edge from \(point).")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_menu_staysOnASecondaryDisplayWithItsOwnOriginAndSize
 
     func test_menu_staysOnASecondaryDisplayWithItsOwnOriginAndSize() {
         // A click near the secondary display's bottom-right corner: the menu
@@ -75,6 +86,8 @@ final class OrbitMenuPanelTests: XCTestCase {
 
     // MARK: - The "+" menu keeps its beak, pointing at its own button
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anchoredMenu_placesABeakOnTheEdgeFacingItsButton
+
     func test_anchoredMenu_placesABeakOnTheEdgeFacingItsButton() {
         let button = CGRect(x: 100, y: 40, width: 24, height: 24)
         let geometry = OrbitMenuPlacement.geometry(
@@ -86,6 +99,8 @@ final class OrbitMenuPanelTests: XCTestCase {
         let tipX = (geometry.arrow?.offset ?? 0) + geometry.containerFrame.minX
         XCTAssertEqual(tipX, button.midX, accuracy: 1, "The beak's tip must sit over the button it belongs to.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anchoredMenu_keepsItsBeakClearOfTheContainerCorners_whenClampedSideways
 
     func test_anchoredMenu_keepsItsBeakClearOfTheContainerCorners_whenClampedSideways() {
         let button = CGRect(x: 2, y: 40, width: 24, height: 24)
@@ -102,6 +117,8 @@ final class OrbitMenuPanelTests: XCTestCase {
         XCTAssertLessThanOrEqual(offset, OrbitMetrics.contextMenuWidth - limit + 0.5)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anchoredMenu_withoutArrow_hasNoBeakAtAll
+
     func test_anchoredMenu_withoutArrow_hasNoBeakAtAll() {
         let geometry = OrbitMenuPlacement.geometry(
             contentSize: contentSize, anchor: CGRect(x: 100, y: 40, width: 24, height: 24),
@@ -111,6 +128,8 @@ final class OrbitMenuPanelTests: XCTestCase {
     }
 
     // MARK: - Submenus land beside their row, flipping when there is no room
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_submenu_opensToTheRightOfItsRow_andFlipsLeftAtTheScreenEdge
 
     func test_submenu_opensToTheRightOfItsRow_andFlipsLeftAtTheScreenEdge() {
         let row = CGRect(x: 300, y: 500, width: OrbitMetrics.contextMenuWidth, height: OrbitMetrics.contextMenuRowHeight)
@@ -132,6 +151,8 @@ final class OrbitMenuPanelTests: XCTestCase {
 
     // MARK: - Keyboard navigation
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_keyCodes_mapToTheMenuActionsAContextMenuMustSupport
+
     func test_keyCodes_mapToTheMenuActionsAContextMenuMustSupport() {
         XCTAssertEqual(OrbitMenuKeyAction.from(keyCode: 125), .moveDown)
         XCTAssertEqual(OrbitMenuKeyAction.from(keyCode: 126), .moveUp)
@@ -142,6 +163,8 @@ final class OrbitMenuPanelTests: XCTestCase {
         XCTAssertEqual(OrbitMenuKeyAction.from(keyCode: 123), .closeSubmenu)
         XCTAssertNil(OrbitMenuKeyAction.from(keyCode: 0), "An ordinary letter key must pass straight through the menu.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_arrowKeys_moveTheSelectionAndWrapAround
 
     func test_arrowKeys_moveTheSelectionAndWrapAround() {
         let items = entries(count: 3)
@@ -160,11 +183,15 @@ final class OrbitMenuPanelTests: XCTestCase {
         XCTAssertEqual(selection.selectedItem?.title, "Item 2", "Selection must wrap backwards too.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_upArrowFromNothing_selectsTheLastItem
+
     func test_upArrowFromNothing_selectsTheLastItem() {
         let selection = OrbitMenuSelectionModel(entries: entries(count: 3))
         selection.move(by: -1)
         XCTAssertEqual(selection.selectedItem?.title, "Item 2")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_arrowKeys_skipDisabledItemsAndDividersAndSectionHeaders
 
     func test_arrowKeys_skipDisabledItemsAndDividersAndSectionHeaders() {
         let items: [OrbitContextMenuEntry] = [
@@ -181,6 +208,8 @@ final class OrbitMenuPanelTests: XCTestCase {
         XCTAssertEqual(selection.selectedItem?.title, "Enabled B", "Arrow keys must never land on a disabled item.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_arrowKeys_neverDescendIntoASubmenusOwnItems
+
     func test_arrowKeys_neverDescendIntoASubmenusOwnItems() {
         let items: [OrbitContextMenuEntry] = [
             .item(OrbitContextMenuItem(title: "Parent", submenu: [.item(OrbitContextMenuItem(title: "Child"))])),
@@ -193,6 +222,8 @@ final class OrbitMenuPanelTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_selection_isDroppedWhenTheItemItPointedAtDisappears
+
     func test_selection_isDroppedWhenTheItemItPointedAtDisappears() {
         let items = entries(count: 3)
         let selection = OrbitMenuSelectionModel(entries: items)
@@ -203,6 +234,8 @@ final class OrbitMenuPanelTests: XCTestCase {
     }
 
     // MARK: - Return activates, without any blocking call
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_return_runsTheSelectedItemsActionExactlyOnceAndDismisses
 
     func test_return_runsTheSelectedItemsActionExactlyOnceAndDismisses() {
         var ran = 0
@@ -224,6 +257,8 @@ final class OrbitMenuPanelTests: XCTestCase {
         assertNoPanelsLeaked()
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_escape_dismissesTheMenu
+
     func test_escape_dismissesTheMenu() {
         let controller = OrbitMenuPanelController()
         let window = makeOwnerWindow()
@@ -238,6 +273,8 @@ final class OrbitMenuPanelTests: XCTestCase {
         assertNoPanelsLeaked()
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_keyHandling_isInertWhenNoMenuIsOpen
+
     func test_keyHandling_isInertWhenNoMenuIsOpen() {
         let controller = OrbitMenuPanelController()
         XCTAssertFalse(controller.handleKey(code: 125), "A closed menu must let every key through untouched.")
@@ -245,6 +282,8 @@ final class OrbitMenuPanelTests: XCTestCase {
     }
 
     // MARK: - Dismissal and leaks
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theOwningWindowClosing_takesTheMenuWithIt
 
     func test_theOwningWindowClosing_takesTheMenuWithIt() {
         let controller = OrbitMenuPanelController()
@@ -258,6 +297,8 @@ final class OrbitMenuPanelTests: XCTestCase {
         XCTAssertFalse(controller.isPresented, "A menu must never outlive the window it was opened from.")
         assertNoPanelsLeaked()
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theAnchorLeavingItsWindow_takesTheMenuWithIt
 
     func test_theAnchorLeavingItsWindow_takesTheMenuWithIt() {
         // The engine view being torn down when a tab goes away is exactly this.
@@ -276,6 +317,8 @@ final class OrbitMenuPanelTests: XCTestCase {
         XCTAssertEqual(lost, 1, "The menu must learn that the view it was opened from left the window.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dismiss_isIdempotentAndLeavesNoPanelBehind
+
     func test_dismiss_isIdempotentAndLeavesNoPanelBehind() {
         let controller = OrbitMenuPanelController()
         let window = makeOwnerWindow()
@@ -290,12 +333,16 @@ final class OrbitMenuPanelTests: XCTestCase {
         assertNoPanelsLeaked()
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_presenter_presentsNothingForAViewWithNoWindow
+
     func test_presenter_presentsNothingForAViewWithNoWindow() {
         let presenter = OrbitContextMenuPresenter()
         presenter.present(entries: entries(count: 2), anchorView: NSView(), at: CGPoint(x: 10, y: 10))
         XCTAssertFalse(presenter.isPresented)
         assertNoPanelsLeaked()
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_presenter_presentsNothingForAnEmptyMenu
 
     func test_presenter_presentsNothingForAnEmptyMenu() {
         let controller = OrbitMenuPanelController()
@@ -309,6 +356,8 @@ final class OrbitMenuPanelTests: XCTestCase {
     }
 
     // MARK: - The panel itself draws none of its own chrome
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_panel_isBorderlessTransparentAndCastsNoSystemShadow
 
     func test_panel_isBorderlessTransparentAndCastsNoSystemShadow() {
         let panel = OrbitMenuPanel(

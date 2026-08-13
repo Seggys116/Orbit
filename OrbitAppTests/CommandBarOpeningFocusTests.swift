@@ -3,6 +3,7 @@ import SwiftUI
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class CommandBarOpeningFocusTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -104,6 +105,8 @@ final class CommandBarOpeningFocusTests: XCTestCase {
 
     // MARK: - The reported behaviour
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_openingOnAPageSelectsTheWholeURL
+
     func test_openingOnAPageSelectsTheWholeURL() {
         let window = mountCommandBar(mode: .editURL(pageURL))
         guard let editor = assertFocused(window, "The bar never took the keyboard, so nothing was selected either.") else { return }
@@ -115,6 +118,8 @@ final class CommandBarOpeningFocusTests: XCTestCase {
             "The URL was not selected — the caret was placed in \(editor.string) at \(editor.selectedRange())."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theFirstKeystrokeReplacesTheWholeURL
 
     func test_theFirstKeystrokeReplacesTheWholeURL() {
         let window = mountCommandBar(mode: .editURL(pageURL))
@@ -128,11 +133,15 @@ final class CommandBarOpeningFocusTests: XCTestCase {
         XCTAssertEqual(editor.string, "g", "Typing did not replace the address; the field holds \(editor.string).")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_openingBlankStillTakesTheKeyboard
+
     func test_openingBlankStillTakesTheKeyboard() {
         let window = mountCommandBar(mode: .newTab)
         guard let editor = assertFocused(window, "A new-tab bar opened without the keyboard; typing would have gone to the page.") else { return }
         XCTAssertEqual(editor.string, "", "The new-tab bar should open with an empty query.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_focusStolenWhileTheBarIsOpeningIsTakenBack
 
     func test_focusStolenWhileTheBarIsOpeningIsTakenBack() {
         let window = mountCommandBar(mode: .editURL(pageURL), settle: false)
@@ -147,6 +156,8 @@ final class CommandBarOpeningFocusTests: XCTestCase {
             "Focus came back but the URL was left unselected: \(editor.string) at \(editor.selectedRange())."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_asecondOpeningGestureOverAnOpenBarReSeedsAndReSelects
 
     func test_asecondOpeningGestureOverAnOpenBarReSeedsAndReSelects() {
         let window = mountCommandBar(mode: .newTab)

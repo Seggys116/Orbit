@@ -7,6 +7,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
 
     private func waitUntilTrue(
@@ -161,6 +162,8 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
         return json
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testVideoReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly
+
     func testVideoReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let (result, metadata) = try drivePlayback(
@@ -183,6 +186,7 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
     /// Metadata (duration) is proven unconditionally before the play()-dependent assertions;
     /// a NotAllowedError from Chromium's real autoplay policy XCTSkips them instead of failing.
     // ORBIT-LIVE-ENGINE: MAY-SKIP testAudioReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAudioReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly
     func testAudioReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let (result, metadata) = try drivePlayback(

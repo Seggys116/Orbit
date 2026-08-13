@@ -6,7 +6,10 @@ import XCTest
 // MARK: - 1. The pure glyph state machine
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ToolbarAddressCopyGlyphTests: XCTestCase {
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_atRest_secureShowsTheChainLink
 
     func test_atRest_secureShowsTheChainLink() {
         XCTAssertEqual(
@@ -15,12 +18,16 @@ final class ToolbarAddressCopyGlyphTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_atRest_insecureShowsTheWarningLockSlash
+
     func test_atRest_insecureShowsTheWarningLockSlash() {
         XCTAssertEqual(
             ToolbarAddressCopyGlyph.current(security: .insecure, isHovering: false, isCopied: false),
             .resting(symbol: "lock.slash", isWarning: true)
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_atRest_localAndUnknownDrawNothing
 
     func test_atRest_localAndUnknownDrawNothing() {
         for security: SecurityLevel in [.local, .unknown] {
@@ -31,6 +38,8 @@ final class ToolbarAddressCopyGlyphTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hovering_alwaysShowsTheCopyGlyphRegardlessOfSecurityState
+
     func test_hovering_alwaysShowsTheCopyGlyphRegardlessOfSecurityState() {
         for security: SecurityLevel in [.secure, .insecure, .mixedContent, .certificateError, .local, .unknown] {
             XCTAssertEqual(
@@ -39,6 +48,8 @@ final class ToolbarAddressCopyGlyphTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_copied_outranksHovering
 
     func test_copied_outranksHovering() {
         XCTAssertEqual(
@@ -73,6 +84,8 @@ final class ToolbarAddressCopyClickCatchingNSViewTests: XCTestCase {
 
     // MARK: The click genuinely fires (the user's exact complaint, applied here)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_mouseDown_invokesOnClick
+
     func test_mouseDown_invokesOnClick() {
         let view = ToolbarAddressCopyClickCatchingNSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
         var clickCount = 0
@@ -83,6 +96,8 @@ final class ToolbarAddressCopyClickCatchingNSViewTests: XCTestCase {
         XCTAssertEqual(clickCount, 1, "A click must invoke onClick exactly once.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_mouseDown_withNoOnClickWired_doesNothingAndDoesNotCrash
+
     func test_mouseDown_withNoOnClickWired_doesNothingAndDoesNotCrash() {
         let view = ToolbarAddressCopyClickCatchingNSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
         view.mouseDown(with: mouseDownEvent())
@@ -90,11 +105,15 @@ final class ToolbarAddressCopyClickCatchingNSViewTests: XCTestCase {
 
     // MARK: Hit testing — always the frontmost responder for its own bounds
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hitTest_claimsPointsInsideBounds
+
     func test_hitTest_claimsPointsInsideBounds() {
         let view = ToolbarAddressCopyClickCatchingNSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
         XCTAssertTrue(view.hitTest(NSPoint(x: 8, y: 8)) === view)
         XCTAssertTrue(view.hitTest(NSPoint(x: 0, y: 0)) === view)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hitTest_returnsNilOutsideBounds
 
     func test_hitTest_returnsNilOutsideBounds() {
         let view = ToolbarAddressCopyClickCatchingNSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
@@ -104,12 +123,16 @@ final class ToolbarAddressCopyClickCatchingNSViewTests: XCTestCase {
 
     // MARK: First click after window activation must not be wasted
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acceptsFirstMouse_isTrue
+
     func test_acceptsFirstMouse_isTrue() {
         let view = ToolbarAddressCopyClickCatchingNSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
         XCTAssertTrue(view.acceptsFirstMouse(for: nil))
     }
 
     // MARK: Never a window-drag handle — this control's own, independent fix
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_clickCatcher_isNeverAWindowDragHandle
 
     func test_clickCatcher_isNeverAWindowDragHandle() {
         let view = ToolbarAddressCopyClickCatchingNSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
@@ -120,6 +143,8 @@ final class ToolbarAddressCopyClickCatchingNSViewTests: XCTestCase {
     }
 
     // MARK: Hover — reports genuine transitions only, never a duplicate
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_updateHover_reportsEnterAndExit
 
     func test_updateHover_reportsEnterAndExit() {
         let view = ToolbarAddressCopyClickCatchingNSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
@@ -132,6 +157,8 @@ final class ToolbarAddressCopyClickCatchingNSViewTests: XCTestCase {
         XCTAssertEqual(reported, [true, false])
         XCTAssertFalse(view.isHovering)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_updateHover_neverReportsTheSameStateTwice
 
     func test_updateHover_neverReportsTheSameStateTwice() {
         let view = ToolbarAddressCopyClickCatchingNSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
@@ -191,6 +218,8 @@ final class ToolbarAddressCopyControlHostedTests: XCTestCase {
         return (window, catcher)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realClick_putsTheRawURLOnThePasteboard
+
     func test_realClick_putsTheRawURLOnThePasteboard() {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("OrbitAppTests-ToolbarAddressCopy-\(UUID().uuidString)"))
         let url = URL(string: "https://example.com/deep/path?q=1#frag")!
@@ -208,6 +237,8 @@ final class ToolbarAddressCopyControlHostedTests: XCTestCase {
             "Clicking the real, mounted hover-to-copy control must put the whole raw absolute URL on the pasteboard — the same thing ToolbarContextMenuAction.copyURL(_:to:) puts there for the header's own right-click 'Copy URL' row, so the two Toolbar surfaces never disagree about what they copy."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realHover_changesTheRenderedGlyph
 
     func test_realHover_changesTheRenderedGlyph() {
         let url = URL(string: "https://example.com")!
@@ -298,6 +329,8 @@ final class ToolbarViewAddressCopyControlIntegrationTests: XCTestCase {
         return nil
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_control_isMountedForALoadedPage_andAbsentOnAnEmptyTab
+
     func test_control_isMountedForALoadedPage_andAbsentOnAnEmptyTab() {
         let loadedTab = makeTab(url: "https://example.com")
         defer { cleanup([loadedTab.id]) }
@@ -332,6 +365,8 @@ final class ToolbarViewAddressCopyControlIntegrationTests: XCTestCase {
             "An empty tab with nothing worth copying must not mount the hover-to-copy control at all — matching the old inline icon's own `if hasLoadedPage` gate."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_clickingTheControlInsideARealToolbarView_copiesThatPanesOwnURL
 
     func test_clickingTheControlInsideARealToolbarView_copiesThatPanesOwnURL() {
         let tab = makeTab(url: "https://example.com/this-panes-own-page")

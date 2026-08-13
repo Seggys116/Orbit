@@ -2,9 +2,12 @@ import AppKit
 import XCTest
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class OrbitScrollerTests: XCTestCase {
 
     // MARK: - Width
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theScrollerIsThinnerThanAppKitsAtEveryControlSizeAndStyle
 
     func test_theScrollerIsThinnerThanAppKitsAtEveryControlSizeAndStyle() {
         let sizes: [NSControl.ControlSize] = [.regular, .small, .mini, .large]
@@ -27,6 +30,8 @@ final class OrbitScrollerTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theScrollerDeclaresItselfUsableUnderOverlayScrollerStyle
+
     func test_theScrollerDeclaresItselfUsableUnderOverlayScrollerStyle() {
         XCTAssertTrue(
             OrbitScroller.isCompatibleWithOverlayScrollers,
@@ -35,6 +40,8 @@ final class OrbitScrollerTests: XCTestCase {
     }
 
     // MARK: - Installation
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aRealScrollViewLaysOutTheThinScrollerOnBothAxes
 
     func test_aRealScrollViewLaysOutTheThinScrollerOnBothAxes() {
         let stock = makeScrollView()
@@ -62,6 +69,8 @@ final class OrbitScrollerTests: XCTestCase {
                        "AppKit must lay the horizontal scroller out at Orbit's width. The same harness measures \(stockHorizontal)pt with AppKit's own scroller.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_applyingTwiceReplacesNothingTheSecondTime
+
     func test_applyingTwiceReplacesNothingTheSecondTime() {
         let scrollView = makeScrollView()
         XCTAssertTrue(OrbitScrollerInstaller.apply(to: scrollView))
@@ -76,6 +85,8 @@ final class OrbitScrollerTests: XCTestCase {
         XCTAssertTrue(scrollView.horizontalScroller === horizontal, "The horizontal scroller instance must survive a second apply.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aScrollViewWithNoScrollerIsLeftWithoutOne
+
     func test_aScrollViewWithNoScrollerIsLeftWithoutOne() {
         let scrollView = makeScrollView()
         scrollView.hasVerticalScroller = false
@@ -88,6 +99,8 @@ final class OrbitScrollerTests: XCTestCase {
         XCTAssertFalse(scrollView.hasVerticalScroller, "The retrofit must not switch a hidden vertical indicator back on.")
         XCTAssertFalse(scrollView.hasHorizontalScroller, "The retrofit must not switch a hidden horizontal indicator back on.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aWindowSweepReachesNestedScrollViews
 
     func test_aWindowSweepReachesNestedScrollViews() {
         let outer = makeScrollView()
@@ -106,6 +119,8 @@ final class OrbitScrollerTests: XCTestCase {
     }
 
     // MARK: - Drawing
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theKnobPaintsAThinCentredPillAndNoTrack
 
     func test_theKnobPaintsAThinCentredPillAndNoTrack() {
         let (window, scrollView) = makeHostedScrollView()

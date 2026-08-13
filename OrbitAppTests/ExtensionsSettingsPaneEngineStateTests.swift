@@ -7,6 +7,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
 
     private lazy var demoEnvironment: AppEnvironment = AppEnvironment.demo
@@ -25,6 +26,8 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
 
     // MARK: - 1. A running Chromium engine draws the real pane, in both environments
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theRealChromiumEngineAdvertisesExtensions
+
     func test_theRealChromiumEngineAdvertisesExtensions() {
         XCTAssertTrue(
             ChromiumEngine(storage: .isolated).capabilities.contains(.extensions),
@@ -36,6 +39,8 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theOrbitEnvironmentWithARunningEngine_drawsTheInstallControls
+
     func test_theOrbitEnvironmentWithARunningEngine_drawsTheInstallControls() {
         orbitEnvironment._test_engineOverride = engine
         let window = hostExtensionsPane(env: orbitEnvironment)
@@ -45,6 +50,8 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
             "The Extensions pane drew no install field for an engine that reports .extensions — the real pane is not being reached."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theDemoEnvironmentWithARunningEngine_drawsTheSameInstallControls
 
     func test_theDemoEnvironmentWithARunningEngine_drawsTheSameInstallControls() {
         demoEnvironment._test_engineOverride = engine
@@ -64,6 +71,7 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
 
     // ExtensionsSettingsPaneRowStatesVisualTests covers what this state *does* paint;
     // this covers what it must not offer.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anEnvironmentWithNoEngine_offersNoInstallControls
     func test_anEnvironmentWithNoEngine_offersNoInstallControls() {
         demoEnvironment._test_engineOverride = nil
         XCTAssertFalse(
@@ -81,6 +89,8 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
 
     // MARK: - 3. One Settings surface, identical in both app entry points
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_bothAppEntryPointsDeclareTheSameSettingsScene
+
     func test_bothAppEntryPointsDeclareTheSameSettingsScene() throws {
         let orbit = try Self.settingsSceneBody(ofAppFile: "Orbit/OrbitApp.swift")
         let demo = try Self.settingsSceneBody(ofAppFile: "OrbitDemo/OrbitDemoApp.swift")
@@ -94,6 +104,8 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
             """
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_neitherAppEntryPointBuildsItsOwnSettingsHierarchy
 
     func test_neitherAppEntryPointBuildsItsOwnSettingsHierarchy() throws {
         for file in ["Orbit/OrbitApp.swift", "OrbitDemo/OrbitDemoApp.swift"] {
@@ -119,6 +131,8 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
     }
 
     // MARK: - 4. The deleted WebKit backend must not come back as prose
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noShippedSourceDescribesTheDeletedWebKitBackend
 
     func test_noShippedSourceDescribesTheDeletedWebKitBackend() throws {
         let phrases = ["WebKit fallback", "WKWebView", "Safari Web Extensions", "fallback backend", "fallback engine"]

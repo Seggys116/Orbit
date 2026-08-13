@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ToolbarHeaderHitTestEvidenceTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -79,6 +80,8 @@ final class ToolbarHeaderHitTestEvidenceTests: XCTestCase {
 
     // MARK: - 1. Every control in the header can be reached by a real click
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyHeaderControlIsReachableByARealClick
+
     func test_everyHeaderControlIsReachableByARealClick() {
         let tab = makeTab()
         defer { env.state.tabs.removeValue(forKey: tab.id) }
@@ -110,6 +113,8 @@ final class ToolbarHeaderHitTestEvidenceTests: XCTestCase {
     }
 
     // MARK: - 2. The recovery itself
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_contentViewRecoversAClickSwiftUIWouldHaveSwallowed
 
     func test_contentViewRecoversAClickSwiftUIWouldHaveSwallowed() throws {
         let content = OrbitWindowContentView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
@@ -147,6 +152,8 @@ final class ToolbarHeaderHitTestEvidenceTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_recoveryDoesNotDisturbAClickThatAlreadyWorks
+
     func test_recoveryDoesNotDisturbAClickThatAlreadyWorks() {
         let content = OrbitWindowContentView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
         let plain = NSView(frame: content.bounds)
@@ -157,6 +164,8 @@ final class ToolbarHeaderHitTestEvidenceTests: XCTestCase {
         XCTAssertTrue(content.hitTest(NSPoint(x: 51, y: 51)) === catcher)
         XCTAssertTrue(content.hitTest(NSPoint(x: 300, y: 150)) === plain, "A plain AppKit view keeps every point no control occupies.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_recoverySkipsHiddenAndTransparentControls
 
     func test_recoverySkipsHiddenAndTransparentControls() {
         let content = OrbitWindowContentView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))

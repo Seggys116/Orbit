@@ -7,6 +7,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ExtensionActionPopupHostingSizingTests: XCTestCase {
 
     private var windows: [NSWindow] = []
@@ -56,6 +57,8 @@ final class ExtensionActionPopupHostingSizingTests: XCTestCase {
 
     // MARK: - Loading state
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_beforeAnyReport_theHostingControllersPreferredContentSizeIsThePopupLoadingSize
+
     func test_beforeAnyReport_theHostingControllersPreferredContentSizeIsThePopupLoadingSize() {
         let (model, _) = makeModel()
         model.start()
@@ -67,6 +70,8 @@ final class ExtensionActionPopupHostingSizingTests: XCTestCase {
     }
 
     // MARK: - The reported defect itself, at the AppKit chrome layer
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aToggleSizedReport_shrinksTheRealPopoverHostToExactlyThatSize
 
     func test_aToggleSizedReport_shrinksTheRealPopoverHostToExactlyThatSize() throws {
         let (model, engine) = makeModel()
@@ -86,6 +91,8 @@ final class ExtensionActionPopupHostingSizingTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aGrowingReport_growsTheRealPopoverHostToTheLargerFrame
+
     func test_aGrowingReport_growsTheRealPopoverHostToTheLargerFrame() throws {
         let (model, engine) = makeModel()
         model.start()
@@ -102,6 +109,8 @@ final class ExtensionActionPopupHostingSizingTests: XCTestCase {
 
     // MARK: - Clamping survives the real host, not just the model
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anOversizedReport_clampsTheRealPopoverHostToChromesMaximum
+
     func test_anOversizedReport_clampsTheRealPopoverHostToChromesMaximum() throws {
         let (model, engine) = makeModel()
         model.start()
@@ -111,6 +120,8 @@ final class ExtensionActionPopupHostingSizingTests: XCTestCase {
 
         XCTAssertEqual(settledPreferredContentSize(for: model), ExtensionActionPopupSupport.popupMaximumSize)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anUndersizedReport_clampsTheRealPopoverHostUpToChromesMinimum
 
     func test_anUndersizedReport_clampsTheRealPopoverHostUpToChromesMinimum() throws {
         let (model, engine) = makeModel()
@@ -123,6 +134,8 @@ final class ExtensionActionPopupHostingSizingTests: XCTestCase {
     }
 
     // MARK: - The failure state is not left at the popup's stale web-content size
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aLoadFailure_hostsAtThePopupMessageWidth_notWhateverSizeWasReportedBeforeItFailed
 
     func test_aLoadFailure_hostsAtThePopupMessageWidth_notWhateverSizeWasReportedBeforeItFailed() throws {
         let (model, engine) = makeModel()

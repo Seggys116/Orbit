@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class PaneChromeTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -35,6 +36,8 @@ final class PaneChromeTests: XCTestCase {
 
     // MARK: - 1. Header background equals the tab's theme colour
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_headerBackground_equalsTabsThemeColorWhenSet
+
     func test_headerBackground_equalsTabsThemeColorWhenSet() {
         let tab = makeTab()
         defer { cleanup([tab.id]) }
@@ -63,6 +66,8 @@ final class PaneChromeTests: XCTestCase {
     }
 
     // MARK: - 2. Glyph colour flips at the luminance threshold
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_glyphColor_flipsAtLuminanceThreshold_forLightAndDarkPages
 
     func test_glyphColor_flipsAtLuminanceThreshold_forLightAndDarkPages() {
         let darkTab = makeTab(url: "https://dark.example.com")
@@ -112,6 +117,8 @@ final class PaneChromeTests: XCTestCase {
     }
 
     // MARK: - 2b. A colour that resolves *after* the first render still lands
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aColourResolvedAfterTheFirstRender_repaintsTheHeaderAndItsGlyphsTogether
 
     func test_aColourResolvedAfterTheFirstRender_repaintsTheHeaderAndItsGlyphsTogether() async {
         let tab = makeTab(url: "https://resolves-late.example.com")
@@ -193,6 +200,8 @@ final class PaneChromeTests: XCTestCase {
     }
 
     // MARK: - 2c. The header keeps following the page for the document's life
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aPageThatChangesColourWithoutNavigating_repaintsTheHeaderAndItsGlyphsEveryTime
 
     func test_aPageThatChangesColourWithoutNavigating_repaintsTheHeaderAndItsGlyphsEveryTime() async {
         let tab = makeTab(url: "https://changes-colour-in-place.example.com")
@@ -279,6 +288,8 @@ final class PaneChromeTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aPageThatChangesColour_movesTheScrollerAndTheHeaderTogether
+
     func test_aPageThatChangesColour_movesTheScrollerAndTheHeaderTogether() {
         let sequence: [ThemeColor] = [
             ThemeColor(red: 1, green: 1, blue: 1),
@@ -301,6 +312,8 @@ final class PaneChromeTests: XCTestCase {
     }
 
     // MARK: - 3. Each pane in a split reflects its own tab's navigation state
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_twoPaneSplit_eachHeaderReflectsItsOwnTabsNavigationState
 
     func test_twoPaneSplit_eachHeaderReflectsItsOwnTabsNavigationState() {
         let tabA = makeTab(url: "https://a.example.com")
@@ -367,6 +380,8 @@ final class PaneChromeTests: XCTestCase {
 
     // MARK: - 4. The focused pane's border differs from the unfocused pane's
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_splitPane_focusedBorderDiffersFromUnfocused
+
     func test_splitPane_focusedBorderDiffersFromUnfocused() {
         let tabA = makeTab(url: "https://a.example.com")
         let tabB = makeTab(url: "https://b.example.com")
@@ -414,6 +429,8 @@ final class PaneChromeTests: XCTestCase {
 
     // MARK: - 5. The pane header renders in every sidebar state (reverted regression)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_paneHeader_rendersInBothSidebarStates
+
     func test_paneHeader_rendersInBothSidebarStates() {
         let tab = makeTab()
         defer { cleanup([tab.id]) }
@@ -456,6 +473,8 @@ final class PaneChromeTests: XCTestCase {
     }
 
     // MARK: - 6. Content card inset is uniform on all four edges, both sidebar states
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_contentCard_insetIsUniformOnAllFourEdges_bothSidebarStates
 
     func test_contentCard_insetIsUniformOnAllFourEdges_bothSidebarStates() {
         PeekState.shared.dismiss()
@@ -528,6 +547,8 @@ final class PaneChromeTests: XCTestCase {
     }
 
     // MARK: - 7. The seam between two split panes is one gap, not two
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_splitPanes_interPaneGapMatchesTheOuterCardInset
 
     func test_splitPanes_interPaneGapMatchesTheOuterCardInset() {
         PeekState.shared.dismiss()

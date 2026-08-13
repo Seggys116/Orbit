@@ -6,6 +6,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class WindowSizingRegressionTests: XCTestCase {
 
     private struct TallContent: View {
@@ -22,6 +23,8 @@ final class WindowSizingRegressionTests: XCTestCase {
         return hosting
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withoutTheFix_defaultSizingOptions_fittingSizeReflectsTallContentHeight
+
     func test_withoutTheFix_defaultSizingOptions_fittingSizeReflectsTallContentHeight() {
         let hosting = makeTallHostingView(sizingOptions: .standardBounds)
         XCTAssertGreaterThan(
@@ -30,6 +33,8 @@ final class WindowSizingRegressionTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withTheFix_emptySizingOptions_fittingSizeNoLongerReflectsTallContentHeight
+
     func test_withTheFix_emptySizingOptions_fittingSizeNoLongerReflectsTallContentHeight() {
         let hosting = makeTallHostingView(sizingOptions: [])
         XCTAssertLessThan(
@@ -37,6 +42,8 @@ final class WindowSizingRegressionTests: XCTestCase {
             "P0 regression: OrbitWindowController.configure() sets hosting.sizingOptions = [] specifically so the hosting view never publishes the SwiftUI content's own tall ideal height as its fittingSize — found \(hosting.fittingSize.height)pt, still reflecting the tall content."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_fittingSizeHeight_isSubstantiallySmallerWithTheFixThanWithoutIt
 
     func test_fittingSizeHeight_isSubstantiallySmallerWithTheFixThanWithoutIt() {
         let withoutFix = makeTallHostingView(sizingOptions: .standardBounds).fittingSize.height

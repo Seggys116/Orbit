@@ -3,6 +3,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
 
     private var allCatcherTypes: [(name: String, make: @MainActor (NSRect) -> NSView)] {
@@ -20,6 +21,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
     }
 
     // MARK: - 1. A catcher away from its superview's origin claims its own frame
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyClickCatcherClaimsItsOwnFrameWhenItIsNotAtItsSuperviewsOrigin
 
     func test_everyClickCatcherClaimsItsOwnFrameWhenItIsNotAtItsSuperviewsOrigin() {
         for catcherType in allCatcherTypes {
@@ -43,6 +46,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noClickCatcherClaimsAPointOutsideItsOwnFrame
+
     func test_noClickCatcherClaimsAPointOutsideItsOwnFrame() {
         for catcherType in allCatcherTypes {
             let container = makeContainer()
@@ -59,6 +64,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
     }
 
     // MARK: - 2. Conversion holds through more than one level
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyClickCatcherIsReachableThroughNestedOffsetSuperviews
 
     func test_everyClickCatcherIsReachableThroughNestedOffsetSuperviews() {
         for catcherType in allCatcherTypes {
@@ -87,6 +94,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
 
     // MARK: - 3. The standalone case every other test in this repo relies on
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aParentlessCatcherStillClaimsPointsInItsOwnBounds
+
     func test_aParentlessCatcherStillClaimsPointsInItsOwnBounds() {
         for catcherType in allCatcherTypes {
             let catcher = catcherType.make(NSRect(x: 0, y: 0, width: 22, height: 22))
@@ -103,6 +112,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
     }
 
     // MARK: - 4. Existing extra conditions must survive the conversion
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resizeHandleGuardStillRunsBeforeGeometryAtANonZeroOrigin
 
     func test_resizeHandleGuardStillRunsBeforeGeometryAtANonZeroOrigin() {
         let container = makeContainer()
@@ -121,6 +132,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
     }
 
     // MARK: - 5. The window's recovery walk can now actually recover
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theWindowsRecoveryWalkFindsEveryCatcherTypeItRecognisesAtANonZeroOrigin
 
     func test_theWindowsRecoveryWalkFindsEveryCatcherTypeItRecognisesAtANonZeroOrigin() {
         for catcherType in allCatcherTypes {
@@ -142,6 +155,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyClickCatcherIsRecognisedByTheRecoveryWalksFamilyMatcher
 
     func test_everyClickCatcherIsRecognisedByTheRecoveryWalksFamilyMatcher() {
         var recognised: [String] = []
@@ -177,6 +192,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aSubclassOfACatcherIsRecognisedByTheRecoveryWalkToo
+
     func test_aSubclassOfACatcherIsRecognisedByTheRecoveryWalkToo() {
         let popupHost = OrbitPopupButtonMenuHostView(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
         XCTAssertTrue(
@@ -186,6 +203,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
     }
 
     // MARK: - 6. The end-to-end case: a click SwiftUI swallowed, recovered
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyCatcherIsRecoveredFromUnderASwiftUIContainerThatSwallowedTheClick
 
     func test_everyCatcherIsRecoveredFromUnderASwiftUIContainerThatSwallowedTheClick() {
         for catcherType in allCatcherTypes {
@@ -216,6 +235,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noCatcherIsRecoveredWhileHiddenOrFullyTransparent
 
     func test_noCatcherIsRecoveredWhileHiddenOrFullyTransparent() {
         for catcherType in allCatcherTypes {

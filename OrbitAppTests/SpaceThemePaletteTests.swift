@@ -4,14 +4,19 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class SpaceThemePaletteTests: XCTestCase {
 
     // MARK: - Determinism and the shipped default
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_nextDefaultTheme_withNothingInUse_isExactlyTheShippedDefault
 
     func test_nextDefaultTheme_withNothingInUse_isExactlyTheShippedDefault() {
         let theme = SpaceThemePalette.nextDefaultTheme(avoiding: [])
         XCTAssertEqual(theme.colors, SpaceTheme.defaultPalette)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_nextDefaultTheme_isPure_sameInputAlwaysProducesTheSameOutput
 
     func test_nextDefaultTheme_isPure_sameInputAlwaysProducesTheSameOutput() {
         let usedThemes = [SpaceTheme(colors: SpaceTheme.defaultPalette)]
@@ -21,6 +26,8 @@ final class SpaceThemePaletteTests: XCTestCase {
     }
 
     // MARK: - Distinctness while the curated set has room
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_creatingSpacesOneAtATime_neverRepeatsAGradientWhileCuratedPresetsRemain
 
     func test_creatingSpacesOneAtATime_neverRepeatsAGradientWhileCuratedPresetsRemain() {
         var used: [SpaceTheme] = []
@@ -39,12 +46,16 @@ final class SpaceThemePaletteTests: XCTestCase {
 
     // MARK: - The batch entry point onboarding needs
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_defaultThemes_returnsCountDistinctThemes
+
     func test_defaultThemes_returnsCountDistinctThemes() {
         let themes = SpaceThemePalette.defaultThemes(count: 6)
         XCTAssertEqual(themes.count, 6)
         XCTAssertEqual(Set(themes.map(\.colors)).count, 6, "All six pre-defined onboarding Spaces must get visibly different gradients.")
         XCTAssertEqual(themes.first?.colors, SpaceTheme.defaultPalette, "The first of a pre-defined batch keeps the shipped default look, same as a lone Space would.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_defaultThemes_matchesCallingNextDefaultThemeInALoopByHand
 
     func test_defaultThemes_matchesCallingNextDefaultThemeInALoopByHand() {
         let batch = SpaceThemePalette.defaultThemes(count: 5)
@@ -57,6 +68,8 @@ final class SpaceThemePaletteTests: XCTestCase {
         XCTAssertEqual(batch, handRolled)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_defaultThemes_respectsThemesAlreadyInUseBeforeTheBatch
+
     func test_defaultThemes_respectsThemesAlreadyInUseBeforeTheBatch() {
         let existing = [SpaceThemePalette.nextDefaultTheme(avoiding: [])]
         let batch = SpaceThemePalette.defaultThemes(count: 4, avoiding: existing)
@@ -65,12 +78,16 @@ final class SpaceThemePaletteTests: XCTestCase {
         XCTAssertEqual(Set(batch.map(\.colors)).count, batch.count)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_defaultThemes_zeroOrNegativeCountReturnsEmpty
+
     func test_defaultThemes_zeroOrNegativeCountReturnsEmpty() {
         XCTAssertEqual(SpaceThemePalette.defaultThemes(count: 0), [])
         XCTAssertEqual(SpaceThemePalette.defaultThemes(count: -3), [])
     }
 
     // MARK: - Matching on the gradient, not the whole theme
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_avoiding_matchesOnColorsEvenWhenOtherThemeFieldsDiffer
 
     func test_avoiding_matchesOnColorsEvenWhenOtherThemeFieldsDiffer() {
         let sameColorsDifferentGrain = SpaceTheme(
@@ -85,6 +102,8 @@ final class SpaceThemePaletteTests: XCTestCase {
 
     // MARK: - Exhaustion: degrading sensibly, not repeating immediately
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_onceCuratedPresetsAreExhausted_theNextAssignmentIsStillNew
+
     func test_onceCuratedPresetsAreExhausted_theNextAssignmentIsStillNew() {
         let allPresetsInUse = SpaceThemePalette.presets
         let eleventh = SpaceThemePalette.nextDefaultTheme(avoiding: allPresetsInUse)
@@ -96,6 +115,8 @@ final class SpaceThemePaletteTests: XCTestCase {
         XCTAssertLessThan(eleventh.primary.luminance, 0.55, "A procedurally extended theme must still read as a dark surface, same as every curated preset.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pastExhaustion_aWholeFurtherBatchStaysMutuallyDistinct
+
     func test_pastExhaustion_aWholeFurtherBatchStaysMutuallyDistinct() {
         let batch = SpaceThemePalette.defaultThemes(count: SpaceThemePalette.presets.count + 15)
 
@@ -106,6 +127,8 @@ final class SpaceThemePaletteTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anEnormousBatch_stillReturnsExactlyCountThemesWithoutCrashing
+
     func test_anEnormousBatch_stillReturnsExactlyCountThemesWithoutCrashing() {
         let enormous = SpaceThemePalette.defaultThemes(count: 500)
         XCTAssertEqual(enormous.count, 500)
@@ -115,6 +138,8 @@ final class SpaceThemePaletteTests: XCTestCase {
 
     // MARK: - Legibility: every preset, both appearances
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyPreset_isADarkSurface
+
     func test_everyPreset_isADarkSurface() {
         for (index, preset) in SpaceThemePalette.presets.enumerated() {
             XCTAssertTrue(
@@ -123,6 +148,8 @@ final class SpaceThemePaletteTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyPreset_readableForegroundTiersClearWCAGContrastFloors
 
     func test_everyPreset_readableForegroundTiersClearWCAGContrastFloors() {
         for (index, preset) in SpaceThemePalette.presets.enumerated() {
@@ -148,6 +175,8 @@ final class SpaceThemePaletteTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_proceduralExtension_readableForegroundTiersClearWCAGContrastFloorsToo
+
     func test_proceduralExtension_readableForegroundTiersClearWCAGContrastFloorsToo() {
         let extended = SpaceThemePalette.defaultThemes(count: SpaceThemePalette.presets.count + 10)
             .suffix(10)
@@ -168,11 +197,15 @@ final class SpaceThemePaletteTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyPreset_hasAtLeastOneColorStop
+
     func test_everyPreset_hasAtLeastOneColorStop() {
         for preset in SpaceThemePalette.presets {
             XCTAssertFalse(preset.colors.isEmpty)
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyPreset_primaryColorIsItsOwnFirstStopNotTheFallback
 
     func test_everyPreset_primaryColorIsItsOwnFirstStopNotTheFallback() {
         for preset in SpaceThemePalette.presets {
@@ -185,6 +218,8 @@ final class SpaceThemePaletteTests: XCTestCase {
     private static let minimumPrimaryDeltaE = 10.0
 
     private static let minimumSecondaryDeltaE = 6.0
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyPairOfPresets_primaryStopsAreMeasurablyDistinct
 
     func test_everyPairOfPresets_primaryStopsAreMeasurablyDistinct() {
         let presets = SpaceThemePalette.presets
@@ -202,6 +237,8 @@ final class SpaceThemePaletteTests: XCTestCase {
         }
         print("SpaceThemePaletteTests: worst-case primary-stop ΔE = \(worst) between presets[\(worstPair.0)] and presets[\(worstPair.1)].")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyPairOfPresets_secondaryStopsAreMeasurablyDistinct
 
     func test_everyPairOfPresets_secondaryStopsAreMeasurablyDistinct() {
         let presets = SpaceThemePalette.presets
@@ -222,6 +259,8 @@ final class SpaceThemePaletteTests: XCTestCase {
 
     private static let minimumGeneratedChroma = 16.0
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyGeneratedPreset_hasMeaningfulPerceptualChroma
+
     func test_everyGeneratedPreset_hasMeaningfulPerceptualChroma() {
         for (index, preset) in SpaceThemePalette.presets.enumerated() where index != 0 {
             for stop in preset.colors {
@@ -235,6 +274,8 @@ final class SpaceThemePaletteTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noGeneratedPreset_hasAnInputHueInsideTheExcludedLabHueArc
+
     func test_noGeneratedPreset_hasAnInputHueInsideTheExcludedLabHueArc() {
         let excludedArc = SpaceThemePalette.excludedHueLowDegrees...SpaceThemePalette.excludedHueHighDegrees
         for (index, preset) in SpaceThemePalette.presets.enumerated() where index != 0 {
@@ -247,6 +288,8 @@ final class SpaceThemePaletteTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noPreset_rendersInsideTheMuddyPerceivedHueArc
 
     func test_noPreset_rendersInsideTheMuddyPerceivedHueArc() {
         let excludedArc = SpaceThemePalette.renderedExcludedHueLowDegrees...SpaceThemePalette.renderedExcludedHueHighDegrees

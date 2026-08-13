@@ -8,9 +8,12 @@ private struct FlatColorProbe: View {
 }
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class RenderHarnessCacheTests: XCTestCase {
 
     private static let probeSize = CGSize(width: 40, height: 24)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_twoRendersOfTheSameViewTypeAndSize_returnTheirOwnContent
 
     func test_twoRendersOfTheSameViewTypeAndSize_returnTheirOwnContent() {
         let first = render(FlatColorProbe(fill: .blue), size: Self.probeSize)
@@ -47,6 +50,8 @@ final class RenderHarnessCacheTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theReturnedBitmapIsAlwaysExactlyTheRequestedSize
+
     func test_theReturnedBitmapIsAlwaysExactlyTheRequestedSize() {
         for index in 0..<8 {
             let size = CGSize(width: 40, height: 24)
@@ -63,6 +68,8 @@ final class RenderHarnessCacheTests: XCTestCase {
             )
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theViewStillStartsAtTheBitmapsTopLeftCorner
 
     func test_theViewStillStartsAtTheBitmapsTopLeftCorner() {
         for _ in 0..<4 {

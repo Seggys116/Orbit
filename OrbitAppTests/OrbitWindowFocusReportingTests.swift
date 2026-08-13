@@ -6,6 +6,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class OrbitWindowFocusReportingTests: XCTestCase {
 
     private var windows: [NSWindow] = []
@@ -30,10 +31,14 @@ final class OrbitWindowFocusReportingTests: XCTestCase {
         return window
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anOrbitWindowItselfCountsAsOrbitHoldingFocus
+
     func test_anOrbitWindowItselfCountsAsOrbitHoldingFocus() {
         let orbitWindow = makeWindow()
         XCTAssertTrue(OrbitWindowController.isAttached(orbitWindow, toOneOf: [orbitWindow]))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aPopoverAttachedToAnOrbitWindowCountsAsOrbitHoldingFocus
 
     func test_aPopoverAttachedToAnOrbitWindowCountsAsOrbitHoldingFocus() {
         let orbitWindow = makeWindow()
@@ -45,6 +50,8 @@ final class OrbitWindowFocusReportingTests: XCTestCase {
             "a popover takes key status from the window it is attached to; Orbit has not lost focus"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aPopoverNestedInsideAnotherPopoverCountsAsOrbitHoldingFocus
 
     func test_aPopoverNestedInsideAnotherPopoverCountsAsOrbitHoldingFocus() {
         let orbitWindow = makeWindow()
@@ -63,11 +70,15 @@ final class OrbitWindowFocusReportingTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anUnrelatedWindowIsNotOrbitHoldingFocus
+
     func test_anUnrelatedWindowIsNotOrbitHoldingFocus() {
         let orbitWindow = makeWindow()
         let unrelated = makeWindow()
         XCTAssertFalse(OrbitWindowController.isAttached(unrelated, toOneOf: [orbitWindow]))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noKeyWindowAtAllIsNotOrbitHoldingFocus
 
     func test_noKeyWindowAtAllIsNotOrbitHoldingFocus() {
         let orbitWindow = makeWindow()

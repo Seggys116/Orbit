@@ -6,9 +6,12 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class OrbitTooltipTests: XCTestCase {
 
     // MARK: - The backing view's own contract
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_backingView_registersAnAppKitTooltipTrackingAreaAtItsOwnFrame
 
     func test_backingView_registersAnAppKitTooltipTrackingAreaAtItsOwnFrame() {
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
@@ -31,6 +34,8 @@ final class OrbitTooltipTests: XCTestCase {
             "The area must cover the control's real bounds, not the window"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_backingView_isNeverAClickTargetAndNeverDragsTheWindow
 
     func test_backingView_isNeverAClickTargetAndNeverDragsTheWindow() {
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
@@ -57,6 +62,8 @@ final class OrbitTooltipTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_backingView_treatsBlankTextAsNoTooltipRatherThanAnEmptyBubble
+
     func test_backingView_treatsBlankTextAsNoTooltipRatherThanAnEmptyBubble() {
         let backing = OrbitTooltipBackingView()
 
@@ -70,6 +77,8 @@ final class OrbitTooltipTests: XCTestCase {
         XCTAssertEqual(backing.tooltipText, "New…", "A real label survives, trimmed")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_backingView_updatesInPlaceWhenTheHelpTextChanges
+
     func test_backingView_updatesInPlaceWhenTheHelpTextChanges() {
         let backing = OrbitTooltipBackingView()
         backing.apply("Collapse")
@@ -78,6 +87,8 @@ final class OrbitTooltipTests: XCTestCase {
     }
 
     // MARK: - The modifier, through a real hosting view
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theModifierPutsARealTooltipCarryingViewIntoTheAppKitTree
 
     func test_theModifierPutsARealTooltipCarryingViewIntoTheAppKitTree() {
         let hosting = NSHostingView(
@@ -95,6 +106,7 @@ final class OrbitTooltipTests: XCTestCase {
     }
 
     // AppKit's automatic rect was measured as (0,0,0,0) for the NSHostingController shape.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theTooltipRectIsRegisteredInBothOfOrbitsWindowShapes
     func test_theTooltipRectIsRegisteredInBothOfOrbitsWindowShapes() {
         func backing(inHostingSubviewWindow: Bool) -> OrbitTooltipBackingView? {
             let content = Button("Spaces") {}
@@ -149,6 +161,7 @@ final class OrbitTooltipTests: XCTestCase {
     }
 
     // Checked at the source, not SwiftUI's hosted subview order (a private implementation detail).
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theModifierAttachesTheBackingBehindTheControlNotOverIt
     func test_theModifierAttachesTheBackingBehindTheControlNotOverIt() throws {
         let source = try String(
             contentsOf: URL(fileURLWithPath: #filePath)
@@ -168,6 +181,8 @@ final class OrbitTooltipTests: XCTestCase {
     }
 
     // MARK: - The sweep
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noProductionSourceStillUsesSwiftUIsOwnHelpModifier
 
     func test_noProductionSourceStillUsesSwiftUIsOwnHelpModifier() throws {
         let root = URL(fileURLWithPath: #filePath)

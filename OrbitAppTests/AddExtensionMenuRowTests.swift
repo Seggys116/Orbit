@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class AddExtensionMenuRowTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -26,6 +27,8 @@ final class AddExtensionMenuRowTests: XCTestCase {
 
     // MARK: - 1. The menu carries both of Arc's rows
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theExtensionsMenuOffersAddExtensionAboveManageExtensions
+
     func test_theExtensionsMenuOffersAddExtensionAboveManageExtensions() throws {
         let extensionsMenu = try XCTUnwrap(
             MainMenuBuilder.build().items.compactMap(\.submenu).first { $0.title == "Extensions" },
@@ -45,6 +48,8 @@ final class AddExtensionMenuRowTests: XCTestCase {
 
     // MARK: - 2. The focus request the row makes
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aRepeatedRequestIsADistinctRequest
+
     func test_aRepeatedRequestIsADistinctRequest() {
         SettingsRouter.shared.requestFocus(.extensionInstallField)
         let first = SettingsRouter.shared.focusRequest?.token
@@ -55,6 +60,8 @@ final class AddExtensionMenuRowTests: XCTestCase {
         XCTAssertNotEqual(first, second, "Two consecutive Add Extension… choices must be two distinct requests, or the second one is silently swallowed.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theOwningPaneCanClearTheRequest
+
     func test_theOwningPaneCanClearTheRequest() {
         SettingsRouter.shared.requestFocus(.extensionInstallField)
         SettingsRouter.shared.consumeFocusRequest(.extensionInstallField)
@@ -62,6 +69,8 @@ final class AddExtensionMenuRowTests: XCTestCase {
     }
 
     // MARK: - 3. The caret really lands in the install field
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aMountedExtensionsPaneWithAPendingRequestPutsTheCaretInTheInstallField
 
     func test_aMountedExtensionsPaneWithAPendingRequestPutsTheCaretInTheInstallField() {
         SettingsRouter.shared.requestFocus(.extensionInstallField)

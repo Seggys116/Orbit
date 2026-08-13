@@ -3,6 +3,7 @@ import SwiftUI
 import XCTest
 @testable import Orbit
 
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class SidebarRowClickDragEvidenceTests: XCTestCase {
 
     private final class RecordingView: NSView {}
@@ -42,16 +43,19 @@ final class SidebarRowClickDragEvidenceTests: XCTestCase {
     // MARK: - 1. Geometric claim, measured against the real `SidebarDropTarget`
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_atRest_hitTestInsideNominalTopStripBand_resolvesToContent
     func test_atRest_hitTestInsideNominalTopStripBand_resolvesToContent() {
         assertResolvesToContent(atFractionOfRowHeightFromTop: 0.15, label: "top strip band (0.15 * rowHeight)")
     }
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_atRest_hitTestInMiddleGapBetweenStrips_resolvesToContent
     func test_atRest_hitTestInMiddleGapBetweenStrips_resolvesToContent() {
         assertResolvesToContent(atFractionOfRowHeightFromTop: 0.5, label: "middle gap (0.5 * rowHeight)")
     }
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_atRest_hitTestInsideNominalBottomStripBand_resolvesToContent
     func test_atRest_hitTestInsideNominalBottomStripBand_resolvesToContent() {
         assertResolvesToContent(atFractionOfRowHeightFromTop: 0.85, label: "bottom strip band (0.85 * rowHeight)")
     }
@@ -100,6 +104,7 @@ final class SidebarRowClickDragEvidenceTests: XCTestCase {
     // MARK: - 2. Does `.draggable(_:)` alone add a new, distinct `NSView`?
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_draggablePresenceAddsNoDistinctNSView
     func test_draggablePresenceAddsNoDistinctNSView() {
         let size = CGSize(width: 120, height: 120)
 
@@ -136,6 +141,7 @@ final class SidebarRowClickDragEvidenceTests: XCTestCase {
     // MARK: - 3. Does the full `SidebarDropTarget` apparatus add real `NSView`s?
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_fullSidebarDropTargetApparatus_addsRealDraggingDestinationViews
     func test_fullSidebarDropTargetApparatus_addsRealDraggingDestinationViews() {
         let size = CGSize(width: 220, height: OrbitMetrics.sidebarRowHeight)
 

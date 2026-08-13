@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class OrbitScrollerLiveRetrofitTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -18,6 +19,8 @@ final class OrbitScrollerLiveRetrofitTests: XCTestCase {
     }
 
     // MARK: - The mechanism
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aSwiftUIScrollViewIsRetrofittedWithNoCallSiteOfItsOwn
 
     func test_aSwiftUIScrollViewIsRetrofittedWithNoCallSiteOfItsOwn() {
         OrbitScrollerInstaller.start()
@@ -52,6 +55,8 @@ final class OrbitScrollerLiveRetrofitTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theLibrarysSpacesSectionGetsThinScrollers
+
     func test_theLibrarysSpacesSectionGetsThinScrollers() {
         OrbitScrollerInstaller.start()
 
@@ -81,6 +86,7 @@ final class OrbitScrollerLiveRetrofitTests: XCTestCase {
     }
 
     // .scrollIndicators(.hidden) still has a live NSScroller in the tree (only visually suppressed); .never produces none at all.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anIndicatorOptOutSurvivesTheRetrofitAndAHiddenOneIsStillThin
     func test_anIndicatorOptOutSurvivesTheRetrofitAndAHiddenOneIsStillThin() {
         OrbitScrollerInstaller.start()
 
