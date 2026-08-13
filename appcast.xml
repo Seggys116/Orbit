@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><title>Orbit</title><item>
+            <title>1.0.0</title>
+            <pubDate>Thu, 13 Aug 2026 23:09:52 +0000</pubDate>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/Seggys116/Orbit/releases/download/v1.0.0/Orbit-1.0.0-arm64.dmg" length="114402827" type="application/octet-stream" sparkle:edSignature="0bXyVizGZMkBx1IWoXGulDrIXyv4t5HKmn0SBSzv0kUHMUN6w1Ke/0TeO04d+nOkCQf9ZmAGW15fbqImzmK/Bw=="></enclosure>
+        </item>
+    </channel></rss><!-- sparkle-signatures:
+edSignature: KLNs+j+yQui4mP3BDSBT9hDYYLtINyWfo6kd16zXRQgRRr/XaNEG146ZqjYeWjrgPfL6oSWNcu0+NUhIoSbYAA==
+length: 1113
+-->
