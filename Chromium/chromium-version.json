@@ -31,29 +31,29 @@
   ],
   "chromium_repo_url": "https://chromium.googlesource.com/chromium/src.git",
   "channel": "stable",
-  "chromium_version": "151.0.7922.138",
-  "chromium_checkout": "refs/tags/151.0.7922.138",
+  "chromium_version": "152.0.7977.42",
+  "chromium_checkout": "refs/tags/152.0.7977.42",
   "build_target": "orbit",
-  "pinned_at": "2026-08-12",
+  "pinned_at": "2026-08-13",
   "prebuilt": {
     "_readme": "Filled in per configuration by `Scripts/chromium record-prebuilt` after the release machine publishes a build for this pin. An empty platforms map means: fetch has nothing to download for that configuration yet -- run `Scripts/chromium build --from-source --config <name>` locally, or wait for the publish job.",
-    "release_tag": "chromium-151.0.7922.138",
+    "release_tag": "chromium-152.0.7977.42",
     "configs": {
       "dcheck": {
         "platforms": {
           "macosarm64": {
-            "asset": "orbit-chromium-151.0.7922.138-macosarm64-dcheck.tar.xz",
-            "sha256": "501be729d2051cccb05b7f0a8192fe1b0263d468ac500f756efe1732ce90b1c6",
-            "size": 95270844
+            "asset": "orbit-chromium-152.0.7977.42-macosarm64-dcheck.tar.xz",
+            "sha256": "36b0f16cb3b3748de84d68feecea5da35db2d98a1b68bc462c2fcca2cabf9db9",
+            "size": 94523824
           }
         }
       },
       "shipping": {
         "platforms": {
           "macosarm64": {
-            "asset": "orbit-chromium-151.0.7922.138-macosarm64-shipping.tar.xz",
-            "sha256": "db2b77892c34683943ca2663d57cfd88ba6a05fff9649e5e3fe614bbb512c3ed",
-            "size": 75073776
+            "asset": "orbit-chromium-152.0.7977.42-macosarm64-shipping.tar.xz",
+            "sha256": "f20f57e23772269e7267123de84e12c72ff624d88e31484bcecfa3d5cce83d9a",
+            "size": 72415444
           }
         }
       }

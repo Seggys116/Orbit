@@ -15,7 +15,9 @@
 namespace orbit {
 
 OrbitExtensionsAPIClient::OrbitExtensionsAPIClient()
-    : messaging_delegate_(std::make_unique<OrbitMessagingDelegate>()) {}
+    : messaging_delegate_(std::make_unique<OrbitMessagingDelegate>()),
+      webstore_private_delegate_(
+          std::make_unique<OrbitWebstorePrivateAPIDelegate>()) {}
 
 OrbitExtensionsAPIClient::~OrbitExtensionsAPIClient() = default;
 
@@ -27,6 +29,11 @@ OrbitExtensionsAPIClient::GetMessagingDelegate() {
 extensions::ManagementAPIDelegate*
 OrbitExtensionsAPIClient::CreateManagementAPIDelegate() const {
   return new OrbitManagementAPIDelegate();
+}
+
+extensions::WebstorePrivateAPIDelegate*
+OrbitExtensionsAPIClient::GetWebstorePrivateAPIDelegate() {
+  return webstore_private_delegate_.get();
 }
 
 void OrbitExtensionsAPIClient::AddAdditionalValueStoreCaches(

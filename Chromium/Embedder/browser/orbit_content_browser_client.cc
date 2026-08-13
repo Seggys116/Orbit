@@ -318,7 +318,8 @@ void OrbitContentBrowserClient::SiteInstanceGotProcessAndSite(
     return;
   }
   const extensions::Extension* extension =
-      registry->enabled_extensions().GetByID(principal.GetHost());
+      registry->enabled_extensions().GetByID(
+          extensions::ExtensionId(principal.GetHost()));
   if (!extension) {
     return;
   }

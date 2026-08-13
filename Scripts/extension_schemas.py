@@ -324,11 +324,14 @@ def cmd_sync(_args):
 
     files = {}
     for namespace, filename in sorted(ported.items()):
-        source = os.path.join(CHROME_API_DIR, filename)
-        if not os.path.exists(source):
+        # Upstream moves schemas between the two layers: webstore_private went
+        # from chrome to core in 152.
+        candidates = [os.path.join(d, filename) for d in (CHROME_API_DIR, CORE_API_DIR)]
+        source = next((c for c in candidates if os.path.exists(c)), None)
+        if source is None:
             sys.exit(
                 "error: Orbit ports %s from %s but upstream has no such file at %s"
-                % (namespace, filename, source)
+                % (namespace, filename, " or ".join(candidates))
             )
         shutil.copyfile(source, os.path.join(VENDOR_DIR, filename))
         files[filename] = sha256_of(source)
