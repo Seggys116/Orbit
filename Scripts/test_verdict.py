@@ -258,10 +258,17 @@ def bundle_tests(path: str) -> dict[str, list[dict[str, str]]]:
     return grouped
 
 
-def log_events(path: str) -> tuple[dict[tuple[str, str], str], dict[str, int]]:
-    """Skip reasons by (class, method), and the per-outcome case counts, from an xcodebuild log."""
+def log_events(
+    path: str,
+) -> tuple[dict[tuple[str, str], str], dict[str, int], dict[tuple[str, str], tuple[int, str]]]:
+    """Skip reasons, per-outcome case counts, and retry attempts, from an xcodebuild log.
+
+    -retry-tests-on-failure re-runs a failed test and logs a second terminal line for it, so a
+    test is kept by (suite, method) with only its LAST terminal outcome, matching what the result
+    bundle records; the discarded earlier attempts are surfaced separately as retries.
+    """
     reasons: dict[tuple[str, str], str] = {}
-    counts = {"passed": 0, "failed": 0, "skipped": 0}
+    attempts: dict[tuple[str, str], tuple[int, str]] = {}
     for line in _lines(path):
         match = LOG_SKIP.match(line)
         if match:
@@ -270,12 +277,21 @@ def log_events(path: str) -> tuple[dict[tuple[str, str], str], dict[str, int]]:
             continue
         match = LOG_CASE.match(line)
         if match:
-            counts[match.group(3)] += 1
+            suite, method, result = match.groups()
+            key = (suite, method)
+            attempts[key] = (attempts.get(key, (0, ""))[0] + 1, result)
             continue
         match = LOG_CASE_PARALLEL.match(line)
         if match:
-            counts[match.group(3)] += 1
-    return reasons, counts
+            suite, method, result = match.groups()
+            key = (suite, method)
+            attempts[key] = (attempts.get(key, (0, ""))[0] + 1, result)
+
+    counts = {"passed": 0, "failed": 0, "skipped": 0}
+    for _, result in attempts.values():
+        counts[result] += 1
+    retried = {key: value for key, value in attempts.items() if value[0] > 1}
+    return reasons, counts, retried
 
 
 def _sample(names, limit=20):
@@ -313,8 +329,9 @@ def command_check(arguments) -> int:
 
     reasons: dict[tuple[str, str], str] = {}
     log_counts = None
+    log_retries: dict[tuple[str, str], tuple[int, str]] = {}
     if arguments.log:
-        reasons, log_counts = log_events(arguments.log)
+        reasons, log_counts, log_retries = log_events(arguments.log)
 
     live_suites = set()
     if arguments.allow_live_engine_gate_skips:
@@ -440,6 +457,21 @@ def command_check(arguments) -> int:
                 "until that is explained."
             )
 
+    if log_retries:
+        passed_on_retry = {key: value for key, value in log_retries.items() if value[1] == "passed"}
+        if passed_on_retry:
+            detail = ", ".join(
+                f"{suite}.{method} ({attempts} attempts)"
+                for (suite, method), (attempts, _) in sorted(passed_on_retry.items())
+            )
+            print(f"test-verdict: {len(passed_on_retry)} test(s) passed only on retry: {detail}")
+        if arguments.max_retries_allowed is not None and len(log_retries) > arguments.max_retries_allowed:
+            problems.append(
+                f"{len(log_retries)} test(s) needed a retry, more than the "
+                f"{arguments.max_retries_allowed} this run allows via --max-retries-allowed. That is "
+                f"the suite degrading, not one test's bad luck: {_sample(list(log_retries))}."
+            )
+
     print(f"test-verdict: {total_executed} test(s) executed over {len(arguments.target)} target(s)")
     if arguments.allow_hosted_runner_exclusions:
         detail = f": {_sample(all_excluded)}" if all_excluded else ""
@@ -545,7 +577,7 @@ def command_live(arguments) -> int:
         row["accepted_skips"] = 0
         reasons: dict[tuple[str, str], str] = {}
         if os.path.exists(row["log_path"]):
-            reasons, _ = log_events(row["log_path"])
+            reasons, _, _ = log_events(row["log_path"])
         elif row["log_skipped"]:
             problems.append(
                 f"{label}: {row['log_skipped']} test(s) skipped and its log {row['log_path']} is "
@@ -647,6 +679,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--target", action="append", default=[], required=True)
     check.add_argument("--allow-live-engine-gate-skips", action="store_true")
     check.add_argument("--allow-hosted-runner-exclusions", action="store_true")
+    check.add_argument("--max-retries-allowed", type=int, default=None)
     check.set_defaults(handler=command_check)
 
     live = subparsers.add_parser("live", help="verdict for one Scripts/live-engine-tests configuration")
