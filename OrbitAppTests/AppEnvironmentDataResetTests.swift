@@ -43,9 +43,9 @@ final class AppEnvironmentDataResetTests: XCTestCase {
 
     override func tearDown() async throws {
         DataResetTargets.override = originalTargets
-        AppEnvironment.defaults = .standard
-        SiteZoomStore.defaults = .standard
-        SyncPreferences.defaults = .standard
+        AppEnvironment.defaults = OrbitDefaults.standard
+        SiteZoomStore.defaults = OrbitDefaults.standard
+        SyncPreferences.defaults = OrbitDefaults.standard
         scratchDefaults.removePersistentDomain(forName: suiteName)
         try? FileManager.default.removeItem(at: scratchRoot)
         try await super.tearDown()
@@ -423,7 +423,7 @@ final class OnboardingRestartTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        AppEnvironment.defaults = .standard
+        AppEnvironment.defaults = OrbitDefaults.standard
         scratchDefaults.removePersistentDomain(forName: suiteName)
         try await super.tearDown()
     }

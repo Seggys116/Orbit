@@ -17,7 +17,7 @@ final class ShortcutIdentityAndNamingTests: XCTestCase {
 
     override func tearDown() {
         scratchDefaults?.removePersistentDomain(forName: suiteName)
-        ShortcutRegistry.defaults = .standard
+        ShortcutRegistry.defaults = OrbitDefaults.standard
         ShortcutRegistry.shared.reloadOverridesFromStore()
         scratchDefaults = nil
         suiteName = nil

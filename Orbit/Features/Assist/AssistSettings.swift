@@ -21,9 +21,9 @@ enum AssistSettings {
     static let instantLinksEnabledKey = "OrbitAssistInstantLinksEnabled"
 
     #if DEBUG
-    static var defaults: UserDefaults = .standard
+    static var defaults: UserDefaults = OrbitDefaults.standard
     #else
-    static let defaults: UserDefaults = .standard
+    static let defaults: UserDefaults = OrbitDefaults.standard
     #endif
 
     // MARK: Master switch — Assist ships off and stays off until it is turned on here
@@ -131,7 +131,16 @@ enum AssistSettings {
 
 enum AssistKeychain {
 
-    static let service = "com.zak-noble-clarke.Orbit.assist-provider"
+    static let productionService = "com.zak-noble-clarke.Orbit.assist-provider"
+
+    /// Only the installed browser reaches the item holding the user's real API key.
+    static let service: String = {
+        switch OrbitRuntimeScope.current {
+        case .production: return productionService
+        case .development: return productionService + ".development"
+        case .test: return productionService + ".test"
+        }
+    }()
 
     /// One entry per provider kind, so switching providers doesn't destroy the other one's key.
     static func account(for kind: AssistProviderKind) -> String { "api-key-\(kind.rawValue)" }

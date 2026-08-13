@@ -1,5 +1,5 @@
-//  Resolves an EngineStorage to a profile directory. `.persistent` answers nil,
-//  not a path, so the engine's own production default is never overridden.
+//  Resolves an EngineStorage to a profile directory. `.persistent` answers nil only in the
+//  production scope, so the engine's own default is overridden everywhere else.
 
 import Foundation
 import OSLog
@@ -17,13 +17,12 @@ enum EngineStorageDirectory {
 
     private static var privateDirectory: URL?
 
-    /// `nil` means "leave the engine on its own default", i.e. the production
-    /// profile. Every other mode gets one private directory per process,
-    /// created on first use and reused for the rest of the process's life.
+    /// `nil` means "leave the engine on its own default", the production profile. Every other
+    /// mode gets one private directory per process, created on first use and reused for its life.
     static func directory(for storage: EngineStorage) -> URL? {
         switch storage {
         case .persistent:
-            return nil
+            return persistentDirectory(for: OrbitRuntimeScope.current)
         case .ephemeral, .isolated:
             if let privateDirectory { return privateDirectory }
             let root = privateRoot
@@ -32,6 +31,18 @@ enum EngineStorageDirectory {
             privateDirectory = created
             return created
         }
+    }
+
+    /// For reading and preparing the profile only; the engine is still configured by `directory(for:)`.
+    static func resolvedDirectory(for storage: EngineStorage) -> URL {
+        directory(for: storage) ?? productionProfile
+    }
+
+    static func persistentDirectory(
+        for scope: OrbitRuntimeScope,
+        root: @autoclosure () -> URL = OrbitDataRoot.processDefault.url
+    ) -> URL? {
+        scope.isProduction ? nil : root()
     }
 
     /// Never used to configure the engine; only to assert a private directory
@@ -111,8 +122,6 @@ enum EngineStorageDirectory {
     }
 
     static func isProcessAlive(_ owner: pid_t) -> Bool {
-        if owner == getpid() { return true }
-        if kill(owner, 0) == 0 { return true }
-        return errno == EPERM
+        OrbitProcessLiveness.isAlive(owner)
     }
 }

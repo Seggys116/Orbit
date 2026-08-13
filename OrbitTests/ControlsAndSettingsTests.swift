@@ -31,7 +31,7 @@ final class SettingsBindingRoundTripTests: XCTestCase {
         scratchDirectory = nil
 
         defaults?.removePersistentDomain(forName: defaultsSuiteName)
-        ShortcutRegistry.defaults = .standard
+        ShortcutRegistry.defaults = OrbitDefaults.standard
         ShortcutRegistry.shared.reloadOverridesFromStore()
         defaults = nil
         defaultsSuiteName = nil

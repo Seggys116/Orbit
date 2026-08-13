@@ -43,7 +43,7 @@ final class TidyDownloadsCoordinatorTests: XCTestCase {
     }
 
     override func tearDown() {
-        AssistSettings.defaults = .standard
+        AssistSettings.defaults = OrbitDefaults.standard
         suite = nil
         if let scratch { try? FileManager.default.removeItem(at: scratch) }
         scratch = nil

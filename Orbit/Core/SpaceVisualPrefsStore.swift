@@ -18,7 +18,7 @@ final class SpaceVisualPrefsStore {
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        guard let data = OrbitDefaults.standard.data(forKey: defaultsKey),
               let decoded = try? JSONDecoder().decode([String: Double].self, from: data) else { return }
         var result: [SpaceID: Double] = [:]
         for (key, value) in decoded {
@@ -32,6 +32,6 @@ final class SpaceVisualPrefsStore {
         var encodable: [String: Double] = [:]
         for (id, value) in blurBySpace { encodable[id.uuidString] = value }
         guard let data = try? JSONEncoder().encode(encodable) else { return }
-        UserDefaults.standard.set(data, forKey: defaultsKey)
+        OrbitDefaults.standard.set(data, forKey: defaultsKey)
     }
 }

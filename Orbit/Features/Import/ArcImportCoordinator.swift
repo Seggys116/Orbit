@@ -22,6 +22,7 @@ public struct ArcImportSummary: Sendable, Hashable {
     public var keyBindingsImported: Int
     public var keyBindingsNeedingManualRebind: [String]
     public var cookies: ArcCookieImportOutcome
+    public var siteData: ArcSiteDataImportOutcome
 
     public init(
         spacesCreated: Int = 0,
@@ -41,7 +42,8 @@ public struct ArcImportSummary: Sendable, Hashable {
         extensionsNeedRestart: Bool = false,
         keyBindingsImported: Int = 0,
         keyBindingsNeedingManualRebind: [String] = [],
-        cookies: ArcCookieImportOutcome = .notAttempted
+        cookies: ArcCookieImportOutcome = .notAttempted,
+        siteData: ArcSiteDataImportOutcome = .notAttempted
     ) {
         self.spacesCreated = spacesCreated
         self.foldersCreated = foldersCreated
@@ -61,6 +63,7 @@ public struct ArcImportSummary: Sendable, Hashable {
         self.keyBindingsImported = keyBindingsImported
         self.keyBindingsNeedingManualRebind = keyBindingsNeedingManualRebind
         self.cookies = cookies
+        self.siteData = siteData
     }
 
     public var totalTabsImported: Int {
@@ -77,6 +80,19 @@ public enum ArcCookieImportOutcome: Sendable, Hashable {
     case partiallyImported(stored: Int, decrypted: Int)
     case keychainDenied
     case failed(reason: String)
+}
+
+/// Local Storage and IndexedDB, staged here and merged in before the next launch.
+public enum ArcSiteDataImportOutcome: Sendable, Hashable {
+    case notAttempted
+    case nothingToImport
+    case staged(sites: Int, indexedDBSites: Int, bytes: Int64)
+    case failed(reason: String)
+
+    public var stagedSiteCount: Int {
+        guard case .staged(let sites, let indexedDBSites, _) = self else { return 0 }
+        return max(sites, indexedDBSites)
+    }
 }
 
 /// Local two-case enum, not Result: the failure payload is a report (ArcCookieImportOutcome), not an Error.
@@ -98,6 +114,7 @@ public enum ArcImportCoordinator {
         reader: BrowserDataReader = BrowserDataReader(),
         historyStore: HistoryStore? = nil,
         importCookies: Bool = false,
+        importSiteData: Bool = true,
         historyLimit: Int = 5000,
         archiveLimit: Int = 2000,
         extensionStore: ExtensionStore? = nil,
@@ -135,7 +152,33 @@ public enum ArcImportCoordinator {
             )
         }
 
+        if importSiteData {
+            summary.siteData = await stageArcSiteData(reader: reader, stagingDirectory: env.dataRoot.pendingSiteData)
+        }
+
         return summary
+    }
+
+    // MARK: - Site data
+
+    static func stageArcSiteData(
+        reader: BrowserDataReader,
+        stagingDirectory: URL
+    ) async -> ArcSiteDataImportOutcome {
+        let profile = ArcImportReader.chromiumProfileDirectory(homeDirectory: reader.homeDirectory)
+        return await Task.detached(priority: .userInitiated) { () -> ArcSiteDataImportOutcome in
+            do {
+                let staged = try ArcSiteDataStager.stage(profileDirectory: profile, into: stagingDirectory)
+                guard !staged.isEmpty else { return .nothingToImport }
+                return .staged(
+                    sites: staged.localStorageOrigins,
+                    indexedDBSites: staged.indexedDBOrigins,
+                    bytes: staged.bytesStaged
+                )
+            } catch {
+                return .failed(reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            }
+        }.value
     }
 
     // MARK: - Apply
@@ -146,7 +189,7 @@ public enum ArcImportCoordinator {
         appPreferences: ArcAppPreferences? = nil,
         env: AppEnvironment,
         profileID: ProfileID? = nil,
-        defaults: UserDefaults = .standard,
+        defaults: UserDefaults = OrbitDefaults.standard,
         shortcutRegistry: ShortcutRegistry = .shared
     ) -> ArcImportSummary {
         var summary = ArcImportSummary()

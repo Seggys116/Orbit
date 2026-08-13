@@ -24,9 +24,9 @@ final class LinksSettingsWiringTests: XCTestCase {
     }
 
     override func tearDown() {
-        PeekSettings.defaults = .standard
-        LittleOrbitSettings.defaults = .standard
-        RoutingDefaults.defaults = .standard
+        PeekSettings.defaults = OrbitDefaults.standard
+        LittleOrbitSettings.defaults = OrbitDefaults.standard
+        RoutingDefaults.defaults = OrbitDefaults.standard
         defaults?.removePersistentDomain(forName: defaultsSuiteName)
         defaults = nil
         defaultsSuiteName = nil

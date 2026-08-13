@@ -55,12 +55,22 @@ final class ChromiumEngine: BrowserEngine {
         if let directory = EngineStorageDirectory.directory(for: storage) {
             try OrbitChromiumBridge.shared.setUserDataDirectory(directory.path)
         }
+        installPendingSiteData()
         installExtensionActionRelay()
         installSearchSuggestRelay()
         try OrbitChromiumBridge.shared.loadAndStart()
         // The only push that lands before the first document exists — Orbit's
         // launch-time push runs before the framework is dlopen'd and reaches nothing.
         EngineAppearance.apply()
+    }
+
+    /// The databases are open for the engine's whole life, so the merge lands here.
+    private func installPendingSiteData() {
+        guard storage == .persistent else { return }
+        PendingSiteDataInstaller.installIfPending(
+            stagingDirectory: OrbitDataRoot.processDefault.pendingSiteData,
+            userDataDirectory: EngineStorageDirectory.resolvedDirectory(for: storage)
+        )
     }
 
     /// chrome.privacy.services.searchSuggestEnabled: pushes Orbit's value down as

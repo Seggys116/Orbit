@@ -36,7 +36,7 @@ final class ToolbarSettings {
         }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = OrbitDefaults.standard) {
         self.defaults = defaults
         self.isVisible = (defaults.object(forKey: Self.visibilityDefaultsKey) as? Bool) ?? true
         self.showsFullURL = (defaults.object(forKey: Self.fullURLDefaultsKey) as? Bool) ?? false

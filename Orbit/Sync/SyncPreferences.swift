@@ -6,9 +6,9 @@ public enum SyncPreferences {
     public static let enabledKey = "OrbitICloudSyncEnabled"
 
     #if DEBUG
-    public static var defaults: UserDefaults = .standard
+    public static var defaults: UserDefaults = OrbitDefaults.standard
     #else
-    public static let defaults: UserDefaults = .standard
+    public static let defaults: UserDefaults = OrbitDefaults.standard
     #endif
 
     /// Default `true`; reads via `object(forKey:)` so "unset" isn't read as "disabled".

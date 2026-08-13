@@ -578,9 +578,9 @@ enum RoutingDefaults {
 
     // Not @AppStorage: that can only be read from a View, and handleExternalOpen(url:) is not one.
     #if DEBUG
-    static var defaults: UserDefaults = .standard
+    static var defaults: UserDefaults = OrbitDefaults.standard
     #else
-    static let defaults: UserDefaults = .standard
+    static let defaults: UserDefaults = OrbitDefaults.standard
     #endif
 
     static var destination: RoutingRule.Destination {

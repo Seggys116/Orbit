@@ -140,7 +140,7 @@ final class AskOnPageControllerTests: XCTestCase {
     }
 
     override func tearDown() {
-        AssistSettings.defaults = .standard
+        AssistSettings.defaults = OrbitDefaults.standard
         suite = nil
         super.tearDown()
     }

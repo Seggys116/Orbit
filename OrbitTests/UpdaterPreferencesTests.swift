@@ -14,7 +14,7 @@ final class UpdaterPreferencesTests: XCTestCase {
 
     override func tearDown() {
         scratchDefaults.removePersistentDomain(forName: defaultsSuiteName)
-        UpdaterPreferences.defaults = .standard
+        UpdaterPreferences.defaults = OrbitDefaults.standard
         super.tearDown()
     }
 

@@ -41,7 +41,7 @@ final class AppearanceSettings {
         }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = OrbitDefaults.standard) {
         self.defaults = defaults
         let stored = defaults.string(forKey: Self.defaultsKey)
         self.selection = stored.flatMap(Appearance.init(rawValue:)) ?? .automatic

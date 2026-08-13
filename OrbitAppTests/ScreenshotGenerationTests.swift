@@ -464,7 +464,7 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     private func restoreAssistDefaults(_ suiteName: String) {
         AssistSettings.defaults.removePersistentDomain(forName: suiteName)
-        AssistSettings.defaults = .standard
+        AssistSettings.defaults = OrbitDefaults.standard
         AssistKeychain.inMemoryOverride = nil
     }
 

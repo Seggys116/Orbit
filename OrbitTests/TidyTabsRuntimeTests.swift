@@ -54,7 +54,7 @@ final class TidyTabsRuntimeTests: XCTestCase {
     }
 
     override func tearDown() {
-        AssistSettings.defaults = .standard
+        AssistSettings.defaults = OrbitDefaults.standard
         suite = nil
         runtime = nil
         provider = nil

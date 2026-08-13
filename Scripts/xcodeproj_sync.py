@@ -25,6 +25,9 @@ DEMO_EXCLUDES = [
 ORBIT_TESTS_REUSED_SOURCES = [
     "Orbit/Core/DesignTokens.swift",
     "Orbit/Core/OrbitDataRoot.swift",
+    "Orbit/Core/OrbitDefaults.swift",
+    "Orbit/Core/OrbitProcessLiveness.swift",
+    "Orbit/Core/OrbitRuntimeScope.swift",
     "Orbit/Core/ShortcutRegistry.swift",
     "Orbit/Engine/BrowserEngine.swift",
     "Orbit/Engine/ContentBlocking/CompiledFilterListCache.swift",

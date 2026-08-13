@@ -75,6 +75,47 @@ final class DataRootIsolationTests: XCTestCase {
         assertOutsideTheRealProfile(OrbitDataRoot.processDefault.url, what: "the process default root")
     }
 
+    func testTheEnginesPersistentProfileResolvesOutsideTheRealProfile() throws {
+        let directory = try XCTUnwrap(
+            EngineStorageDirectory.directory(for: .persistent),
+            "nil leaves the engine on DefaultOrbitUserDataDir(), which is the real user's profile"
+        )
+        assertOutsideTheRealProfile(directory, what: "the engine's persistent profile")
+    }
+
+    func testOrbitDefaultsIsItsOwnPreferencesDomainUnderXCTest() {
+        XCTAssertFalse(
+            OrbitDefaults.standard === UserDefaults.standard,
+            "a process hosting a test bundle was handed the real browser's preferences domain"
+        )
+
+        let key = "DataRootIsolationProbe-\(UUID().uuidString)"
+        OrbitDefaults.standard.set("scoped", forKey: key)
+        defer { OrbitDefaults.standard.removeObject(forKey: key) }
+
+        XCTAssertEqual(OrbitDefaults.standard.string(forKey: key), "scoped", "the scoped domain did not keep its own write")
+        XCTAssertNil(
+            UserDefaults.standard.object(forKey: key),
+            "a write through OrbitDefaults landed in the real user's preferences"
+        )
+    }
+
+    func testTheRealPreferencesAreNotReadableThroughOrbitDefaultsUnderXCTest() {
+        let key = "DataRootIsolationInboundProbe-\(UUID().uuidString)"
+        UserDefaults.standard.set("real-preferences-probe", forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+
+        XCTAssertEqual(
+            UserDefaults.standard.string(forKey: key),
+            "real-preferences-probe",
+            "the probe never reached the real domain, so the assertion below would pass for the wrong reason"
+        )
+        XCTAssertNil(
+            OrbitDefaults.standard.object(forKey: key),
+            "the scoped suite read a value out of the real browser's own preferences — a scoped run must be excluded in both directions, or it inherits settings it can then overwrite"
+        )
+    }
+
     func testEveryStoreDefaultResolvesOutsideTheRealProfile() {
         let defaults: [(String, URL)] = [
             ("StateStore", StateStore.defaultRootDirectory()),

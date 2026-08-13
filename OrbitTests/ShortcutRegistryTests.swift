@@ -18,7 +18,7 @@ final class ShortcutRegistryTests: XCTestCase {
 
     override func tearDown() {
         scratchDefaults?.removePersistentDomain(forName: suiteName)
-        ShortcutRegistry.defaults = .standard
+        ShortcutRegistry.defaults = OrbitDefaults.standard
         // Put the singleton back on the machine's real saved remaps, so a later setBinding here
         // cannot persist this suite's in-memory state over the user's own.
         ShortcutRegistry.shared.reloadOverridesFromStore()

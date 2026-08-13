@@ -446,13 +446,13 @@ enum EaselPalette {
         colors.indices.contains(index) ? colors[index] : colors[defaultIndex]
     }
 
-    static func loadPreferredIndex(defaults: UserDefaults = .standard) -> Int {
+    static func loadPreferredIndex(defaults: UserDefaults = OrbitDefaults.standard) -> Int {
         guard defaults.object(forKey: preferenceKey) != nil else { return defaultIndex }
         let stored = defaults.integer(forKey: preferenceKey)
         return colors.indices.contains(stored) ? stored : defaultIndex
     }
 
-    static func savePreferredIndex(_ index: Int, defaults: UserDefaults = .standard) {
+    static func savePreferredIndex(_ index: Int, defaults: UserDefaults = OrbitDefaults.standard) {
         guard colors.indices.contains(index) else { return }
         defaults.set(index, forKey: preferenceKey)
     }

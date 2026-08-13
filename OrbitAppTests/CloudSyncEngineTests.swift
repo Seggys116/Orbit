@@ -25,7 +25,7 @@ final class CloudSyncEngineTests: XCTestCase {
     }
 
     override func tearDown() {
-        SyncPreferences.defaults = .standard
+        SyncPreferences.defaults = OrbitDefaults.standard
         scratchDefaults.removePersistentDomain(forName: defaultsSuiteName)
         scratchDefaults = nil
         defaultsSuiteName = nil

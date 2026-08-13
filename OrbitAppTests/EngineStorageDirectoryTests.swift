@@ -1,8 +1,6 @@
-//  Proves the storage-mode plumbing: which directory each EngineStorage
-//  resolves to, that .persistent sends no override (so DefaultOrbitUserDataDir()
-//  stays the only thing that defines it), and a private directory is
-//  genuinely outside the real profile. Never calls engine.start(). It cannot
-//  prove a running engine honours the value; OrbitDemo's DemoEngineProbe does that.
+//  Proves the storage-mode plumbing: which directory each EngineStorage resolves
+//  to, and that nothing a scoped run resolves lands on the real profile. Never
+//  calls engine.start(); OrbitDemo's DemoEngineProbe proves a running engine honours it.
 
 import Foundation
 import XCTest
@@ -33,10 +31,60 @@ final class EngineStorageDirectoryTests: XCTestCase {
 
     // MARK: - Which mode gets an override
 
-    func testPersistentSendsNoOverrideSoTheProductionProfileIsUnchanged() {
-        XCTAssertNil(
+    func testPersistentResolvesOutsideTheRealProfileUnderATestHost() throws {
+        XCTAssertFalse(
+            OrbitRuntimeScope.current.isProduction,
+            "a process hosting a test bundle resolved as the production browser, so every path below is the real user's"
+        )
+
+        let directory = try XCTUnwrap(
             EngineStorageDirectory.directory(for: .persistent),
-            "the real browser must send no user-data-dir override at all — anything else redefines the user's profile path in Swift instead of leaving it to DefaultOrbitUserDataDir()"
+            "a scoped run has to be handed an explicit profile directory — nil leaves the engine on DefaultOrbitUserDataDir(), which is the real user's profile"
+        )
+        XCTAssertEqual(
+            directory, OrbitDataRoot.processDefault.url,
+            "the engine and the Swift stores must land in the same scoped root, or a reset clears half of it"
+        )
+
+        let production = EngineStorageDirectory.productionProfile.resolvingSymlinksInPath().path
+        let resolved = directory.resolvingSymlinksInPath().path
+        XCTAssertNotEqual(resolved, production)
+        XCTAssertFalse(
+            resolved.hasPrefix(production + "/"),
+            "\(resolved) is inside the real user's profile at \(production)"
+        )
+    }
+
+    func testOnlyTheProductionScopeLeavesTheEngineOnItsOwnDefault() {
+        let roots = [
+            scratchRoot!,
+            OrbitDataRoot.processDefault.url,
+            EngineStorageDirectory.productionProfile,
+            URL(fileURLWithPath: "/Users/example/somewhere-else", isDirectory: true),
+        ]
+        for root in roots {
+            XCTAssertNil(
+                EngineStorageDirectory.persistentDirectory(for: .production, root: root),
+                "the shipping browser sends no user-data-dir override at all, whatever root it is handed: \(root.path)"
+            )
+            XCTAssertEqual(
+                EngineStorageDirectory.persistentDirectory(for: .development, root: root),
+                root,
+                "a development run has to be pinned to its own root — nil would leave the engine on DefaultOrbitUserDataDir(), the real user's profile"
+            )
+            XCTAssertEqual(
+                EngineStorageDirectory.persistentDirectory(for: .test, root: root),
+                root,
+                "a test run has to be pinned to its own root — nil would leave the engine on DefaultOrbitUserDataDir(), the real user's profile"
+            )
+        }
+    }
+
+    func testThePersistentDirectoryDefaultsToTheProcessRoot() {
+        XCTAssertEqual(
+            EngineStorageDirectory.persistentDirectory(for: .test),
+            OrbitDataRoot.processDefault.url,
+            "the injected root is for the tests; with none supplied the engine and the Swift stores must still share one root"
         )
     }
 

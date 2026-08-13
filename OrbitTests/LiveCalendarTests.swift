@@ -248,7 +248,7 @@ final class LiveCalendarStoreTests: XCTestCase {
     }
 
     override func tearDown() {
-        LiveCalendarSettings.defaults = .standard
+        LiveCalendarSettings.defaults = OrbitDefaults.standard
         suite.removePersistentDomain(forName: suiteName)
         suite = nil
         suiteName = nil

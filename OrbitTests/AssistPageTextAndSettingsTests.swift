@@ -89,7 +89,7 @@ final class AssistSettingsDefaultsTests: XCTestCase {
     }
 
     override func tearDown() {
-        AssistSettings.defaults = .standard
+        AssistSettings.defaults = OrbitDefaults.standard
         AssistKeychain.inMemoryOverride = nil
         suite.removePersistentDomain(forName: suiteName)
         suite = nil

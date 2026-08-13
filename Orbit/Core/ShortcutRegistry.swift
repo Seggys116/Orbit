@@ -283,9 +283,9 @@ final class ShortcutRegistry {
     static let defaultsKey = "OrbitShortcutOverrides.v1"
 
     #if DEBUG
-    static var defaults: UserDefaults = .standard
+    static var defaults: UserDefaults = OrbitDefaults.standard
     #else
-    static let defaults: UserDefaults = .standard
+    static let defaults: UserDefaults = OrbitDefaults.standard
     #endif
 
     private init() {

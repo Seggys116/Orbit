@@ -20,7 +20,7 @@ final class DeveloperModePersistenceTests: XCTestCase {
 
     override func tearDown() {
         writingStore?.removePersistentDomain(forName: suiteName)
-        DeveloperModeSettings.defaults = .standard
+        DeveloperModeSettings.defaults = OrbitDefaults.standard
         writingStore = nil
         suiteName = nil
         super.tearDown()

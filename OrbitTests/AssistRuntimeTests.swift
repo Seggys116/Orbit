@@ -39,7 +39,7 @@ final class AssistRuntimeAskOnPageTests: XCTestCase {
     }
 
     override func tearDown() {
-        AssistSettings.defaults = .standard
+        AssistSettings.defaults = OrbitDefaults.standard
         suite = nil
         super.tearDown()
     }
@@ -154,7 +154,7 @@ final class AssistRuntimeTidyTabTitleTests: XCTestCase {
     }
 
     override func tearDown() {
-        AssistSettings.defaults = .standard
+        AssistSettings.defaults = OrbitDefaults.standard
         suite = nil
         super.tearDown()
     }
@@ -260,7 +260,7 @@ final class AssistRuntimeTidyDownloadTests: XCTestCase {
     }
 
     override func tearDown() {
-        AssistSettings.defaults = .standard
+        AssistSettings.defaults = OrbitDefaults.standard
         suite = nil
         super.tearDown()
     }

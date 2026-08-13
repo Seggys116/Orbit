@@ -19,7 +19,7 @@ final class ShortcutModifierMaskingTests: XCTestCase {
     override func tearDown() {
         ShortcutRegistry.shared.resetToDefaults()
         scratchDefaults.removePersistentDomain(forName: defaultsSuiteName)
-        ShortcutRegistry.defaults = .standard
+        ShortcutRegistry.defaults = OrbitDefaults.standard
         ShortcutRegistry.shared.reloadOverridesFromStore()
         super.tearDown()
     }

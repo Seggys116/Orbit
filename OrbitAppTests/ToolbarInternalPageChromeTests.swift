@@ -64,7 +64,7 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
         settings = nil
         writingStore = nil
 
-        DeveloperModeSettings.defaults = .standard
+        DeveloperModeSettings.defaults = OrbitDefaults.standard
         developerModeWritingStore?.removePersistentDomain(forName: developerModeSuiteName)
         developerModeWritingStore = nil
         developerModeSuiteName = nil

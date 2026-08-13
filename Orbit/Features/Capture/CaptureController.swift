@@ -10,14 +10,14 @@ final class DeveloperModeSettings {
     static let defaultsKey = "OrbitDeveloperModeEnabled"
 
     #if DEBUG
-    static var defaults: UserDefaults = .standard {
+    static var defaults: UserDefaults = OrbitDefaults.standard {
         didSet {
             guard defaults !== oldValue else { return }
             shared.reload(from: defaults)
         }
     }
     #else
-    static let defaults: UserDefaults = .standard
+    static let defaults: UserDefaults = OrbitDefaults.standard
     #endif
 
     static let shared = DeveloperModeSettings()
@@ -32,7 +32,7 @@ final class DeveloperModeSettings {
     }
 
     #if DEBUG
-    // Must not route through isEnabled's setter, or test teardown would persist into the real UserDefaults.standard.
+    // Not through isEnabled's setter: that would write the restored value straight back out.
     fileprivate func reload(from newStore: UserDefaults) {
         backingStore = newStore
         isEnabled = newStore.bool(forKey: Self.defaultsKey)

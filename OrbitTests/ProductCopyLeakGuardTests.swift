@@ -17,6 +17,7 @@ final class ProductCopyLeakGuardTests: XCTestCase {
         "from Arc but not transferred",
         "read Arc's saved logins",
         "Arc's login sessions could not be read",
+        "Arc's saved site data could not be read",
         "Arc logins weren't brought across",
         "Arc has no saved encryption key",
         "Arc's encryption key",

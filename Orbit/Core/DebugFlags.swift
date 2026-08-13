@@ -15,7 +15,7 @@ enum DebugFlags {
     }
 
     // Launches the real, signed app bundle — indistinguishable from the browser the user runs.
-    // Every decision reaching the real profile must read this: see OrbitDataRoot.isProductionBrowserProcess.
+    // Every decision reaching the real profile must read this: see OrbitRuntimeScope.resolve.
     static var isRunningSmokeProbe: Bool {
         ProcessInfo.processInfo.environment["ORBIT_SMOKE_PROBE"] == "1"
     }
@@ -64,7 +64,7 @@ enum DiagnosticChannel: String, CaseIterable {
             return fromEnvironment
         }
         if DiagnosticChannel.allChannelsPreferenceIsOn { return true }
-        return UserDefaults.standard.bool(forKey: preferenceKey)
+        return OrbitDefaults.standard.bool(forKey: preferenceKey)
     }
 
     // MARK: Resolution
@@ -73,7 +73,7 @@ enum DiagnosticChannel: String, CaseIterable {
     private static let allChannelsPreferenceKey = "OrbitLogUI"
 
     private static var allChannelsPreferenceIsOn: Bool {
-        UserDefaults.standard.bool(forKey: allChannelsPreferenceKey)
+        OrbitDefaults.standard.bool(forKey: allChannelsPreferenceKey)
     }
 
     private static let environmentOverrides: [DiagnosticChannel: Bool] = {

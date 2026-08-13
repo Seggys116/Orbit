@@ -318,9 +318,9 @@ final class AppEnvironment {
     }
 
     #if DEBUG
-    static var defaults: UserDefaults = .standard
+    static var defaults: UserDefaults = OrbitDefaults.standard
     #else
-    static let defaults: UserDefaults = .standard
+    static let defaults: UserDefaults = OrbitDefaults.standard
     #endif
 
     // MARK: - Init
@@ -378,11 +378,9 @@ final class AppEnvironment {
         let storedWidth = AppEnvironment.defaults.double(forKey: Keys.sidebarWidth)
         self.sidebarWidth = storedWidth > 0 ? CGFloat(storedWidth) : OrbitMetrics.sidebarDefaultWidth
 
-        // Guard mirrors OrbitAppDelegate.applicationDidFinishLaunching's own:
-        // a hosted test run must not start background work against the real
-        // user's Application Support directory just from touching .shared.
-        let isHostingTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        if syncsWithICloud, !isHostingTests {
+        // Only the installed browser touches the real iCloud container: a development or test run
+        // must neither push scratch state into it nor pull the user's real state out of it.
+        if syncsWithICloud, OrbitRuntimeScope.current.isProduction {
             let engine = CloudSyncEngine(store: store)
             self.syncEngine = engine
             engine.start()

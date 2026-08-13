@@ -17,7 +17,7 @@ enum ExtensionCorpus {
         let expectation: String
     }
 
-    private struct Manifest: Decodable {
+    private struct CorpusManifest: Decodable {
         let unpackRoot: String
         let extensions: [CorpusEntry]
     }
@@ -61,7 +61,7 @@ enum ExtensionCorpus {
 
     static let manifestURL: URL = repositoryRoot.appendingPathComponent("Chromium/extension-corpus.json")
 
-    private static func loadManifest() throws -> Manifest {
+    private static func loadManifest() throws -> CorpusManifest {
         let data: Data
         do {
             data = try Data(contentsOf: manifestURL)
@@ -71,7 +71,7 @@ enum ExtensionCorpus {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         do {
-            return try decoder.decode(Manifest.self, from: data)
+            return try decoder.decode(CorpusManifest.self, from: data)
         } catch {
             throw CorpusError.manifestUnreadable(manifestURL, String(describing: error))
         }

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Static security invariants (sandbox-disabling switches, entitlement policy,
-# engine DCHECK configuration); run with no argument for all of them.
+# engine DCHECK configuration, and the four that keep a development or test run
+# off the real user's data: scoped preferences, scoped data root, a single
+# production identity, and the engine's persistent-profile scope gate); run with
+# no argument for all of them.
 # Runtime counterpart OrbitTests/SandboxInvariantTests.swift's real-Orbit test
 # currently skips (OrbitTests isn't the live-engine target), so no run yet
 # measures a real browser's helpers.

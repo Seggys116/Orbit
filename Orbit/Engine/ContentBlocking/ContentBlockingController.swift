@@ -60,7 +60,7 @@ public final class ContentBlockingController: ObservableObject {
 
     // MARK: - Init
 
-    public init(store: FilterListStore? = nil, defaults: UserDefaults = .standard) {
+    public init(store: FilterListStore? = nil, defaults: UserDefaults = OrbitDefaults.standard) {
         self.store = store ?? FilterListStore(directory: FilterListStore.defaultDirectory())
         self.defaults = defaults
 

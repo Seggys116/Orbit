@@ -2,9 +2,9 @@ import Foundation
 
 public enum BoostsGlobalSettings {
     #if DEBUG
-    public static var defaults: UserDefaults = .standard
+    public static var defaults: UserDefaults = OrbitDefaults.standard
     #else
-    public static let defaults: UserDefaults = .standard
+    public static let defaults: UserDefaults = OrbitDefaults.standard
     #endif
 
     private static let key = "OrbitBoostsGloballyEnabled"

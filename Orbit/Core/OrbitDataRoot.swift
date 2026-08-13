@@ -1,8 +1,7 @@
-//  Every store names its subdirectory here so a new store cannot land on the
-//  real profile. `.production` is reachable only from the real browser process.
-//  The production/scratch decision is read from the running process, never from a
-//  switch a test can set — such a switch once let a test environment prune the
-//  real profile's Space icons.
+//  Every store names its subdirectory here so a new store cannot land on the real profile.
+//  Which root a process gets comes from OrbitRuntimeScope, read from the running process
+//  rather than from a switch a test can set — such a switch once let a test environment
+//  prune the real profile's Space icons.
 
 import Foundation
 import OSLog
@@ -13,12 +12,37 @@ struct OrbitDataRoot: Sendable, Equatable {
 
     private static let logger = Logger(subsystem: "com.orbit.browser", category: "OrbitDataRoot")
 
-    static let productionBundleIdentifier = "com.zak-noble-clarke.Orbit"
+    static var productionBundleIdentifier: String { OrbitRuntimeScope.productionBundleIdentifier }
 
     /// Exactly `~/Library/Application Support/Orbit` — the directory the real
     /// browser has always used. Never construct one of these for a demo or a test.
     static var production: OrbitDataRoot {
         OrbitDataRoot(url: applicationSupportBase.appendingPathComponent("Orbit", isDirectory: true))
+    }
+
+    /// One stable directory per bundle, in a place no release reads.
+    static func development(bundleIdentifier: String? = Bundle.main.bundleIdentifier) -> OrbitDataRoot {
+        let url = developmentBase
+            .appendingPathComponent(developmentName(for: bundleIdentifier), isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: url,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        return OrbitDataRoot(url: url)
+    }
+
+    static var developmentBase: URL {
+        URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("OrbitDev", isDirectory: true)
+    }
+
+    /// The last component of the bundle identifier, not the whole thing: Chromium puts sockets
+    /// in its user data directory and `sun_path` is 104 bytes, which $TMPDIR already half spends.
+    static func developmentName(for bundleIdentifier: String?) -> String {
+        let identifier = bundleIdentifier ?? productionBundleIdentifier
+        let last = identifier.split(separator: ".").last.map(String.init) ?? ""
+        return last.isEmpty ? productionBundleIdentifier : last
     }
 
     static func scratch(label: String) -> OrbitDataRoot {
@@ -34,31 +58,20 @@ struct OrbitDataRoot: Sendable, Equatable {
 
     /// What a store built with no explicit root gets. Resolved once per process.
     static let processDefault: OrbitDataRoot = {
-        guard isProductionBrowserProcess else {
-            let root = scratch(label: "Process")
-            logger.log("""
-            not the production browser process \
-            (bundle \(Bundle.main.bundleIdentifier ?? "<none>", privacy: .public)) — \
-            stores default to \(root.url.path, privacy: .public)
-            """)
-            return root
-        }
-        return production
+        let root = make(for: OrbitRuntimeScope.current)
+        logger.log("""
+        scope \(OrbitRuntimeScope.current.rawValue, privacy: .public) — \
+        stores default to \(root.url.path, privacy: .public)
+        """)
+        return root
     }()
 
-    static var isProductionBrowserProcess: Bool {
-        let environment = ProcessInfo.processInfo.environment
-        guard environment["XCTestConfigurationFilePath"] == nil else { return false }
-        // A probe is a throwaway diagnostic run of the real bundle, so it would otherwise resolve to
-        // the real profile. Opt in with ORBIT_PROBE_REAL_PROFILE=1 for the one case that needs it,
-        // verifying a Web Store install against the profile the user actually browses with.
-        if environment["ORBIT_WEBSTORE_PROBE"] != nil, environment["ORBIT_PROBE_REAL_PROFILE"] == nil {
-            return false
+    static func make(for scope: OrbitRuntimeScope) -> OrbitDataRoot {
+        switch scope {
+        case .production: return production
+        case .development: return development()
+        case .test: return scratch(label: "Process")
         }
-        // No opt-in needed; nothing the smoke probe does touches the user's profile.
-        // Read directly, not via DebugFlags: this file is recompiled into OrbitTests, which lacks it.
-        if environment["ORBIT_SMOKE_PROBE"] == "1" { return false }
-        return Bundle.main.bundleIdentifier == productionBundleIdentifier
     }
 
     var isProduction: Bool { url == OrbitDataRoot.production.url }
@@ -79,6 +92,7 @@ struct OrbitDataRoot: Sendable, Equatable {
     var contentBlocking: URL { directory("ContentBlocking") }
     var sync: URL { directory("Sync") }
     var chromiumProfile: URL { directory("Chromium") }
+    var pendingSiteData: URL { directory("PendingSiteData") }
 
     var downloadsFile: URL { directory("Downloads").appendingPathComponent("downloads.json", isDirectory: false) }
     var boostsFile: URL { directory("Boosts").appendingPathComponent("boosts.json", isDirectory: false) }

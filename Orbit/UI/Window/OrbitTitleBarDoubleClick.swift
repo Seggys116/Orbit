@@ -7,6 +7,7 @@ protocol OrbitPreferenceReading {
 
 extension UserDefaults: OrbitPreferenceReading {}
 
+// Not OrbitDefaults: this is macOS's own setting, read from the global domain, not Orbit data.
 enum OrbitTitleBarDoubleClick {
     static let preferenceKey = "AppleActionOnDoubleClick"
 

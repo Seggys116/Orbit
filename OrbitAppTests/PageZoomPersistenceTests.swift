@@ -20,7 +20,7 @@ final class PageZoomPersistenceTests: XCTestCase {
 
     override func tearDown() {
         scratchDefaults.removePersistentDomain(forName: defaultsSuiteName)
-        SiteZoomStore.defaults = .standard
+        SiteZoomStore.defaults = OrbitDefaults.standard
         super.tearDown()
     }
 

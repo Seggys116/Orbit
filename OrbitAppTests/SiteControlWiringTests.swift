@@ -20,7 +20,7 @@ final class SiteControlWiringTests: XCTestCase {
 
     override func tearDown() {
         scratchDefaults.removePersistentDomain(forName: defaultsSuiteName)
-        PeekSettings.defaults = .standard
+        PeekSettings.defaults = OrbitDefaults.standard
         super.tearDown()
     }
 
@@ -308,7 +308,7 @@ final class SiteControlWiringTests: XCTestCase {
         AppEnvironment.defaults = scratchDefaults
         let originalOpen = OnboardingWindowController.openBrowserWindow
         defer {
-            AppEnvironment.defaults = .standard
+            AppEnvironment.defaults = OrbitDefaults.standard
             OnboardingWindowController.openBrowserWindow = originalOpen
         }
         var windowsOpened = 0
@@ -334,7 +334,7 @@ final class SiteControlWiringTests: XCTestCase {
         AppEnvironment.defaults = scratchDefaults
         let originalOpen = OnboardingWindowController.openBrowserWindow
         defer {
-            AppEnvironment.defaults = .standard
+            AppEnvironment.defaults = OrbitDefaults.standard
             OnboardingWindowController.openBrowserWindow = originalOpen
         }
         var windowsOpened = 0
@@ -353,7 +353,7 @@ final class SiteControlWiringTests: XCTestCase {
         AppEnvironment.defaults = scratchDefaults
         let originalOpen = OnboardingWindowController.openBrowserWindow
         defer {
-            AppEnvironment.defaults = .standard
+            AppEnvironment.defaults = OrbitDefaults.standard
             OnboardingWindowController.openBrowserWindow = originalOpen
         }
         var windowsOpened = 0

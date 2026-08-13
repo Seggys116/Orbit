@@ -778,7 +778,7 @@ enum DemoEngineProbe {
         }
     }
 
-    private static let competitorBundleID = "com.zak-noble-clarke.Orbit"
+    private static let competitorBundleID = OrbitRuntimeScope.productionBundleIdentifier
 
     private static func currentCompetitors() -> [NSRunningApplication] {
         NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == competitorBundleID }

@@ -349,6 +349,10 @@ struct OnboardingView: View {
         if case .imported(let count) = summary.cookies, count > 0 {
             parts.append("\(count) login session\(count == 1 ? "" : "s")")
         }
+        let sites = summary.siteData.stagedSiteCount
+        if sites > 0 {
+            parts.append("saved site data from \(sites) site\(sites == 1 ? "" : "s")")
+        }
         return "Imported " + parts.joined(separator: ", ") + " from Arc."
     }
 
@@ -379,6 +383,15 @@ struct OnboardingView: View {
             caveats.append("Orbit was not allowed to read Arc's saved logins, so you will need to sign in again.")
         case .failed(let reason):
             caveats.append("Arc's login sessions could not be read: \(reason)")
+        }
+        switch summary.siteData {
+        case .notAttempted, .nothingToImport:
+            break
+        case .staged(let sites, let indexedDBSites, _):
+            let count = max(sites, indexedDBSites)
+            caveats.append("Saved site data — drawings, notes and offline documents — came across for \(count) site\(count == 1 ? "" : "s"). Restart Orbit to put \(count == 1 ? "it" : "them") in place. Sites Orbit already holds data for keep Orbit's.")
+        case .failed(let reason):
+            caveats.append("Arc's saved site data could not be read: \(reason)")
         }
         return caveats
     }

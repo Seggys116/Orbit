@@ -63,7 +63,7 @@ final class TidyTabsCoordinatorTests: XCTestCase {
     }
 
     override func tearDown() {
-        AssistSettings.defaults = .standard
+        AssistSettings.defaults = OrbitDefaults.standard
         suite = nil
         coordinator = nil
         provider = nil

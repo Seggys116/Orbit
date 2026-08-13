@@ -12,7 +12,7 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
 
     override func tearDown() {
         for key in writtenPreferenceKeys {
-            UserDefaults.standard.removeObject(forKey: key)
+            OrbitDefaults.standard.removeObject(forKey: key)
         }
         writtenPreferenceKeys.removeAll()
         super.tearDown()
@@ -20,7 +20,7 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
 
     private func setPreference(_ key: String, _ value: Bool) {
         writtenPreferenceKeys.insert(key)
-        UserDefaults.standard.set(value, forKey: key)
+        OrbitDefaults.standard.set(value, forKey: key)
     }
 
     private func channelsNotForcedByEnvironment() -> [DiagnosticChannel] {
@@ -44,7 +44,7 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
             "The environment has forced every diagnostic channel, so this run could not measure the default state."
         )
         for channel in channels {
-            UserDefaults.standard.removeObject(forKey: channel.preferenceKey)
+            OrbitDefaults.standard.removeObject(forKey: channel.preferenceKey)
             XCTAssertFalse(
                 channel.isEnabled,
                 "\(channel.rawValue) logs by default. Every one of these fires on a hot browsing path; the console has to stay readable without anyone asking it to."
@@ -92,7 +92,7 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
             )
         }
 
-        UserDefaults.standard.removeObject(forKey: subject.preferenceKey)
+        OrbitDefaults.standard.removeObject(forKey: subject.preferenceKey)
         XCTAssertFalse(subject.isEnabled, "\(subject.rawValue) stayed on after its preference was removed.")
     }
 
@@ -105,7 +105,7 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
         for channel in channels {
             XCTAssertTrue(channel.isEnabled, "The OrbitLogUI master switch left \(channel.rawValue) off.")
         }
-        UserDefaults.standard.removeObject(forKey: "OrbitLogUI")
+        OrbitDefaults.standard.removeObject(forKey: "OrbitLogUI")
         for channel in channels {
             XCTAssertFalse(channel.isEnabled, "\(channel.rawValue) stayed on after the OrbitLogUI master switch was removed.")
         }
@@ -137,7 +137,7 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
         }
         let store = try OSLogStore(scope: .currentProcessIdentifier)
 
-        UserDefaults.standard.removeObject(forKey: DiagnosticChannel.toolbarColour.preferenceKey)
+        OrbitDefaults.standard.removeObject(forKey: DiagnosticChannel.toolbarColour.preferenceKey)
         let quietMark = Date()
         renderAToolbarHeader()
         let quiet = try colourLines(from: store, since: quietMark)

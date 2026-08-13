@@ -3,7 +3,7 @@ import SwiftUI
 struct GeneralSettingsPane: View {
     @Environment(AppEnvironment.self) private var env
     // Key name is load-bearing: renaming it resets the preference for anyone who already set it.
-    @AppStorage("OrbitConfirmBeforeQuit") private var confirmBeforeQuit = false
+    @AppStorage("OrbitConfirmBeforeQuit", store: OrbitDefaults.standard) private var confirmBeforeQuit = false
 
     @State private var isDefaultBrowser = false
 

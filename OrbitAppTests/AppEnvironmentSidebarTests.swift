@@ -21,7 +21,7 @@ final class AppEnvironmentSidebarTests: XCTestCase {
 
     override func tearDown() {
         writingStore?.removePersistentDomain(forName: suiteName)
-        AppEnvironment.defaults = .standard
+        AppEnvironment.defaults = OrbitDefaults.standard
         writingStore = nil
         suiteName = nil
         super.tearDown()
