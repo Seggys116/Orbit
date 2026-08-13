@@ -38,12 +38,15 @@ MAY_SKIP_LINE = re.compile(r"^\s*//\s*" + re.escape(MAY_SKIP_MARKER) + r"\s+([A-
 CANNOT_RUN_LINE = re.compile(r"^\s*//\s*" + re.escape(CANNOT_RUN_MARKER) + r"\s+([A-Za-z0-9_]+)\s*$")
 CONDITIONAL = re.compile(r"^\s*#(if|elseif|else|endif)\b\s*(.*)$")
 
-LOG_SKIP = re.compile(r"^.*?:\s*-\[[A-Za-z0-9_.]+\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]\s*:\s*Test skipped\s*-\s*(.*)$")
+LOG_SKIP = re.compile(r"^.*?:\s*-\[([A-Za-z0-9_.]+)\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]\s*:\s*Test skipped\s*-\s*(.*)$")
 # Same wording as LOG_SKIP's suffix, but as an xcresult "Failure Message" child of a skipped Test Case.
 BUNDLE_SKIP_PREFIX = "Test skipped - "
-LOG_CASE = re.compile(r"^Test Case '-\[[A-Za-z0-9_.]+\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]' (passed|failed|skipped)\b")
+LOG_CASE = re.compile(r"^Test Case '-\[([A-Za-z0-9_.]+)\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]' (passed|failed|skipped)\b")
 # Parallel-runner reporter (OrbitTests): lower-case "case", no module prefix, no skip reason at all.
+# The module is always this same one target, so it is filled in below rather than left blank -- a
+# blank would risk colliding with a same-named class+method that a *different* target also runs.
 LOG_CASE_PARALLEL = re.compile(r"^Test case '([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\(\)' (passed|failed|skipped)\b")
+LOG_CASE_PARALLEL_MODULE = "OrbitTests"
 
 
 class VerdictError(Exception):
@@ -260,31 +263,33 @@ def bundle_tests(path: str) -> dict[str, list[dict[str, str]]]:
 
 def log_events(
     path: str,
-) -> tuple[dict[tuple[str, str], str], dict[str, int], dict[tuple[str, str], tuple[int, str]]]:
+) -> tuple[dict[tuple[str, str, str], str], dict[str, int], dict[tuple[str, str, str], tuple[int, str]]]:
     """Skip reasons, per-outcome case counts, and retry attempts, from an xcodebuild log.
 
     -retry-tests-on-failure re-runs a failed test and logs a second terminal line for it, so a
-    test is kept by (suite, method) with only its LAST terminal outcome, matching what the result
-    bundle records; the discarded earlier attempts are surfaced separately as retries.
+    test is kept by (module, suite, method) -- the module because the same class+method
+    legitimately runs once per test target, and collapsing across targets would either merge two
+    real passes into a fake retry or hide a real one -- with only its LAST terminal outcome,
+    matching what the result bundle records; the discarded earlier attempts are retries.
     """
-    reasons: dict[tuple[str, str], str] = {}
-    attempts: dict[tuple[str, str], tuple[int, str]] = {}
+    reasons: dict[tuple[str, str, str], str] = {}
+    attempts: dict[tuple[str, str, str], tuple[int, str]] = {}
     for line in _lines(path):
         match = LOG_SKIP.match(line)
         if match:
-            suite, method, reason = match.groups()
-            reasons[(suite, method)] = reason.strip()
+            module, suite, method, reason = match.groups()
+            reasons[(module, suite, method)] = reason.strip()
             continue
         match = LOG_CASE.match(line)
         if match:
-            suite, method, result = match.groups()
-            key = (suite, method)
+            module, suite, method, result = match.groups()
+            key = (module, suite, method)
             attempts[key] = (attempts.get(key, (0, ""))[0] + 1, result)
             continue
         match = LOG_CASE_PARALLEL.match(line)
         if match:
             suite, method, result = match.groups()
-            key = (suite, method)
+            key = (LOG_CASE_PARALLEL_MODULE, suite, method)
             attempts[key] = (attempts.get(key, (0, ""))[0] + 1, result)
 
     counts = {"passed": 0, "failed": 0, "skipped": 0}
@@ -417,7 +422,9 @@ def command_check(arguments) -> int:
                 continue
             suite, method = key
             # The log is cheap and already parsed; the result bundle always has it, so fall back to that.
-            reason = reasons.get(key) or bundle_reasons.get(key)
+            # (target, suite, method): the log key carries the module, so a same-named suite+method
+            # skipped in a different target cannot be mistaken for this target's reason.
+            reason = reasons.get((target, suite, method)) or bundle_reasons.get(key)
             if reason is None:
                 problems.append(
                     f"{target}: {suite}.{method} was skipped and no reason for it is in the log or the "
@@ -461,15 +468,16 @@ def command_check(arguments) -> int:
         passed_on_retry = {key: value for key, value in log_retries.items() if value[1] == "passed"}
         if passed_on_retry:
             detail = ", ".join(
-                f"{suite}.{method} ({attempts} attempts)"
-                for (suite, method), (attempts, _) in sorted(passed_on_retry.items())
+                f"{module}/{suite}.{method} ({attempts} attempts)"
+                for (module, suite, method), (attempts, _) in sorted(passed_on_retry.items())
             )
             print(f"test-verdict: {len(passed_on_retry)} test(s) passed only on retry: {detail}")
         if arguments.max_retries_allowed is not None and len(log_retries) > arguments.max_retries_allowed:
+            named = _sample([(f"{module}/{suite}", method) for module, suite, method in log_retries])
             problems.append(
                 f"{len(log_retries)} test(s) needed a retry, more than the "
                 f"{arguments.max_retries_allowed} this run allows via --max-retries-allowed. That is "
-                f"the suite degrading, not one test's bad luck: {_sample(list(log_retries))}."
+                f"the suite degrading, not one test's bad luck: {named}."
             )
 
     print(f"test-verdict: {total_executed} test(s) executed over {len(arguments.target)} target(s)")
@@ -575,7 +583,7 @@ def command_live(arguments) -> int:
         log_skipped += row["log_skipped"]
 
         row["accepted_skips"] = 0
-        reasons: dict[tuple[str, str], str] = {}
+        reasons: dict[tuple[str, str, str], str] = {}
         if os.path.exists(row["log_path"]):
             reasons, _, _ = log_events(row["log_path"])
         elif row["log_skipped"]:
@@ -583,7 +591,7 @@ def command_live(arguments) -> int:
                 f"{label}: {row['log_skipped']} test(s) skipped and its log {row['log_path']} is "
                 "gone, so why they skipped cannot be established."
             )
-        for (suite, method), reason in sorted(reasons.items()):
+        for (_module, suite, method), reason in sorted(reasons.items()):
             if GATE_MARKER in reason:
                 problems.append(
                     f"{label}: {suite}.{method} skipped on the live-engine gate ({reason}). The "

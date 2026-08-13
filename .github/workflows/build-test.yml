@@ -224,6 +224,9 @@ jobs:
       # environment to a hosted test target's process. Scripts/live-engine-tests
       # has the measured evidence.
       #
+      # Exactly one test per run pays a one-off start-up cost on this runner and hit
+      # the old 120s wall; it is whichever suite's first test lands on that worker.
+      #
       # Those gate skips are the only skips this job declares as expected, via
       # --allow-live-engine-gate-skips below; a gate skip anywhere else, or a
       # skip in a suite whose source never calls XCTSkip, fails the job.
@@ -249,8 +252,8 @@ jobs:
             -retry-tests-on-failure \
             -test-iterations 3 \
             -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 120 \
-            -maximum-test-execution-time-allowance 300 \
+            -default-test-execution-time-allowance 300 \
+            -maximum-test-execution-time-allowance 600 \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_STYLE=Manual \
