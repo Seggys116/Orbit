@@ -151,29 +151,34 @@ jobs:
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
           echo "Marked #$number pending on $sha"
 
-  # Hosted-runner guard: fails loudly, before the build job would otherwise
-  # queue forever waiting for a self-hosted runner that was never registered.
+  # No builder is a configuration choice, not a fault: the engine is then built
+  # and published out of band, and the pin PR stays pending until it is.
   runner-check:
-    name: Check the self-hosted builder is configured
+    name: Check the builder is configured
     needs: check
     if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.builder.outputs.configured }}
     steps:
-      - name: Require CHROMIUM_BUILDER_RUNNER_LABEL
+      - name: Look for CHROMIUM_BUILDER_RUNNER_LABEL
+        id: builder
         run: |
           if [ -z "${{ vars.CHROMIUM_BUILDER_RUNNER_LABEL }}" ]; then
-            echo "::error::Repository variable CHROMIUM_BUILDER_RUNNER_LABEL is not set." >&2
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No builder is registered, so this pin needs an engine built and published out of band."
             echo "A Chromium source build needs a persistent, self-hosted macOS runner." >&2
             echo "Not a cost decision: standard runners are free on public repos. A hosted" >&2
             echo "macos-26 has 3 cores, 7GB RAM and 14GB of disk, and a hard 6h job cap;" >&2
             echo "measured, this build needs 54GB (49GB checkout, 8GB per configuration)" >&2
             echo "and is ephemeral there, so every run would restart from zero." >&2
-            echo "Register a self-hosted runner with a label of your choosing, set it as" >&2
-            echo "the CHROMIUM_BUILDER_RUNNER_LABEL repo variable (Settings > Secrets and" >&2
-            echo "variables > Actions > Variables), and re-run this workflow." >&2
-            exit 1
+            echo "Either register one and set CHROMIUM_BUILDER_RUNNER_LABEL, or build the" >&2
+            echo "engine elsewhere, publish it, and push the record-prebuilt commit to" >&2
+            echo "chore/chromium-update, which runs CI on the pull request." >&2
+            exit 0
           fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
           echo "Builder runner label: ${{ vars.CHROMIUM_BUILDER_RUNNER_LABEL }}"
 
   # Expensive: a full Chromium checkout and build (hours). Self-hosted only --
@@ -182,7 +187,7 @@ jobs:
   build-and-publish:
     name: Build and publish the prebuilt
     needs: [check, runner-check]
-    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.runner-check.outputs.configured == 'true' && (needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ${{ vars.CHROMIUM_BUILDER_RUNNER_LABEL }}
     # A first Chromium build from a cold checkout runs past the 6h default.
     timeout-minutes: 720
@@ -290,7 +295,7 @@ jobs:
   # stale pending status and no explanation.
   report:
     name: Report the verdict to the pull request
-    needs: [check, verify]
+    needs: [check, runner-check, verify]
     if: always() && needs.check.outputs.pr_number != ''
     runs-on: ubuntu-latest
     permissions:
@@ -302,10 +307,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.check.outputs.pr_number }}
           VERIFY_RESULT: ${{ needs.verify.result }}
+          BUILDER_CONFIGURED: ${{ needs.runner-check.outputs.configured }}
         run: |
           if [ "$VERIFY_RESULT" = "success" ]; then
             state=success
             description="Built and tested on the pin branch"
+          elif [ "$BUILDER_CONFIGURED" != "true" ] && [ "$VERIFY_RESULT" = "skipped" ]; then
+            state=pending
+            description="Waiting for an engine built and published out of band"
           else
             state=failure
             description="Verification $VERIFY_RESULT"
@@ -317,6 +326,11 @@ jobs:
             -f context='chromium-update / verify' \
             -f description="$description" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+
+          if [ "$state" = "pending" ]; then
+            echo "::notice::Chromium bump #$PR_NUMBER is unverified until its engine is published and the record-prebuilt commit is pushed to chore/chromium-update. Do not merge it before then."
+            exit 0
+          fi
 
           if [ "$state" != "success" ]; then
             echo "::error::Chromium bump #$PR_NUMBER is unverified (verify job: $VERIFY_RESULT). Do not merge it."
