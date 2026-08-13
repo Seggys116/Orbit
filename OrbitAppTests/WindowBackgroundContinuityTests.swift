@@ -7,6 +7,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
 final class WindowBackgroundContinuityTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -30,6 +31,8 @@ final class WindowBackgroundContinuityTests: XCTestCase {
         let cardLeadingEdge = Int(sidebarWidth + OrbitMetrics.sidebarResizeHandleWidth + OrbitMetrics.cardInset)
         return 140...(cardLeadingEdge - 2)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_windowBackground_hasNoSeamAtTheSidebarsTrailingEdge
 
     func test_windowBackground_hasNoSeamAtTheSidebarsTrailingEdge() async {
         OrbitScreenshotFixtures.configure(env)

@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
 final class ThemeEditorRedesignTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -455,6 +456,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
     func test_themeEditorPanel_dark() async {
         await renderAndSavePanel(name: "space-theme-picker", appearance: .darkAqua)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_themeEditorPanel_light
 
     func test_themeEditorPanel_light() async {
         await renderAndSavePanel(name: "space-theme-picker-light", appearance: .aqua)

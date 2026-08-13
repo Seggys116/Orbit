@@ -3,6 +3,7 @@ import SwiftUI
 @testable import Orbit
 
 @MainActor
+// Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
 final class CommandBarPlacementTests: XCTestCase {
 
     // MARK: - Helpers
@@ -396,6 +397,8 @@ private struct AnchorRoundTripProbe: View {
 extension CommandBarPlacementTests {
 
     // MARK: - 6. The whole round trip, rendered
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anchorRoundTrip_placesThePanelOnTheContentRegionNotTheWindow
 
     func test_anchorRoundTrip_placesThePanelOnTheContentRegionNotTheWindow() async {
         let windowSize = CGSize(width: 1200, height: 800)

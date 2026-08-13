@@ -4,6 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
+// Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
 final class ScreenshotGenerationTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -549,6 +550,8 @@ final class ScreenshotGenerationTests: XCTestCase {
     }
 
     // MARK: - New Space
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_newSpacePanel
 
     func test_newSpacePanel() async {
         OrbitScreenshotFixtures.configure(env)

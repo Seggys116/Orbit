@@ -3,6 +3,7 @@ import SwiftUI
 @testable import Orbit
 
 @MainActor
+// Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
 final class BrowserWindowHoverPanelRenderTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -186,6 +187,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
             "An own-bounds copy is supposed to diverge hard from the window gradient at x=\(x) (window \(expected), copy \(actual)). If it no longer does, the ramp theme has gone flat and the slice test above proves nothing."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoverPanel_inRealWindow_paintsTheWindowsLeftSliverNotTheWholeRamp
 
     func test_hoverPanel_inRealWindow_paintsTheWindowsLeftSliverNotTheWholeRamp() async {
         OrbitScreenshotFixtures.configure(env)

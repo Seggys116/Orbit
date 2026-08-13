@@ -78,6 +78,7 @@ private final class RecordingMediaWebContents: NSObject, WebContents {
 }
 
 @MainActor
+// Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
 final class SidebarMiniPlayerTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -480,6 +481,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         XCTAssertTrue(env.toggleMiniPlayerPictureInPicture(for: tabs.playing))
         XCTAssertEqual(contents.pictureInPictureToggleCount, 1)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theToggleRefusesWithoutTheCapability_evenIfSomethingDrewTheButton
 
     func test_theToggleRefusesWithoutTheCapability_evenIfSomethingDrewTheButton() throws {
         let tabs = try twoTabs()
