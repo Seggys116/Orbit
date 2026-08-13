@@ -104,6 +104,8 @@ source_set("orbit_lib") {
     "browser/api/web_navigation/orbit_web_navigation_api.h",
     "browser/api/webstore_private/orbit_webstore_private_api.cc",
     "browser/api/webstore_private/orbit_webstore_private_api.h",
+    "browser/api/webstore_private/orbit_webstore_private_api_delegate.cc",
+    "browser/api/webstore_private/orbit_webstore_private_api_delegate.h",
     "browser/api/windows/orbit_windows_api.cc",
     "browser/api/windows/orbit_windows_api.h",
     "browser/orbit_browser_context.cc",

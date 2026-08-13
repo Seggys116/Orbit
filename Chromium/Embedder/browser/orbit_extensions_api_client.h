@@ -14,6 +14,7 @@
 #include "extensions/browser/api/management/management_api_delegate.h"
 #include "extensions/browser/api/storage/settings_namespace.h"
 #include "extensions/browser/api/storage/settings_observer.h"
+#include "orbit/browser/api/webstore_private/orbit_webstore_private_api_delegate.h"
 
 namespace content {
 class BrowserContext;
@@ -41,6 +42,8 @@ class OrbitExtensionsAPIClient : public extensions::ExtensionsAPIClient {
   extensions::MessagingDelegate* GetMessagingDelegate() override;
   extensions::ManagementAPIDelegate* CreateManagementAPIDelegate()
       const override;
+  extensions::WebstorePrivateAPIDelegate* GetWebstorePrivateAPIDelegate()
+      override;
   // StorageFrontend::Init installs LOCAL itself and asks here for the rest;
   // without this, chrome.storage.sync/managed rejected every call.
   void AddAdditionalValueStoreCaches(
@@ -55,6 +58,8 @@ class OrbitExtensionsAPIClient : public extensions::ExtensionsAPIClient {
   // MessageService DCHECKs on a null delegate; backed by OrbitTabRegistry so
   // tab-targeted messaging (sender.tab, connect(tabId)) works too.
   std::unique_ptr<extensions::MessagingDelegate> messaging_delegate_;
+  // Built eagerly: the core factory registration dereferences it at startup.
+  std::unique_ptr<OrbitWebstorePrivateAPIDelegate> webstore_private_delegate_;
 };
 
 }  // namespace orbit
