@@ -312,6 +312,8 @@ final class CommandBarPlacementTests: XCTestCase {
         return (box.anchors, left, right)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realWindow_contentRegionStartsAfterTheSidebarAndSpansTheRest
+
     func test_realWindow_contentRegionStartsAfterTheSidebarAndSpansTheRest() async {
         guard let (anchors, _, _) = await anchorsFromRealWindow() else { return }
 
@@ -337,6 +339,8 @@ final class CommandBarPlacementTests: XCTestCase {
             "Centring on the content region should offset the bar from the window's centre by half the sidebar column."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_realWindow_eachSplitPanePublishesItsOwnRegionInsideTheContentRegion
 
     func test_realWindow_eachSplitPanePublishesItsOwnRegionInsideTheContentRegion() async {
         guard let (anchors, left, right) = await anchorsFromRealWindow() else { return }

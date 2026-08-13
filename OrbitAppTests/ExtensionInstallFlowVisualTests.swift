@@ -157,12 +157,16 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_consentSheet_withNoPermissions_paintsInBothAppearances
+
     func test_consentSheet_withNoPermissions_paintsInBothAppearances() async {
         for (appearance, suffix) in [(NSAppearance.Name.darkAqua, ""), (.aqua, "-light")] {
             let view = ExtensionConsentSheetView(pending: Self.samplePendingInstall(), onAnswer: { _ in })
             await renderAndSave(view, name: "extension-consent-no-permissions\(suffix)", size: CGSize(width: 460, height: 280), appearance: appearance)
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_consentSheet_withGrantedAndOptionalWarnings_paintsInBothAppearances
 
     func test_consentSheet_withGrantedAndOptionalWarnings_paintsInBothAppearances() async {
         let pending = Self.samplePendingInstall(warnings: [Self.grantedWarning, Self.optionalWarning])
@@ -191,6 +195,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             "Adding a chromiumVersionWarning did not visibly change the rendered sheet."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_consentSheet_updateWording_namesBothVersions
 
     func test_consentSheet_updateWording_namesBothVersions() async {
         let pending = Self.samplePendingInstall(isUpdate: true, previousVersion: "1.0.0")
@@ -374,6 +380,7 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
 
     // Each state is laid over a plain surface of the appearance's own tone,
     // since the sheet's own material is host chrome the offscreen renderer never paints.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installModal_paintsEveryPhase_inBothAppearances
     func test_installModal_paintsEveryPhase_inBothAppearances() async {
         let size = CGSize(width: OrbitMetrics.extensionInstallSheetWidth, height: 190)
         let subject = Self.sampleSubject()
@@ -613,6 +620,8 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
     //
     // Other row states read live ExtensionStore/ExtensionRuntime singletons with no test seam;
     // "unsupported engine" is the only state that never consults either.
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_extensionsPane_withNoExtensionCapableEngine_rendersTheUnsupportedMessage
 
     func test_extensionsPane_withNoExtensionCapableEngine_rendersTheUnsupportedMessage() {
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {

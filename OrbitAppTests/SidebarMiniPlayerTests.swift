@@ -515,6 +515,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
     private static let renderBaseHeight: CGFloat = 200
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withNothingPlaying_theTrayDrawsNothing
+
     func test_withNothingPlaying_theTrayDrawsNothing() async {
         let box = await renderTray(alwaysExpanded: false).boundingBoxOfContent()
         XCTAssertNil(
@@ -522,6 +524,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
             "Nothing is playing, so the sidebar must look exactly as it did before this feature existed."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withATabPlaying_theTrayActuallyDraws
 
     func test_withATabPlaying_theTrayActuallyDraws() async throws {
         let tabs = try twoTabs()
@@ -532,6 +536,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         XCTAssertGreaterThan(box.width, 0)
         XCTAssertGreaterThan(box.height, 0)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theHoveredCardIsTallerThanTheIdleRow
 
     func test_theHoveredCardIsTallerThanTheIdleRow() async throws {
         let tabs = try twoTabs()
@@ -549,6 +555,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dismissing_stopsTheTrayDrawing
+
     func test_dismissing_stopsTheTrayDrawing() async throws {
         let tabs = try twoTabs()
         _ = makePlaying(tabs.playing)
@@ -560,6 +568,8 @@ final class SidebarMiniPlayerTests: XCTestCase {
         let after = await renderTray(alwaysExpanded: true).boundingBoxOfContent()
         XCTAssertNil(after)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_thePictureInPictureControlIsDrawnOnlyWhenTheEngineCanDriveIt
 
     func test_thePictureInPictureControlIsDrawnOnlyWhenTheEngineCanDriveIt() async throws {
         let tabs = try twoTabs()

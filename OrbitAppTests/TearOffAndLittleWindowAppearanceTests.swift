@@ -31,6 +31,8 @@ final class TearOffAndLittleWindowAppearanceTests: XCTestCase {
 
     // MARK: - 1. The little window's chrome, at the window's own default size
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_littleWindowChrome_darkPageThemeColour
+
     func test_littleWindowChrome_darkPageThemeColour() async throws {
         let tab = try makeLittleOrbitTab()
         env.themeColors[tab.id] = ThemeColor(red: 0.05, green: 0.07, blue: 0.09)
@@ -45,6 +47,8 @@ final class TearOffAndLittleWindowAppearanceTests: XCTestCase {
 
         assertHeaderIsTinted(rendered, expected: ThemeColor(red: 0.05, green: 0.07, blue: 0.09))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_littleWindowChrome_lightPageThemeColour
 
     func test_littleWindowChrome_lightPageThemeColour() async throws {
         let tab = try makeLittleOrbitTab()
@@ -103,6 +107,8 @@ final class TearOffAndLittleWindowAppearanceTests: XCTestCase {
 
     // MARK: - 2. The torn-off window's sidebar (`TornOffWindowBar` present)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tornOffWindowSidebar_showsTheTemporaryBar
+
     func test_tornOffWindowSidebar_showsTheTemporaryBar() async throws {
         let host = env
         let originTabID = try seedOriginTab(in: host)
@@ -131,6 +137,8 @@ final class TearOffAndLittleWindowAppearanceTests: XCTestCase {
             "Nothing is painted where TornOffWindowBar should be (\(band)) — a torn-off window would give the user no indication its tabs close with it."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_ordinarySidebar_hasNoTemporaryBar
 
     func test_ordinarySidebar_hasNoTemporaryBar() async throws {
         let space = try XCTUnwrap(env.activeSpace, "AppEnvironment.demo seeds an active Space")

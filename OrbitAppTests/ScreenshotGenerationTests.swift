@@ -23,6 +23,8 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // MARK: - Window
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_windowFull
+
     func test_windowFull() async {
         OrbitScreenshotFixtures.configure(env)
         await renderAndSave(
@@ -31,6 +33,8 @@ final class ScreenshotGenerationTests: XCTestCase {
             size: Self.windowSize
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_windowFullLight
 
     func test_windowFullLight() async {
         OrbitScreenshotFixtures.configure(env)
@@ -54,6 +58,8 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_windowSidebarCollapsed
+
     func test_windowSidebarCollapsed() async {
         OrbitScreenshotFixtures.configure(env)
         env.isSidebarVisible = false
@@ -64,6 +70,8 @@ final class ScreenshotGenerationTests: XCTestCase {
             size: Self.windowSize
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_windowHoverOverlay
 
     func test_windowHoverOverlay() async {
         OrbitScreenshotFixtures.configure(env)
@@ -105,6 +113,8 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // MARK: - Sidebar alone
     // NOT a direct render of SidebarView: ImageRenderer renders ScrollView content as entirely blank, so ScreenshotSidebarComposition swaps it for a plain VStack.
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_sidebar
 
     func test_sidebar() async {
         OrbitScreenshotFixtures.configure(env)
@@ -151,6 +161,8 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_sidebarNestedFolders
+
     func test_sidebarNestedFolders() async {
         OrbitScreenshotFixtures.configure(env)
         guard let space = env.space(OrbitScreenshotFixtures.IDs.personalSpaceID) else {
@@ -162,6 +174,8 @@ final class ScreenshotGenerationTests: XCTestCase {
             .orbitScreenshotModeDragDisabledForTests()
         await renderAndSave(view, name: "sidebar-nested-folders", size: CGSize(width: env.sidebarWidth, height: 1000))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_sidebarSingleSpace
 
     func test_sidebarSingleSpace() async {
         OrbitScreenshotFixtures.configure(env)
@@ -216,6 +230,8 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // MARK: - Split view
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_splitTwoPanes
+
     func test_splitTwoPanes() async {
         OrbitScreenshotFixtures.configure(env)
         OrbitScreenshotFixtures.seedSplitGroup(env)
@@ -228,6 +244,8 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // MARK: - Command Bar
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_commandBar
+
     func test_commandBar() async {
         OrbitScreenshotFixtures.configure(env)
         env.commandBarMode = .editURL(URL(string: "https://github.com")!)
@@ -238,6 +256,7 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // Scoped to the input row: TextField rasterises as a solid block, and ScrollView
     // content does not rasterise off-screen at all -- both ImageRenderer limitations.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_commandBarSiteSearch
     func test_commandBarSiteSearch() async {
         OrbitScreenshotFixtures.configure(env)
         env.commandBarMode = .newTab
@@ -278,6 +297,8 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // MARK: - Settings
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsGeneral
+
     func test_settingsGeneral() async {
         OrbitScreenshotFixtures.configure(env)
         SettingsRouter.shared.selectedPane = .general
@@ -291,6 +312,8 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsData
+
     func test_settingsData() async {
         OrbitScreenshotFixtures.configure(env)
         SettingsRouter.shared.selectedPane = .data
@@ -303,6 +326,8 @@ final class ScreenshotGenerationTests: XCTestCase {
             size: CGSize(width: SettingsMetrics.windowDefaultWidth, height: 1400)
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsProfiles
 
     func test_settingsProfiles() async {
         OrbitScreenshotFixtures.configure(env)
@@ -319,6 +344,7 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // Captures the window on the Links pane, not the Air Traffic Control
     // sheet: a .sheet has no presented content to rasterise off-screen.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsLinks
     func test_settingsLinks() async {
         OrbitScreenshotFixtures.configure(env)
         SettingsRouter.shared.selectedPane = .links
@@ -332,6 +358,8 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsShortcuts
+
     func test_settingsShortcuts() async {
         OrbitScreenshotFixtures.configure(env)
         SettingsRouter.shared.selectedPane = .shortcuts
@@ -344,6 +372,8 @@ final class ScreenshotGenerationTests: XCTestCase {
             size: CGSize(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight)
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsAssist
 
     func test_settingsAssist() async {
         OrbitScreenshotFixtures.configure(env)
@@ -360,6 +390,8 @@ final class ScreenshotGenerationTests: XCTestCase {
             size: CGSize(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight)
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsAssistTurnedOn
 
     func test_settingsAssistTurnedOn() async {
         OrbitScreenshotFixtures.configure(env)
@@ -430,6 +462,8 @@ final class ScreenshotGenerationTests: XCTestCase {
         AssistKeychain.inMemoryOverride = nil
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsExtensions
+
     func test_settingsExtensions() async {
         OrbitScreenshotFixtures.configure(env)
         SettingsRouter.shared.selectedPane = .extensions
@@ -442,6 +476,8 @@ final class ScreenshotGenerationTests: XCTestCase {
             size: CGSize(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight)
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsICloud
 
     func test_settingsICloud() async {
         OrbitScreenshotFixtures.configure(env)
@@ -459,6 +495,7 @@ final class ScreenshotGenerationTests: XCTestCase {
     // Kept as its own image, near-identical to settings-general.png, because
     // it documents the rail-plus-content-column structure rather than the
     // General pane's own content.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsWindow
     func test_settingsWindow() async {
         OrbitScreenshotFixtures.configure(env)
         SettingsRouter.shared.selectedPane = .general
@@ -474,6 +511,8 @@ final class ScreenshotGenerationTests: XCTestCase {
     // MARK: - Library
     // NOT a render of LibraryRootView: ScreenshotLibraryComposition works around the same ScrollView limitation as ScreenshotSidebarComposition.
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloads
+
     func test_libraryDownloads() async {
         OrbitScreenshotFixtures.configure(env)
         LibraryRouter.shared.selectedSection = .downloads
@@ -486,6 +525,8 @@ final class ScreenshotGenerationTests: XCTestCase {
             size: CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_librarySpaces
 
     func test_librarySpaces() async {
         OrbitScreenshotFixtures.configure(env)
@@ -501,6 +542,7 @@ final class ScreenshotGenerationTests: XCTestCase {
     }
 
     // The note's body is not shown: LibraryNotePreviewView puts its Text in a ScrollView, which ImageRenderer does not rasterise off-screen; only the preview column's chrome is visible here.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryEaselsAndNotes
     func test_libraryEaselsAndNotes() async {
         OrbitScreenshotFixtures.configure(env)
 
@@ -535,6 +577,7 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // MARK: - Site Control Center
     // No real engine ever starts in this target, so env.activeWebContents/env.engine are nil after a plain configure(env); seedSiteControlPopover(_:) attaches mock engine/session/webContents so the rows gated on env.engine actually draw.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_siteControlPopover
     func test_siteControlPopover() async {
         OrbitScreenshotFixtures.configure(env)
         OrbitScreenshotFixtures.seedSiteControlPopover(env)

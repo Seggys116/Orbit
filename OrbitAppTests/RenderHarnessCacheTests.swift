@@ -31,6 +31,8 @@ final class RenderHarnessCacheTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_screenshotRenderer_alsoReturnsItsOwnContentForARepeatedTypeAndSize
+
     func test_screenshotRenderer_alsoReturnsItsOwnContentForARepeatedTypeAndSize() async {
         let first = await renderForScreenshot(FlatColorProbe(fill: .green), size: Self.probeSize, settlePasses: 1, settleDelayNanoseconds: 1_000_000)
         let second = await renderForScreenshot(FlatColorProbe(fill: .red), size: Self.probeSize, settlePasses: 1, settleDelayNanoseconds: 1_000_000)

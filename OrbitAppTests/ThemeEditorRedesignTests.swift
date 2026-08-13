@@ -453,6 +453,8 @@ final class ThemeEditorRedesignTests: XCTestCase {
             .appendingPathComponent("refs/screenshots", isDirectory: true)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_themeEditorPanel_dark
+
     func test_themeEditorPanel_dark() async {
         await renderAndSavePanel(name: "space-theme-picker", appearance: .darkAqua)
     }
