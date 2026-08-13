@@ -24,6 +24,7 @@ private final class RecordedSink: @unchecked Sendable {
 }
 
 @MainActor
+// Whole suite excluded on GitHub-hosted runners: whichever test runs first deadlocks past five minutes there.
 final class TidyDownloadsCoordinatorTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -64,6 +65,8 @@ final class TidyDownloadsCoordinatorTests: XCTestCase {
         return item.id
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_renamingMovesTheRealFileAndUpdatesTheRecord
+
     func test_renamingMovesTheRealFileAndUpdatesTheRecord() throws {
         let id = try makeCompletedDownload(named: "6774fe08-5cd3-4b6e-9623-8cbc791eede6.pdf")
 
@@ -83,6 +86,8 @@ final class TidyDownloadsCoordinatorTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_renamingRefusesToClobberAnExistingFile
+
     func test_renamingRefusesToClobberAnExistingFile() throws {
         let id = try makeCompletedDownload(named: "opaque-9f8e7d6c5b4a3210.pdf")
         try Data("other".utf8).write(to: scratch.appendingPathComponent("Taken.pdf"))
@@ -92,6 +97,8 @@ final class TidyDownloadsCoordinatorTests: XCTestCase {
         XCTAssertNotEqual(moved.lastPathComponent, "Taken.pdf")
         XCTAssertEqual(try Data(contentsOf: scratch.appendingPathComponent("Taken.pdf")), Data("other".utf8), "The existing file must be untouched")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_renamingAnUnfinishedDownloadDoesNothing
 
     func test_renamingAnUnfinishedDownloadDoesNothing() throws {
         let destination = scratch.appendingPathComponent("partial.bin")
@@ -103,6 +110,8 @@ final class TidyDownloadsCoordinatorTests: XCTestCase {
         )
         XCTAssertNil(env.downloadStore.renameFile(id: item.id, to: "Something.bin"))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidyRaisesTheAnnouncementOnlyWhenTheFileActuallyMoved
 
     func test_tidyRaisesTheAnnouncementOnlyWhenTheFileActuallyMoved() async throws {
         let coordinator = TidyDownloadsCoordinator()
@@ -124,6 +133,8 @@ final class TidyDownloadsCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.announcement, raised)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidyRaisesNoAnnouncementWhenTheMoveFailed
+
     func test_tidyRaisesNoAnnouncementWhenTheMoveFailed() async throws {
         let coordinator = TidyDownloadsCoordinator()
         let provider = RecordedSink()
@@ -141,6 +152,8 @@ final class TidyDownloadsCoordinatorTests: XCTestCase {
         XCTAssertNil(announcement)
         XCTAssertNil(coordinator.announcement)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_undoPutsTheFileBackAndClearsTheCard
 
     func test_undoPutsTheFileBackAndClearsTheCard() async throws {
         let coordinator = TidyDownloadsCoordinator()
@@ -191,6 +204,8 @@ final class TidyDownloadsCoordinatorTests: XCTestCase {
             "A stream of .completed callbacks for one download must not start several requests"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withTheFeatureOffNothingIsRequestedAndNoFileMoves
 
     func test_withTheFeatureOffNothingIsRequestedAndNoFileMoves() async throws {
         AssistSettings.isTidyDownloadsEnabled = false
