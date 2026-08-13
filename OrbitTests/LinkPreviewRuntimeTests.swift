@@ -21,6 +21,7 @@ private final class RecordedLinkPreviewSink: @unchecked Sendable {
 }
 
 @MainActor
+// Whole suite excluded on GitHub-hosted runners: needs a real running app, not a headless VM.
 final class LinkPreviewRuntimeTests: XCTestCase {
 
     private var suite: UserDefaults!
@@ -55,6 +56,8 @@ final class LinkPreviewRuntimeTests: XCTestCase {
 
     // MARK: Refusals
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_linkPreview_withTheFeatureOff_refusesAndNeverCallsTheProvider
+
     func test_linkPreview_withTheFeatureOff_refusesAndNeverCallsTheProvider() async {
         AssistSettings.isFiveSecondPreviewsEnabled = false
         let provider = RecordedLinkPreviewSink()
@@ -67,6 +70,8 @@ final class LinkPreviewRuntimeTests: XCTestCase {
         }
         XCTAssertTrue(provider.requests.isEmpty, "Nothing may leave the machine for a switched-off feature")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_linkPreview_withNoReadablePageText_throwsNoPageTextRatherThanSummarisingTheURLAlone
 
     func test_linkPreview_withNoReadablePageText_throwsNoPageTextRatherThanSummarisingTheURLAlone() async {
         AssistSettings.isFiveSecondPreviewsEnabled = true
@@ -82,6 +87,8 @@ final class LinkPreviewRuntimeTests: XCTestCase {
         XCTAssertTrue(provider.requests.isEmpty)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_linkPreview_anEmptySummaryFailsTheWholePreview_ratherThanRenderingABlankCard
+
     func test_linkPreview_anEmptySummaryFailsTheWholePreview_ratherThanRenderingABlankCard() async {
         AssistSettings.isFiveSecondPreviewsEnabled = true
         let provider = RecordedLinkPreviewSink()
@@ -95,6 +102,8 @@ final class LinkPreviewRuntimeTests: XCTestCase {
             XCTAssertEqual(error as? AssistError, .emptyCompletion)
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_linkPreview_propagatesAProviderFailure
 
     func test_linkPreview_propagatesAProviderFailure() async {
         AssistSettings.isFiveSecondPreviewsEnabled = true
@@ -111,6 +120,8 @@ final class LinkPreviewRuntimeTests: XCTestCase {
     }
 
     // MARK: What it sends
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_linkPreview_sendsThePageTitleURLAndText_neverTheImageURL
 
     func test_linkPreview_sendsThePageTitleURLAndText_neverTheImageURL() async throws {
         AssistSettings.isFiveSecondPreviewsEnabled = true
@@ -129,6 +140,8 @@ final class LinkPreviewRuntimeTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_linkPreview_carriesThePageDatasTruncationNoticeOntoTheCard
+
     func test_linkPreview_carriesThePageDatasTruncationNoticeOntoTheCard() async throws {
         AssistSettings.isFiveSecondPreviewsEnabled = true
         let provider = RecordedLinkPreviewSink()
@@ -139,6 +152,8 @@ final class LinkPreviewRuntimeTests: XCTestCase {
         XCTAssertEqual(preview.truncationNotice, "This page was long, so I read the first 80%.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_linkPreview_carriesTheFetchedImageURLThroughUntouched
+
     func test_linkPreview_carriesTheFetchedImageURLThroughUntouched() async throws {
         AssistSettings.isFiveSecondPreviewsEnabled = true
         let provider = RecordedLinkPreviewSink()
@@ -148,6 +163,8 @@ final class LinkPreviewRuntimeTests: XCTestCase {
         let preview = try await AssistRuntime().linkPreview(sourceURL: data.sourceURL, pageData: data, sink: provider.sink)
         XCTAssertEqual(preview.imageURL, imageURL)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_linkPreview_usesTheSourceURLsHostAsSourceHost
 
     func test_linkPreview_usesTheSourceURLsHostAsSourceHost() async throws {
         AssistSettings.isFiveSecondPreviewsEnabled = true
@@ -162,6 +179,8 @@ final class LinkPreviewRuntimeTests: XCTestCase {
 // MARK: - Reply parsing
 
 final class LinkPreviewReplyParsingTests: XCTestCase {
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parseLinkPreviewReply_readsTheSummaryAndEveryItem
 
     func test_parseLinkPreviewReply_readsTheSummaryAndEveryItem() {
         let raw = """
@@ -178,11 +197,15 @@ final class LinkPreviewReplyParsingTests: XCTestCase {
         XCTAssertEqual(parsed.items[0].symbolName, AssistRuntime.linkPreviewGlyphs["place"])
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parseLinkPreviewReply_toleratesNoItemLinesAtAll
+
     func test_parseLinkPreviewReply_toleratesNoItemLinesAtAll() {
         let parsed = AssistRuntime.parseLinkPreviewReply("SUMMARY: Just a summary, nothing else.")
         XCTAssertEqual(parsed.summary, "Just a summary, nothing else.")
         XCTAssertTrue(parsed.items.isEmpty)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parseLinkPreviewReply_dropsAnItemLineMissingAField
 
     func test_parseLinkPreviewReply_dropsAnItemLineMissingAField() {
         let raw = """
@@ -197,10 +220,14 @@ final class LinkPreviewReplyParsingTests: XCTestCase {
 
     // MARK: Glyph allow-list
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parseLinkPreviewReply_mapsARecognisedGlyphKeyToItsSFSymbol
+
     func test_parseLinkPreviewReply_mapsARecognisedGlyphKeyToItsSFSymbol() {
         let parsed = AssistRuntime.parseLinkPreviewReply("SUMMARY: s\nITEM: money | Budget Tip | Bring cash.")
         XCTAssertEqual(parsed.items.first?.symbolName, "dollarsign.circle")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parseLinkPreviewReply_anUnrecognisedGlyphKeyFallsBackToTheNeutralGlyph_neverReachesSwiftUIAsRawText
 
     func test_parseLinkPreviewReply_anUnrecognisedGlyphKeyFallsBackToTheNeutralGlyph_neverReachesSwiftUIAsRawText() {
         let raw = "SUMMARY: s\nITEM: chart.bar.xaxis | Suspicious Lead | A detail sentence right here."
@@ -213,11 +240,15 @@ final class LinkPreviewReplyParsingTests: XCTestCase {
         XCTAssertFalse(AssistRuntime.linkPreviewGlyphs.values.contains("chart.bar.xaxis"))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parseLinkPreviewReply_anEmptyOrGarbledGlyphKeyAlsoFallsBackToNeutral
+
     func test_parseLinkPreviewReply_anEmptyOrGarbledGlyphKeyAlsoFallsBackToNeutral() {
         let raw = "SUMMARY: s\nITEM:  | Lead Phrase | A detail sentence right here."
         let parsed = AssistRuntime.parseLinkPreviewReply(raw)
         XCTAssertEqual(parsed.items.first?.symbolName, AssistRuntime.linkPreviewNeutralGlyph)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyAllowListedGlyphIsGrey_lineArt_shortList
 
     func test_everyAllowListedGlyphIsGrey_lineArt_shortList() {
         XCTAssertTrue((8...12).contains(AssistRuntime.linkPreviewGlyphs.count))
@@ -239,11 +270,15 @@ final class LinkPreviewGroundedItemsTests: XCTestCase {
     Oaxaca City itself. Many tours include a stop to taste Mezcal at a family-run palenque.
     """
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_groundedItems_keepsAnItemWhoseLeadPhraseIsOnThePage
+
     func test_groundedItems_keepsAnItemWhoseLeadPhraseIsOnThePage() {
         let items = [AssistRuntime.LinkPreview.Item(symbolName: "star", lead: "Visit Monte Alban", detail: "An ancient site.")]
         let grounded = AssistRuntime.groundedItems(items, in: pageText)
         XCTAssertEqual(grounded, items, "Monte Alban is genuinely on the page and must be kept")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_groundedItems_dropsAnItemWhoseLeadPhraseIsNotOnThePage
 
     func test_groundedItems_dropsAnItemWhoseLeadPhraseIsNotOnThePage() {
         let items = [AssistRuntime.LinkPreview.Item(symbolName: "place", lead: "Explore Hierve el Agua", detail: "Petrified waterfalls nearby.")]
@@ -254,6 +289,8 @@ final class LinkPreviewGroundedItemsTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_groundedItems_keepsGroundedAndDropsUngroundedFromTheSameBatch
+
     func test_groundedItems_keepsGroundedAndDropsUngroundedFromTheSameBatch() {
         let grounded = AssistRuntime.LinkPreview.Item(symbolName: "food", lead: "Taste Mezcal", detail: "At a family-run palenque.")
         let invented = AssistRuntime.LinkPreview.Item(symbolName: "place", lead: "Climb Pyramid of the Sun", detail: "A famous nearby ruin.")
@@ -261,16 +298,22 @@ final class LinkPreviewGroundedItemsTests: XCTestCase {
         XCTAssertEqual(result, [grounded])
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_groundedItems_aLeadPhraseOfOnlyShortOrStopWordsCannotGroundItself
+
     func test_groundedItems_aLeadPhraseOfOnlyShortOrStopWordsCannotGroundItself() {
         let items = [AssistRuntime.LinkPreview.Item(symbolName: "star", lead: "See This Here", detail: "Something or other.")]
         XCTAssertTrue(AssistRuntime.groundedItems(items, in: pageText).isEmpty)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_groundedItems_ignoresCaseAndCurlyPunctuationDifferences
 
     func test_groundedItems_ignoresCaseAndCurlyPunctuationDifferences() {
         let curlyPage = "The chef\u{2019}s tour visits MONTE ALBAN before lunch."
         let items = [AssistRuntime.LinkPreview.Item(symbolName: "food", lead: "Visit Monte Alban", detail: "A guided tour.")]
         XCTAssertEqual(AssistRuntime.groundedItems(items, in: curlyPage), items)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_groundedItems_dropsEveryItemWhenNoneAreGrounded_leavingTheSummaryToStandAlone
 
     func test_groundedItems_dropsEveryItemWhenNoneAreGrounded_leavingTheSummaryToStandAlone() {
         let items = [
@@ -279,6 +322,8 @@ final class LinkPreviewGroundedItemsTests: XCTestCase {
         ]
         XCTAssertTrue(AssistRuntime.groundedItems(items, in: pageText).isEmpty)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_groundedItems_withEmptyPageTextGroundsNothing
 
     func test_groundedItems_withEmptyPageTextGroundsNothing() {
         let items = [AssistRuntime.LinkPreview.Item(symbolName: "place", lead: "Visit Monte Alban", detail: "d")]

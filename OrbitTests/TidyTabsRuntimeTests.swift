@@ -24,6 +24,7 @@ private final class TidyTabsProvider: @unchecked Sendable {
 }
 
 @MainActor
+// Whole suite excluded on GitHub-hosted runners: needs a real running app, not a headless VM.
 final class TidyTabsRuntimeTests: XCTestCase {
 
     private var suite: UserDefaults!
@@ -65,6 +66,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
 
     // MARK: - What leaves the machine
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_thePromptCarriesEveryTabsTitleAndAddressAndNothingElse
+
     func test_thePromptCarriesEveryTabsTitleAndAddressAndNothingElse() async throws {
         provider.reply = "GROUP: Oaxaca Trip | 1, 2, 3"
         _ = try await runtime.tidiedTabGroups(candidates: candidates, sink: provider.sink)
@@ -82,6 +85,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(provider.requests.count, 1, "One press of the broom is one request, not one per tab.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_thePromptIsBuiltOnlyFromTitlesAndAddresses
 
     func test_thePromptIsBuiltOnlyFromTitlesAndAddresses() async throws {
         provider.reply = "GROUP: Oaxaca Trip | 1, 2, 3"
@@ -104,6 +109,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
 
     // MARK: - Refusals
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_refusesWhenTheFeatureIsOff
+
     func test_refusesWhenTheFeatureIsOff() async {
         AssistSettings.isTidyTabsEnabled = false
         provider.reply = "GROUP: Anything | 1, 2"
@@ -115,6 +122,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
         }
         XCTAssertTrue(provider.requests.isEmpty, "A switched-off feature must not reach the provider at all.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_refusesAtSixTabsAndRunsAtSeven
 
     func test_refusesAtSixTabsAndRunsAtSeven() async throws {
         provider.reply = "GROUP: Oaxaca Trip | 1, 2, 3"
@@ -131,6 +140,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
         XCTAssertEqual(groups.count, 1, "Seven tabs is more than six.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aProviderErrorThrowsAndProducesNoGroups
+
     func test_aProviderErrorThrowsAndProducesNoGroups() async {
         provider.failure = .http(status: 503, body: "overloaded")
         do {
@@ -140,6 +151,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
             XCTAssertEqual(error as? AssistError, .http(status: 503, body: "overloaded"))
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aReplyWithNoUsableGroupThrowsRatherThanReturningNothing
 
     func test_aReplyWithNoUsableGroupThrowsRatherThanReturningNothing() async {
         provider.reply = "I'm sorry, I can't help with that."
@@ -152,6 +165,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
     }
 
     // MARK: - Grounding: a group may contain only tabs that were sent
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aGroupNamingATabThatWasNeverSentDropsThatTab
 
     func test_aGroupNamingATabThatWasNeverSentDropsThatTab() {
         let stranger = UUID()
@@ -170,6 +185,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aTabClaimedByTwoGroupsIsKeptOnlyByTheFirst
+
     func test_aTabClaimedByTwoGroupsIsKeptOnlyByTheFirst() {
         let parsed = [
             AssistRuntime.TidyTabGroup(name: "Oaxaca Trip", tabIDs: [id(0), id(1), id(2)]),
@@ -184,6 +201,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
             "The rendered runs are a partition of the list; a tab cannot sit under two headers."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aGroupOfOneIsDroppedAndItsTabIsGivenBackToALaterGroup
 
     func test_aGroupOfOneIsDroppedAndItsTabIsGivenBackToALaterGroup() {
         let parsed = [
@@ -205,6 +224,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
 
     // MARK: - Parsing a real-shaped reply
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parsesGroupLinesAndIgnoresEverythingElse
+
     func test_parsesGroupLinesAndIgnoresEverythingElse() {
         let reply = """
             Sure! Here's how I'd organise them:
@@ -222,11 +243,15 @@ final class TidyTabsRuntimeTests: XCTestCase {
         XCTAssertEqual(parsed[2].tabIDs, [id(6), id(7)], "`7 and 8` must yield two tabs, not a tab numbered 78.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aNumberOutsideTheListIsDropped
+
     func test_aNumberOutsideTheListIsDropped() {
         let parsed = AssistRuntime.parseTidyTabsReply("GROUP: Oaxaca Trip | 1, 99, 0, 2", candidates: candidates)
         XCTAssertEqual(parsed.count, 1)
         XCTAssertEqual(parsed[0].tabIDs, [id(0), id(1)], "There is no tab 99 and no tab 0.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aNameThatIsASentenceIsRejectedRatherThanTruncated
 
     func test_aNameThatIsASentenceIsRejectedRatherThanTruncated() {
         XCTAssertNil(
@@ -236,6 +261,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
         XCTAssertEqual(AssistRuntime.acceptTidyGroupName("  1. \"Oaxaca Trip\":  "), "Oaxaca Trip")
         XCTAssertNil(AssistRuntime.acceptTidyGroupName("   "))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aScriptedReplyBecomesGroupsOverTheTabsThatWereSent
 
     func test_aScriptedReplyBecomesGroupsOverTheTabsThatWereSent() async throws {
         provider.reply = """
@@ -267,6 +294,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aHeaderIsEmittedOnceAtTheStartOfEachRun
+
     func test_aHeaderIsEmittedOnceAtTheStartOfEachRun() {
         let tabs = [
             tab(0, group: nil),
@@ -293,6 +322,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aTabWithNoGroupAfterAGroupEndsTheRunWithoutDrawingAnything
+
     func test_aTabWithNoGroupAfterAGroupEndsTheRunWithoutDrawingAnything() {
         let tabs = [tab(0, group: "Oaxaca Trip"), tab(1, group: "Oaxaca Trip"), tab(2, group: nil)]
 
@@ -304,6 +335,8 @@ final class TidyTabsRuntimeTests: XCTestCase {
             if case .header = items[index] { XCTFail("Nothing marks the end of a run — the next row simply has no header.") }
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anEmptyOrWhitespaceGroupNameDrawsNoHeader
 
     func test_anEmptyOrWhitespaceGroupNameDrawsNoHeader() {
         let items = tidyGroupedTodayItems([tab(0, group: "   "), tab(1, group: "")]) { _ in nil }

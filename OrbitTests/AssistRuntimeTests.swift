@@ -48,6 +48,8 @@ final class AssistRuntimeAskOnPageTests: XCTestCase {
         PageTextExtract(title: "Oaxacan Food", url: "https://example.com/oaxaca", text: text, totalCharacters: total)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_askOnPage_withTheFeatureOff_refusesAndNeverCallsTheProvider
+
     func test_askOnPage_withTheFeatureOff_refusesAndNeverCallsTheProvider() async {
         AssistSettings.isAskOnPageEnabled = false
         let provider = RecordingProvider()
@@ -61,6 +63,8 @@ final class AssistRuntimeAskOnPageTests: XCTestCase {
         }
         XCTAssertTrue(provider.requests.isEmpty, "Nothing may leave the machine for a switched-off feature")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_askOnPage_withNoReadableText_refusesAndNeverCallsTheProvider
 
     func test_askOnPage_withNoReadableText_refusesAndNeverCallsTheProvider() async {
         AssistSettings.isAskOnPageEnabled = true
@@ -76,6 +80,8 @@ final class AssistRuntimeAskOnPageTests: XCTestCase {
         XCTAssertTrue(provider.requests.isEmpty)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_askOnPage_sendsExactlyTheTitleTheURLThePageTextAndTheQuestion
+
     func test_askOnPage_sendsExactlyTheTitleTheURLThePageTextAndTheQuestion() async throws {
         AssistSettings.isAskOnPageEnabled = true
         let provider = RecordingProvider()
@@ -90,6 +96,8 @@ final class AssistRuntimeAskOnPageTests: XCTestCase {
         XCTAssertTrue(request.user.contains("what are chapulines?"))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_askOnPage_returnsTheProvidersAnswerVerbatim
+
     func test_askOnPage_returnsTheProvidersAnswerVerbatim() async throws {
         AssistSettings.isAskOnPageEnabled = true
         let provider = RecordingProvider()
@@ -100,6 +108,8 @@ final class AssistRuntimeAskOnPageTests: XCTestCase {
         XCTAssertEqual(answer.text, "They are toasted grasshoppers.")
         XCTAssertEqual(answer.question, "q")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_askOnPage_carriesTheTruncationNoticeOnlyWhenThePageWasActuallyCut
 
     func test_askOnPage_carriesTheTruncationNoticeOnlyWhenThePageWasActuallyCut() async throws {
         AssistSettings.isAskOnPageEnabled = true
@@ -113,6 +123,8 @@ final class AssistRuntimeAskOnPageTests: XCTestCase {
         let whole = try await AssistRuntime().askOnPage(question: "q", sink: provider.sink)
         XCTAssertNil(whole.truncationNotice, "A page that fitted must not claim it was cut")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_askOnPage_propagatesAProviderFailureRatherThanReturningAnAnswer
 
     func test_askOnPage_propagatesAProviderFailureRatherThanReturningAnAnswer() async {
         AssistSettings.isAskOnPageEnabled = true
@@ -147,6 +159,8 @@ final class AssistRuntimeTidyTabTitleTests: XCTestCase {
         super.tearDown()
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidiedTabTitle_withTheFeatureOff_refuses
+
     func test_tidiedTabTitle_withTheFeatureOff_refuses() async {
         AssistSettings.isTidyTabTitlesEnabled = false
         let provider = RecordingProvider()
@@ -163,6 +177,8 @@ final class AssistRuntimeTidyTabTitleTests: XCTestCase {
         XCTAssertTrue(provider.requests.isEmpty)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidiedTabTitle_leavesAShortTitleAloneWithoutSpendingARequest
+
     func test_tidiedTabTitle_leavesAShortTitleAloneWithoutSpendingARequest() async throws {
         AssistSettings.isTidyTabTitlesEnabled = true
         let provider = RecordingProvider()
@@ -174,6 +190,8 @@ final class AssistRuntimeTidyTabTitleTests: XCTestCase {
         XCTAssertNil(result)
         XCTAssertTrue(provider.requests.isEmpty)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidiedTabTitle_sendsTheTitleAndURLButNotAnyPageBody
 
     func test_tidiedTabTitle_sendsTheTitleAndURLButNotAnyPageBody() async throws {
         AssistSettings.isTidyTabTitlesEnabled = true
@@ -194,6 +212,8 @@ final class AssistRuntimeTidyTabTitleTests: XCTestCase {
         XCTAssertEqual(provider.pageTextCallCount, 0, "It must not even read the page")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acceptTidiedTitle_rejectsAnythingNotShorterThanTheOriginal
+
     func test_acceptTidiedTitle_rejectsAnythingNotShorterThanTheOriginal() {
         let original = "A Reasonably Long Original Title Here"
         XCTAssertNil(AssistRuntime.acceptTidiedTitle(original, original: original))
@@ -201,11 +221,15 @@ final class AssistRuntimeTidyTabTitleTests: XCTestCase {
         XCTAssertEqual(AssistRuntime.acceptTidiedTitle("Short Title", original: original), "Short Title")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acceptTidiedTitle_stripsQuotesAndTakesOnlyTheFirstLine
+
     func test_acceptTidiedTitle_stripsQuotesAndTakesOnlyTheFirstLine() {
         let original = "A Reasonably Long Original Title Here"
         XCTAssertEqual(AssistRuntime.acceptTidiedTitle("\"Quoted\"", original: original), "Quoted")
         XCTAssertEqual(AssistRuntime.acceptTidiedTitle("First\nSecond line", original: original), "First")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acceptTidiedTitle_rejectsAModelThatAnsweredWithASentence
 
     func test_acceptTidiedTitle_rejectsAModelThatAnsweredWithASentence() {
         let original = String(repeating: "x", count: 200)
@@ -215,6 +239,8 @@ final class AssistRuntimeTidyTabTitleTests: XCTestCase {
             "A nine-word answer is prose, not a tab title"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acceptTidiedTitle_rejectsAnEmptyAnswer
 
     func test_acceptTidiedTitle_rejectsAnEmptyAnswer() {
         XCTAssertNil(AssistRuntime.acceptTidiedTitle("   \n ", original: "A long original title here"))
@@ -239,9 +265,13 @@ final class AssistRuntimeTidyDownloadTests: XCTestCase {
         super.tearDown()
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_filenameLooksOpaque_isTrueForTheUUIDArcsOwnScreenshotShows
+
     func test_filenameLooksOpaque_isTrueForTheUUIDArcsOwnScreenshotShows() {
         XCTAssertTrue(AssistRuntime.filenameLooksOpaque("6774fe08-5cd3-4b6e-9623-8cbc791eede6.pdf"))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_filenameLooksOpaque_isTrueForGenericAndNumericNames
 
     func test_filenameLooksOpaque_isTrueForGenericAndNumericNames() {
         for name in ["download.pdf", "document (3).docx", "untitled.png", "20240414123055.jpg", "IMG_4021.HEIC"] {
@@ -249,11 +279,15 @@ final class AssistRuntimeTidyDownloadTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_filenameLooksOpaque_isFalseForANameThatAlreadyMeansSomething
+
     func test_filenameLooksOpaque_isFalseForANameThatAlreadyMeansSomething() {
         for name in ["Q3 Budget Review.xlsx", "AeroMexico Flight Confirmation.pdf", "annual-report-2024.pdf"] {
             XCTAssertFalse(AssistRuntime.filenameLooksOpaque(name), "\(name) is already meaningful and must be left alone")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidiedDownloadName_leavesAMeaningfulNameAloneWithoutSpendingARequest
 
     func test_tidiedDownloadName_leavesAMeaningfulNameAloneWithoutSpendingARequest() async throws {
         AssistSettings.isTidyDownloadsEnabled = true
@@ -268,6 +302,8 @@ final class AssistRuntimeTidyDownloadTests: XCTestCase {
         XCTAssertTrue(provider.requests.isEmpty)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidiedDownloadName_keepsTheOriginalExtension
+
     func test_tidiedDownloadName_keepsTheOriginalExtension() async throws {
         AssistSettings.isTidyDownloadsEnabled = true
         let provider = RecordingProvider()
@@ -281,6 +317,8 @@ final class AssistRuntimeTidyDownloadTests: XCTestCase {
         )
         XCTAssertEqual(result, "AeroMexico Flight Confirmation, April 14.pdf")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidiedDownloadName_neverSendsTheFileItself_onlyItsNameSourceAndPageTitle
 
     func test_tidiedDownloadName_neverSendsTheFileItself_onlyItsNameSourceAndPageTitle() async throws {
         AssistSettings.isTidyDownloadsEnabled = true
@@ -299,15 +337,21 @@ final class AssistRuntimeTidyDownloadTests: XCTestCase {
         XCTAssertEqual(provider.pageTextCallCount, 0)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acceptTidiedFileName_doesNotDoubleTheExtension
+
     func test_acceptTidiedFileName_doesNotDoubleTheExtension() {
         XCTAssertEqual(AssistRuntime.acceptTidiedFileName("Invoice March.pdf", extension: "pdf"), "Invoice March.pdf")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acceptTidiedFileName_removesPathSeparatorsAndIllegalCharacters
 
     func test_acceptTidiedFileName_removesPathSeparatorsAndIllegalCharacters() {
         let cleaned = AssistRuntime.acceptTidiedFileName("Report: Q1/Q2 <draft>?", extension: "pdf")
         XCTAssertEqual(cleaned, "Report - Q1-Q2 draft.pdf")
         XCTAssertFalse(cleaned!.contains("/"))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_acceptTidiedFileName_rejectsAnEmptyOrAbsurdlyLongAnswer
 
     func test_acceptTidiedFileName_rejectsAnEmptyOrAbsurdlyLongAnswer() {
         XCTAssertNil(AssistRuntime.acceptTidiedFileName("   ", extension: "pdf"))

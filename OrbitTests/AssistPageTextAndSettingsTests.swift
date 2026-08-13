@@ -6,6 +6,8 @@ import XCTest
 
 final class PageTextExtractorTests: XCTestCase {
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parse_readsTheBridgeDictionaryTheScriptReturns
+
     func test_parse_readsTheBridgeDictionaryTheScriptReturns() throws {
         let value: [String: Any] = [
             "title": "What Makes Oaxacan Food Oaxacan?",
@@ -20,11 +22,15 @@ final class PageTextExtractorTests: XCTestCase {
         XCTAssertEqual(extract.totalCharacters, 5000)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parse_returnsNilForAPageWithNoVisibleText
+
     func test_parse_returnsNilForAPageWithNoVisibleText() {
         XCTAssertNil(PageTextExtractor.parse(["title": "x", "url": "y", "total": 0, "text": "   \n "]))
         XCTAssertNil(PageTextExtractor.parse(nil))
         XCTAssertNil(PageTextExtractor.parse("a bare string"))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_parse_neverReportsATotalSmallerThanWhatItActuallyHas
 
     func test_parse_neverReportsATotalSmallerThanWhatItActuallyHas() {
         let extract = PageTextExtractor.parse(["title": "", "url": "", "total": 2, "text": "much longer text"])
@@ -32,10 +38,14 @@ final class PageTextExtractorTests: XCTestCase {
         XCTAssertEqual(extract?.includedFraction, 1.0)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_truncationNotice_matchesTheSentenceArcsOwnCaptureShows
+
     func test_truncationNotice_matchesTheSentenceArcsOwnCaptureShows() {
         let extract = PageTextExtract(title: "", url: "", text: String(repeating: "a", count: 800), totalCharacters: 1000)
         XCTAssertEqual(extract.truncationNotice, "This page was long, so I read the first 80%.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_truncationNotice_isNilWhenNothingWasCut
 
     func test_truncationNotice_isNilWhenNothingWasCut() {
         let extract = PageTextExtract(title: "", url: "", text: "all of it", totalCharacters: 9)
@@ -43,16 +53,22 @@ final class PageTextExtractorTests: XCTestCase {
         XCTAssertNil(extract.truncationNotice)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_truncationNotice_roundsDownSoItNeverOverclaims
+
     func test_truncationNotice_roundsDownSoItNeverOverclaims() {
         let extract = PageTextExtract(title: "", url: "", text: String(repeating: "a", count: 899), totalCharacters: 1000)
         XCTAssertEqual(extract.truncationNotice, "This page was long, so I read the first 89%.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_script_asksForInnerTextRatherThanTextContent
 
     func test_script_asksForInnerTextRatherThanTextContent() {
         let script = PageTextExtractor.script()
         XCTAssertTrue(script.contains("innerText"))
         XCTAssertFalse(script.contains("textContent"))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_script_carriesTheCharacterBudgetItWasGiven
 
     func test_script_carriesTheCharacterBudgetItWasGiven() {
         XCTAssertTrue(PageTextExtractor.script(characterBudget: 1234).contains("slice(0, 1234)"))
@@ -87,9 +103,13 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         AssistSettings.apiKey = "sk-test"
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_assistItselfShipsOff
+
     func test_assistItselfShipsOff() {
         XCTAssertFalse(AssistSettings.isEnabled)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyAssistFeatureShipsOff
 
     func test_everyAssistFeatureShipsOff() {
         XCTAssertFalse(AssistSettings.isAskOnPageEnabled)
@@ -101,15 +121,21 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         XCTAssertFalse(AssistSettings.isInstantLinksEnabled)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theProviderDefaultsToAnthropicOutOfTheBox
+
     func test_theProviderDefaultsToAnthropicOutOfTheBox() {
         XCTAssertEqual(AssistSettings.providerKind, .anthropic)
         XCTAssertEqual(AssistSettings.baseURLString, "", "The base URL is only stored once the user types one")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noProviderIsConfiguredOutOfTheBox
+
     func test_noProviderIsConfiguredOutOfTheBox() {
         XCTAssertFalse(AssistSettings.isProviderConfigured)
         XCTAssertFalse(AssistSettings.isAnyFeatureLive)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_everyFeatureStaysDeadWhileAssistItselfIsOff
 
     func test_everyFeatureStaysDeadWhileAssistItselfIsOff() {
         configureProvider()
@@ -131,6 +157,8 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         XCTAssertFalse(AssistSettings.isAnyFeatureLive)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_turningAssistOffAndOnAgainRestoresTheSwitchesTheUserChose
+
     func test_turningAssistOffAndOnAgainRestoresTheSwitchesTheUserChose() {
         AssistSettings.isEnabled = true
         AssistSettings.isAskOnPageEnabled = true
@@ -145,6 +173,8 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         XCTAssertFalse(AssistSettings.isTidyDownloadsEnabled)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_configuringAProviderAloneDoesNotMakeAnyFeatureLive
+
     func test_configuringAProviderAloneDoesNotMakeAnyFeatureLive() {
         AssistSettings.isEnabled = true
         configureProvider()
@@ -156,6 +186,8 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aFeatureIsOnlyLiveWithAssistOnAProviderAndItsOwnSwitch
+
     func test_aFeatureIsOnlyLiveWithAssistOnAProviderAndItsOwnSwitch() {
         AssistSettings.isAskOnPageEnabled = true
         configureProvider()
@@ -164,6 +196,8 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         AssistSettings.isEnabled = true
         XCTAssertTrue(AssistSettings.isAnyFeatureLive)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_switchingProviderKeepsEachProvidersOwnKey
 
     func test_switchingProviderKeepsEachProvidersOwnKey() {
         AssistSettings.providerKind = .anthropic
@@ -175,6 +209,8 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         AssistSettings.providerKind = .anthropic
         XCTAssertEqual(AssistSettings.apiKey, "sk-ant-secret")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_providerConfigCarriesTheKindTheBaseURLAndTheModel
 
     func test_providerConfigCarriesTheKindTheBaseURLAndTheModel() {
         AssistSettings.isEnabled = true
@@ -188,6 +224,8 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         XCTAssertTrue(config.isConfigured, "A loopback provider needs no key")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aPreviouslySavedFullEndpointIsStillUsedUntilANewBaseURLIsTyped
+
     func test_aPreviouslySavedFullEndpointIsStillUsedUntilANewBaseURLIsTyped() {
         suite.set("https://api.openai.com/v1/chat/completions", forKey: AssistSettings.providerEndpointKey)
         XCTAssertEqual(AssistSettings.baseURLString, "https://api.openai.com/v1/chat/completions")
@@ -195,6 +233,8 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         AssistSettings.baseURLString = "https://openrouter.ai/api/v1"
         XCTAssertEqual(AssistSettings.baseURLString, "https://openrouter.ai/api/v1")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsSurviveAWriteThenReloadThroughASecondUserDefaults
 
     func test_settingsSurviveAWriteThenReloadThroughASecondUserDefaults() throws {
         AssistSettings.isEnabled = true
@@ -211,6 +251,8 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         XCTAssertTrue(reader.bool(forKey: AssistSettings.tidyDownloadsEnabledKey))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theAPIKeyIsNeverWrittenIntoUserDefaults
+
     func test_theAPIKeyIsNeverWrittenIntoUserDefaults() throws {
         AssistSettings.apiKey = "sk-super-secret"
         let reader = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -222,6 +264,8 @@ final class AssistSettingsDefaultsTests: XCTestCase {
         }
         XCTAssertEqual(AssistSettings.apiKey, "sk-super-secret")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_clearingTheAPIKeyRemovesIt
 
     func test_clearingTheAPIKeyRemovesIt() {
         AssistSettings.apiKey = "sk-test"

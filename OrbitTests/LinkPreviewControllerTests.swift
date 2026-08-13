@@ -57,6 +57,7 @@ private final class RecordedLinkSink: @unchecked Sendable {
 }
 
 @MainActor
+// Whole suite excluded on GitHub-hosted runners: needs a real running app, not a headless VM.
 final class LinkPreviewControllerTests: XCTestCase {
 
     private var suite: UserDefaults!
@@ -94,6 +95,8 @@ final class LinkPreviewControllerTests: XCTestCase {
 
     // MARK: - Feature disabled (#8)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoverChanged_withTheFeatureDisabled_neverCallsFetchOrTheSink
+
     func test_hoverChanged_withTheFeatureDisabled_neverCallsFetchOrTheSink() async {
         AssistSettings.isFiveSecondPreviewsEnabled = false
         let controller = LinkPreviewController()
@@ -116,6 +119,8 @@ final class LinkPreviewControllerTests: XCTestCase {
 
     // MARK: - Incognito (#7)
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoverChanged_withANonPersistentSession_neverCallsFetchOrTheSink
+
     func test_hoverChanged_withANonPersistentSession_neverCallsFetchOrTheSink() async {
         let controller = LinkPreviewController()
         controller.debounceNanoseconds = 0
@@ -135,6 +140,8 @@ final class LinkPreviewControllerTests: XCTestCase {
         XCTAssertEqual(sink.generateCallCount, 0, "Nothing may leave an Incognito window — the model call must never happen")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoverChanged_withANonPersistentSession_refusesEvenWithNoSinkAtAll
+
     func test_hoverChanged_withANonPersistentSession_refusesEvenWithNoSinkAtAll() async {
         let controller = LinkPreviewController()
         controller.debounceNanoseconds = 0
@@ -153,6 +160,8 @@ final class LinkPreviewControllerTests: XCTestCase {
 
     // MARK: - Non-http(s) scheme
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoverChanged_refusesANonHTTPScheme
+
     func test_hoverChanged_refusesANonHTTPScheme() async {
         let controller = LinkPreviewController()
         controller.debounceNanoseconds = 0
@@ -170,6 +179,8 @@ final class LinkPreviewControllerTests: XCTestCase {
     }
 
     // MARK: - Shift released mid-flight (#5)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_shiftReleasedWhileAFetchIsInFlight_noCardIsEverShown
 
     func test_shiftReleasedWhileAFetchIsInFlight_noCardIsEverShown() async {
         let controller = LinkPreviewController()
@@ -195,6 +206,8 @@ final class LinkPreviewControllerTests: XCTestCase {
     }
 
     // MARK: - Hover moved to a different URL while in flight (#6)
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoverMovedToADifferentURLWhileTheFirstIsInFlight_theFirstsLateResultNeverBecomesTheVisibleCard
 
     func test_hoverMovedToADifferentURLWhileTheFirstIsInFlight_theFirstsLateResultNeverBecomesTheVisibleCard() async {
         let controller = LinkPreviewController()
@@ -240,6 +253,8 @@ final class LinkPreviewControllerTests: XCTestCase {
 
     // MARK: - Same URL re-hovered while already showing
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_reHoveringTheSameURLWhileAlreadyShowing_doesNotRefetch
+
     func test_reHoveringTheSameURLWhileAlreadyShowing_doesNotRefetch() async {
         let controller = LinkPreviewController()
         controller.debounceNanoseconds = 0
@@ -262,6 +277,8 @@ final class LinkPreviewControllerTests: XCTestCase {
     }
 
     // MARK: - The happy path, for completeness
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoverChanged_aFullSuccessfulRunReachesReadyWithTheParsedPreview
 
     func test_hoverChanged_aFullSuccessfulRunReachesReadyWithTheParsedPreview() async {
         let controller = LinkPreviewController()

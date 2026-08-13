@@ -5,6 +5,7 @@ import XCTest
 
 @MainActor
 // Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
+// Whole suite excluded on GitHub-hosted runners: needs a real running app, not a headless VM.
 final class ScreenshotGenerationTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -48,6 +49,7 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // The fixture's Spaces use followsSystemAppearance, so the window background is genuinely
     // adaptive; Settings/Library paint from a fixed LibraryPalette and are not, so this stays scoped.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_windowAppearance_lightAndDarkRenderDifferently
     func test_windowAppearance_lightAndDarkRenderDifferently() {
         OrbitScreenshotFixtures.configure(env)
         let dark = render(windowView(), size: Self.windowSize, appearance: .darkAqua)
@@ -86,6 +88,7 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // Real state comparisons, not three individually non-blank renders: each transition must
     // visibly change the rendered window, or the flags exist without layout reacting to them.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_sidebarVisibilityStates_eachRenderVisiblyDifferently
     func test_sidebarVisibilityStates_eachRenderVisiblyDifferently() {
         OrbitScreenshotFixtures.configure(env)
 
@@ -132,6 +135,7 @@ final class ScreenshotGenerationTests: XCTestCase {
     // Goes further than "the sidebar is non-blank": proves the seeded now-playing card actually
     // reaches the bottom tray band, not just that seedNowPlayingCard()'s own env-level assertions
     // (nowPlayingTabs/canDrivePictureInPicture) passed while the tray itself stayed empty.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_sidebar_nowPlayingCard_isVisibleInTheBottomTrayBand
     func test_sidebar_nowPlayingCard_isVisibleInTheBottomTrayBand() {
         OrbitScreenshotFixtures.configure(env)
         guard let space = env.space(OrbitScreenshotFixtures.IDs.workSpaceID) else {
@@ -274,6 +278,7 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // Cropped to the view's declared width/row-height (not padded), with RGBA.clear as the
     // background reference, since a rounded-rect corner this tight can itself be anti-aliased.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_commandBar_paintsContentAcrossItsFullDeclaredWidth
     func test_commandBar_paintsContentAcrossItsFullDeclaredWidth() {
         OrbitScreenshotFixtures.configure(env)
         env.commandBarMode = .editURL(URL(string: "https://github.com")!)
@@ -419,6 +424,7 @@ final class ScreenshotGenerationTests: XCTestCase {
 
     // Real before/after comparison: turning Assist on must actually change what the pane draws,
     // not just what the two individual screenshot tests separately claim.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsAssist_turnedOnRendersDifferentlyThanOff
     func test_settingsAssist_turnedOnRendersDifferentlyThanOff() {
         let size = CGSize(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight)
         OrbitScreenshotFixtures.configure(env)

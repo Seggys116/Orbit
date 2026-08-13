@@ -50,6 +50,8 @@ final class RecentPagesModelTests: XCTestCase {
 
     // MARK: Service recognition
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_matching_recognisesEachServiceFromARealURL
+
     func test_matching_recognisesEachServiceFromARealURL() {
         XCTAssertEqual(RecentPagesService.matching(URL(string: "https://www.notion.so/team/Plan-1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d")!), .notion)
         XCTAssertEqual(RecentPagesService.matching(URL(string: "https://www.figma.com/design/AbC123/Marketing-Site")!), .figma)
@@ -57,21 +59,29 @@ final class RecentPagesModelTests: XCTestCase {
         XCTAssertEqual(RecentPagesService.matching(URL(string: "https://acme.atlassian.net/wiki/spaces/ENG/pages/98765/Runbook")!), .confluence)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_matching_rejectsAURLThatMerelyMentionsTheService
+
     func test_matching_rejectsAURLThatMerelyMentionsTheService() {
         XCTAssertNil(RecentPagesService.matching(URL(string: "https://www.google.com/search?q=notion.so+pricing")!))
         XCTAssertNil(RecentPagesService.matching(URL(string: "https://blog.example.com/why-i-left-figma.com/post")!))
         XCTAssertNil(RecentPagesService.matching(URL(string: "https://evil.example.com/?next=https://linear.app/")!))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_matching_requiresTheWikiPathForConfluence
+
     func test_matching_requiresTheWikiPathForConfluence() {
         XCTAssertEqual(RecentPagesService.matching(URL(string: "https://acme.atlassian.net/wiki/spaces/ENG/pages/1/X")!), .confluence)
         XCTAssertNil(RecentPagesService.matching(URL(string: "https://acme.atlassian.net/browse/ENG-42")!))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_matching_acceptsSubdomainsButNotSuffixLookalikes
+
     func test_matching_acceptsSubdomainsButNotSuffixLookalikes() {
         XCTAssertEqual(RecentPagesService.matching(URL(string: "https://team.notion.site/Page-1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d")!), .notion)
         XCTAssertNil(RecentPagesService.matching(URL(string: "https://notmyfigma.com/design/AbC123/X")!))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_urlFragments_areTheOnesArcMatchesOn
 
     func test_urlFragments_areTheOnesArcMatchesOn() {
         XCTAssertEqual(RecentPagesService.notion.urlFragment, "notion.")
@@ -80,11 +90,15 @@ final class RecentPagesModelTests: XCTestCase {
         XCTAssertEqual(RecentPagesService.confluence.urlFragment, "atlassian.net/wiki/")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_lookback_isArcsThirtyDays
+
     func test_lookback_isArcsThirtyDays() {
         XCTAssertEqual(RecentPagesQuery.arcLookback, 30 * 24 * 60 * 60)
     }
 
     // MARK: Title tidying
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidy_stripsTheServicesOwnBrandingSuffix
 
     func test_tidy_stripsTheServicesOwnBrandingSuffix() {
         XCTAssertEqual(RecentPagesTidyTitle.tidy("Q3 Roadmap – Figma", for: .figma), "Q3 Roadmap")
@@ -92,13 +106,19 @@ final class RecentPagesModelTests: XCTestCase {
         XCTAssertEqual(RecentPagesTidyTitle.tidy("Runbook - Confluence", for: .confluence), "Runbook")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidy_stripsNotionCalendarsOwnBranding
+
     func test_tidy_stripsNotionCalendarsOwnBranding() {
         XCTAssertEqual(RecentPagesTidyTitle.tidy("Standup | Notion Calendar", for: .notion), "Standup")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidy_leavesATitleThatCarriesNoBrandingAlone
+
     func test_tidy_leavesATitleThatCarriesNoBrandingAlone() {
         XCTAssertEqual(RecentPagesTidyTitle.tidy("Weekly Plan", for: .notion), "Weekly Plan")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidy_yieldsNothingForATitleThatIsOnlyTheServiceName
 
     func test_tidy_yieldsNothingForATitleThatIsOnlyTheServiceName() {
         XCTAssertEqual(RecentPagesTidyTitle.tidy("Notion", for: .notion), "")
@@ -106,10 +126,14 @@ final class RecentPagesModelTests: XCTestCase {
 
     // MARK: Document identity
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_documentID_parsesNotionsTrailingPageID
+
     func test_documentID_parsesNotionsTrailingPageID() {
         let url = URL(string: "https://www.notion.so/team/Weekly-Plan-1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d")!
         XCTAssertEqual(RecentPagesDocumentID.parse(url, service: .notion), "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_documentID_refusesToGuess
 
     func test_documentID_refusesToGuess() {
         XCTAssertNil(RecentPagesDocumentID.parse(URL(string: "https://www.notion.so/team/Notes")!, service: .notion))
@@ -117,6 +141,8 @@ final class RecentPagesModelTests: XCTestCase {
         XCTAssertNil(RecentPagesDocumentID.parse(URL(string: "https://www.figma.com/files/recent")!, service: .figma))
         XCTAssertNil(RecentPagesDocumentID.parse(URL(string: "https://acme.atlassian.net/wiki/spaces/ENG/overview")!, service: .confluence))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_documentID_parsesFigmaLinearAndConfluence
 
     func test_documentID_parsesFigmaLinearAndConfluence() {
         XCTAssertEqual(
@@ -135,6 +161,8 @@ final class RecentPagesModelTests: XCTestCase {
 
     // MARK: The transform
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_ordersByMostRecentVisitAndHonoursTheLimit
+
     func test_build_ordersByMostRecentVisitAndHonoursTheLimit() {
         let entries = [
             entry("https://www.notion.so/a-1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c61", title: "Oldest", age: 3_000),
@@ -147,6 +175,8 @@ final class RecentPagesModelTests: XCTestCase {
         )
         XCTAssertEqual(data?.items.map(\.displayTitle), ["Newest", "Middle"])
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_collapsesOnePageReachedUnderTwoTitleSlugs
 
     func test_build_collapsesOnePageReachedUnderTwoTitleSlugs() {
         let identifier = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
@@ -161,6 +191,7 @@ final class RecentPagesModelTests: XCTestCase {
 
     // Privacy, on the transform: these rows were never filtered by SQL, exactly the
     // case the SQL-level test cannot cover.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_neverShowsARowFromAnExcludedIncognitoSpace
     func test_build_neverShowsARowFromAnExcludedIncognitoSpace() {
         let incognito = SpaceID()
         let normal = SpaceID()
@@ -179,6 +210,8 @@ final class RecentPagesModelTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_returnsNoCardWhenEveryRowIsExcluded
+
     func test_build_returnsNoCardWhenEveryRowIsExcluded() {
         let incognito = SpaceID()
         let entries = [entry("https://www.notion.so/x-1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c61", title: "Secret", age: 10, spaceID: incognito)]
@@ -187,6 +220,8 @@ final class RecentPagesModelTests: XCTestCase {
             query: RecentPagesQuery(excludedSpaceIDs: [incognito]), now: now
         ))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_dropsRowsOlderThanTheWindow
 
     func test_build_dropsRowsOlderThanTheWindow() {
         let entries = [
@@ -197,10 +232,14 @@ final class RecentPagesModelTests: XCTestCase {
         XCTAssertEqual(data?.items.map(\.displayTitle), ["Recent"])
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_returnsNoCardWhenEveryRowIsOutsideTheWindow
+
     func test_build_returnsNoCardWhenEveryRowIsOutsideTheWindow() {
         let entries = [entry("https://www.notion.so/old-1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c61", title: "Ancient", age: RecentPagesQuery.arcLookback + 60)]
         XCTAssertNil(RecentPagesCard.build(service: .notion, entries: entries, query: RecentPagesQuery(), now: now))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_dropsRowsBelongingToAnotherService
 
     func test_build_dropsRowsBelongingToAnotherService() {
         let entries = [
@@ -211,19 +250,27 @@ final class RecentPagesModelTests: XCTestCase {
         XCTAssertEqual(data?.items.map(\.displayTitle), ["A Notion Doc"])
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_returnsNoCardForNoEntriesAtAll
+
     func test_build_returnsNoCardForNoEntriesAtAll() {
         XCTAssertNil(RecentPagesCard.build(service: .linear, entries: [], query: RecentPagesQuery(), now: now))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_recentPagesData_cannotBeConstructedEmpty
+
     func test_recentPagesData_cannotBeConstructedEmpty() {
         XCTAssertNil(RecentPagesData(service: .notion, items: []))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_iconHost_comesFromABrowsedHostNotAConstant
 
     func test_iconHost_comesFromABrowsedHostNotAConstant() {
         let entries = [entry("https://acme.atlassian.net/wiki/spaces/ENG/pages/1/Runbook", title: "Runbook", age: 10)]
         let data = RecentPagesCard.build(service: .confluence, entries: entries, query: RecentPagesQuery(), now: now)
         XCTAssertEqual(data?.iconHost, "acme.atlassian.net")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_fallsBackToTheURLSlugWhenTheTitleIsOnlyBranding
 
     func test_build_fallsBackToTheURLSlugWhenTheTitleIsOnlyBranding() {
         let entries = [entry("https://www.notion.so/Weekly-Plan", title: "Notion", age: 10)]
@@ -233,6 +280,8 @@ final class RecentPagesModelTests: XCTestCase {
             "Tidying stripped the title to nothing, so the URL's own slug names the row — not the branding that was just removed"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_build_dropsARowThatCanOnlyNameItselfWithTheServiceName
 
     func test_build_dropsARowThatCanOnlyNameItselfWithTheServiceName() {
         let entries = [entry("https://www.notion.so/", title: "Notion", age: 10)]
@@ -274,6 +323,8 @@ final class RecentPagesHistoryQueryTests: XCTestCase {
         ))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_entriesMatchingURLFragment_returnsOnlyMatchingRowsMostRecentFirst
+
     func test_entriesMatchingURLFragment_returnsOnlyMatchingRowsMostRecentFirst() async throws {
         let store = try makeStore()
         try await record(store, "https://www.notion.so/a", title: "A", ago: 3_000)
@@ -286,6 +337,8 @@ final class RecentPagesHistoryQueryTests: XCTestCase {
         )
         XCTAssertEqual(rows.map(\.title), ["B", "A"])
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_entriesMatchingURLFragment_excludesRowsOlderThanTheSinceDate
 
     func test_entriesMatchingURLFragment_excludesRowsOlderThanTheSinceDate() async throws {
         let store = try makeStore()
@@ -300,6 +353,7 @@ final class RecentPagesHistoryQueryTests: XCTestCase {
     }
 
     // Privacy, on the SQL: the exclusion happens before the rows exist in memory.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_entriesMatchingURLFragment_excludesIncognitoSpaceRowsInSQL
     func test_entriesMatchingURLFragment_excludesIncognitoSpaceRowsInSQL() async throws {
         let store = try makeStore()
         let incognito = SpaceID()
@@ -315,6 +369,8 @@ final class RecentPagesHistoryQueryTests: XCTestCase {
         XCTAssertEqual(rows.map(\.title), ["Normal Page"])
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_entriesMatchingURLFragment_keepsRowsWithNoSpaceAtAll
+
     func test_entriesMatchingURLFragment_keepsRowsWithNoSpaceAtAll() async throws {
         let store = try makeStore()
         try await record(store, "https://www.notion.so/imported", title: "Imported", ago: 10, spaceID: nil)
@@ -326,6 +382,8 @@ final class RecentPagesHistoryQueryTests: XCTestCase {
         )
         XCTAssertEqual(rows.map(\.title), ["Imported"])
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_entriesMatchingURLFragment_honoursTheLimit
 
     func test_entriesMatchingURLFragment_honoursTheLimit() async throws {
         let store = try makeStore()
@@ -340,6 +398,8 @@ final class RecentPagesHistoryQueryTests: XCTestCase {
         XCTAssertEqual(rows.map(\.title), ["P0", "P1", "P2"])
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_entriesMatchingURLFragment_treatsWildcardCharactersLiterally
+
     func test_entriesMatchingURLFragment_treatsWildcardCharactersLiterally() async throws {
         let store = try makeStore()
         try await record(store, "https://example.com/a_b", title: "Literal", ago: 10)
@@ -352,12 +412,16 @@ final class RecentPagesHistoryQueryTests: XCTestCase {
         XCTAssertEqual(rows.map(\.title), ["Literal"], "`_` must match an underscore, not any character")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_entriesMatchingURLFragment_returnsNothingForAnEmptyFragment
+
     func test_entriesMatchingURLFragment_returnsNothingForAnEmptyFragment() async throws {
         let store = try makeStore()
         try await record(store, "https://www.notion.so/a", title: "A", ago: 10)
         let rows = try await store.entries(matchingURLFragment: "   ", since: Date(timeIntervalSince1970: 0))
         XCTAssertTrue(rows.isEmpty, "An empty fragment must not degenerate into `LIKE '%%'` and return the whole history")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_liveSource_readsTheRealStoreAndHonoursTheQuery
 
     func test_liveSource_readsTheRealStoreAndHonoursTheQuery() async throws {
         let store = try makeStore()
@@ -371,6 +435,7 @@ final class RecentPagesHistoryQueryTests: XCTestCase {
     }
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theHistoryConnectionSeamReadsWhicheverStoreItIsGiven
     func test_theHistoryConnectionSeamReadsWhicheverStoreItIsGiven() async throws {
         let store = try makeStore()
         try await record(store, "https://www.notion.so/injected", title: "Injected", ago: 30)
@@ -385,6 +450,8 @@ final class RecentPagesHistoryQueryTests: XCTestCase {
         let none = await RecentPagesHistoryConnection.source().historyEntries(.notion, RecentPagesQuery())
         XCTAssertTrue(none.isEmpty, "Overriding with nil must yield `.unavailable`, not fall back to opening the real database")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_unavailableSource_yieldsNoRowsAndThereforeNoCard
 
     func test_unavailableSource_yieldsNoRowsAndThereforeNoCard() async {
         let rows = await RecentPagesSource.unavailable.historyEntries(.notion, RecentPagesQuery())
@@ -441,6 +508,8 @@ final class RecentPagesLinkPreviewTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoveringANotionLink_buildsTheCardWithNoProviderConfigured
+
     func test_hoveringANotionLink_buildsTheCardWithNoProviderConfigured() async {
         let controller = LinkPreviewController()
         controller.debounceNanoseconds = 0
@@ -465,6 +534,8 @@ final class RecentPagesLinkPreviewTests: XCTestCase {
         XCTAssertEqual(recorded.requestedServices, [.notion])
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoveringAnOrdinaryLink_stillTakesTheGenericPathAndNeverAsksHistory
+
     func test_hoveringAnOrdinaryLink_stillTakesTheGenericPathAndNeverAsksHistory() async {
         let controller = LinkPreviewController()
         controller.debounceNanoseconds = 0
@@ -488,6 +559,7 @@ final class RecentPagesLinkPreviewTests: XCTestCase {
 
     // Privacy: .idle is also what "hasn't run yet" looks like; the assertion below is
     // that history was never read.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_hoveringANotionLinkInIncognito_neverReadsHistoryAtAll
     func test_hoveringANotionLinkInIncognito_neverReadsHistoryAtAll() async {
         let controller = LinkPreviewController()
         controller.debounceNanoseconds = 0
@@ -508,6 +580,8 @@ final class RecentPagesLinkPreviewTests: XCTestCase {
         XCTAssertEqual(recorded.callCount, 0, "An Incognito session must not read the user's browsing history for a card")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withTheFeatureDisabled_theCardNeverReadsHistory
+
     func test_withTheFeatureDisabled_theCardNeverReadsHistory() async {
         AssistSettings.isFiveSecondPreviewsEnabled = false
         let controller = LinkPreviewController()
@@ -526,6 +600,8 @@ final class RecentPagesLinkPreviewTests: XCTestCase {
         XCTAssertEqual(controller.phase, .idle)
         XCTAssertEqual(recorded.callCount, 0)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withNoMatchingHistory_showsNoCardRatherThanAnEmptyOne
 
     func test_withNoMatchingHistory_showsNoCardRatherThanAnEmptyOne() async {
         let controller = LinkPreviewController()
@@ -546,6 +622,8 @@ final class RecentPagesLinkPreviewTests: XCTestCase {
         XCTAssertNil(controller.previewedURL, "`previewedURL` is nil exactly when the phase is idle")
         XCTAssertEqual(recorded.callCount, 1, "It must actually have looked before concluding there was nothing")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_movingToAnotherServiceDiscardsTheAbandonedCard
 
     func test_movingToAnotherServiceDiscardsTheAbandonedCard() async {
         let controller = LinkPreviewController()
@@ -571,6 +649,8 @@ final class RecentPagesLinkPreviewTests: XCTestCase {
         XCTAssertEqual(data.service, .linear, "The abandoned Notion card must never replace the Linear one")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_releasingShiftClearsTheCard
+
     func test_releasingShiftClearsTheCard() async {
         let controller = LinkPreviewController()
         controller.debounceNanoseconds = 0
@@ -590,6 +670,8 @@ final class RecentPagesLinkPreviewTests: XCTestCase {
         )
         XCTAssertEqual(controller.phase, .idle)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theExclusionSetIsHandedToTheSource
 
     func test_theExclusionSetIsHandedToTheSource() async {
         let controller = LinkPreviewController()
@@ -621,6 +703,8 @@ final class RecentPagesWiringTests: XCTestCase {
         return try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theOverlayActuallyWiresTheCardIn
+
     func test_theOverlayActuallyWiresTheCardIn() throws {
         let overlay = try source("Orbit/Features/Assist/LinkPreviewOverlayView.swift")
 
@@ -641,6 +725,8 @@ final class RecentPagesWiringTests: XCTestCase {
             "The overlay must compute the Incognito exclusion set rather than passing an empty one"
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theCardViewActuallyRendersTheNewPhase
 
     func test_theCardViewActuallyRendersTheNewPhase() throws {
         let card = try source("Orbit/Features/Assist/LinkPreviewCardView.swift")

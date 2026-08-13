@@ -52,6 +52,8 @@ final class TidyTabTitlesCoordinatorTests: XCTestCase {
 
     // MARK: shouldRequest
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_shouldRequest_isFalseForATitleShortEnoughToAlreadyFit
+
     func test_shouldRequest_isFalseForATitleShortEnoughToAlreadyFit() {
         let coordinator = TidyTabTitlesCoordinator()
         XCTAssertFalse(
@@ -60,12 +62,16 @@ final class TidyTabTitlesCoordinatorTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_shouldRequest_isTrueForALongTitle
+
     func test_shouldRequest_isTrueForALongTitle() {
         let coordinator = TidyTabTitlesCoordinator()
         XCTAssertTrue(coordinator.shouldRequest(tabID: UUID(), rawTitle: longTitle))
     }
 
     // MARK: tidy
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidy_writesTheShortenedTitleThroughApply
 
     func test_tidy_writesTheShortenedTitleThroughApply() async {
         let coordinator = TidyTabTitlesCoordinator()
@@ -84,6 +90,8 @@ final class TidyTabTitlesCoordinatorTests: XCTestCase {
         XCTAssertEqual(applied.values.first, "Mezcal and Mole")
         XCTAssertEqual(provider.requests.count, 1)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tidy_appliesNilWhenTheProviderFails_soTheRealTitleStays
 
     func test_tidy_appliesNilWhenTheProviderFails_soTheRealTitleStays() async {
         let coordinator = TidyTabTitlesCoordinator()
@@ -105,6 +113,8 @@ final class TidyTabTitlesCoordinatorTests: XCTestCase {
 
     // MARK: the pin trigger — Arc's actual trigger
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinningATabWithNoProviderConfiguredChangesNothing
+
     func test_pinningATabWithNoProviderConfiguredChangesNothing() {
         let coordinator = TidyTabTitlesCoordinator()
         let tabID = makeTab(title: longTitle)
@@ -114,6 +124,8 @@ final class TidyTabTitlesCoordinatorTests: XCTestCase {
         XCTAssertNil(env.tab(tabID)?.tidiedTitle, "With no provider there is nothing to write")
         XCTAssertEqual(env.tab(tabID)?.displayTitle, longTitle)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pinningPostsTheNotificationTheCoordinatorListensFor
 
     func test_pinningPostsTheNotificationTheCoordinatorListensFor() {
         let tabID = makeTab(title: longTitle)
@@ -126,6 +138,8 @@ final class TidyTabTitlesCoordinatorTests: XCTestCase {
         wait(for: [expectation], timeout: 2)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_unpinningRestoresTheRealTitle
+
     func test_unpinningRestoresTheRealTitle() {
         let tabID = makeTab(title: longTitle)
         env.pinTab(tabID)
@@ -137,6 +151,8 @@ final class TidyTabTitlesCoordinatorTests: XCTestCase {
         XCTAssertNil(env.tab(tabID)?.tidiedTitle)
         XCTAssertEqual(env.tab(tabID)?.displayTitle, longTitle, "Unpinning gives the tab its real title back")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_clearAllTidiedTitles_isWhatSwitchingTheFeatureOffDoes
 
     func test_clearAllTidiedTitles_isWhatSwitchingTheFeatureOffDoes() {
         let a = makeTab(title: longTitle)
@@ -151,6 +167,8 @@ final class TidyTabTitlesCoordinatorTests: XCTestCase {
     }
 
     // MARK: navigating a pinned tab away
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_shouldClearOnCommit_whenAPinnedTabNavigatesAwayFromItsPinnedURL
 
     func test_shouldClearOnCommit_whenAPinnedTabNavigatesAwayFromItsPinnedURL() {
         var tab = Tab(

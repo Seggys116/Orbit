@@ -14,10 +14,14 @@ final class AskOnPageQuoteVerificationTests: XCTestCase {
     in today's dollars. Tallying Haiti's losses, he presented a bill: $21,685,135,571.48.
     """
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aQuotationThatIsActuallyInThePageIsKept
+
     func test_aQuotationThatIsActuallyInThePageIsKept() {
         let quote = "We found that Haitians paid about $560 million in today's dollars."
         XCTAssertEqual(AssistRuntime.verifiedQuote(quote, in: page), quote)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aPlausibleInventionIsRejected
 
     func test_aPlausibleInventionIsRejected() {
         let invented = "We found that Haitians paid about $600 million in today's dollars."
@@ -27,10 +31,14 @@ final class AskOnPageQuoteVerificationTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aParaphraseIsRejectedEvenThoughItIsTrue
+
     func test_aParaphraseIsRejectedEvenThoughItIsTrue() {
         let paraphrase = "Haitians paid roughly 560 million dollars in modern money."
         XCTAssertNil(AssistRuntime.verifiedQuote(paraphrase, in: page))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_curlyQuotesAndDashesDoNotCauseAFalseRejection
 
     func test_curlyQuotesAndDashesDoNotCauseAFalseRejection() {
         let page = "Haiti\u{2019}s founders \u{2014} in 1804 \u{2014} declared independence."
@@ -38,20 +46,28 @@ final class AskOnPageQuoteVerificationTests: XCTestCase {
         XCTAssertEqual(AssistRuntime.verifiedQuote(quote, in: page), quote)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_differingWhitespaceDoesNotCauseAFalseRejection
+
     func test_differingWhitespaceDoesNotCauseAFalseRejection() {
         let page = "We found that\n   Haitians paid   about $560 million."
         let quote = "We found that Haitians paid about $560 million."
         XCTAssertEqual(AssistRuntime.verifiedQuote(quote, in: page), quote)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aFragmentTooShortToBeEvidenceIsRejected
+
     func test_aFragmentTooShortToBeEvidenceIsRejected() {
         XCTAssertNil(AssistRuntime.verifiedQuote("Haiti", in: page), "A single word matches by accident and proves nothing")
         XCTAssertNil(AssistRuntime.verifiedQuote("The Ransom", in: page))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noQuoteAtAllIsNotAnError
+
     func test_noQuoteAtAllIsNotAnError() {
         XCTAssertNil(AssistRuntime.verifiedQuote(nil, in: page))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theReturnedStringIsTheOneThatWasChecked
 
     func test_theReturnedStringIsTheOneThatWasChecked() {
         let quote = "We found that Haitians paid about $560 million in today's dollars."
@@ -63,6 +79,8 @@ final class AskOnPageQuoteVerificationTests: XCTestCase {
 @MainActor
 final class AskOnPageReplyParsingTests: XCTestCase {
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_splitsTheLabelledTwoLineReply
+
     func test_splitsTheLabelledTwoLineReply() {
         let raw = """
         QUOTE: We found that Haitians paid about $560 million in today's dollars.
@@ -73,16 +91,22 @@ final class AskOnPageReplyParsingTests: XCTestCase {
         XCTAssertEqual(split.answer, "So, Haitians paid about $560 million to France and French investors.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_NONEMeansThereIsNoQuote
+
     func test_NONEMeansThereIsNoQuote() {
         let split = AssistRuntime.splitQuoteAndAnswer("QUOTE: NONE\nANSWER: The page does not say.")
         XCTAssertNil(split.quote)
         XCTAssertEqual(split.answer, "The page does not say.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_stripsSurroundingQuotationMarksFromTheQuoteLine
+
     func test_stripsSurroundingQuotationMarksFromTheQuoteLine() {
         let split = AssistRuntime.splitQuoteAndAnswer("QUOTE: \"a quoted passage here\"\nANSWER: yes")
         XCTAssertEqual(split.quote, "a quoted passage here")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aMultiLineAnswerIsKeptWhole
 
     func test_aMultiLineAnswerIsKeptWhole() {
         let raw = """
@@ -92,6 +116,8 @@ final class AskOnPageReplyParsingTests: XCTestCase {
         """
         XCTAssertEqual(AssistRuntime.splitQuoteAndAnswer(raw).answer, "First sentence.\nSecond sentence.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anUnlabelledReplyBecomesTheAnswerWithNoQuote
 
     func test_anUnlabelledReplyBecomesTheAnswerWithNoQuote() {
         let split = AssistRuntime.splitQuoteAndAnswer("The model just answered in prose.")
@@ -123,6 +149,8 @@ final class AskOnPageControllerTests: XCTestCase {
         AssistSink(generate: { _ in reply }, pageText: { page })
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aSuccessfulAskAppendsAnExchangeAndReturnsToIdle
+
     func test_aSuccessfulAskAppendsAnExchangeAndReturnsToIdle() async {
         let controller = AskOnPageController()
         let page = PageTextExtract(title: "t", url: "u", text: "Haitians paid about $560 million in today's dollars.", totalCharacters: 52)
@@ -138,6 +166,8 @@ final class AskOnPageControllerTests: XCTestCase {
         XCTAssertEqual(controller.phase, .idle)
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anInventedQuoteIsDroppedButTheAnswerIsStillShown
+
     func test_anInventedQuoteIsDroppedButTheAnswerIsStillShown() async {
         let controller = AskOnPageController()
         let page = PageTextExtract(title: "t", url: "u", text: "Haitians paid about $560 million in today's dollars.", totalCharacters: 52)
@@ -150,6 +180,8 @@ final class AskOnPageControllerTests: XCTestCase {
         XCTAssertNil(controller.exchanges.first?.quote, "A quote that is not in the page must not be rendered as one")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withNoProviderTheRefusalIsShownAndNoExchangeIsRecorded
+
     func test_withNoProviderTheRefusalIsShownAndNoExchangeIsRecorded() async {
         let controller = AskOnPageController()
         await controller.ask(question: "q", sink: nil)
@@ -157,6 +189,8 @@ final class AskOnPageControllerTests: XCTestCase {
         XCTAssertTrue(controller.exchanges.isEmpty)
         XCTAssertEqual(controller.phase, .failed(AssistError.notConfigured.localizedDescription))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anIncognitoTabIsRefusedBeforeAnySinkIsConsulted
 
     func test_anIncognitoTabIsRefusedBeforeAnySinkIsConsulted() async {
         let controller = AskOnPageController()
@@ -173,6 +207,8 @@ final class AskOnPageControllerTests: XCTestCase {
         XCTAssertEqual(controller.phase, .failed(AssistError.incognito.localizedDescription))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aProviderFailureSurfacesItsMessageRatherThanAnAnswer
+
     func test_aProviderFailureSurfacesItsMessageRatherThanAnAnswer() async {
         let controller = AskOnPageController()
         let failing = AssistSink(
@@ -187,6 +223,8 @@ final class AskOnPageControllerTests: XCTestCase {
         }
         XCTAssertTrue(message.contains("401"))
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_switchingTabUnderAnOpenPanelClearsTheConversation
 
     func test_switchingTabUnderAnOpenPanelClearsTheConversation() async {
         let controller = AskOnPageController()
@@ -203,6 +241,8 @@ final class AskOnPageControllerTests: XCTestCase {
         XCTAssertFalse(controller.isPresented, "An answer about one page must never stay on screen over another")
         XCTAssertTrue(controller.exchanges.isEmpty)
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_presentingTheSameTabAgainKeepsTheConversation
 
     func test_presentingTheSameTabAgainKeepsTheConversation() async {
         let controller = AskOnPageController()

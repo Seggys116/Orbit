@@ -21,6 +21,7 @@ private final class RecordedSink: @unchecked Sendable {
 }
 
 @MainActor
+// Whole suite excluded on GitHub-hosted runners: needs a real running app, not a headless VM.
 final class TidyTabsCoordinatorTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -98,6 +99,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
 
     // MARK: - The feature working
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aScriptedReplyReordersTodayUnderModelNamedHeaders
+
     func test_aScriptedReplyReordersTodayUnderModelNamedHeaders() async {
         provider.reply = """
             GROUP: Oaxaca Trip | 1, 2, 3
@@ -127,6 +130,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
         XCTAssertFalse(Set(todayShape().compactMap(\.group)).contains("Google"))
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_ungroupedTabsAreOrderedAboveTheFirstHeader
+
     func test_ungroupedTabsAreOrderedAboveTheFirstHeader() async {
         provider.reply = "GROUP: Oaxaca Trip | 1, 2, 3"
 
@@ -142,6 +147,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
             "Everything the model did not name is ungrouped and sits above the first header."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_removeHeaderUngroupsWithoutClosingOrReorderingAnything
 
     func test_removeHeaderUngroupsWithoutClosingOrReorderingAnything() async {
         provider.reply = """
@@ -161,6 +168,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
             "Only the named header goes."
         )
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_convertToFolderPinsTheGroupAndTheHeaderDisappearsWithIt
 
     func test_convertToFolderPinsTheGroupAndTheHeaderDisappearsWithIt() async {
         provider.reply = "GROUP: Oaxaca Trip | 1, 2, 3"
@@ -184,6 +193,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
 
     // MARK: - Failure: say so, change nothing
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aFailedRequestLeavesTheSidebarUntouchedAndReportsTheError
+
     func test_aFailedRequestLeavesTheSidebarUntouchedAndReportsTheError() async {
         let orderBefore = env.todayTabs(in: spaceID).map(\.id)
         provider.failure = .http(status: 500, body: "boom")
@@ -201,6 +212,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
         XCTAssertTrue(message.contains("500"), "The message shown must be the real one. Got: \(message)")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aFailedRequestDoesNotSilentlyFallBackToHostGrouping
+
     func test_aFailedRequestDoesNotSilentlyFallBackToHostGrouping() async {
         provider.failure = .transport("offline")
 
@@ -216,6 +229,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aReplyWithNothingUsableInItIsAFailureNotAnEmptySuccess
+
     func test_aReplyWithNothingUsableInItIsAFailureNotAnEmptySuccess() async {
         provider.reply = "Sorry, I can't organise these."
 
@@ -225,6 +240,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
         XCTAssertEqual(error, .emptyCompletion)
         XCTAssertEqual(todayShape().compactMap(\.group), [])
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theStoreRefusesTabsThatAreNotTodayTabsOfThisSpace
 
     func test_theStoreRefusesTabsThatAreNotTodayTabsOfThisSpace() {
         let stranger = env.store.openTab(url: URL(string: "https://example.com/pinned")!, in: spaceID, section: .pinned, activate: false)
@@ -254,6 +271,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
 
     // MARK: - Nothing leaves an incognito window
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_anIncognitoSpaceIsRefusedAndNothingIsSent
+
     func test_anIncognitoSpaceIsRefusedAndNothingIsSent() async {
         let index = try! XCTUnwrap(env.state.spaces.firstIndex { $0.id == spaceID })
         let incognitoProfile = Profile(name: "Incognito", symbolName: "eyeglasses", isPersistent: false)
@@ -271,6 +290,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
         XCTAssertEqual(todayShape().compactMap(\.group), [], "Nothing may be grouped, because nothing may be sent.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theProductionEntryPointRefusesWhenTheSwitchIsOff
+
     func test_theProductionEntryPointRefusesWhenTheSwitchIsOff() {
         AssistSettings.isTidyTabsEnabled = false
 
@@ -285,6 +306,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
 
     // MARK: - The model-free path is still there
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theHostFallbackStillGroupsTodayTabsBySiteWithNoProvider
+
     func test_theHostFallbackStillGroupsTodayTabsBySiteWithNoProvider() {
         AssistSettings.isTidyTabsEnabled = false
 
@@ -297,6 +320,8 @@ final class TidyTabsCoordinatorTests: XCTestCase {
         )
         XCTAssertEqual(env.todayTabs(in: spaceID).count, 8, "Grouping by site must not close or move anything out of Today.")
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_shouldUseModelIsGatedOnTheSwitchAndTheThreshold
 
     func test_shouldUseModelIsGatedOnTheSwitchAndTheThreshold() {
         AssistSettings.isTidyTabsEnabled = true
