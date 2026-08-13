@@ -217,7 +217,7 @@
 	not decode fails closed. Scripts/release doctor and verify reject both.
 	-->
 	<key>SUPublicEDKey</key>
-	<string>6pek9S6kotrKSBRGOKTK6AN2G6sv8FFicpwI6bjWgeY=</string>
+	<string>rssJhOsAtL/2xwfnxWRLlZlWztQnBVvGRAE5jDbZDzQ=</string>
 	<!--
 	Check for updates on a schedule, without asking first.
 
