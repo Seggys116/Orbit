@@ -184,6 +184,25 @@ jobs:
       - name: The archive can actually take an update
         run: Scripts/release verify --app "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app" --structure-only
 
+      # Release is the only configuration that links the shipping engine, and
+      # 1.0.0 shipped unable to launch because nothing ever started one.
+      - name: The Release build actually launches
+        run: |
+          Scripts/app-launch-smoke run \
+            --scheme Orbit \
+            --configuration Release \
+            --attempts 2 \
+            --derived-data "$RUNNER_TEMP/SmokeRelease" \
+            --results-dir "$RUNNER_TEMP/smoke-release"
+
+      - name: Upload the release launch-smoke evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.0
+        with:
+          name: release-launch-smoke
+          path: ${{ runner.temp }}/smoke-release
+          if-no-files-found: warn
+
       - name: Sign for distribution
         env:
           ORBIT_SIGN_KEYCHAIN: ${{ steps.keychain.outputs.keychain }}

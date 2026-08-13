@@ -562,7 +562,7 @@ def build(scheme: Scheme, options: argparse.Namespace, run_directory: str) -> No
         "xcodebuild", "build",
         "-project", os.path.join(REPO_ROOT, "Orbit.xcodeproj"),
         "-scheme", scheme.xcode_scheme,
-        "-configuration", "Debug",
+        "-configuration", options.configuration,
         "-destination", options.destination,
         "-derivedDataPath", options.derived_data,
     ] + options.build_arguments
@@ -644,7 +644,7 @@ def command_run(options: argparse.Namespace) -> int:
     for scheme in schemes:
         if not options.skip_build:
             build(scheme, options, run_directory)
-        app_path = os.path.join(options.derived_data, "Build", "Products", "Debug", scheme.app)
+        app_path = os.path.join(options.derived_data, "Build", "Products", options.configuration, scheme.app)
         if not os.path.isdir(app_path):
             raise SmokeError(
                 f"{app_path} does not exist. Run without --skip-build, or point --derived-data at "
@@ -769,6 +769,9 @@ def build_parser() -> argparse.ArgumentParser:
                           "intermittent, so one launch proves nothing)")
     run.add_argument("--derived-data", default=os.path.join(REPO_ROOT, "DerivedData"))
     run.add_argument("--destination", default="platform=macOS,arch=arm64")
+    # Release is the only configuration that links the shipping engine, and a
+    # release-only fault there is invisible to every Debug run.
+    run.add_argument("--configuration", default="Debug", choices=["Debug", "Release"])
     run.add_argument("--results-dir")
     run.add_argument("--skip-build", action="store_true")
     run.add_argument("--url", help="load this instead of the local marker page; the paint checks "

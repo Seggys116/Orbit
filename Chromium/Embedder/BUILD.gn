@@ -89,6 +89,7 @@ source_set("orbit_lib") {
     "app/orbit_paths_mac.mm",
     "bridge/orbit_bridge_api.cc",
     "bridge/orbit_bridge_api.h",
+    "bridge/orbit_native_event_protocol_mac.mm",
     "bridge/orbit_bridge_internal.h",
     "browser/api/action/orbit_action_api.cc",
     "browser/api/action/orbit_action_api.h",
