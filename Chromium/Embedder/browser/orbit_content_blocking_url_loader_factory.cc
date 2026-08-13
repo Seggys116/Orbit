@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 
+#include "base/byte_size.h"
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
 #include "base/numerics/safe_conversions.h"
@@ -277,8 +278,8 @@ void OrbitContentBlockingURLLoaderFactory::ServeSubstitution(
                                    std::nullopt);
 
   network::URLLoaderCompletionStatus status(net::OK);
-  status.decoded_body_length = static_cast<int64_t>(body.size());
-  status.encoded_body_length = static_cast<int64_t>(body.size());
+  status.decoded_body_length = base::ByteSize(body.size());
+  status.encoded_body_length = base::ByteSize(body.size());
   client_remote->OnComplete(status);
 
   StubURLLoader::Bind(std::move(loader));

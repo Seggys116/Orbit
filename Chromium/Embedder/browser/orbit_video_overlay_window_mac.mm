@@ -389,7 +389,7 @@ class OrbitVideoOverlayWindowMac : public content::VideoOverlayWindow,
   std::unique_ptr<Native> native_;
   std::unique_ptr<ui::RecyclableCompositorMac> compositor_;
   std::unique_ptr<ui::DisplayCALayerTree> display_ca_layer_tree_;
-  std::unique_ptr<ui::Layer> root_layer_;
+  std::unique_ptr<ui::LayerSolidColor> root_layer_;
   std::unique_ptr<ui::Layer> video_layer_;
 
   gfx::Size natural_size_;
@@ -520,11 +520,11 @@ void OrbitVideoOverlayWindowMac::BuildWindow() {
 
   compositor_ =
       std::make_unique<ui::RecyclableCompositorMac>(content::GetContextFactory());
-  root_layer_ = std::make_unique<ui::Layer>(ui::LAYER_SOLID_COLOR);
-  root_layer_->SetColor(SK_ColorBLACK);
+  root_layer_ = std::make_unique<ui::LayerSolidColor>();
+  root_layer_->SetColor(SkColors::kBlack);
   root_layer_->SetBounds(
       gfx::Rect(gfx::Size(kMinContentWidth, kMinContentHeight)));
-  video_layer_ = std::make_unique<ui::Layer>(ui::LAYER_TEXTURED);
+  video_layer_ = std::make_unique<ui::LayerTextured>();
   video_layer_->SetFillsBoundsOpaquely(true);
   video_layer_->SetBounds(root_layer_->bounds());
   root_layer_->Add(video_layer_.get());
@@ -601,7 +601,7 @@ void OrbitVideoOverlayWindowMac::UpdateCompositorSurface() {
                              display.GetColorSpaces(), display.id());
   root_layer_->SetBounds(gfx::Rect(size_in_dip));
   video_layer_->SetBounds(gfx::Rect(size_in_dip));
-  if (video_layer_->has_external_content()) {
+  if (video_layer_->HasExternalContent()) {
     video_layer_->SetSurfaceSize(size_in_dip);
   }
 }
@@ -611,7 +611,7 @@ void OrbitVideoOverlayWindowMac::PushSurfaceToLayer() {
     return;
   }
   video_layer_->SetShowSurface(surface_id_, root_layer_->bounds().size(),
-                               SK_ColorBLACK,
+                               SkColors::kBlack,
                                cc::DeadlinePolicy::UseDefaultDeadline(),
                                /*stretch_content_to_fill_bounds=*/true);
 }

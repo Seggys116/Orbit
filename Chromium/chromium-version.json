@@ -40,10 +40,22 @@
     "release_tag": "chromium-152.0.7977.42",
     "configs": {
       "dcheck": {
-        "platforms": {}
+        "platforms": {
+          "macosarm64": {
+            "asset": "orbit-chromium-152.0.7977.42-macosarm64-dcheck.tar.xz",
+            "sha256": "bb4e276d9c3395d43007210a55740621a371d88318e0d95ce2fd1f89dc765d39",
+            "size": 94524012
+          }
+        }
       },
       "shipping": {
-        "platforms": {}
+        "platforms": {
+          "macosarm64": {
+            "asset": "orbit-chromium-152.0.7977.42-macosarm64-shipping.tar.xz",
+            "sha256": "4c369da5b37c6ad3c2cd77bcfc9f5a2603290a13884ad63c59a4d69a4f692e43",
+            "size": 72413368
+          }
+        }
       }
     }
   }

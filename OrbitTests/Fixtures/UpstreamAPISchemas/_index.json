@@ -29,7 +29,7 @@
     "  for them, and can work out which permissions an ordinary extension can",
     "  really end up holding."
   ],
-  "chromium_version": "151.0.7922.138",
+  "chromium_version": "152.0.7977.42",
   "chrome_namespaces": [
     "accessibilityFeatures",
     "accessibilityPrivate",
@@ -67,7 +67,6 @@
     "devtools.recorder",
     "dictationPrivate",
     "documentScan",
-    "dom",
     "downloads",
     "downloadsInternal",
     "echoPrivate",
@@ -94,7 +93,6 @@
     "glicPrivate",
     "history",
     "identity",
-    "idltest",
     "imageLoaderPrivate",
     "imageWriterPrivate",
     "indigoPrivate",
@@ -123,7 +121,6 @@
     "printingMetrics",
     "privacy",
     "processes",
-    "proxy",
     "proxyOverrideRulesPrivate",
     "quickUnlockPrivate",
     "readingList",
@@ -151,7 +148,6 @@
     "webNavigation",
     "webrtcDesktopCapturePrivate",
     "webrtcLoggingPrivate",
-    "webstorePrivate",
     "webviewTag",
     "windows",
     "wmDesksPrivate"
@@ -176,6 +172,7 @@
     "declarativeWebRequest",
     "diagnostics",
     "dns",
+    "dom",
     "events",
     "extensionOptionsInternal",
     "extensionTypes",
@@ -200,6 +197,7 @@
     "power",
     "printerProvider",
     "printerProviderInternal",
+    "proxy",
     "requirements",
     "runtime",
     "scripting",
@@ -226,7 +224,8 @@
     "webRequestInternal",
     "webViewInternal",
     "webViewRequest",
-    "webcamPrivate"
+    "webcamPrivate",
+    "webstorePrivate"
   ],
   "chrome_permissions": [
     "accessibilityFeatures.modify",
@@ -287,7 +286,6 @@
     "history",
     "identity",
     "identity.email",
-    "idltest",
     "imageLoaderPrivate",
     "imageWriterPrivate",
     "indigoPrivate",
@@ -312,7 +310,6 @@
     "printingMetrics",
     "privacy",
     "processes",
-    "proxy",
     "proxyOverrideRulesPrivate",
     "readingList",
     "resourcesPrivate",
@@ -385,6 +382,7 @@
     "omnibox.directInput",
     "power",
     "printerProvider",
+    "proxy",
     "runtime",
     "serial",
     "socket",
@@ -459,6 +457,7 @@
     "printerProvider",
     "printing",
     "printingMetrics",
+    "proxy",
     "serial",
     "socket",
     "speechRecognitionPrivate",
@@ -491,12 +490,12 @@
     "action.json": "b7ae92c0449c015f3990939b2aff7be545523a8bd9ccc40ede378e8e5cca90b7",
     "cookies.json": "55af34867fdeb62e97edf8d28c83acaec076f131ecd44713c54fc65be10ca768",
     "permissions.json": "56266a7c00ea2d65264971f71188bb105744b8182ba31883572bb20cc1acd697",
-    "privacy.json": "c4f2bbf72d820f9ab6f357fef54bb91eb24dc510abef72097a3576cae8b1b47b",
+    "privacy.json": "7609b9d2e85deb0c19541d1fcbe75b2a759ba62e29da1f54382d72287c097690",
     "tabs.json": "cb79c30061945188f8ceaf70f162b8b608f341590deb992ac3a65fb6a698f4e7",
     "web_navigation.json": "1b3effc46899635fa268124d912f563aedde7be738bcba2ac2b6b08b8228d1e5",
     "webstore_private.json": "ff2498e96282e85fca63591c77d159ae0b90a6bf7cb387f5a15b597800c09776",
     "windows.json": "08fa616a5a228dc4d3b016f8824a8f9d6162c415372fc387a781fa2fb2f790e0",
-    "_chrome_permission_features.json": "a0176fbb8a4894f3e0677a87d3944535936b9c4b2a21a2de00c4b6176bfbd15d",
-    "_core_permission_features.json": "f52919e50be9698c4fb2d3b19aa9bf8ff61bfb4836700447676a7dd76ff3d0db"
+    "_chrome_permission_features.json": "ba6a2eb8a1ea90ca2a8262ccb0cbb4f7adc167d8bc2ed7c543b97aadc5454802",
+    "_core_permission_features.json": "be021aed3542345b292ec2e4ec06b85094ce9efc1d382fc0b0e65a2f7ef34a8e"
   }
 }

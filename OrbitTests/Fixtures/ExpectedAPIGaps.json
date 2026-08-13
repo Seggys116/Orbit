@@ -30,7 +30,7 @@
     "OrbitTests/Fixtures/EventLiveness.json plus ChromiumExtensionEventLivenessLiveTests",
     "exist to catch. An event listed here must also be listed as notDispatched there."
   ],
-  "chromium_version": "151.0.7922.138",
+  "chromium_version": "152.0.7977.42",
   "neverDispatchedEvents": [
     "action.onClicked",
     "tabs.onReplaced",
@@ -169,10 +169,6 @@
       "status": "absent",
       "reason": "outOfScope"
     },
-    "dom": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
     "downloads": {
       "status": "absent",
       "reason": "notPorted"
@@ -277,10 +273,6 @@
       "status": "absent",
       "reason": "notPorted"
     },
-    "idltest": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
     "imageLoaderPrivate": {
       "status": "absent",
       "reason": "chromeInternal"
@@ -382,10 +374,6 @@
       "reason": "chromeInternal"
     },
     "processes": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "proxy": {
       "status": "absent",
       "reason": "notPorted"
     },
@@ -715,7 +703,6 @@
     "history",
     "identity",
     "identity.email",
-    "idltest",
     "imageLoaderPrivate",
     "imageWriterPrivate",
     "indigoPrivate",
@@ -738,7 +725,6 @@
     "printing",
     "printingMetrics",
     "processes",
-    "proxy",
     "proxyOverrideRulesPrivate",
     "readingList",
     "resourcesPrivate",
