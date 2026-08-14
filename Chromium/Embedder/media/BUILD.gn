@@ -1,0 +1,61 @@
+# Copyright 2026 The Orbit Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+#
+# ":audio_toolbox_aac" is depended on by //media/mojo/services (see
+# chromium_manager.py: patch_gpu_mojo_media_client_mac()), so nothing here may
+# reach //content or //orbit:orbit_framework -- that would be a dependency
+# cycle. //media only.
+
+import("//media/media_options.gni")
+import("//testing/test.gni")
+
+assert(is_mac, "Orbit's platform audio decoder is macOS-only.")
+assert(proprietary_codecs,
+       "AAC demuxing and mp4::AAC only exist with proprietary_codecs = true; " +
+           "see Chromium/chromium-version.json's platform_codecs.")
+
+source_set("codec_support") {
+  sources = [
+    "orbit_codec_support.cc",
+    "orbit_codec_support.h",
+  ]
+  deps = [
+    "//base",
+    "//media",
+    "//orbit:media_buildflags",
+  ]
+}
+
+source_set("audio_toolbox_aac") {
+  sources = [
+    "orbit_audio_toolbox_aac_decoder.cc",
+    "orbit_audio_toolbox_aac_decoder.h",
+  ]
+  frameworks = [ "AudioToolbox.framework" ]
+  deps = [
+    "//base",
+    "//media",
+  ]
+}
+
+# Not reached from //orbit:orbit, so a shipping build never pays for it. Build
+# and run it with: autoninja -C out/<dir> orbit_media_unittests &&
+# out/<dir>/orbit_media_unittests
+test("orbit_media_unittests") {
+  sources = [
+    "orbit_aac_test_streams.h",
+    "orbit_audio_toolbox_aac_decoder_unittest.cc",
+    "orbit_codec_support_unittest.cc",
+  ]
+  frameworks = [ "AudioToolbox.framework" ]
+  deps = [
+    ":audio_toolbox_aac",
+    ":codec_support",
+    "//base",
+    "//base/test:run_all_unittests",
+    "//base/test:test_support",
+    "//media",
+    "//testing/gtest",
+  ]
+}

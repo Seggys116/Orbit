@@ -7,11 +7,9 @@
 #include "extensions/common/constants.h"
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/extensions_renderer_client.h"
-#include "media/base/audio_codecs.h"
 #include "media/base/media_types.h"
-#include "media/base/video_codecs.h"
 #include "orbit/common/orbit_extensions_client.h"
-#include "orbit/orbit_media_buildflags.h"
+#include "orbit/media/orbit_codec_support.h"
 #include "orbit/renderer/orbit_extensions_renderer_api_provider.h"
 #include "orbit/renderer/orbit_extensions_renderer_client.h"
 #include "orbit/renderer/orbit_render_frame_observer.h"
@@ -56,66 +54,14 @@ void OrbitContentRendererClient::RenderFrameCreated(
 
 bool OrbitContentRendererClient::IsDecoderSupportedAudioType(
     const media::AudioType& type) {
-  switch (type.codec) {
-    case media::AudioCodec::kAAC:
-#if !BUILDFLAG(ORBIT_BUNDLED_PROPRIETARY_DECODERS)
-      // AudioToolbox is registered for xHE-AAC only; AAC-LC has no decoder.
-      if (type.profile != media::AudioCodecProfile::kXHE_AAC) {
-        return false;
-      }
-#endif
-      break;
-    case media::AudioCodec::kUnknown:
-    case media::AudioCodec::kMP3:
-    case media::AudioCodec::kPCM:
-    case media::AudioCodec::kVorbis:
-    case media::AudioCodec::kFLAC:
-    case media::AudioCodec::kAMR_NB:
-    case media::AudioCodec::kAMR_WB:
-    case media::AudioCodec::kPCM_MULAW:
-    case media::AudioCodec::kGSM_MS:
-    case media::AudioCodec::kPCM_S16BE:
-    case media::AudioCodec::kPCM_S24BE:
-    case media::AudioCodec::kOpus:
-    case media::AudioCodec::kEAC3:
-    case media::AudioCodec::kPCM_ALAW:
-    case media::AudioCodec::kALAC:
-    case media::AudioCodec::kAC3:
-    case media::AudioCodec::kMpegHAudio:
-    case media::AudioCodec::kDTS:
-    case media::AudioCodec::kDTSXP2:
-    case media::AudioCodec::kDTSE:
-    case media::AudioCodec::kAC4:
-    case media::AudioCodec::kIAMF:
-      break;
-  }
-  return content::ContentRendererClient::IsDecoderSupportedAudioType(type);
+  return OrbitSupportsDecodingAudio(
+      type, content::ContentRendererClient::IsDecoderSupportedAudioType(type));
 }
 
 bool OrbitContentRendererClient::IsDecoderSupportedVideoType(
     const media::VideoType& type) {
-  switch (type.codec) {
-    case media::VideoCodec::kH264:
-#if !BUILDFLAG(ORBIT_BUNDLED_PROPRIETARY_DECODERS)
-      // VideoToolbox registers BASELINE..HIGH, with no software fallback.
-      if (type.profile > media::H264PROFILE_HIGH) {
-        return false;
-      }
-#endif
-      break;
-    case media::VideoCodec::kUnknown:
-    case media::VideoCodec::kVC1:
-    case media::VideoCodec::kMPEG2:
-    case media::VideoCodec::kMPEG4:
-    case media::VideoCodec::kTheora:
-    case media::VideoCodec::kVP8:
-    case media::VideoCodec::kVP9:
-    case media::VideoCodec::kHEVC:
-    case media::VideoCodec::kAV1:
-    case media::VideoCodec::kDolbyVision:
-      break;
-  }
-  return content::ContentRendererClient::IsDecoderSupportedVideoType(type);
+  return OrbitSupportsDecodingVideo(
+      type, content::ContentRendererClient::IsDecoderSupportedVideoType(type));
 }
 
 void OrbitContentRendererClient::RunScriptsAtDocumentStart(

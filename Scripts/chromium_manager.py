@@ -65,6 +65,35 @@ ENGINE_MARKER_PREFIX = b"orbit-engine-build: dcheck="
 EMBEDDER_SOURCE_DIR = os.path.join(REPO_ROOT, "Chromium", "Embedder")
 EMBEDDER_SYMLINK = os.path.join(CHROMIUM_SRC, "orbit")
 
+ORBIT_GPU_MEDIA_MARKER = "orbit/media/orbit_audio_toolbox_aac_decoder.h"
+ORBIT_GPU_MEDIA_REPLACEMENTS = (
+    (
+        '#include "media/filters/mac/audio_toolbox_audio_decoder.h"',
+        '#include "media/filters/mac/audio_toolbox_audio_decoder.h"\n'
+        '#include "orbit/media/orbit_audio_toolbox_aac_decoder.h"',
+    ),
+    (
+        "    SupportedAudioDecoderConfigs audio_configs;\n"
+        "    audio_configs.emplace_back(AudioCodec::kAAC, AudioCodecProfile::kXHE_AAC);",
+        "    SupportedAudioDecoderConfigs audio_configs =\n"
+        "        orbit::OrbitSupportedMacAudioDecoderConfigs();",
+    ),
+    (
+        "    return std::make_unique<AudioToolboxAudioDecoder>(std::move(media_log));",
+        "    return orbit::CreateOrbitMacAudioDecoder(std::move(media_log));",
+    ),
+)
+ORBIT_GPU_MEDIA_BUILD_MARKER = '"//orbit/media:audio_toolbox_aac"'
+ORBIT_GPU_MEDIA_BUILD_ORIGINAL = (
+    "  } else if (is_apple) {\n"
+    '    sources += [ "gpu_mojo_media_client_mac.cc" ]'
+)
+ORBIT_GPU_MEDIA_BUILD_REPLACEMENT = (
+    "  } else if (is_apple) {\n"
+    '    sources += [ "gpu_mojo_media_client_mac.cc" ]\n'
+    '    deps += [ "//orbit/media:audio_toolbox_aac" ]'
+)
+
 ORBIT_MEDIA_ASSERT_MARKER = "# --- Orbit: platform decoders, no bundled ffmpeg decoders ---"
 ORBIT_MEDIA_ASSERT_ORIGINAL = """if (proprietary_codecs && media_use_ffmpeg) {
   assert(
@@ -1046,6 +1075,7 @@ def checkout_chromium(manifest: dict, env: dict, force: bool) -> None:
         link_embedder_source()
         patch_root_build_gn()
         patch_media_codec_assert()
+        patch_gpu_mojo_media_client_mac()
         return
 
     info(f"Syncing Chromium {manifest['chromium_version']} (--no-history)")
@@ -1064,6 +1094,7 @@ def checkout_chromium(manifest: dict, env: dict, force: bool) -> None:
     link_embedder_source()
     patch_root_build_gn()
     patch_media_codec_assert()
+    patch_gpu_mojo_media_client_mac()
 
 def link_embedder_source() -> None:
     """Makes //orbit resolve, inside the checkout, to Orbit's own repo-owned GN+C++ tree.
@@ -1118,6 +1149,38 @@ def patch_media_codec_assert() -> None:
         )
     with open(media_build_gn, "w", encoding="utf-8") as handle:
         handle.write(contents.replace(ORBIT_MEDIA_ASSERT_ORIGINAL, ORBIT_MEDIA_ASSERT_REPLACEMENT))
+
+def patch_gpu_mojo_media_client_mac() -> None:
+    """AAC-LC decodes through AudioToolbox in the GPU process; the renderer sandbox denies it,
+    and upstream offers no embedder hook for the platform decoder list."""
+    client = os.path.join(CHROMIUM_SRC, "media", "mojo", "services", "gpu_mojo_media_client_mac.cc")
+    build = os.path.join(CHROMIUM_SRC, "media", "mojo", "services", "BUILD.gn")
+    for path in (client, build):
+        if not os.path.isfile(path):
+            die(f"Missing {os.path.relpath(path, REPO_ROOT)}; this checkout is incomplete.")
+
+    with open(client, encoding="utf-8") as handle:
+        contents = handle.read()
+    if ORBIT_GPU_MEDIA_MARKER not in contents:
+        for original, replacement in ORBIT_GPU_MEDIA_REPLACEMENTS:
+            if original not in contents:
+                die(
+                    "gpu_mojo_media_client_mac.cc no longer contains:\n"
+                    f"{original}\n"
+                    "Re-read it before assuming Orbit's AAC decoder still registers."
+                )
+            contents = contents.replace(original, replacement, 1)
+        with open(client, "w", encoding="utf-8") as handle:
+            handle.write(contents)
+
+    with open(build, encoding="utf-8") as handle:
+        contents = handle.read()
+    if ORBIT_GPU_MEDIA_BUILD_MARKER in contents:
+        return
+    if ORBIT_GPU_MEDIA_BUILD_ORIGINAL not in contents:
+        die("media/mojo/services/BUILD.gn no longer has the is_apple sources block this patch extends.")
+    with open(build, "w", encoding="utf-8") as handle:
+        handle.write(contents.replace(ORBIT_GPU_MEDIA_BUILD_ORIGINAL, ORBIT_GPU_MEDIA_BUILD_REPLACEMENT, 1))
 
 def pgo_target(platform_key: str) -> str:
     return "mac-arm" if gn_target_cpu(platform_key) == "arm64" else "mac"

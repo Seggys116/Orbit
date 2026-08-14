@@ -314,6 +314,7 @@ source_set("orbit_lib") {
     "//extensions/renderer/resources:extensions_renderer_resources",
     "//orbit/common/api",
     "//orbit/common/api:webstore_private_api",
+    "//orbit/media:codec_support",
     "//gin",
     "//media",
     "//mojo/public/cpp/bindings",
