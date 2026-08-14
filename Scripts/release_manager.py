@@ -34,6 +34,7 @@ GENERATED_XCCONFIG = os.path.join(REPO_ROOT, "Chromium", "Generated", "Chromium.
 DEFAULT_WORK_DIR = os.path.join(REPO_ROOT, "build", "release")
 
 SPARKLE_FRAMEWORK_NAME = "Sparkle.framework"
+ENGINE_FRAMEWORK_NAME = "Orbit Framework.framework"
 
 SPARKLE_XPC_SERVICES = ("Downloader.xpc", "Installer.xpc")
 SPARKLE_XPC_PLIST_KEYS = (
@@ -1564,6 +1565,31 @@ def cmd_sign(args) -> int:
 
     sign(sparkle, label=SPARKLE_FRAMEWORK_NAME)
 
+    # 1b. The engine's helper bundles, each with its own entitlements. Signed as
+    # bundles, not as the loose executables step 2 would otherwise find: without
+    # allow-jit the renderer's V8 and the GPU's shader compiler cannot allocate
+    # executable memory under the hardened runtime, and every page stays blank.
+    helpers_dir = os.path.join(
+        frameworks_dir, ENGINE_FRAMEWORK_NAME, "Versions", "A", "Helpers"
+    )
+    helper_prefixes = []
+    if os.path.isdir(helpers_dir):
+        roles_by_display = {role.display: role for role in HELPER_ROLES}
+        for entry in sorted(os.listdir(helpers_dir)):
+            bundle = os.path.join(helpers_dir, entry)
+            if not entry.endswith(".app") or not os.path.isdir(bundle):
+                continue
+            role = roles_by_display.get(entry)
+            if role is None:
+                die(
+                    f"{entry} is embedded but no SignedRole describes it, so it "
+                    "would be signed with the hardened runtime and no "
+                    "entitlements. Add a role for it rather than shipping a "
+                    "helper whose permissions nobody chose."
+                )
+            sign(bundle, role.path, label=f"{entry}  ({', '.join(role.entitlements)})")
+            helper_prefixes.append(bundle + os.sep)
+
     # 2. Anything else Mach-O not signed above; the outer bundle would otherwise seal it unsigned.
     for path in nested_machos(app):
         if path in signed_paths:
@@ -1572,6 +1598,9 @@ def cmd_sign(args) -> int:
             continue
         # Sparkle was sealed as bundles in step 1; re-signing its executables here would undo that ordering.
         if path.startswith(sparkle + os.sep):
+            continue
+        # Same for the helper bundles sealed in step 1b.
+        if any(path.startswith(prefix) for prefix in helper_prefixes):
             continue
         sign(path, label=f"{os.path.relpath(path, app)}  (additional nested code)")
 

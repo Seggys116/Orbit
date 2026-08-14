@@ -184,13 +184,28 @@ jobs:
       - name: The archive can actually take an update
         run: Scripts/release verify --app "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app" --structure-only
 
-      # Release is the only configuration that links the shipping engine, and
-      # 1.0.0 shipped unable to launch because nothing ever started one.
-      - name: The Release build actually launches
+      - name: Sign for distribution
+        env:
+          ORBIT_SIGN_KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
         run: |
+          APP="$RUNNER_TEMP/export/Orbit.app"
+          mkdir -p "$RUNNER_TEMP/export"
+          ditto "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app" "$APP"
+          Scripts/sign-app.sh "$APP" "$IDENTITY"
+
+      # The signed bundle, not a fresh Release build: the hardened runtime and
+      # the helper entitlements only exist here, and 1.0.1 shipped with every
+      # renderer dying on JIT because nothing ever launched what was signed.
+      - name: The signed app actually launches
+        run: |
+          PRODUCTS="$RUNNER_TEMP/SmokeRelease/Build/Products/Release"
+          mkdir -p "$PRODUCTS"
+          ditto "$RUNNER_TEMP/export/Orbit.app" "$PRODUCTS/Orbit.app"
           Scripts/app-launch-smoke run \
             --scheme Orbit \
             --configuration Release \
+            --skip-build \
             --attempts 2 \
             --derived-data "$RUNNER_TEMP/SmokeRelease" \
             --results-dir "$RUNNER_TEMP/smoke-release"
@@ -202,16 +217,6 @@ jobs:
           name: release-launch-smoke
           path: ${{ runner.temp }}/smoke-release
           if-no-files-found: warn
-
-      - name: Sign for distribution
-        env:
-          ORBIT_SIGN_KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
-          IDENTITY: ${{ steps.keychain.outputs.identity }}
-        run: |
-          APP="$RUNNER_TEMP/export/Orbit.app"
-          mkdir -p "$RUNNER_TEMP/export"
-          ditto "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app" "$APP"
-          Scripts/sign-app.sh "$APP" "$IDENTITY"
 
       - name: Notarise and staple the app
         env:
