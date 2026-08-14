@@ -1396,6 +1396,9 @@ private final class ContinuationBox<T> {
     init(continuation: CheckedContinuation<T, Never>) {
         self.continuation = continuation
     }
+
+    // See AtomicJSONFileWriter: explicit, to step around the 26.6 optimiser crash.
+    deinit {}
 }
 
 // MARK: - Callback struct mirror

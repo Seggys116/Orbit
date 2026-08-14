@@ -19,6 +19,9 @@ private final class WebContentsHostContainerView: NSView {
 
 // hitTest always returns nil so this overlay never swallows a page click.
 private final class PageOverlayHostingView<Content: View>: NSHostingView<Content> {
+    // See AtomicJSONFileWriter: explicit, to step around the 26.6 optimiser crash.
+    deinit {}
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override var mouseDownCanMoveWindow: Bool { false }
 

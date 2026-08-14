@@ -17,6 +17,10 @@ final class AtomicJSONFileWriter<Value: Codable & Sendable> {
         self.maximumSaveDelay = maximumSaveDelay
     }
 
+    // Xcode 26.6's EarlyPerfInliner crashes on the synthesised destructor of a
+    // generic class at a 14.6 deployment target. An explicit one steps around it.
+    deinit {}
+
     func loadNow(default defaultValue: Value) -> Value {
         guard let data = try? Data(contentsOf: fileURL) else { return defaultValue }
         let decoder = JSONDecoder()
