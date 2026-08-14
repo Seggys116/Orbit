@@ -28,9 +28,11 @@
 # and dlopen is what applies in every configuration, component build or not.
 
 import("//build/apple/tweak_info_plist.gni")
+import("//build/buildflag_header.gni")
 import("//build/config/mac/rules.gni")
 import("//content/public/app/mac_helpers.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
+import("//third_party/ffmpeg/ffmpeg_options.gni")
 import("//third_party/icu/config.gni")
 import("//tools/grit/repack.gni")
 import("//tools/v8_context_snapshot/v8_context_snapshot.gni")
@@ -54,6 +56,17 @@ group("orbit") {
 executable("orbit_selftest") {
   sources = [ "app/orbit_selftest_main.cc" ]
   deps = [ ":orbit_framework" ]
+}
+
+# "Chrome" branding is what puts ffmpeg's H.264/AAC decoders in the binary;
+# proprietary_codecs alone only advertises them.
+orbit_bundled_proprietary_decoders = ffmpeg_branding == "Chrome"
+
+buildflag_header("media_buildflags") {
+  header = "orbit_media_buildflags.h"
+  flags = [
+    "ORBIT_BUNDLED_PROPRIETARY_DECODERS=$orbit_bundled_proprietary_decoders",
+  ]
 }
 
 # Browser<->renderer wiring for user-script injection and the page->native
@@ -167,8 +180,16 @@ source_set("orbit_lib") {
     "browser/orbit_management_api_delegate.h",
     "browser/orbit_messaging_delegate.cc",
     "browser/orbit_messaging_delegate.h",
+    "browser/orbit_native_message_port_dispatcher.cc",
+    "browser/orbit_native_message_port_dispatcher.h",
+    "browser/orbit_native_message_process_host.cc",
+    "browser/orbit_native_message_process_host.h",
+    "browser/orbit_native_messaging_host_manifest.cc",
+    "browser/orbit_native_messaging_host_manifest.h",
     "browser/orbit_native_nested_loop_guard.h",
     "browser/orbit_native_nested_loop_guard.mm",
+    "browser/orbit_native_process_launcher.cc",
+    "browser/orbit_native_process_launcher.h",
     "browser/orbit_permission_controller_delegate.cc",
     "browser/orbit_permission_controller_delegate.h",
     "browser/orbit_permission_store.cc",
@@ -231,6 +252,7 @@ source_set("orbit_lib") {
     "renderer/orbit_tabs_hooks_delegate.h",
   ]
   deps = [
+    ":media_buildflags",
     ":mojo_bindings",
     "//base/version_info",
     "//cc",
@@ -293,6 +315,7 @@ source_set("orbit_lib") {
     "//orbit/common/api",
     "//orbit/common/api:webstore_private_api",
     "//gin",
+    "//media",
     "//mojo/public/cpp/bindings",
     "//mojo/public/js:resources",
     "//net",

@@ -38,7 +38,7 @@ final class TodayNewTabRowPositionTests: XCTestCase {
             env.openTab(url: URL(string: "https://example\(index).com")!, in: space.id)
         }
 
-        let view = TodaySectionView(spaceID: space.id, theme: Self.lightTheme, revealsBroom: false)
+        let view = TodaySectionView(spaceID: space.id, theme: Self.lightTheme)
             .environment(env)
             // The + New Tab row is an NSViewRepresentable, which ImageRenderer paints as a
             // saturated block; suppressed here the same way the screenshot generator does it.
@@ -92,6 +92,27 @@ final class TodayNewTabRowPositionTests: XCTestCase {
             arc-sidebar-today-list-clear.png, arc-hover-preview-pinned-tab.png, and frame 0 of \
             web/arc-library-window-sections-tour.gif. With the row at the bottom of the list instead, the affordance slides \
             down the sidebar as the user accumulates tabs.
+            """
+        )
+    }
+
+    func test_aTidyableTodayList_reservesNoEmptyBandAboveTheNewTabRow() {
+        let empty = renderTodaySection(todayTabCount: 0)
+        let tidyable = renderTodaySection(todayTabCount: AssistRuntime.tidyTabsMinimumTabs + 1)
+
+        XCTAssertTrue(
+            imagesDifferAnywhere(empty, tidyable),
+            "Filling Today past the Tidy Tabs threshold must change the render somewhere, or the band comparison below would pass vacuously."
+        )
+
+        let bandHeight = Int(OrbitMetrics.sidebarRowHeight.rounded(.down))
+        XCTAssertTrue(
+            topBandIsIdentical(empty, tidyable, height: bandHeight),
+            """
+            Crossing the Tidy Tabs threshold pushed `+ New Tab` down the sidebar. The Today section used to grow a \
+            broom row above it — a full band of height holding one 15pt glyph, invisible until the pointer entered \
+            the sidebar, which read as an unexplained empty gap under the Clear divider. The broom belongs on \
+            TodayDividerRow beside Clear, where the row's fixed height already pays for it.
             """
         )
     }

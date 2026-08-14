@@ -88,6 +88,7 @@
 		0CC9C5601D92E557A6720043 /* FirefoxImportReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1574C05F3926D651362080B5 /* FirefoxImportReader.swift */; };
 		0CD43FF1392A4642BD33BCCE /* ChatGPTCommandBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80509E2D2540CD2C4F61459F /* ChatGPTCommandBar.swift */; };
 		0CF561D883C87B42C1C29AD1 /* TabRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55A71BE7F6632000CCD0B9B3 /* TabRowView.swift */; };
+		0D01BF0B6D7C0147C045D90A /* ArcFaviconReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B795FF1E95FA877A4B8B839 /* ArcFaviconReader.swift */; };
 		0DAF7ACD79D3F993A47D983C /* LiveCalendarModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE24966DEE147179EFFF3525 /* LiveCalendarModels.swift */; };
 		0E2D280C035EAAD2D8C2D56F /* LinksSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05FD1AF3677C36011A114813 /* LinksSettingsPane.swift */; };
 		0E565DBDDC51BAA0B3C3358E /* OrbitTitleBarDoubleClick.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C8D8ED4C644ADAB14A0571A /* OrbitTitleBarDoubleClick.swift */; };
@@ -198,6 +199,7 @@
 		212E7BAEF8EEB200CD84DF5C /* LinkPreviewFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BB1855773C3782DFFD0B5CC /* LinkPreviewFetcher.swift */; };
 		216C17D2ACB80F2EC43F2242 /* OrbitContextMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 072D2640800686379286D538 /* OrbitContextMenuView.swift */; };
 		217C4407683F9752D17B1CE6 /* ThemeBackgroundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C8465ADDDB9F143A4B5A45 /* ThemeBackgroundView.swift */; };
+		21E875D752F39D59CDBBF04C /* SpaceSwipeScrollPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D311DC2133FA36EB04801FD9 /* SpaceSwipeScrollPathTests.swift */; };
 		220CBEAEE6D7C25D090726B6 /* GitHubMarkShapeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8C1D140C3C9B38F3AE71615 /* GitHubMarkShapeTests.swift */; };
 		221B55080118ED398F62D0E2 /* GitHubLiveFolderRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87EFF9B915F4375AEBFBDBDE /* GitHubLiveFolderRowView.swift */; };
 		224A957AC2E51A8700BE0696 /* AppEnvironment+TornOffWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3482D4D554A934EE9BDFFD5A /* AppEnvironment+TornOffWindow.swift */; };
@@ -634,6 +636,7 @@
 		7C9D5FDB2F1C02EB6117FE1B /* ChromiumExtensionWebSocketWebRequestLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43754570066B7A5DC3F5DAD7 /* ChromiumExtensionWebSocketWebRequestLiveTests.swift */; };
 		7CA12129C84EA3B9D4259233 /* OrbitScreenshotMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA236F6D2559254FC4FE21F /* OrbitScreenshotMode.swift */; };
 		7CCA7AD51E930F2AFD11626F /* RenderHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = BECA9CED130AD15DDDF1DF3B /* RenderHarness.swift */; };
+		7CD95A828B711CEC0D27EB03 /* SidebarSurvivesRelaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468AA39168356EF207AE57D2 /* SidebarSurvivesRelaunchTests.swift */; };
 		7CDEA601B0437E3AA29B77BB /* SidebarNewTabRowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A1A6E12E7292476B591024 /* SidebarNewTabRowTests.swift */; };
 		7D6DB2A256FCC8554B5DEC99 /* PinnedTabResetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4C5CE3EF6B47F0E6E83429 /* PinnedTabResetTests.swift */; };
 		7D8280CDED29E2DCC5D63988 /* StandardEditSubmenus.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF7F1EFA0DEFA0C4BBFA86C /* StandardEditSubmenus.swift */; };
@@ -917,6 +920,7 @@
 		B5FDCCBBF71607BFAC74C6AB /* ChromiumEngineSurfaceLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBDFD973213DEA7247FB074C /* ChromiumEngineSurfaceLiveTests.swift */; };
 		B620569883658B5FECAAF10C /* PriorityInversionPrimitiveGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 956B3F412C45765FAAE87F8D /* PriorityInversionPrimitiveGuardTests.swift */; };
 		B68CF5E155259814EC721728 /* OrbitDemoAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0226FF130402B0BFC517E4D5 /* OrbitDemoAppDelegate.swift */; };
+		B6B944D05F074B01DD110193 /* ArcFaviconReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 407BD78F8FA219204CFDBC34 /* ArcFaviconReader.swift */; };
 		B6C78A30B14BBA7DBD56BF62 /* SpaceThemePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EED8AC294786EB8A733335C /* SpaceThemePalette.swift */; };
 		B71B9E6C75E289D534BD6C9A /* OrbitButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9061CA5A6DED86E83B810160 /* OrbitButton.swift */; };
 		B87D7429F77632609DCCF934 /* NoteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39935D3F2D5AA7D14FF7E7A5 /* NoteStore.swift */; };
@@ -1046,6 +1050,7 @@
 		D2D2A2648FB42A9C940E81C0 /* FavoritesGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42898B5ED222B39542358DC5 /* FavoritesGridView.swift */; };
 		D325FDBE28C5080209A3EDD2 /* LibraryMediaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8480A0245797B3C92A47AADF /* LibraryMediaView.swift */; };
 		D3450D952F5EFF80F84C3402 /* GitHubLiveFolderSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 169228EAFF5454AEC732AD83 /* GitHubLiveFolderSource.swift */; };
+		D3AD53C673104FFAF47A9F88 /* ArcFaviconReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B795FF1E95FA877A4B8B839 /* ArcFaviconReader.swift */; };
 		D3C57112B2F61930D4E2659D /* SplitViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DB8B72F03516C111FE2412F /* SplitViewContainer.swift */; };
 		D425F172F6147A2722208343 /* ProfilesSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FCC066C6866CB3E7DCA4D60 /* ProfilesSettingsPane.swift */; };
 		D4490D4A05E13EE94F3DD79B /* ContentBlockingCosmeticCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9906A053C7BB4A83719F8459 /* ContentBlockingCosmeticCacheTests.swift */; };
@@ -1182,6 +1187,7 @@
 		EB9DCAB1FC3BD6E69300EA52 /* SettingsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A7CC4A511CC14B36F42088B /* SettingsSidebarView.swift */; };
 		EBA5EDE2B096C5421029733F /* GitHubLiveFolderSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 277A2A03BD3A9C078E700F28 /* GitHubLiveFolderSourceTests.swift */; };
 		EBC2BC93C62764CFD91A35A0 /* SpaceSwipeGestureCatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FB402D21F1A4A949FC81AA /* SpaceSwipeGestureCatcher.swift */; };
+		EBED6FD1EDD67A763E80B3FA /* ArcFaviconReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E977250E8A172A35F2EABA3D /* ArcFaviconReaderTests.swift */; };
 		EC3125BE51523F88555F1727 /* EngineTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA71299362552006972B565 /* EngineTypes.swift */; };
 		EC4F278D26B00FF9438AA3C8 /* AssistSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7084B230E2287EB9E78112EC /* AssistSettingsPane.swift */; };
 		EC64100E51056E9CCB8E7752 /* IncognitoSidebarVariantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 904420C8A2A8CFF6BE32F2E9 /* IncognitoSidebarVariantTests.swift */; };
@@ -1516,6 +1522,7 @@
 		3EED8AC294786EB8A733335C /* SpaceThemePalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceThemePalette.swift; sourceTree = "<group>"; };
 		3F035706ABBD805253704AE9 /* LibraryPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryPalette.swift; sourceTree = "<group>"; };
 		3F92D87BF00627BA8E944BB9 /* AssistPageTextAndSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistPageTextAndSettingsTests.swift; sourceTree = "<group>"; };
+		407BD78F8FA219204CFDBC34 /* ArcFaviconReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcFaviconReader.swift; sourceTree = "<group>"; };
 		40897CA7FFB15A36654471D6 /* BrowserImportReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserImportReaderTests.swift; sourceTree = "<group>"; };
 		409E4397A38DDB93915FE04C /* ContentBlockingInitialLoadOrderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentBlockingInitialLoadOrderingTests.swift; sourceTree = "<group>"; };
 		40DEEEBFEC0E8EB62AEE44BE /* LiveCalendarCountdownPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCalendarCountdownPill.swift; sourceTree = "<group>"; };
@@ -1546,6 +1553,7 @@
 		465A75B1143DB3BA995C1189 /* OrbitInternalPageChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitInternalPageChrome.swift; sourceTree = "<group>"; };
 		466D6E243C44CB309482F555 /* tabs.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = tabs.json; sourceTree = "<group>"; };
 		467A9E4F44E17AC687B1F697 /* ChromiumPermissionsAPILiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromiumPermissionsAPILiveTests.swift; sourceTree = "<group>"; };
+		468AA39168356EF207AE57D2 /* SidebarSurvivesRelaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSurvivesRelaunchTests.swift; sourceTree = "<group>"; };
 		46D4650238001A27A8E30C13 /* WebContentsHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContentsHostView.swift; sourceTree = "<group>"; };
 		46E1926FF22A7CDA94D9FE38 /* AppearanceMenuItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceMenuItem.swift; sourceTree = "<group>"; };
 		4738605FEBD2FEA5124F2E29 /* QuitConfirmation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuitConfirmation.swift; sourceTree = "<group>"; };
@@ -1656,6 +1664,7 @@
 		6A27D32414EE596B65E12F57 /* SpaceSwipeGestureCatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceSwipeGestureCatcherTests.swift; sourceTree = "<group>"; };
 		6A30F63F0B3A4A96AAD78EBD /* ExtensionConsentSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionConsentSheetView.swift; sourceTree = "<group>"; };
 		6A6C11E5E57ABC4EA35607C5 /* ShortcutRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRegistry.swift; sourceTree = "<group>"; };
+		6B795FF1E95FA877A4B8B839 /* ArcFaviconReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcFaviconReader.swift; sourceTree = "<group>"; };
 		6B9609FF8CA856ADBBFA4F76 /* OrbitNSActionButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitNSActionButton.swift; sourceTree = "<group>"; };
 		6BB1855773C3782DFFD0B5CC /* LinkPreviewFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkPreviewFetcher.swift; sourceTree = "<group>"; };
 		6BC107C4EA0E59849C0C31F0 /* ExtensionInstallFlowVisualTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionInstallFlowVisualTests.swift; sourceTree = "<group>"; };
@@ -2035,6 +2044,7 @@
 		D2C4E096ED91A38CCE1DBF64 /* OrbitApplication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApplication.swift; sourceTree = "<group>"; };
 		D2E2FE894C6DA512EBD16E91 /* ArcSiteDataStager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcSiteDataStager.swift; sourceTree = "<group>"; };
 		D2F7C77FB9D72E48B7E43FD6 /* DemoMenuBarProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoMenuBarProbe.swift; sourceTree = "<group>"; };
+		D311DC2133FA36EB04801FD9 /* SpaceSwipeScrollPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceSwipeScrollPathTests.swift; sourceTree = "<group>"; };
 		D3140ADFDFF146DC379389C7 /* ExpectedAPIGaps.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ExpectedAPIGaps.json; sourceTree = "<group>"; };
 		D360A0D9B697E9E42470471F /* EmptyStatePlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStatePlaceholderTests.swift; sourceTree = "<group>"; };
 		D38795DDFF439862E556C122 /* SidebarRecentPagesPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarRecentPagesPreview.swift; sourceTree = "<group>"; };
@@ -2101,6 +2111,7 @@
 		E89A922A65FDAD8A946492BF /* ArcAppPreferencesReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcAppPreferencesReaderTests.swift; sourceTree = "<group>"; };
 		E90A65F72ECCDC30A0B3D68B /* FeatureRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureRegistration.swift; sourceTree = "<group>"; };
 		E959E15FE16EF5B92C28BCCB /* MainMenuBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuBuilder.swift; sourceTree = "<group>"; };
+		E977250E8A172A35F2EABA3D /* ArcFaviconReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcFaviconReaderTests.swift; sourceTree = "<group>"; };
 		E983F752FD968253F0899A0F /* CRX3ArchiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CRX3ArchiveTests.swift; sourceTree = "<group>"; };
 		EA2A86BB9CA5D93A8FA5AFFE /* AssistRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistRuntime.swift; sourceTree = "<group>"; };
 		EA5B5CCC23E014F7F3C30C13 /* EaselShapeToolAndExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EaselShapeToolAndExportTests.swift; sourceTree = "<group>"; };
@@ -2336,6 +2347,7 @@
 			children = (
 				E89A922A65FDAD8A946492BF /* ArcAppPreferencesReaderTests.swift */,
 				9DA767AA666B4F6C61BFB8FC /* ArcCookieDecryptorTests.swift */,
+				E977250E8A172A35F2EABA3D /* ArcFaviconReaderTests.swift */,
 				3D4F29D5D9F8EE5074AB104E /* ArchivePolicyProfileMigrationTests.swift */,
 				F4447FEC67B8D7D2E8438D21 /* ArchivePolicyScopeBackCompatDecodingTests.swift */,
 				6D973B5D8D01DA37F667A61E /* ArcKeyBindingsReaderTests.swift */,
@@ -2456,12 +2468,14 @@
 				C64644C682F070A913B06296 /* SidebarResizeHandleTests.swift */,
 				94A4A32202582DD7E01F7C4A /* SidebarRowPaddingConsistencyTests.swift */,
 				993BA4BB932E2E9F2C157C93 /* SidebarRowShapeAndPaddingTests.swift */,
+				468AA39168356EF207AE57D2 /* SidebarSurvivesRelaunchTests.swift */,
 				E5C89B256D52DDB9A2FA5388 /* SidebarTearOffDecisionTests.swift */,
 				145A4DC505C8E5FEB566A7E6 /* SiteDataImportTests.swift */,
 				FC95A5D93F84660858403097 /* SiteSearchTests.swift */,
 				7C620BCE2FF880D0513702A0 /* SpaceIconBackCompatDecodingTests.swift */,
 				BB927D4A21B8C1B24C870902 /* SpaceIconStoreOperationsTests.swift */,
 				6A27D32414EE596B65E12F57 /* SpaceSwipeGestureCatcherTests.swift */,
+				D311DC2133FA36EB04801FD9 /* SpaceSwipeScrollPathTests.swift */,
 				506EBDC4BF8EC54BAEEE5067 /* SpaceTitleRowCaretTests.swift */,
 				6CA788F1979EB47AFF4DCB51 /* SplitGroupRowGroupingTests.swift */,
 				F675B8A3D730432BD397417E /* StoreTests.swift */,
@@ -2662,6 +2676,7 @@
 				9B5582AB114A4CC6492864C0 /* ArcAppPreferencesReader.swift */,
 				67285DF5A05C7C3D5E1126FF /* ArcCookieDecryptor.swift */,
 				3A38DB867C4AE3457D7A7E10 /* ArcExtensionInventory.swift */,
+				407BD78F8FA219204CFDBC34 /* ArcFaviconReader.swift */,
 				1C27F4676956B767F44419F1 /* ArcImportReader.swift */,
 				C8A8394462B51023230834D2 /* ArcKeyBindingsReader.swift */,
 				C534561CA05252FF408CBD7B /* ArcSettingsReader.swift */,
@@ -3320,6 +3335,7 @@
 				04E4C846562562965FDBA598 /* ArcAppPreferencesReader.swift */,
 				1D1B1E5DB9BB0219D799B729 /* ArcCookieDecryptor.swift */,
 				CDEE74DD173C81D0E0ADDB0D /* ArcExtensionInventory.swift */,
+				6B795FF1E95FA877A4B8B839 /* ArcFaviconReader.swift */,
 				8523CCD5508D1B89FDFC2B5C /* ArcImportCoordinator.swift */,
 				3C9B33CB248BC129917BF719 /* ArcImportReader.swift */,
 				2CD745B4E4F9C44B6C276C23 /* ArcKeyBindingsReader.swift */,
@@ -3981,6 +3997,7 @@
 				B933F0A9427EF5FE8FF46F8E /* ArcAppPreferencesReader.swift in Sources */,
 				7A8192CE7B6CC2DF32026EB4 /* ArcCookieDecryptor.swift in Sources */,
 				74E89963163C6D9360167D2C /* ArcExtensionInventory.swift in Sources */,
+				0D01BF0B6D7C0147C045D90A /* ArcFaviconReader.swift in Sources */,
 				0A13D6F99733A7CE311238EB /* ArcImportCoordinator.swift in Sources */,
 				36E800B2FF6FF7860625CB83 /* ArcImportReader.swift in Sources */,
 				20DACF8A53C89F93957197FE /* ArcKeyBindingsReader.swift in Sources */,
@@ -4233,6 +4250,7 @@
 			files = (
 				9BC24344888BDE73E36E099A /* ArcAppPreferencesReaderTests.swift in Sources */,
 				FB8F7D9F1034B189C9E97C88 /* ArcCookieDecryptorTests.swift in Sources */,
+				EBED6FD1EDD67A763E80B3FA /* ArcFaviconReaderTests.swift in Sources */,
 				44298720209606C09D6ED96B /* ArchivePolicyProfileMigrationTests.swift in Sources */,
 				1DC7A38620888454A2B50874 /* ArchivePolicyScopeBackCompatDecodingTests.swift in Sources */,
 				0F72EEB154F26E41F7DA8783 /* ArcKeyBindingsReaderTests.swift in Sources */,
@@ -4371,6 +4389,7 @@
 				4244C5A27ABAF375C619F615 /* ArcAppPreferencesReader.swift in Sources */,
 				988610F420A4A1FCABCE8ACA /* ArcCookieDecryptor.swift in Sources */,
 				AA7124E0D28A3B98BE1540F6 /* ArcExtensionInventory.swift in Sources */,
+				B6B944D05F074B01DD110193 /* ArcFaviconReader.swift in Sources */,
 				3E67AE71A41E3D0E74B920DD /* ArcImportReader.swift in Sources */,
 				82046349E074D100BE2E45E3 /* ArcKeyBindingsReader.swift in Sources */,
 				3F7EE29ECD634007476EE9BF /* ArcSettingsReader.swift in Sources */,
@@ -4419,12 +4438,14 @@
 				E03F0588C0897D0563945436 /* SidebarResizeHandleTests.swift in Sources */,
 				2DC925F58C66B9D37D235E6B /* SidebarRowPaddingConsistencyTests.swift in Sources */,
 				FCD99EF45B524E29B8EDFD8D /* SidebarRowShapeAndPaddingTests.swift in Sources */,
+				7CD95A828B711CEC0D27EB03 /* SidebarSurvivesRelaunchTests.swift in Sources */,
 				B9DABB5F17079A84DABAFDDA /* SidebarTearOffDecisionTests.swift in Sources */,
 				5398E21B26105F6C282FE778 /* SiteDataImportTests.swift in Sources */,
 				44CC34638632F2E4E88CAFE9 /* SiteSearchTests.swift in Sources */,
 				973BD1BE83CD592D3528EEA6 /* SpaceIconBackCompatDecodingTests.swift in Sources */,
 				2289E79CEF5798052AC1964F /* SpaceIconStoreOperationsTests.swift in Sources */,
 				2D22CFB19C7432E554CB45BC /* SpaceSwipeGestureCatcherTests.swift in Sources */,
+				21E875D752F39D59CDBBF04C /* SpaceSwipeScrollPathTests.swift in Sources */,
 				9F6AE541C03D8806F92E6099 /* SpaceTitleRowCaretTests.swift in Sources */,
 				9F7E8BD3A11FECBF2BF4ADD2 /* SplitGroupRowGroupingTests.swift in Sources */,
 				F010DFC5EAE69E8F34C54E63 /* StoreTests.swift in Sources */,
@@ -4879,6 +4900,7 @@
 				926A68F2190034F1466995B5 /* ArcAppPreferencesReader.swift in Sources */,
 				E2837D14B927A6DB7982E72C /* ArcCookieDecryptor.swift in Sources */,
 				4C3FDB63621DD2E5EBE6D051 /* ArcExtensionInventory.swift in Sources */,
+				D3AD53C673104FFAF47A9F88 /* ArcFaviconReader.swift in Sources */,
 				C7285FD80B3157C6F9486F20 /* ArcImportCoordinator.swift in Sources */,
 				16EA4035AC5559D6B2610EEE /* ArcImportReader.swift in Sources */,
 				9F9C7CA71613C1C93B7C11BA /* ArcKeyBindingsReader.swift in Sources */,

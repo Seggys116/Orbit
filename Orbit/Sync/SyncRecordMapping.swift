@@ -268,6 +268,10 @@ public struct SyncTombstoneLog: Codable, Sendable {
         deletedAt[recordName] != nil
     }
 
+    public mutating func forget(_ recordName: String) {
+        deletedAt.removeValue(forKey: recordName)
+    }
+
     public mutating func prune(now: Date = Date()) {
         deletedAt = deletedAt.filter { now.timeIntervalSince($0.value) < Self.retention }
     }

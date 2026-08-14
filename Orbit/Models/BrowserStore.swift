@@ -48,6 +48,8 @@ public final class BrowserStore {
 
     let stateStore: StateStore
 
+    private var autosaveTask: Task<Void, Never>?
+
     // MARK: - Auto-archive
 
     private var autoArchiveTask: Task<Void, Never>?
@@ -66,6 +68,7 @@ public final class BrowserStore {
         migrateSpaceArchivePolicyToProfile()
         purgeIncognitoResidue()
         runArchiveSweep()
+        repairSidebarMembership()
         if let autoArchiveInterval {
             startAutoArchiveTimer(interval: autoArchiveInterval)
         }
@@ -121,6 +124,11 @@ public final class BrowserStore {
         state = newState
     }
 
+    func repairSidebarMembership() {
+        guard let repaired = state.repairingSidebarMembership() else { return }
+        state = repaired
+    }
+
     private func purgeIncognitoResidue() {
         let purged = state.strippingEphemeralEntities()
         guard purged.profiles.count != state.profiles.count
@@ -134,10 +142,15 @@ public final class BrowserStore {
 
     // MARK: - Autosave
 
+    // Chained, not fire-and-forget: unstructured tasks reach the actor in no guaranteed order, so an older snapshot could arrive last and become the one written.
     private func scheduleAutosave() {
         let snapshot = state
         let store = stateStore
-        Task { await store.scheduleSave(snapshot) }
+        let previous = autosaveTask
+        autosaveTask = Task {
+            await previous?.value
+            await store.scheduleSave(snapshot)
+        }
     }
 
     public func saveNow() throws {

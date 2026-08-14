@@ -179,7 +179,10 @@ struct LiveWebContentsHostView: NSViewRepresentable {
         guard overlay.superview !== container || container.subviews.last !== overlay else { return }
 
         overlay.translatesAutoresizingMaskIntoConstraints = false
+        // Reordering keeps the existing constraints; re-activating adds four duplicates per re-embed.
+        let needsConstraints = overlay.superview !== container
         container.addSubview(overlay, positioned: .above, relativeTo: nil)
+        guard needsConstraints else { return }
         NSLayoutConstraint.activate([
             overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             overlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),

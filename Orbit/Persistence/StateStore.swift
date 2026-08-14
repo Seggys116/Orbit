@@ -88,6 +88,35 @@ nonisolated public enum StateBackupRetention {
     }
 }
 
+// MARK: - Write ordering
+
+/// `saveNow` runs on the main actor at termination while a debounced write runs on the actor's executor; without this the older debounced snapshot could land last.
+private final class WriteCoordinator: @unchecked Sendable {
+
+    private let lock = NSLock()
+    private var generation: UInt64 = 0
+
+    func currentGeneration() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return generation
+    }
+
+    func write(_ body: () throws -> Void) rethrows {
+        lock.lock()
+        defer { lock.unlock() }
+        generation &+= 1
+        try body()
+    }
+
+    func writeIfNotSuperseded(scheduledAt scheduledGeneration: UInt64, _ body: () throws -> Void) rethrows {
+        lock.lock()
+        defer { lock.unlock() }
+        guard scheduledGeneration == generation else { return }
+        try body()
+    }
+}
+
 public enum StateStoreError: Error, LocalizedError, Sendable {
     case fileMissing
     case noValidState(reason: String)
@@ -126,7 +155,11 @@ public actor StateStore {
     // MARK: - Actor-isolated debounce state
 
     private var pendingState: OrbitState?
+    private var pendingDeadline: ContinuousClock.Instant?
+    private var pendingGeneration: UInt64 = 0
     private var debounceTask: Task<Void, Never>?
+
+    private nonisolated let writeCoordinator = WriteCoordinator()
 
     private var debouncedSaveFailureHandler: (@Sendable (Error) -> Void)?
 
@@ -134,16 +167,26 @@ public actor StateStore {
         debouncedSaveFailureHandler = handler
     }
 
-    private static let debounceDuration: Duration = .milliseconds(750)
+    public nonisolated let debounceDuration: Duration
+
+    /// A trailing debounce alone can be starved forever: load-progress ticks reschedule it faster than it fires, and nothing reaches disk until the page goes quiet.
+    public nonisolated let maximumSaveDelay: Duration
 
     // MARK: - Init
 
-    public init(rootDirectory: URL? = nil, maxBackups: Int = 10) {
+    public init(
+        rootDirectory: URL? = nil,
+        maxBackups: Int = 10,
+        debounceDuration: Duration = .milliseconds(750),
+        maximumSaveDelay: Duration = .seconds(5)
+    ) {
         let base = rootDirectory ?? StateStore.defaultRootDirectory()
         self.rootDirectory = base
         self.stateFileURL = base.appendingPathComponent("state.json", isDirectory: false)
         self.backupsDirectory = base.appendingPathComponent("Backups", isDirectory: true)
         self.maxBackups = max(1, maxBackups)
+        self.debounceDuration = debounceDuration
+        self.maximumSaveDelay = maximumSaveDelay
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: backupsDirectory, withIntermediateDirectories: true)
     }
@@ -222,9 +265,15 @@ public actor StateStore {
 
     public func scheduleSave(_ state: OrbitState) {
         pendingState = state
+        pendingGeneration = writeCoordinator.currentGeneration()
+        let now = ContinuousClock.now
+        let deadline = pendingDeadline ?? now.advanced(by: maximumSaveDelay)
+        pendingDeadline = deadline
+        let delay = min(debounceDuration, max(.zero, now.duration(to: deadline)))
+
         debounceTask?.cancel()
         debounceTask = Task { [weak self] in
-            try? await Task.sleep(for: StateStore.debounceDuration)
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             await self?.flushPendingSave()
         }
@@ -233,8 +282,11 @@ public actor StateStore {
     private func flushPendingSave() async {
         guard let toSave = pendingState else { return }
         pendingState = nil
+        pendingDeadline = nil
         do {
-            try Self.write(toSave, stateFileURL: stateFileURL, backupsDirectory: backupsDirectory, maxBackups: maxBackups)
+            try writeCoordinator.writeIfNotSuperseded(scheduledAt: pendingGeneration) {
+                try Self.write(toSave, stateFileURL: stateFileURL, backupsDirectory: backupsDirectory, maxBackups: maxBackups)
+            }
         } catch {
             debouncedSaveFailureHandler?(error)
         }
@@ -244,13 +296,16 @@ public actor StateStore {
         debounceTask?.cancel()
         debounceTask = nil
         pendingState = nil
+        pendingDeadline = nil
     }
 
     // MARK: - Synchronous, termination-safe save
 
     @discardableResult
     public nonisolated func saveNow(_ state: OrbitState) throws -> URL {
-        try Self.write(state, stateFileURL: stateFileURL, backupsDirectory: backupsDirectory, maxBackups: maxBackups)
+        try writeCoordinator.write {
+            try Self.write(state, stateFileURL: stateFileURL, backupsDirectory: backupsDirectory, maxBackups: maxBackups)
+        }
         return stateFileURL
     }
 

@@ -230,7 +230,7 @@ struct OnboardingView: View {
         guard source.importsNativeStructure else {
             return "Orbit can import your bookmarks and browsing history from \(source.displayName). Passwords are not imported."
         }
-        return "Orbit can import your Arc Spaces whole: their names, icons and themes, your pinned tabs and folders, Today tabs, favourites, archived tabs, browsing history, extensions, keyboard shortcuts, per-site zoom and your link-routing rules. Passwords are not imported."
+        return "Orbit can import your Arc Spaces whole: their names, icons and themes, your pinned tabs and folders, Today tabs, favourites, archived tabs, browsing history, site icons, extensions, keyboard shortcuts, per-site zoom and your link-routing rules. Passwords are not imported."
     }
 
     private func importSourceRow(_ browser: ImportableBrowser) -> some View {
@@ -342,6 +342,9 @@ struct OnboardingView: View {
         }
         if summary.historyEntriesImported > 0 {
             parts.append("\(summary.historyEntriesImported) history entr\(summary.historyEntriesImported == 1 ? "y" : "ies")")
+        }
+        if summary.faviconsImported > 0 {
+            parts.append("\(summary.faviconsImported) site icon\(summary.faviconsImported == 1 ? "" : "s")")
         }
         if summary.keyBindingsImported > 0 {
             parts.append("\(summary.keyBindingsImported) keyboard shortcut\(summary.keyBindingsImported == 1 ? "" : "s")")

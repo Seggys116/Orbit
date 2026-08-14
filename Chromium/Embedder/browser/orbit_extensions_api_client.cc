@@ -6,10 +6,12 @@
 
 #include <utility>
 
+#include "base/task/single_thread_task_runner.h"
 #include "extensions/browser/api/messaging/messaging_delegate.h"
 #include "orbit/browser/orbit_managed_value_store_cache.h"
 #include "orbit/browser/orbit_management_api_delegate.h"
 #include "orbit/browser/orbit_messaging_delegate.h"
+#include "orbit/browser/orbit_native_message_port_dispatcher.h"
 #include "orbit/browser/orbit_sync_value_store_cache.h"
 
 namespace orbit {
@@ -34,6 +36,16 @@ OrbitExtensionsAPIClient::CreateManagementAPIDelegate() const {
 extensions::WebstorePrivateAPIDelegate*
 OrbitExtensionsAPIClient::GetWebstorePrivateAPIDelegate() {
   return webstore_private_delegate_.get();
+}
+
+std::unique_ptr<extensions::NativeMessagePortDispatcher>
+OrbitExtensionsAPIClient::CreateNativeMessagePortDispatcher(
+    std::unique_ptr<extensions::NativeMessageHost> host,
+    base::WeakPtr<extensions::NativeMessagePort> port,
+    scoped_refptr<base::SingleThreadTaskRunner> message_service_task_runner) {
+  return std::make_unique<OrbitNativeMessagePortDispatcher>(
+      std::move(host), std::move(port),
+      std::move(message_service_task_runner));
 }
 
 void OrbitExtensionsAPIClient::AddAdditionalValueStoreCaches(

@@ -74,6 +74,8 @@ public extension BrowserStore {
     }
 
     func selectTab(_ id: TabID) {
+        // Without this the pane shows an archived page the sidebar has no row for — and that pairing persists across a relaunch.
+        if state.tabs[id]?.section == .archived { restoreFromArchive(id, to: .today) }
         guard var tab = state.tabs[id] else { return }
         var newState = state
         tab.lastAccessedAt = Date()
@@ -83,6 +85,12 @@ public extension BrowserStore {
             newState.activeSpaceID = tab.spaceID
         }
         state = newState
+    }
+
+    /// Selecting a tab was the only thing that ever moved `lastAccessedAt`, so a tab navigated in all day still read as idle to the archive sweep the moment it stopped being active.
+    func noteTabAccessed(_ id: TabID, at date: Date = Date()) {
+        guard let tab = state.tabs[id], tab.lastAccessedAt < date else { return }
+        state.tabs[id]?.lastAccessedAt = date
     }
 
     // MARK: - Closing

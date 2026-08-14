@@ -1163,6 +1163,50 @@ public extension OrbitState {
     }
 }
 
+// MARK: - Sidebar membership repair
+
+public extension OrbitState {
+
+    /// The content pane renders `activeTabBySpace` while the sidebar renders `Space.today`, so a tab that falls out of `today` alone becomes a page with no row. Returns nil when nothing needed repairing.
+    func repairingSidebarMembership() -> OrbitState? {
+        var repaired = self
+        var changed = false
+
+        var todayTabsBySpace: [SpaceID: [Tab]] = [:]
+        for tab in tabs.values where tab.section == .today {
+            todayTabsBySpace[tab.spaceID, default: []].append(tab)
+        }
+
+        for index in repaired.spaces.indices {
+            let spaceID = repaired.spaces[index].id
+            var contained = Set(repaired.spaces[index].today)
+                .union(repaired.spaces[index].pinned.flatMap(\.allTabIDs))
+
+            let orphans = (todayTabsBySpace[spaceID] ?? [])
+                .filter { !contained.contains($0.id) }
+                .sorted { $0.createdAt < $1.createdAt }
+            for orphan in orphans {
+                repaired.spaces[index].today.append(orphan.id)
+                contained.insert(orphan.id)
+                changed = true
+            }
+
+            guard let activeID = repaired.activeTabBySpace[spaceID],
+                  let active = repaired.tabs[activeID],
+                  active.spaceID == spaceID,
+                  !contained.contains(activeID)
+            else { continue }
+            repaired.tabs[activeID]?.section = .today
+            repaired.tabs[activeID]?.archivedAt = nil
+            repaired.tabs[activeID]?.isUnloaded = false
+            repaired.spaces[index].today.append(activeID)
+            changed = true
+        }
+
+        return changed ? repaired : nil
+    }
+}
+
 // MARK: - Demo fixture
 
 public extension OrbitState {

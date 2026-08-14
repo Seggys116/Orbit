@@ -35,6 +35,10 @@ class OrbitContentRendererClient : public content::ContentRendererClient {
                       bool was_created_by_renderer,
                       const url::Origin* outermost_origin) override;
   void RenderFrameCreated(content::RenderFrame* render_frame) override;
+  // canPlayType, MediaSource.isTypeSupported, MediaCapabilities and WebCodecs
+  // all answer from these.
+  bool IsDecoderSupportedAudioType(const media::AudioType& type) override;
+  bool IsDecoderSupportedVideoType(const media::VideoType& type) override;
   void RunScriptsAtDocumentStart(content::RenderFrame* render_frame) override;
   void RunScriptsAtDocumentEnd(content::RenderFrame* render_frame) override;
   void RunScriptsAtDocumentIdle(content::RenderFrame* render_frame) override;

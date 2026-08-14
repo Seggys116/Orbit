@@ -56,6 +56,35 @@ public final class FaviconCache {
         memoryCache.setObject(image, forKey: host.lowercased() as NSString)
     }
 
+    // MARK: - Imported icons (encoded bytes)
+
+    /// Accepts whatever another browser stored — PNG or ICO — and reports false when the bytes aren't a usable image.
+    @discardableResult
+    public func cache(imageData: Data, forHost host: String) -> Bool {
+        guard let image = FaviconCache.decodedImage(imageData) else { return false }
+        store(image, forHost: host)
+        return true
+    }
+
+    /// One eviction pass for the whole batch; evicting per icon rescans the directory once per file.
+    @discardableResult
+    public func cache(imageDataByHost icons: [String: Data]) -> Int {
+        var stored = 0
+        for (host, data) in icons {
+            guard let image = FaviconCache.decodedImage(data) else { continue }
+            memoryCache.setObject(image, forKey: host.lowercased() as NSString)
+            writeToDisk(image, forHost: host)
+            stored += 1
+        }
+        if stored > 0 { evictDiskCacheIfNeeded() }
+        return stored
+    }
+
+    private nonisolated static func decodedImage(_ data: Data) -> NSImage? {
+        guard let image = NSImage(data: data), image.size.width > 0, image.size.height > 0 else { return nil }
+        return image
+    }
+
     // MARK: - Async fetch
 
     public func image(for faviconURL: URL?, host: String) async -> NSImage {

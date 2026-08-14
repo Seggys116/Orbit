@@ -6,12 +6,15 @@ final class AtomicJSONFileWriter<Value: Codable & Sendable> {
 
     private let fileURL: URL
     private let debounceDuration: Duration
+    private let maximumSaveDelay: Duration
     private var pendingValue: Value?
+    private var pendingDeadline: ContinuousClock.Instant?
     private var debounceTask: Task<Void, Never>?
 
-    init(fileURL: URL, debounceDuration: Duration = .milliseconds(400)) {
+    init(fileURL: URL, debounceDuration: Duration = .milliseconds(400), maximumSaveDelay: Duration = .seconds(5)) {
         self.fileURL = fileURL
         self.debounceDuration = debounceDuration
+        self.maximumSaveDelay = maximumSaveDelay
     }
 
     func loadNow(default defaultValue: Value) -> Value {
@@ -21,10 +24,14 @@ final class AtomicJSONFileWriter<Value: Codable & Sendable> {
         return (try? decoder.decode(Value.self, from: data)) ?? defaultValue
     }
 
+    /// Capped: a source that mutates faster than the debounce (download progress, say) would otherwise starve the trailing timer and never reach disk at all.
     func scheduleSave(_ value: Value) {
         pendingValue = value
+        let now = ContinuousClock.now
+        let deadline = pendingDeadline ?? now.advanced(by: maximumSaveDelay)
+        pendingDeadline = deadline
+        let duration = min(debounceDuration, max(.zero, now.duration(to: deadline)))
         debounceTask?.cancel()
-        let duration = debounceDuration
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: duration)
             guard !Task.isCancelled else { return }
@@ -37,12 +44,14 @@ final class AtomicJSONFileWriter<Value: Codable & Sendable> {
         debounceTask?.cancel()
         debounceTask = nil
         pendingValue = nil
+        pendingDeadline = nil
         try Self.write(value, to: fileURL)
     }
 
     private func flush() {
         guard let value = pendingValue else { return }
         pendingValue = nil
+        pendingDeadline = nil
         try? Self.write(value, to: fileURL)
     }
 

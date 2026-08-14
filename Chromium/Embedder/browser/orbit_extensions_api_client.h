@@ -10,6 +10,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/management/management_api_delegate.h"
 #include "extensions/browser/api/storage/settings_namespace.h"
@@ -24,8 +25,15 @@ namespace value_store {
 class ValueStoreFactory;
 }  // namespace value_store
 
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
+
 namespace extensions {
 class MessagingDelegate;
+class NativeMessageHost;
+class NativeMessagePort;
+class NativeMessagePortDispatcher;
 class ValueStoreCache;
 }  // namespace extensions
 
@@ -43,6 +51,12 @@ class OrbitExtensionsAPIClient : public extensions::ExtensionsAPIClient {
   extensions::ManagementAPIDelegate* CreateManagementAPIDelegate()
       const override;
   extensions::WebstorePrivateAPIDelegate* GetWebstorePrivateAPIDelegate()
+      override;
+  std::unique_ptr<extensions::NativeMessagePortDispatcher>
+  CreateNativeMessagePortDispatcher(
+      std::unique_ptr<extensions::NativeMessageHost> host,
+      base::WeakPtr<extensions::NativeMessagePort> port,
+      scoped_refptr<base::SingleThreadTaskRunner> message_service_task_runner)
       override;
   // StorageFrontend::Init installs LOCAL itself and asks here for the rest;
   // without this, chrome.storage.sync/managed rejected every call.

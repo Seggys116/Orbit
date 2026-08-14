@@ -10,7 +10,8 @@ extension AppEnvironment: WebContentsDelegate {
     func webContentsDidChangeNavigationState(_ contents: WebContents) {
         guard let tabID = tabID(for: contents) else { return }
         navigationStates[tabID] = contents.navigationState
-        guard var tab = state.tabs[tabID] else { return }
+        guard let existing = state.tabs[tabID] else { return }
+        var tab = existing
         if let url = contents.navigationState.url, url != tab.url {
             tab.url = url
         }
@@ -21,6 +22,8 @@ extension AppEnvironment: WebContentsDelegate {
                 tab.pinnedTitle = tab.title
             }
         }
+        // Load progress alone fires this many times a second; writing an identical Tab back would reschedule the autosave debounce every time and starve it.
+        guard tab != existing else { return }
         state.tabs[tabID] = tab
     }
 
@@ -81,6 +84,7 @@ extension AppEnvironment: WebContentsDelegate {
         certificateProblems.removeValue(forKey: tabID)
         refusedCertificateTabIDs.remove(tabID)
         applyStoredZoomFactor(to: contents, tabID: tabID, url: url)
+        store.noteTabAccessed(tabID)
         guard let tab = state.tabs[tabID] else { return }
         recordVisit(url: url, title: tab.title, profileID: space(tab.spaceID)?.profileID ?? state.profiles.first?.id ?? UUID(), spaceID: tab.spaceID, wasTyped: kind == .typed)
     }

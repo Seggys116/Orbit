@@ -10,6 +10,7 @@ public struct ArcImportSummary: Sendable, Hashable {
     public var archivedTabsImported: Int
     public var favoritesImported: Int
     public var historyEntriesImported: Int
+    public var faviconsImported: Int
     public var zoomLevelsImported: Int
     public var sitePermissionsImported: Int
     public var routingRulesImported: Int
@@ -32,6 +33,7 @@ public struct ArcImportSummary: Sendable, Hashable {
         archivedTabsImported: Int = 0,
         favoritesImported: Int = 0,
         historyEntriesImported: Int = 0,
+        faviconsImported: Int = 0,
         zoomLevelsImported: Int = 0,
         sitePermissionsImported: Int = 0,
         routingRulesImported: Int = 0,
@@ -52,6 +54,7 @@ public struct ArcImportSummary: Sendable, Hashable {
         self.archivedTabsImported = archivedTabsImported
         self.favoritesImported = favoritesImported
         self.historyEntriesImported = historyEntriesImported
+        self.faviconsImported = faviconsImported
         self.zoomLevelsImported = zoomLevelsImported
         self.sitePermissionsImported = sitePermissionsImported
         self.routingRulesImported = routingRulesImported
@@ -117,11 +120,12 @@ public enum ArcImportCoordinator {
         importSiteData: Bool = true,
         historyLimit: Int = 5000,
         archiveLimit: Int = 2000,
+        faviconLimit: Int = 2000,
         extensionStore: ExtensionStore? = nil,
         extensionInstaller: ExtensionInstaller? = nil
     ) async throws -> ArcImportSummary {
         let payload = try await Task.detached(priority: .userInitiated) {
-            try reader.readArc(historyLimit: historyLimit, archiveLimit: archiveLimit)
+            try reader.readArc(historyLimit: historyLimit, archiveLimit: archiveLimit, faviconLimit: faviconLimit)
         }.value
 
         // A plist Orbit cannot parse must not cost the user their Spaces — failure here is swallowed.
@@ -194,6 +198,8 @@ public enum ArcImportCoordinator {
     ) -> ArcImportSummary {
         var summary = ArcImportSummary()
         summary.extensionsFound = payload.extensions.count
+        // Host-keyed and Profile-independent, so it lands even when there is no Profile to build Spaces in.
+        summary.faviconsImported = applyFavicons(payload.favicons, cache: env.faviconCache)
 
         let profile = resolvedProfileID(profileID, env: env)
         guard let profile else { return summary }
@@ -289,6 +295,14 @@ public enum ArcImportCoordinator {
         applyKeyBindings(payload.keyBindings, registry: shortcutRegistry, summary: &summary)
 
         return summary
+    }
+
+    // MARK: Favicons
+
+    static func applyFavicons(_ favicons: [ArcFavicon], cache: FaviconCache) -> Int {
+        guard !favicons.isEmpty else { return 0 }
+        let byHost = Dictionary(favicons.map { ($0.host, $0.imageData) }, uniquingKeysWith: { first, _ in first })
+        return cache.cache(imageDataByHost: byHost)
     }
 
     // MARK: Key bindings

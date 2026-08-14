@@ -32,7 +32,8 @@ public struct BrowserDataReader: Sendable {
                 homeDirectory: homeDirectory,
                 browser: browser,
                 historyLimit: historyLimit,
-                archiveLimit: 0
+                archiveLimit: 0,
+                faviconLimit: 0
             )
             folders = ArcImportReader.flattenedBookmarkFolders(payload.sidebar)
             visits = payload.visits
@@ -51,11 +52,16 @@ public struct BrowserDataReader: Sendable {
 
     // MARK: - Arc
 
-    public func readArc(historyLimit: Int = 5000, archiveLimit: Int = 2000) throws -> ArcImportPayload {
+    public func readArc(
+        historyLimit: Int = 5000,
+        archiveLimit: Int = 2000,
+        faviconLimit: Int = 2000
+    ) throws -> ArcImportPayload {
         try ArcImportReader.read(
             homeDirectory: homeDirectory,
             historyLimit: historyLimit,
-            archiveLimit: archiveLimit
+            archiveLimit: archiveLimit,
+            faviconLimit: faviconLimit
         )
     }
 

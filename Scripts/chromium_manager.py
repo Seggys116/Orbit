@@ -65,6 +65,18 @@ ENGINE_MARKER_PREFIX = b"orbit-engine-build: dcheck="
 EMBEDDER_SOURCE_DIR = os.path.join(REPO_ROOT, "Chromium", "Embedder")
 EMBEDDER_SYMLINK = os.path.join(CHROMIUM_SRC, "orbit")
 
+ORBIT_MEDIA_ASSERT_MARKER = "# --- Orbit: platform decoders, no bundled ffmpeg decoders ---"
+ORBIT_MEDIA_ASSERT_ORIGINAL = """if (proprietary_codecs && media_use_ffmpeg) {
+  assert(
+      ffmpeg_branding != "Chromium",
+      "proprietary codecs and ffmpeg_branding set to Chromium are incompatible")
+}"""
+ORBIT_MEDIA_ASSERT_REPLACEMENT = f"""{ORBIT_MEDIA_ASSERT_MARKER}
+# Orbit decodes H.264 with VideoToolbox and bundles no decoder, which upstream's
+# assert forbids as policy. The ffmpeg decoders are resolved by name at runtime,
+# so nothing here link-depends on them.
+"""
+
 ORBIT_ROOT_BUILD_GN_MARKER = "# --- Orbit embedder root, see Chromium/Embedder/BUILD.gn ---"
 ORBIT_ROOT_BUILD_GN_APPEND = f"""
 {ORBIT_ROOT_BUILD_GN_MARKER}
@@ -1019,6 +1031,7 @@ def write_gclient_config(manifest: dict) -> None:
         "'deps_file': 'DEPS', "
         "'managed': True, "  # this checkout is entirely tool-managed; let gclient reset it cleanly
         "'custom_deps': {}, "
+        "'custom_vars': {'checkout_pgo_profiles': True}, "  # is_official_build's PGO profile
         "}]\n"
     )
     write_if_changed(gclient_file, spec)
@@ -1032,6 +1045,7 @@ def checkout_chromium(manifest: dict, env: dict, force: bool) -> None:
         info(f"Chromium src already at {manifest['chromium_version']}; skipping sync.")
         link_embedder_source()
         patch_root_build_gn()
+        patch_media_codec_assert()
         return
 
     info(f"Syncing Chromium {manifest['chromium_version']} (--no-history)")
@@ -1049,6 +1063,7 @@ def checkout_chromium(manifest: dict, env: dict, force: bool) -> None:
 
     link_embedder_source()
     patch_root_build_gn()
+    patch_media_codec_assert()
 
 def link_embedder_source() -> None:
     """Makes //orbit resolve, inside the checkout, to Orbit's own repo-owned GN+C++ tree.
@@ -1085,24 +1100,129 @@ def patch_root_build_gn() -> None:
     with open(root_build_gn, "a", encoding="utf-8") as handle:
         handle.write(ORBIT_ROOT_BUILD_GN_APPEND)
 
+def patch_media_codec_assert() -> None:
+    """Upstream forbids proprietary_codecs with Chromium ffmpeg as policy, not as a link requirement:
+    the ffmpeg decoders resolve through avcodec_find_decoder at runtime, so platform decode works
+    without them. Reapplied every checkout because the file resets on a version bump."""
+    media_build_gn = os.path.join(CHROMIUM_SRC, "media", "BUILD.gn")
+    if not os.path.isfile(media_build_gn):
+        die(f"Missing {os.path.relpath(media_build_gn, REPO_ROOT)}; this checkout is incomplete.")
+    with open(media_build_gn, encoding="utf-8") as handle:
+        contents = handle.read()
+    if ORBIT_MEDIA_ASSERT_MARKER in contents:
+        return
+    if ORBIT_MEDIA_ASSERT_ORIGINAL not in contents:
+        die(
+            "media/BUILD.gn no longer contains the proprietary_codecs/ffmpeg_branding assert this "
+            "patch replaces. Re-read it before assuming platform_codecs still gen's."
+        )
+    with open(media_build_gn, "w", encoding="utf-8") as handle:
+        handle.write(contents.replace(ORBIT_MEDIA_ASSERT_ORIGINAL, ORBIT_MEDIA_ASSERT_REPLACEMENT))
+
+def pgo_target(platform_key: str) -> str:
+    return "mac-arm" if gn_target_cpu(platform_key) == "arm64" else "mac"
+
+def pgo_profile_present(platform_key: str) -> bool:
+    pgo_dir = os.path.join(CHROMIUM_SRC, "chrome", "build")
+    try:
+        with open(os.path.join(pgo_dir, f"{pgo_target(platform_key)}.pgo.txt"), encoding="utf-8") as handle:
+            name = handle.read().strip()
+    except OSError:
+        return False
+    return bool(name) and os.path.isfile(os.path.join(pgo_dir, "pgo_profiles", name))
+
+def fetch_pgo_profile(platform_key: str, env: dict) -> None:
+    """gn gen hard-fails without this profile, so fetch it here rather than only on a full sync."""
+    if pgo_profile_present(platform_key):
+        return
+    info(f"Fetching the {pgo_target(platform_key)} PGO profile (large; this is most of the engine's speed)")
+    run_streamed(
+        [
+            sys.executable,
+            os.path.join("tools", "update_pgo_profiles.py"),
+            f"--target={pgo_target(platform_key)}",
+            "update",
+            "--gs-url-base=chromium-optimization-profiles/pgo_profiles",
+        ],
+        cwd=CHROMIUM_SRC,
+        env=env,
+    )
+    if not pgo_profile_present(platform_key):
+        warn("No PGO profile; building without it. The engine will be measurably slower than Chrome.")
+
+V8_BUILTINS_PROFILES = os.path.join("v8", "tools", "builtins-pgo", "profiles")
+
+def v8_builtins_profiles_present() -> bool:
+    # x64 even on arm64: mksnapshot runs in the host toolchain.
+    return os.path.isfile(os.path.join(CHROMIUM_SRC, V8_BUILTINS_PROFILES, "x64.profile"))
+
+def fetch_v8_builtins_profiles(env: dict) -> None:
+    """A second, separate profile set official builds need; ninja fails on the missing file, not gn."""
+    if v8_builtins_profiles_present():
+        return
+    info("Fetching V8's builtins PGO profiles")
+    run_streamed(
+        [
+            sys.executable,
+            os.path.join("v8", "tools", "builtins-pgo", "download_profiles.py"),
+            "download",
+            "--depot-tools",
+            DEPOT_TOOLS_DIR,
+        ],
+        cwd=CHROMIUM_SRC,
+        env=env,
+    )
+    if not v8_builtins_profiles_present():
+        die("V8 builtins PGO profiles are missing; an official build cannot link mksnapshot without them.")
+
 def gn_args_for(manifest: dict, platform_key: str, config: str) -> str:
     build_target = manifest.get("build_target", "content_shell")
-    return "\n".join(
-        [
-            "is_debug = false",
-            f"is_component_build = {'true' if build_target in COMPONENT_BUILD_TARGETS else 'false'}",
-            "symbol_level = 0",
-            f'target_cpu = "{gn_target_cpu(platform_key)}"',
-            f"dcheck_always_on = {'true' if dcheck_always_on(config) else 'false'}",
-            # EXPENSIVE_DCHECK()s DCHECK-crash the renderer on the first SVG page (CSSDefaultStyleSheets).
-            "enable_expensive_dchecks = false",
-        ]
-    ) + "\n"
+    # PGO profiles are generated from dcheck-off builds; upstream pgo.gni refuses to mix them.
+    pgo_phase = 2 if not dcheck_always_on(config) and pgo_profile_present(platform_key) else 0
+    args = [
+        # ThinLTO, PGO, zero-init stack vars: the difference between this and a Chrome-speed engine.
+        # Off for dcheck: it only ever runs tests, and LTO would double the build for no gain there.
+        f"is_official_build = {'false' if dcheck_always_on(config) else 'true'}",
+        "is_debug = false",
+        f"is_component_build = {'true' if build_target in COMPONENT_BUILD_TARGETS else 'false'}",
+        "symbol_level = 0",
+        # Both default to true under is_official_build; with symbol_level=0 they only cost link time.
+        "enable_dsyms = false",
+        "enable_stripping = false",
+        f"chrome_pgo_phase = {pgo_phase}",
+        f'target_cpu = "{gn_target_cpu(platform_key)}"',
+        f"dcheck_always_on = {'true' if dcheck_always_on(config) else 'false'}",
+        # EXPENSIVE_DCHECK()s DCHECK-crash the renderer on the first SVG page (CSSDefaultStyleSheets).
+        "enable_expensive_dchecks = false",
+    ]
+    args += media_gn_args(manifest)
+    return "\n".join(args) + "\n"
+
+def media_gn_args(manifest: dict) -> list:
+    media = manifest.get("licensed_media", {})
+    # Bundles ffmpeg's H.264/AAC decoders. Patent-licensed: Orbit ships them only once someone decides to.
+    licensed = bool(media.get("proprietary_codecs"))
+    # VideoToolbox H.264/HEVC, nothing bundled. 152 has no AudioToolbox path for AAC-LC.
+    platform = bool(manifest.get("platform_codecs"))
+    args = []
+    if licensed or platform:
+        args.append("proprietary_codecs = true")
+        args.append(f'ffmpeg_branding = "{"Chrome" if licensed else "Chromium"}"')
+    if platform and not licensed:
+        # Encode H.264 with VideoToolbox rather than bundling OpenH264.
+        args.append("media_use_openh264 = false")
+    # Key-system plumbing only. Playback also needs a Google-licensed CDM binary Orbit does not have.
+    if media.get("widevine"):
+        args.append("enable_widevine = true")
+    return args
 
 def gn_gen(manifest: dict, platform_key: str, env: dict, config: str) -> None:
     build_target = manifest.get("build_target", "content_shell")
     out_dir = out_dir_for(build_target, config)
     os.makedirs(out_dir, exist_ok=True)
+    fetch_v8_builtins_profiles(env)
+    if not dcheck_always_on(config):
+        fetch_pgo_profile(platform_key, env)
     write_if_changed(os.path.join(out_dir, "args.gn"), gn_args_for(manifest, platform_key, config))
 
     info("Generating build files (gn gen)")

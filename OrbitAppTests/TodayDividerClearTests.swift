@@ -150,7 +150,7 @@ final class TodayDividerClearTests: XCTestCase {
     func test_bothSurfacesRenderTheOneSharedDivider() throws {
         let sidebar = try source(of: "Orbit/UI/Sidebar/SidebarView.swift")
         XCTAssertTrue(
-            sidebar.contains("TodayDividerRow(spaceID: space.id, theme: space.theme)"),
+            sidebar.contains("TodayDividerRow(spaceID: space.id, theme: space.theme"),
             "SidebarView must mount the shared TodayDividerRow between Pinned and Today. A bare Rectangle here is the exact gap this change closed — Arc's divider carries a Clear control (refs/reference/arc-hover-preview-pinned-tab.png, viewed)."
         )
 
@@ -158,6 +158,26 @@ final class TodayDividerClearTests: XCTestCase {
         XCTAssertTrue(
             manageSpaces.contains("TodayDividerRow(spaceID: spaceID"),
             "ManageSpacesView must mount the same shared TodayDividerRow. It used to carry its own private copy, which is how the two surfaces came to disagree about what Arc's divider looks like."
+        )
+    }
+
+    // MARK: - 4. Tidy sits beside Clear, not in a band of its own
+
+    func test_theTidyBroomIsADividerControl_notARowAboveNewTab() throws {
+        let divider = try source(of: "Orbit/UI/Sidebar/TodayDividerRow.swift")
+        XCTAssertTrue(
+            divider.contains("Image(systemName: \"wind\")"),
+            "The Tidy Tabs broom must live on TodayDividerRow, beside Clear. Tidy and Clear are the two verbs of the Today section and Arc presents them together; the divider's fixed height also means the broom costs no extra vertical space."
+        )
+        XCTAssertTrue(
+            divider.contains("TodayDividerTidyAction.perform"),
+            "TodayDividerRow's broom must run TodayDividerTidyAction.perform, so the tidy path stays one named, testable action like TodayDividerClearAction."
+        )
+
+        let today = try source(of: "Orbit/UI/Sidebar/TodaySectionView.swift")
+        XCTAssertFalse(
+            today.contains("\"wind\""),
+            "TodaySectionView must not draw the broom. It used to render it as its own row above `+ New Tab`, opacity-hidden until hover — a reserved empty band under the Clear divider that users read as a layout bug."
         )
     }
 }

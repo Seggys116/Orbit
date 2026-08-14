@@ -63,7 +63,7 @@ struct SidebarView: View {
                         GitHubLiveFolderRowView(spaceID: space.id, theme: space.theme)
                     }
 
-                    TodayDividerRow(spaceID: space.id, theme: space.theme)
+                    TodayDividerRow(spaceID: space.id, theme: space.theme, revealsBroom: isHovered)
                         .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
                         .overlay(alignment: .top) {
                             if !hasPinnedNodes {
@@ -75,7 +75,7 @@ struct SidebarView: View {
                             }
                         }
 
-                    TodaySectionView(spaceID: space.id, theme: space.theme, revealsBroom: isHovered)
+                    TodaySectionView(spaceID: space.id, theme: space.theme)
                 }
                 .padding(.top, OrbitMetrics.sidebarSectionSpacing)
                 .padding(.bottom, OrbitMetrics.sidebarSectionSpacing)

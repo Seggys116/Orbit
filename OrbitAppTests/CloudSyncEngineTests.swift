@@ -392,6 +392,127 @@ final class CloudSyncEngineTests: XCTestCase {
         )
     }
 
+    // MARK: - Archiving a tab is not deleting it
+
+    /// The reported data loss: the tab's id was tombstoned when it left Today, and every later
+    /// ordered merge then filtered that id out of `Space.today` while `state.tabs` and
+    /// `activeTabBySpace` kept it — a page the content pane restores with no sidebar row.
+    func testArchivingATabNeverTombstonesIt() {
+        var fixture = makeFixture(includeIncognito: false)
+        var tab = fixture.realTab
+        tab.section = .today
+        var space = fixture.realSpace
+        space.pinned = []
+        space.today = [tab.id]
+        fixture.state.spaces = [space]
+        fixture.state.tabs = [tab.id: tab]
+        fixture.state.activeTabBySpace[space.id] = tab.id
+
+        let store = StubSyncableStore(state: fixture.state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(store: store, transport: transport)
+
+        engine.reconcile()
+        XCTAssertTrue(transport.savedRecordNames.contains(tab.id.uuidString), "The tab was never pushed, so archiving it below proves nothing.")
+        _ = acceptQueuedSaves(engine: engine, transport: transport)
+        transport.reset()
+
+        var archived = store.state
+        archived.spaces[0].today = []
+        archived.tabs[tab.id]?.section = .archived
+        store.state = archived
+        engine.reconcile()
+
+        XCTAssertFalse(
+            engine._test_isTombstoned(tab.id.uuidString),
+            "Archiving a tab tombstoned it, so its id is censored out of Today by every future merge for 90 days."
+        )
+        XCTAssertFalse(
+            transport.deletedRecordNames.contains(tab.id.uuidString),
+            "The archived tab's record was deleted from iCloud, which destroys the Archive on every other device."
+        )
+        XCTAssertTrue(
+            transport.deletedRecordNames.contains(TodayEntryRecordName.make(spaceID: space.id, tabID: tab.id)),
+            "The Today membership row must still go: the tab is genuinely no longer in Today."
+        )
+    }
+
+    func testAnInboundTodayChangeDoesNotStripATabThatWasArchivedAndRestored() {
+        var fixture = makeFixture(includeIncognito: false)
+        var tab = fixture.realTab
+        tab.section = .today
+        var space = fixture.realSpace
+        space.pinned = []
+        space.today = [tab.id]
+        fixture.state.spaces = [space]
+        fixture.state.tabs = [tab.id: tab]
+        fixture.state.activeTabBySpace[space.id] = tab.id
+
+        let store = StubSyncableStore(state: fixture.state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(store: store, transport: transport)
+
+        engine.reconcile()
+        _ = acceptQueuedSaves(engine: engine, transport: transport)
+
+        var archived = store.state
+        archived.spaces[0].today = []
+        archived.tabs[tab.id]?.section = .archived
+        store.state = archived
+        engine.reconcile()
+
+        var restored = store.state
+        restored.spaces[0].today = [tab.id]
+        restored.tabs[tab.id]?.section = .today
+        store.state = restored
+        engine.reconcile()
+
+        // Any inbound Today change for this Space re-runs the ordered merge, which is
+        // where a stale tombstone silently deletes the row.
+        let unrelated = Tab(spaceID: space.id, url: URL(string: "https://another.example.com")!)
+        let entry = SyncRecordMapping.todayEntryRecord(
+            from: FlatTodayEntry(spaceID: space.id, tabID: unrelated.id, order: 0),
+            clientModifiedAt: Date(), existing: nil
+        )
+        engine.absorbIncoming(modifications: [entry], deletions: [])
+
+        XCTAssertTrue(
+            store.state.spaces[0].today.contains(tab.id),
+            "An inbound Today change dropped a restored tab out of the sidebar while it stayed in state.tabs and stayed the active tab."
+        )
+    }
+
+    func testDeletingATabOutrightStillTombstonesIt() {
+        var fixture = makeFixture(includeIncognito: false)
+        var tab = fixture.realTab
+        tab.section = .today
+        var space = fixture.realSpace
+        space.pinned = []
+        space.today = [tab.id]
+        fixture.state.spaces = [space]
+        fixture.state.tabs = [tab.id: tab]
+
+        let store = StubSyncableStore(state: fixture.state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(store: store, transport: transport)
+
+        engine.reconcile()
+        _ = acceptQueuedSaves(engine: engine, transport: transport)
+        transport.reset()
+
+        var cleared = store.state
+        cleared.spaces[0].today = []
+        cleared.tabs.removeValue(forKey: tab.id)
+        store.state = cleared
+        engine.reconcile()
+
+        XCTAssertTrue(transport.deletedRecordNames.contains(tab.id.uuidString), "Clearing the Archive must still delete the record from iCloud.")
+        XCTAssertTrue(
+            engine._test_isTombstoned(tab.id.uuidString),
+            "A genuinely deleted tab was not tombstoned, so a stale device could resurrect it."
+        )
+    }
+
     func testAnUnchangedDocumentQueuesNothingOnASecondReconcile() {
         let fixture = makeFixture(includeIncognito: false)
         let store = StubSyncableStore(state: fixture.state)

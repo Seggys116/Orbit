@@ -6,6 +6,7 @@
 //  | Favourites           | same, the topApps container (per profile)       |
 //  | Archived tabs        | StorableArchiveItems.json                       |
 //  | History              | User Data/Default/History (Chromium SQLite)     |
+//  | Site icons           | User Data/Default/Favicons (Chromium SQLite)    |
 //  | Per-host zoom        | Default/Preferences partition.per_host_zoom_levels |
 //  | Site permissions     | Default/Preferences profile.content_settings    |
 //  | Download directory   | Default/Preferences savefile.default_directory  |
@@ -25,6 +26,7 @@ public struct ArcImportPayload: Sendable {
     public var visits: [ImportedVisit]
     public var settings: ArcSettings
     public var extensions: [ArcExtension]
+    public var favicons: [ArcFavicon]
     public var keyBindings: ArcKeyBindingImport
 
     public init(
@@ -33,6 +35,7 @@ public struct ArcImportPayload: Sendable {
         visits: [ImportedVisit] = [],
         settings: ArcSettings = ArcSettings(),
         extensions: [ArcExtension] = [],
+        favicons: [ArcFavicon] = [],
         keyBindings: ArcKeyBindingImport = ArcKeyBindingImport()
     ) {
         self.sidebar = sidebar
@@ -40,6 +43,7 @@ public struct ArcImportPayload: Sendable {
         self.visits = visits
         self.settings = settings
         self.extensions = extensions
+        self.favicons = favicons
         self.keyBindings = keyBindings
     }
 
@@ -79,7 +83,8 @@ public enum ArcImportReader {
         homeDirectory: URL,
         browser: ImportableBrowser = .arc,
         historyLimit: Int = 5000,
-        archiveLimit: Int = 2000
+        archiveLimit: Int = 2000,
+        faviconLimit: Int = 2000
     ) throws -> ArcImportPayload {
         guard isPresent(homeDirectory: homeDirectory) else {
             throw BrowserImportError.notInstalled(browser)
@@ -115,12 +120,20 @@ public enum ArcImportReader {
         let extensions = try ArcExtensionInventory.read(profileDirectory: profile, browser: browser)
         let keyBindings = try ArcKeyBindingsReader.read(homeDirectory: homeDirectory, browser: browser)
 
+        // Icons are decoration; an unreadable Favicons database must not cost the user their Spaces.
+        let favicons = (try? ArcFaviconReader.read(
+            profileDirectory: profile,
+            browser: browser,
+            limit: faviconLimit
+        )) ?? []
+
         return ArcImportPayload(
             sidebar: sidebar,
             archived: archived,
             visits: visits,
             settings: settings,
             extensions: extensions,
+            favicons: favicons,
             keyBindings: keyBindings
         )
     }

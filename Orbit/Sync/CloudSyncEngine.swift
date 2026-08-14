@@ -247,7 +247,13 @@ public final class CloudSyncEngine {
         var toSave: [CKSyncEngine.PendingRecordZoneChange] = []
         var toDelete: [CKSyncEngine.PendingRecordZoneChange] = []
 
+        var forgotATombstone = false
         for (name, push) in desired {
+            // A record that exists again is not deleted; leaving the tombstone would keep censoring its id out of every ordered merge for 90 days.
+            if tombstones.contains(name) {
+                tombstones.forget(name)
+                forgotATombstone = true
+            }
             let hash = Self.contentHash(for: push.payload)
             if let cached = recordCache[name], cached.contentHash == hash {
                 continue
@@ -275,7 +281,7 @@ public final class CloudSyncEngine {
 
         if !toSave.isEmpty { transport.add(pendingRecordZoneChanges: toSave) }
         if !toDelete.isEmpty { transport.add(pendingRecordZoneChanges: toDelete) }
-        if !toSave.isEmpty || !toDelete.isEmpty { persistCaches() }
+        if !toSave.isEmpty || !toDelete.isEmpty || forgotATombstone { persistCaches() }
     }
 
     // MARK: Building CKRecords to save
@@ -452,13 +458,9 @@ public final class CloudSyncEngine {
             }
         }
 
-        var referencedTabIDs = Set<TabID>()
-        for space in state.spaces {
-            referencedTabIDs.formUnion(space.pinned.flatMap(\.allTabIDs))
-            referencedTabIDs.formUnion(space.today)
-        }
-        for tabID in referencedTabIDs {
-            guard let tab = state.tabs[tabID] else { continue }
+        // Every tab of a live Space, not only the ones Today/Pinned reference: an archived tab that dropped out of here read as a deletion, which tombstoned its id and then censored it out of Today for good.
+        let liveSpaceIDs = Set(state.spaces.map(\.id))
+        for tab in state.tabs.values where liveSpaceIDs.contains(tab.spaceID) {
             desired[tab.id.uuidString] = PendingPush(recordType: SyncRecordType.tab, clientModifiedAt: .distantPast, payload: .tab(tab))
         }
 
@@ -843,6 +845,7 @@ public final class CloudSyncEngine {
         let tombstonedUUIDs = Set(tombstones.deletedAt.keys.compactMap(UUID.init(uuidString:)))
         store.applySyncEngineUpdate { state in
             buckets.apply(to: &state, tombstonedUUIDs: tombstonedUUIDs)
+            if let repaired = state.repairingSidebarMembership() { state = repaired }
         }
     }
 

@@ -9,8 +9,15 @@ struct SpaceSwipeGestureCatcher: NSViewRepresentable {
     // hitTest returns nil: a bare NSView otherwise swallows every
     // click/drag inside this frame regardless of the .scrollWheel monitor's
     // own scoping below.
-    final class PassThroughHitTestView: NSView {
+    class PassThroughHitTestView: NSView {
+        var windowDidChange: (() -> Void)?
+
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            windowDidChange?()
+        }
     }
 
     func makeNSView(context: Context) -> NSView {
@@ -41,6 +48,10 @@ struct SpaceSwipeGestureCatcher: NSViewRepresentable {
 
         private weak var view: NSView?
         private var monitor: Any?
+        // -1 matches no window, so a catcher with no window rejects every event.
+        private(set) var monitoredWindowNumber = -1
+
+        var isMonitorInstalled: Bool { monitor != nil }
 
         private var isGestureActive = false
         private var isTrackingHorizontal = false
@@ -56,29 +67,51 @@ struct SpaceSwipeGestureCatcher: NSViewRepresentable {
             self.onEnd = onEnd
         }
 
-        func attach(to view: NSView) {
+        func attach(to view: PassThroughHitTestView) {
             self.view = view
+            view.windowDidChange = { [weak self, weak view] in
+                guard let self, let view else { return }
+                syncMonitor(for: view)
+            }
+            syncMonitor(for: view)
+        }
+
+        func detach() {
+            (view as? PassThroughHitTestView)?.windowDidChange = nil
+            removeMonitor()
+        }
+
+        // Tied to window membership: a monitor that outlives its window still runs on every wheel tick everywhere.
+        func syncMonitor(for view: NSView) {
+            guard let window = view.window else {
+                monitoredWindowNumber = -1
+                isGestureActive = false
+                isTrackingHorizontal = false
+                removeMonitor()
+                return
+            }
+            monitoredWindowNumber = window.windowNumber
+            guard monitor == nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
                 self?.handle(event) ?? event
             }
         }
 
-        func detach() {
+        private func removeMonitor() {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
         }
 
-        private func handle(_ event: NSEvent) -> NSEvent? {
-            guard let view, let window = view.window, event.window === window else { return event }
+        func handle(_ event: NSEvent) -> NSEvent? {
+            guard event.windowNumber == monitoredWindowNumber else { return event }
+            // Only .began reads geometry, so page scrolling walks no view hierarchy here.
+            guard isGestureActive || event.phase == .began else { return event }
             guard event.hasPreciseScrollingDeltas else { return event }
-
-            let locationInView = view.convert(event.locationInWindow, from: nil)
-            let isInsideBounds = view.bounds.contains(locationInView)
 
             if event.phase != [] {
                 switch event.phase {
                 case .began:
-                    isGestureActive = isInsideBounds
+                    isGestureActive = isInsideCatcher(event)
                     isTrackingHorizontal = false
                     accumulatedTranslation = 0
                     undecidedDX = 0
@@ -118,6 +151,11 @@ struct SpaceSwipeGestureCatcher: NSViewRepresentable {
             default:
                 return event
             }
+        }
+
+        private func isInsideCatcher(_ event: NSEvent) -> Bool {
+            guard let view, view.window != nil else { return false }
+            return view.bounds.contains(view.convert(event.locationInWindow, from: nil))
         }
 
         private func process(_ event: NSEvent) -> NSEvent? {

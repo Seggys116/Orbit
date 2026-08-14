@@ -171,6 +171,9 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         try? host.store.saveNow()
         try? host.noteStore.saveNow()
         try? host.easelStore.saveNow()
+        try? host.downloadStore.saveNow()
+        try? host.boostStore.saveNow()
+        try? host.siteSearchStore.saveNow()
 
         // Safe only from this exact call site: applicationShouldTerminate
         // above guarantees this thread is off Chromium's nested pump stack by now.

@@ -102,6 +102,12 @@ enum ImportSQLiteSnapshot {
         return String(cString: cString)
     }
 
+    static func columnBlob(_ statement: OpaquePointer, _ index: Int32) -> Data? {
+        let count = Int(sqlite3_column_bytes(statement, index))
+        guard count > 0, let bytes = sqlite3_column_blob(statement, index) else { return nil }
+        return Data(bytes: bytes, count: count)
+    }
+
     // MARK: - Epoch conversions
 
     /// Safari: history_visits.visit_time is CFAbsoluteTime, seconds since 2001-01-01 UTC.

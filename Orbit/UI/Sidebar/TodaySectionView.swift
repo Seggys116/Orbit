@@ -11,7 +11,6 @@ struct TodaySectionView: View {
     @Environment(AppEnvironment.self) private var env
     var spaceID: SpaceID
     var theme: SpaceTheme
-    var revealsBroom: Bool = true
 
     private var tabs: [Tab] { env.todayTabs(in: spaceID) }
 
@@ -21,10 +20,6 @@ struct TodaySectionView: View {
 
     var body: some View {
         VStack(spacing: OrbitMetrics.sidebarRowSpacing) {
-            if env.shouldShowTidyTabsBroom(in: spaceID) {
-                tidyTabsRow
-            }
-
             if case .failed(let message) = tidyPhase {
                 tidyErrorRow(message)
             }
@@ -75,33 +70,6 @@ struct TodaySectionView: View {
         .contextMenu {
             Button("Clear All Today Tabs") { env.clearTodayTabs(in: spaceID) }
         }
-    }
-
-    private var tidyTabsRow: some View {
-        HStack {
-            Spacer()
-            Button {
-                tidyTabs()
-            } label: {
-                Image(systemName: "wind")
-                    .font(.system(size: OrbitMetrics.iconFavicon, weight: .medium))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(theme.readableForeground.opacity(OrbitMetrics.sidebarRowLabelOpacityInactive))
-            .orbitTooltip(tidyTabsHelp)
-            .disabled(tidyPhase == .tidying)
-            .accessibilityLabel("Tidy Tabs")
-        }
-        .opacity(revealsBroom ? 1 : 0)
-        .allowsHitTesting(revealsBroom)
-        .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
-        .padding(.bottom, OrbitMetrics.sidebarInterSectionGap)
-    }
-
-    private var tidyTabsHelp: String {
-        TidyTabsCoordinator.shouldUseModel(todayTabCount: tabs.count)
-            ? "Tidy Tabs — group Today tabs by subject, using your AI provider"
-            : "Tidy Tabs — group Today tabs by site"
     }
 
     private func tidyErrorRow(_ message: String) -> some View {
@@ -207,18 +175,6 @@ struct TodaySectionView: View {
                     edge = env.preferredSplitEdge()
                 }
                 env.createSplit(existingTabID: targetID, newTabID: resolvedNodeID, edge: edge)
-            }
-        }
-    }
-
-    // Never both: a failed model call does not silently fall back to a host tidy, because the user could not tell the difference by looking.
-    private func tidyTabs() {
-        TidyTabsCoordinator.shared.dismissError()
-        if TidyTabsCoordinator.shouldUseModel(todayTabCount: tabs.count) {
-            TidyTabsCoordinator.shared.tidy(spaceID: spaceID, env: env)
-        } else {
-            withAnimation(OrbitMotion.interactive) {
-                _ = env.tidyTodayTabsByHost(in: spaceID)
             }
         }
     }
