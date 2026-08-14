@@ -166,6 +166,9 @@ class OrbitWebContentsHost : public content::WebContentsObserver,
 
   bool HasPictureInPictureVideo();
 
+  // OrbitWebContentsHasPictureInPictureCandidate's implementation.
+  bool HasPictureInPictureCandidate();
+
   void CapturePreview(bool has_rect,
                       double rect_x,
                       double rect_y,
@@ -358,6 +361,12 @@ class OrbitWebContentsHost : public content::WebContentsObserver,
   // class's empty body left the floating window on screen and the PiP flag stuck forever.
   void ExitPictureInPicture() override;
 
+  // Reached via WebContentsImpl::Activate(), notably PiP's "back to tab" control
+  // (VideoPictureInPictureWindowControllerImpl::CloseAndFocusInitiator ->
+  // FocusInitiator -> Activate). The base class's empty body dropped the request
+  // on the floor; Swift needs it to know which tab to switch to.
+  void ActivateContents(content::WebContents* contents) override;
+
   // OrbitUserScriptRegistry::Observer:
   void OnGlobalUserScriptsChanged() override;
 
@@ -383,6 +392,12 @@ class OrbitWebContentsHost : public content::WebContentsObserver,
   // gone are skipped rather than trusted.
   std::optional<content::MediaPlayerId> PictureInPictureCandidate() const;
   void ClosePictureInPictureWindow(bool should_pause_video);
+
+  // Fires callbacks_.picture_in_picture_available_changed exactly when
+  // PictureInPictureCandidate().has_value() flips, called after every
+  // media_players_ mutation (MediaStartedPlaying/MediaStoppedPlaying/
+  // MediaMetadataChanged/MediaDestroyed/PrimaryPageChanged).
+  void ReportPictureInPictureCandidateIfChanged();
 
   // Shared by RespondToCertificateError and the destructor's refusal of everything still
   // open. Drops the entry after running the callback, so a duplicate answer can't run it twice.
@@ -436,6 +451,10 @@ class OrbitWebContentsHost : public content::WebContentsObserver,
   // Last value pushed through callbacks_.picture_in_picture_changed, so the
   // destructor's own "left PiP" report cannot double-fire after ExitPictureInPicture.
   bool reported_picture_in_picture_active_ = false;
+
+  // Last value pushed through callbacks_.picture_in_picture_available_changed,
+  // so ReportPictureInPictureCandidateIfChanged only forwards an actual flip.
+  bool reported_picture_in_picture_candidate_ = false;
 
   struct MediaPlayerEntry {
     bool has_video = false;

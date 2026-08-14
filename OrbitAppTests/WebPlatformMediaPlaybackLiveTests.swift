@@ -26,6 +26,32 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
         }
     }
 
+    /// Like `waitUntilTrue`, but only returns once the expression has read
+    /// true on several consecutive polls -- proof against a transient true
+    /// (a poll that has not finished settling) being mistaken for the real answer.
+    private func waitUntilStablyTrue(
+        _ contents: ChromiumWebContents,
+        _ expression: String,
+        consecutiveChecks: Int = 5,
+        timeout: Duration = .seconds(15)
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        var consecutiveTrue = 0
+        while true {
+            let result = try await contents.evaluateJavaScript(expression)
+            if (result as? Bool) == true {
+                consecutiveTrue += 1
+                if consecutiveTrue >= consecutiveChecks { return }
+            } else {
+                consecutiveTrue = 0
+            }
+            guard ContinuousClock.now < deadline else {
+                throw EngineError(code: .engineUnavailable, underlyingDescription: "'\(expression)' never stayed true")
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
     private struct PlaybackResult {
         let reachedPlaying: Bool
         let firstCurrentTime: Double
@@ -212,5 +238,85 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
             result.currentTimeAfterSecondPauseSample, result.currentTimeAfterFirstPauseSample, accuracy: 0.05,
             "currentTime kept advancing after pause() -- playback did not really stop"
         )
+    }
+
+    // MARK: - Mute
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testSetMutedReallyMutesAndUnmutesTheLiveVideoElement
+
+    // There is no OrbitWebContentsSetMuted in the bridge; setMuted drives the
+    // page's real elements through the shared media-session observer script.
+    func testSetMutedReallyMutesAndUnmutesTheLiveVideoElement() throws {
+        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
+        let outcome = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> (
+            mutedAfterEnable: Bool, mediaStateReflectsIt: Bool, newElementInheritsMute: Bool, unmutedAfterDisable: Bool
+        ) in
+            let engine = await LiveChromiumEngineHost.sharedEngine()
+            engine.addUserScript(MediaSessionObserverScript.chromiumUserScript, session: engine.defaultSession)
+
+            let server = try LiveHTTPTestServer(routes: [
+                "/": LiveHTTPTestServer.Route(
+                    contentType: "text/html",
+                    body: "<!DOCTYPE html><html><body><video id=\"v\" src=\"/v.webm\" muted loop playsinline></video></body></html>"
+                ),
+                "/v.webm": LiveHTTPTestServer.Route(contentType: "video/webm", data: LiveMediaFixtures.videoWebM, supportsRangeRequests: true),
+            ])
+            defer { server.stop() }
+
+            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            defer { contents.close() }
+            contents.view.frame = NSRect(x: 0, y: 0, width: 320, height: 240)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 320, height: 240), styleMask: [.borderless], backing: .buffered, defer: false
+            )
+            window.contentView = contents.view
+            window.orderFront(nil)
+            defer {
+                window.orderOut(nil)
+                window.contentView = nil
+            }
+            try await Task.sleep(for: .milliseconds(150))
+
+            contents.load(server.baseURL)
+            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            // Off before asserting Orbit's mute reaches it, or the page's own <video muted> attribute would pass the assertion for free.
+            _ = try await contents.evaluateJavaScript("document.getElementById('v').muted = false; true;")
+
+            contents.setMuted(true)
+            try await self.waitUntilTrue(contents, "document.getElementById('v').muted === true")
+            let mutedAfterEnable = true
+            let mediaStateReflectsIt = contents.mediaState.isMuted
+
+            _ = try await contents.evaluateJavaScript("""
+            var w = document.createElement('video');
+            w.id = 'w';
+            document.body.appendChild(w);
+            true;
+            """)
+            var newElementInheritsMute = true
+            do {
+                try await self.waitUntilTrue(contents, "document.getElementById('w').muted === true", timeout: .seconds(5))
+            } catch {
+                newElementInheritsMute = false
+            }
+
+            contents.setMuted(false)
+            var unmutedAfterDisable = true
+            do {
+                try await self.waitUntilStablyTrue(contents, "document.getElementById('v').muted === false")
+            } catch {
+                unmutedAfterDisable = false
+            }
+
+            return (mutedAfterEnable, mediaStateReflectsIt, newElementInheritsMute, unmutedAfterDisable)
+        }
+
+        XCTAssertTrue(outcome.mutedAfterEnable, "contents.setMuted(true) never reached the page's real <video> element")
+        XCTAssertTrue(outcome.mediaStateReflectsIt, "mediaState.isMuted did not flip when setMuted(true) was called")
+        XCTAssertTrue(
+            outcome.newElementInheritsMute,
+            "a <video> element added after setMuted(true) was not muted by the observer's persisted mute state"
+        )
+        XCTAssertTrue(outcome.unmutedAfterDisable, "contents.setMuted(false) never unmuted the page's real <video> element")
     }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct GeneralSettingsPane: View {
@@ -38,15 +39,32 @@ struct GeneralSettingsPane: View {
             #endif
 
             OrbitSettingsSection(title: "About") {
+                OrbitSettingsActionRow(spacing: 12) {
+                    HStack(spacing: 12) {
+                        if let icon = NSApplication.shared.applicationIconImage {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .frame(width: 40, height: 40)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Orbit").font(.system(size: 13, weight: .semibold))
+                            Text(orbitVersionDescription)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } trailing: { EmptyView() }
                 OrbitSettingsValueRow(title: "Engine") {
                     Text(ChromiumBuild.engineDescription).foregroundStyle(.secondary)
                 }
-                OrbitSettingsActionRow {
-                    Text(orbitVersionDescription)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                } trailing: {
-                    OrbitButton(title: "About Orbit…", kind: .secondary, accentColor: SettingsPalette.accent) { AboutWindowController.show() }
+                OrbitSettingsValueRow(title: "Chromium") {
+                    Text("\(ChromiumBuild.version) · \(ChromiumBuild.channel)").foregroundStyle(.secondary)
+                }
+                OrbitSettingsValueRow(title: "Pinned") {
+                    Text(ChromiumBuild.pinnedAt).foregroundStyle(.secondary)
+                }
+                OrbitSettingsValueRow(title: "Copyright") {
+                    Text(copyrightDescription).foregroundStyle(.secondary)
                 }
             }
         }
@@ -59,34 +77,12 @@ struct GeneralSettingsPane: View {
         return "Version \(version) (\(build))"
     }
 
+    private var copyrightDescription: String {
+        "© \(Calendar.current.component(.year, from: Date())) Orbit"
+    }
+
     #if ORBIT_SPARKLE
     @Bindable private var updater = UpdaterController.shared
-
-    private var updaterStatusSummary: String? {
-        switch updater.status {
-        case .idle:
-            return nil
-        case .checking:
-            return "Checking for updates…"
-        case .upToDate:
-            return "Orbit is up to date."
-        case .updateAvailable(let version, _, let isInformationOnly):
-            return isInformationOnly ? "Orbit \(version) is available (see About Orbit…)." : "Orbit \(version) is available."
-        case .downloading(let fractionCompleted):
-            return fractionCompleted.map { "Downloading… \(Int(($0 * 100).rounded()))%" } ?? "Downloading…"
-        case .extracting(let fractionCompleted):
-            return "Extracting… \(Int((fractionCompleted * 100).rounded()))%"
-        case .readyToRelaunch(let version):
-            return "Orbit \(version) is ready to install (see About Orbit…)."
-        case .error:
-            return "Update check failed."
-        }
-    }
-
-    private var updaterErrorDescription: String? {
-        guard case .error(let message) = updater.status else { return nil }
-        return message
-    }
 
     private var lastCheckedDescription: String {
         guard let lastCheckDate = updater.lastCheckDate else { return "Never" }
@@ -107,30 +103,17 @@ struct GeneralSettingsPane: View {
             OrbitSettingsValueRow(title: "Last checked") {
                 Text(lastCheckedDescription).foregroundStyle(.secondary)
             }
-            OrbitSettingsActionRow {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let updaterStatusSummary {
-                        Text(updaterStatusSummary)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    } else if updaterErrorDescription == nil {
-                        Text("Checks for a newer version of Orbit.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    if let updaterErrorDescription {
-                        Text(updaterErrorDescription)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            } trailing: {
-                OrbitButton(title: "Check Now", kind: .secondary, isCompact: true, accentColor: SettingsPalette.accent) {
-                    updater.checkForUpdates()
-                }
-                .disabled(!updater.canCheckForUpdates)
-            }
+            UpdaterStatusView(
+                status: updater.status,
+                canCheckForUpdates: updater.canCheckForUpdates,
+                onCheckForUpdates: { updater.checkForUpdates() },
+                onInstallNow: { updater.installUpdateNow() },
+                onRemindLater: { updater.remindMeLater() },
+                onSkipVersion: { updater.skipThisVersion() },
+                onCancelCheck: { updater.cancelCheck() },
+                onCancelDownload: { updater.cancelDownload() }
+            )
+            .padding(.top, SettingsMetrics.rowVerticalPadding)
         }
     }
     #endif

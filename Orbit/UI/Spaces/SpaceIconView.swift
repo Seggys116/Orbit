@@ -35,6 +35,9 @@ struct SpaceIconView: View {
                 Image(systemName: symbol)
                     .font(.system(size: size, weight: .semibold))
                     .foregroundStyle(foregroundColor)
+                    // Every sibling case below frames itself to size x size; without this the glyph's own
+                    // tight bounding box (which varies per symbol) becomes what the caller centers, not size.
+                    .frame(width: size, height: size, alignment: .center)
             } else {
                 dot
             }

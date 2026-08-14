@@ -522,6 +522,22 @@ nonisolated public indirect enum SidebarNode: Identifiable, Codable, Hashable, S
     }
 }
 
+// A snapshot of one ancestor folder's identity/name/icon, captured at archive time so the
+// Archive view can rebuild the nesting a tab was in without needing the live pinned tree.
+nonisolated public struct ArchivedFolderCrumb: Codable, Hashable, Sendable {
+    public var id: FolderID
+    public var name: String
+    public var icon: String?
+    public var iconIsEmoji: Bool
+
+    public init(id: FolderID, name: String, icon: String? = nil, iconIsEmoji: Bool = false) {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.iconIsEmoji = iconIsEmoji
+    }
+}
+
 nonisolated public struct Folder: Identifiable, Codable, Hashable, Sendable {
     public var id: FolderID
     public var name: String
@@ -596,6 +612,11 @@ nonisolated public struct Tab: Identifiable, Codable, Hashable, Sendable {
 
     public var tidyGroup: String?
 
+    // Root-to-parent chain of the pinned folder this tab lived in when archived, deepest last.
+    // Empty/nil means it was a top-level or Today tab. Lets the Archive view rebuild folder
+    // nesting even after the tab has been structurally removed from the live pinned tree.
+    public var archivedFolderTrail: [ArchivedFolderCrumb]?
+
     public var displayTitle: String {
         if let customTitle, !customTitle.isEmpty { return customTitle }
         if let tidiedTitle, !tidiedTitle.isEmpty { return tidiedTitle }
@@ -633,7 +654,8 @@ nonisolated public struct Tab: Identifiable, Codable, Hashable, Sendable {
         pinnedURL: URL? = nil,
         pinnedTitle: String? = nil,
         tidiedTitle: String? = nil,
-        tidyGroup: String? = nil
+        tidyGroup: String? = nil,
+        archivedFolderTrail: [ArchivedFolderCrumb]? = nil
     ) {
         self.id = id
         self.spaceID = spaceID
@@ -654,6 +676,7 @@ nonisolated public struct Tab: Identifiable, Codable, Hashable, Sendable {
         self.pinnedTitle = pinnedTitle
         self.tidiedTitle = tidiedTitle
         self.tidyGroup = tidyGroup
+        self.archivedFolderTrail = archivedFolderTrail
     }
 
 }

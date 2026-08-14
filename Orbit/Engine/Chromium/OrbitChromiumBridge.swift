@@ -125,6 +125,7 @@ final class OrbitChromiumBridge {
 
     private typealias TogglePictureInPictureFn = @convention(c) (UnsafeMutableRawPointer?) -> Int32
     private typealias HasPictureInPictureVideoFn = @convention(c) (UnsafeMutableRawPointer?) -> Int32
+    private typealias HasPictureInPictureCandidateFn = @convention(c) (UnsafeMutableRawPointer?) -> Int32
 
     // Mirrors orbit_bridge_api.h's OrbitCapturePreviewCallback.
     fileprivate typealias CapturePreviewCallback = @convention(c) (
@@ -309,6 +310,7 @@ final class OrbitChromiumBridge {
     private var webContentsEnableAutoResize: EnableAutoResizeFn?
     private var webContentsTogglePictureInPicture: TogglePictureInPictureFn?
     private var webContentsHasPictureInPictureVideo: HasPictureInPictureVideoFn?
+    private var webContentsHasPictureInPictureCandidate: HasPictureInPictureCandidateFn?
     private var webContentsCapturePreview: CapturePreviewFn?
     private var setUserAgent: SetUserAgentFn?
     private var getCookies: GetCookiesFn?
@@ -543,6 +545,9 @@ final class OrbitChromiumBridge {
         )
         webContentsHasPictureInPictureVideo = optionalSymbol(
             "OrbitWebContentsHasPictureInPictureVideo", as: HasPictureInPictureVideoFn.self
+        )
+        webContentsHasPictureInPictureCandidate = optionalSymbol(
+            "OrbitWebContentsHasPictureInPictureCandidate", as: HasPictureInPictureCandidateFn.self
         )
         webContentsCapturePreview = try symbol("OrbitWebContentsCapturePreview", as: CapturePreviewFn.self)
         setUserAgent = try symbol("OrbitSetUserAgent", as: SetUserAgentFn.self)
@@ -956,6 +961,13 @@ final class OrbitChromiumBridge {
 
     func hasPictureInPictureVideo(_ handle: UnsafeMutableRawPointer) -> Bool {
         (webContentsHasPictureInPictureVideo?(handle) ?? 0) != 0
+    }
+
+    /// Whether togglePictureInPicture(_:) would find something to float right
+    /// now -- the same state picture_in_picture_available_changed reports, for
+    /// a caller that attached after the last edge (e.g. right after init).
+    func hasPictureInPictureCandidate(_ handle: UnsafeMutableRawPointer) -> Bool {
+        (webContentsHasPictureInPictureCandidate?(handle) ?? 0) != 0
     }
 
     // MARK: - Content sizing
@@ -1459,6 +1471,11 @@ struct OrbitWebContentsCallbacksLayout {
     /// Mirrors orbit_bridge_api.h's devtools_bring_to_front field.
     typealias DevToolsBringToFront = @convention(c) (UnsafeMutableRawPointer?) -> Void
 
+    /// Mirrors orbit_bridge_api.h's activation_requested field --
+    /// content::WebContentsDelegate::ActivateContents reached this tab,
+    /// e.g. the PiP window's "back to tab" control.
+    typealias ActivationRequested = @convention(c) (UnsafeMutableRawPointer?) -> Void
+
     /// Mirrors orbit_bridge_api.h's show_context_menu field; params in C struct order.
     typealias ShowContextMenu = @convention(c) (
         UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?,
@@ -1476,6 +1493,12 @@ struct OrbitWebContentsCallbacksLayout {
     typealias FaviconChanged = @convention(c) (
         UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<UInt8>?, Int32, Int32, Int32
     ) -> Void
+
+    /// Mirrors orbit_bridge_api.h's picture_in_picture_available_changed field --
+    /// fires when PictureInPictureCandidate() gains or loses a value, covering
+    /// every frame (main and sub-) since it is driven by content::WebContentsObserver's
+    /// own MediaPlayerInfo, not a page-side element scan. is_available 0/1.
+    typealias PictureInPictureAvailableChanged = @convention(c) (UnsafeMutableRawPointer?, Int32) -> Void
 
     var opaque: UnsafeMutableRawPointer?
     var navigationStateChanged: NavigationStateChanged?
@@ -1500,6 +1523,8 @@ struct OrbitWebContentsCallbacksLayout {
     var devtoolsInspectedPageBounds: DevToolsInspectedPageBounds?
     var devtoolsCloseRequested: DevToolsCloseRequested?
     var devtoolsBringToFront: DevToolsBringToFront?
+    var activationRequested: ActivationRequested?
+    var pictureInPictureAvailableChanged: PictureInPictureAvailableChanged?
 }
 
 // MARK: - Tabs delegate struct mirror

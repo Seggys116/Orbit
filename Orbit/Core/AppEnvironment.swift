@@ -1167,6 +1167,7 @@ final class AppEnvironment {
         mediaStates[tabID] = contents.mediaState
         store.setMediaState(contents.mediaState, forTab: tabID)
         applyStoredZoomFactor(to: contents, tabID: tabID, url: url)
+        applyStoredMuteState(to: contents, tabID: tabID)
         // Lives here, the single funnel every materialisation passes
         // through, so no future call site can bring a tab back to life while leaving it flagged unloaded.
         store.setRendererLive(tabID, true)

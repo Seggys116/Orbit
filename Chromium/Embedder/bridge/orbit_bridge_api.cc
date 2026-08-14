@@ -417,6 +417,10 @@ int OrbitWebContentsHasPictureInPictureVideo(OrbitWebContentsHandle handle) {
   return orbit::ToHost(handle)->HasPictureInPictureVideo() ? 1 : 0;
 }
 
+int OrbitWebContentsHasPictureInPictureCandidate(OrbitWebContentsHandle handle) {
+  return orbit::ToHost(handle)->HasPictureInPictureCandidate() ? 1 : 0;
+}
+
 void OrbitWebContentsCapturePreview(OrbitWebContentsHandle handle,
                                     int has_rect,
                                     double rect_x,

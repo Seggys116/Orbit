@@ -84,6 +84,7 @@ extension AppEnvironment: WebContentsDelegate {
         certificateProblems.removeValue(forKey: tabID)
         refusedCertificateTabIDs.remove(tabID)
         applyStoredZoomFactor(to: contents, tabID: tabID, url: url)
+        applyStoredMuteState(to: contents, tabID: tabID)
         store.noteTabAccessed(tabID)
         guard let tab = state.tabs[tabID] else { return }
         recordVisit(url: url, title: tab.title, profileID: space(tab.spaceID)?.profileID ?? state.profiles.first?.id ?? UUID(), spaceID: tab.spaceID, wasTyped: kind == .typed)
@@ -429,6 +430,14 @@ extension AppEnvironment: WebContentsDelegate {
 
     func webContents(_ contents: WebContents, didChangeFullscreen isFullscreen: Bool) {}
 
+    // The picture-in-picture window's "back to tab" control, not its X --
+    // see ChromiumWebContents.handleActivationRequested. activateTab already
+    // switches Spaces if the tab lives outside the currently active one.
+    func webContentsDidRequestActivation(_ contents: WebContents) {
+        guard let tabID = tabID(for: contents) else { return }
+        activateTab(tabID)
+    }
+
     // MARK: Zoom
 
     // Nothing is persisted for an Incognito Space — a per-host zoom level
@@ -457,6 +466,16 @@ extension AppEnvironment: WebContentsDelegate {
         // Guards against bouncing: setZoomFactor makes both backends report back through didChangeZoomFactor.
         guard abs(factor - contents.zoomFactor) > 0.0001 else { return }
         contents.setZoomFactor(factor)
+    }
+
+    // Mute is a property of the tab, not the page: it is driven by JavaScript
+    // against a document-start observer that is reinstalled fresh on every
+    // navigation, so the desired state has to be resent on every commit too.
+    func applyStoredMuteState(to contents: any WebContents, tabID: TabID) {
+        // Not reapplied when false: the fresh document's observer already
+        // defaults to no override, so there is nothing to resend.
+        guard state.tabs[tabID]?.isMuted == true else { return }
+        contents.setMuted(true)
     }
 
     // MARK: Downloads

@@ -25,8 +25,8 @@ struct LibraryArchivedTabsView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         LibraryDateSectionHeader(title: group.title)
                         VStack(spacing: LibraryMetrics.rowSpacing) {
-                            ForEach(group.items) { tab in
-                                ArchivedTabRow(tab: tab)
+                            ForEach(ArchivedTabTreeBuilder.build(from: group.items)) { node in
+                                ArchivedTreeNodeRow(node: node, depth: 0)
                             }
                         }
                     }
@@ -36,10 +36,98 @@ struct LibraryArchivedTabsView: View {
     }
 }
 
+// MARK: - Row rendering
+// ArchivedTabNode/ArchivedFolderNode/ArchivedTabTreeBuilder live in PinnedNodeTree.swift, next to
+// the ArchivedFolderCrumb trail they rebuild from — model-layer, not view-layer, and they need to
+// be reachable from OrbitTests, whose target membership does not include this view file.
+
+private enum ArchivedRowMetrics {
+    // Same per-depth indent the sidebar uses for pinned folder nesting, so a tab's Archive row
+    // lines up visually the way it would have in the sidebar.
+    static let indentPerDepth = OrbitMetrics.sidebarIndentPerDepth
+}
+
+private struct ArchivedTreeNodeRow: View {
+    var node: ArchivedTabNode
+    var depth: Int
+
+    var body: some View {
+        switch node {
+        case .tab(let tab):
+            ArchivedTabRow(tab: tab, depth: depth)
+        case .folder(let folder):
+            ArchivedFolderRow(folder: folder, depth: depth)
+        }
+    }
+}
+
+private struct ArchivedFolderRow: View {
+    var folder: ArchivedFolderNode
+    var depth: Int
+
+    @State private var isExpanded = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: LibraryMetrics.rowSpacing) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    folderGlyph
+                    Text(folder.name)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(LibraryPalette.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(LibraryPalette.textTertiary)
+                        .frame(width: 10, height: 10)
+                }
+                .padding(.horizontal, LibraryMetrics.rowHorizontalPadding)
+                .padding(.vertical, LibraryMetrics.rowVerticalPadding)
+                .background(
+                    RoundedRectangle(cornerRadius: LibraryMetrics.rowCornerRadius)
+                        .fill(LibraryPalette.cardFill)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, CGFloat(depth) * ArchivedRowMetrics.indentPerDepth)
+
+            if isExpanded {
+                VStack(spacing: LibraryMetrics.rowSpacing) {
+                    ForEach(folder.children) { child in
+                        ArchivedTreeNodeRow(node: child, depth: depth + 1)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var folderGlyph: some View {
+        if let icon = folder.icon, !icon.isEmpty, folder.iconIsEmoji || OrbitSymbolName.isResolvable(icon) {
+            if folder.iconIsEmoji {
+                Text(icon).font(.system(size: 13))
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(LibraryPalette.textSecondary)
+                    .frame(width: OrbitMetrics.sidebarFolderToggleSize, height: OrbitMetrics.sidebarFolderToggleSize)
+            }
+        } else {
+            FolderToggleGlyph(isOpen: isExpanded)
+                .foregroundStyle(LibraryPalette.textSecondary)
+        }
+    }
+}
+
 private struct ArchivedTabRow: View {
     @Environment(AppEnvironment.self) private var env
     @State private var router = LibraryRouter.shared
     var tab: Tab
+    var depth: Int = 0
 
     private var spaceName: String? {
         env.spaces.first(where: { $0.id == tab.spaceID })?.name
@@ -80,6 +168,7 @@ private struct ArchivedTabRow: View {
                 }
             }
         }
+        .padding(.leading, CGFloat(depth) * ArchivedRowMetrics.indentPerDepth)
         .contentShape(Rectangle())
         .contextMenu {
             Button("Restore to Today") { env.restoreFromArchive(tab.id, section: .today) }

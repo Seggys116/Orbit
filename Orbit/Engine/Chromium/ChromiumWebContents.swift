@@ -88,11 +88,19 @@ final class ChromiumWebContents: WebContents {
         callbacks.showContextMenu = ChromiumWebContents.showContextMenuTrampoline
         callbacks.pictureInPictureChanged = ChromiumWebContents.pictureInPictureChangedTrampoline
         callbacks.faviconChanged = ChromiumWebContents.faviconChangedTrampoline
+        callbacks.activationRequested = ChromiumWebContents.activationRequestedTrampoline
+        callbacks.pictureInPictureAvailableChanged = ChromiumWebContents.pictureInPictureAvailableChangedTrampoline
         // opaque is filled in last so no callback sees a half-built struct.
         // Retained, not unretained: the engine keeps calling back until close()
         // destroys it, so dropping this without closing it would dangle.
         callbacks.opaque = Unmanaged.passRetained(self).toOpaque()
         bridge.setCallbacks(handle, callbacks)
+
+        // Seeds the state for a handle that already has a candidate the moment
+        // callbacks attach (an adopted window.open() handle) -- otherwise there is
+        // nothing to trigger the "changed" edge that picture_in_picture_available_changed
+        // reports.
+        mediaState.isPictureInPictureAvailable = bridge.hasPictureInPictureCandidate(handle)
 
         // Registered before anything can navigate, so a certificate error on
         // this tab's very first load already resolves to an instance.
@@ -267,8 +275,20 @@ final class ChromiumWebContents: WebContents {
 
     // MARK: - Media
 
+    /// No native `OrbitWebContentsSetMuted` exists in the bridge, so this
+    /// drives the page's own elements through the shared media-session
+    /// observer's `__orbitDesiredMuted` flag, which also keeps enforcing it
+    /// against later events and newly added elements.
     func setMuted(_ muted: Bool) {
-        Self.logger.notice("setMuted not implemented yet")
+        guard !isClosed else { return }
+        mediaState.isMuted = muted
+        Task { [weak self] in
+            do {
+                _ = try await self?.evaluateJavaScript(MediaSessionObserverScript.setDesiredMuted(muted))
+            } catch {
+                Self.logger.error("setMuted(\(muted, privacy: .public)) failed to reach the page: \(error, privacy: .public)")
+            }
+        }
     }
 
     func togglePictureInPicture() {
@@ -575,6 +595,31 @@ final class ChromiumWebContents: WebContents {
             return
         }
         applyMediaState(updated)
+    }
+
+    // OrbitWebContentsCallbacksLayout.pictureInPictureAvailableChanged: the
+    // native, frame-agnostic answer to "would togglePictureInPicture() find
+    // something to float right now" -- what canDrivePictureInPicture(for:)
+    // gates on. Never derive this from the page-side hasVideo scan, which is
+    // main-frame-only and misses an iframe-hosted player.
+    private func handlePictureInPictureAvailableChanged(_ isAvailable: Bool) {
+        var updated = mediaState
+        updated.isPictureInPictureAvailable = isAvailable
+        guard !isClosed else {
+            mediaState = updated
+            return
+        }
+        applyMediaState(updated)
+    }
+
+    // OrbitWebContentsCallbacksLayout.activationRequested: content:: asked
+    // this tab's own WebContents to become active, e.g. the PiP window's
+    // "back to tab" control. Distinct from picture_in_picture_changed --
+    // that fires for both PiP buttons, this only for the one that means "go
+    // to the tab".
+    private func handleActivationRequested() {
+        guard !isClosed else { return }
+        delegate?.webContentsDidRequestActivation(self)
     }
 
     // `iconURL` can be a data: URL; the already-decoded image is what matters here.
@@ -993,6 +1038,15 @@ final class ChromiumWebContents: WebContents {
     private static let pictureInPictureChangedTrampoline: OrbitWebContentsCallbacksLayout.PictureInPictureChanged = {
         opaque, isActive in
         withInstance(opaque) { $0.handlePictureInPictureChanged(isActive != 0) }
+    }
+
+    private static let activationRequestedTrampoline: OrbitWebContentsCallbacksLayout.ActivationRequested = { opaque in
+        withInstance(opaque) { $0.handleActivationRequested() }
+    }
+
+    private static let pictureInPictureAvailableChangedTrampoline:
+        OrbitWebContentsCallbacksLayout.PictureInPictureAvailableChanged = { opaque, isAvailable in
+        withInstance(opaque) { $0.handlePictureInPictureAvailableChanged(isAvailable != 0) }
     }
 
     // The pixels belong to the engine's stack for the duration of this call,

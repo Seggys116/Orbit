@@ -194,6 +194,169 @@ final class ScreenshotGenerationTests: XCTestCase {
         await renderAndSave(view, name: "sidebar-single-space", size: CGSize(width: env.sidebarWidth, height: 1100))
     }
 
+    // MARK: - Tab row: close button only on hover, title uses the full row width otherwise
+    // TabRowView's own forcesHoveredAppearanceForTesting init param stands in for a real pointer,
+    // which ImageRenderer never has (see ScreenshotSidebarComposition's alwaysExpanded note above).
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tabRowHoverCloseButton
+
+    func test_tabRowHoverCloseButton() async {
+        let width: CGFloat = 260
+        let rowHeight = OrbitMetrics.sidebarRowHeight
+        let theme = SpaceTheme()
+        let tabs = Self.longTitledTabsForHoverTest()
+
+        let view = VStack(spacing: 0) {
+            ForEach(Array(tabs.enumerated()), id: \.offset) { index, tab in
+                TabRowView(tab: tab, theme: theme, forcesHoveredAppearanceForTesting: index.isMultiple(of: 2))
+                    .environment(self.env)
+            }
+        }
+        .frame(width: width)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .orbitScreenshotModeDragDisabledForTests()
+
+        await renderAndSave(
+            view,
+            name: "tab-row-hover-close-button",
+            size: CGSize(width: width, height: rowHeight * CGFloat(tabs.count))
+        )
+    }
+
+    // Pixel proof, not just a non-blank render: the close control must be absent while not
+    // hovering (and the title's ink must reach further right without it), then present once
+    // hovering starts, at the same fixed trailing position both times.
+    func test_tabRowLongTitle_notHoveredUsesFullWidth_hoveredRevealsCloseButtonInPlace() {
+        let width: CGFloat = 260
+        let theme = SpaceTheme()
+        let size = CGSize(width: width, height: OrbitMetrics.sidebarRowHeight)
+        var tab = Orbit.Tab(spaceID: SpaceID(), url: URL(string: "https://long-title.example.com")!)
+        tab.title = "[ASMR] How many more years can this channel possibly keep going for, honestly"
+
+        // Screenshot mode, as the sibling render test uses: the close control carries an
+        // .orbitTooltip, and ImageRenderer rasterises that representable as a block whatever
+        // its opacity — without this the not-hovered row reads as having a visible button.
+        let notHovered = render(
+            TabRowView(tab: tab, theme: theme, forcesHoveredAppearanceForTesting: false)
+                .environment(env)
+                .orbitScreenshotModeDragDisabledForTests(),
+            size: size
+        )
+        let hovered = render(
+            TabRowView(tab: tab, theme: theme, forcesHoveredAppearanceForTesting: true)
+                .environment(env)
+                .orbitScreenshotModeDragDisabledForTests(),
+            size: size
+        )
+
+        // Fixed trailing position: leading padding + row content width, matching the row's own
+        // trailing padding (sidebarHorizontalPadding + sidebarRowContentInset) and the button's
+        // own size (sidebarCloseButtonSize), independent of hover.
+        let rowTrailingInset = OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset
+        let buttonSize = OrbitMetrics.sidebarCloseButtonSize
+        let closeButtonRect = CGRect(
+            x: width - rowTrailingInset - buttonSize - 2,
+            y: (OrbitMetrics.sidebarRowHeight - buttonSize) / 2 - 2,
+            width: buttonSize + 4,
+            height: buttonSize + 4
+        )
+
+        // Presence/absence is proved with a SHORT title, whose ink never reaches the trailing
+        // slot. Asserting "no ink here" on the long-titled row would fail for the very reason
+        // this feature exists: unhovered, the title legitimately occupies that space.
+        var shortTab = Orbit.Tab(spaceID: tab.spaceID, url: URL(string: "https://short.example.com")!)
+        shortTab.title = "Inbox"
+        let shortNotHovered = render(
+            TabRowView(tab: shortTab, theme: theme, forcesHoveredAppearanceForTesting: false)
+                .environment(env)
+                .orbitScreenshotModeDragDisabledForTests(),
+            size: size
+        )
+        let shortHovered = render(
+            TabRowView(tab: shortTab, theme: theme, forcesHoveredAppearanceForTesting: true)
+                .environment(env)
+                .orbitScreenshotModeDragDisabledForTests(),
+            size: size
+        )
+
+        if shortNotHovered.containsNonBackgroundPixels(in: closeButtonRect, background: .clear, tolerance: 0.06) {
+            shortNotHovered.writeDiagnosticPNG(named: "tabRow-hover-FAILED-closeButtonVisibleWhileNotHovering")
+        }
+        XCTAssertFalse(
+            shortNotHovered.containsNonBackgroundPixels(in: closeButtonRect, background: .clear, tolerance: 0.06),
+            "The close (x) button must be invisible while the row is not hovered; found ink in its reserved slot at \(closeButtonRect) with no hover."
+        )
+
+        if !shortHovered.containsNonBackgroundPixels(in: closeButtonRect, background: .clear, tolerance: 0.06) {
+            shortHovered.writeDiagnosticPNG(named: "tabRow-hover-FAILED-closeButtonMissingWhileHovering")
+        }
+        XCTAssertTrue(
+            shortHovered.containsNonBackgroundPixels(in: closeButtonRect, background: .clear, tolerance: 0.06),
+            "The close (x) button must appear at \(closeButtonRect) once the row is hovered."
+        )
+
+        // Not boundingBoxOfContent: it scans the whole row, so it would pick up the (opaque) close
+        // glyph itself in the hovered render and the faint hover-pill tint in the not-hovered one —
+        // neither says anything about how far the title's own ink reaches. This scans only for
+        // clearly-opaque ink (title/favicon, not the ~0.06-alpha hover pill) and ignores the close
+        // button's own fixed column band entirely, in both renders, so only the title is measured.
+        let excludedColumns = closeButtonRect.minX...closeButtonRect.maxX
+        guard let notHoveredTitleMaxX = Self.rightmostOpaqueInkX(in: notHovered, size: size, excludingX: excludedColumns),
+              let hoveredTitleMaxX = Self.rightmostOpaqueInkX(in: hovered, size: size, excludingX: excludedColumns) else {
+            notHovered.writeDiagnosticPNG(named: "tabRow-hover-FAILED-empty-notHovered")
+            hovered.writeDiagnosticPNG(named: "tabRow-hover-FAILED-empty-hovered")
+            XCTFail("Expected both hover states of a long-titled row to draw visible title ink.")
+            return
+        }
+
+        let reclaimedWidth = notHoveredTitleMaxX - hoveredTitleMaxX
+        if reclaimedWidth < 18 {
+            notHovered.writeDiagnosticPNG(named: "tabRow-hover-FAILED-titleNotWider")
+            hovered.writeDiagnosticPNG(named: "tabRow-hover-FAILED-titleNotWider")
+        }
+        XCTAssertGreaterThanOrEqual(
+            reclaimedWidth, 18,
+            "A long title must reach noticeably further right while not hovered (reclaiming the " +
+            "close button's \(OrbitMetrics.sidebarCloseButtonSize + OrbitMetrics.sidebarRowContentSpacing)pt " +
+            "of width) than while hovered — not-hovered title ink reached x=\(notHoveredTitleMaxX), " +
+            "hovered title ink reached x=\(hoveredTitleMaxX)."
+        )
+    }
+
+    private static func rightmostOpaqueInkX(
+        in image: RenderedImage,
+        size: CGSize,
+        excludingX excludedColumns: ClosedRange<CGFloat>,
+        alphaThreshold: Double = 0.5
+    ) -> CGFloat? {
+        var maxX: CGFloat = -1
+        let width = Int(size.width.rounded(.up))
+        let height = Int(size.height.rounded(.up))
+        for x in 0..<width {
+            let fx = CGFloat(x)
+            if excludedColumns.contains(fx) { continue }
+            for y in 0..<height where image.color(atX: x, y: y).a > alphaThreshold {
+                maxX = max(maxX, fx)
+                break
+            }
+        }
+        return maxX >= 0 ? maxX : nil
+    }
+
+    private static func longTitledTabsForHoverTest() -> [Orbit.Tab] {
+        let titles = [
+            "[ASMR] How many more years can this channel possibly keep going for, honestly",
+            "(3) Fixing a Viewer's OLD & BROKEN mechanical keyboard from 2003",
+            "Why every senior engineer eventually rewrites their build system from scratch",
+            "The absolute longest possible page title anyone would ever realistically use",
+        ]
+        return titles.map { title in
+            var tab = Orbit.Tab(spaceID: SpaceID(), url: URL(string: "https://example.com/\(UUID().uuidString)")!)
+            tab.title = title
+            return tab
+        }
+    }
+
     private func reduceFixtureToSingleSpace(keeping spaceID: SpaceID) -> Space? {
         var document = env.state
         guard let kept = document.spaces.first(where: { $0.id == spaceID }) else { return nil }
@@ -226,9 +389,12 @@ final class ScreenshotGenerationTests: XCTestCase {
             env.nowPlayingTabs.contains { $0.id == tabID },
             "The now-playing tray is empty, so refs/screenshots/sidebar.png would show no card at all."
         )
-        XCTAssertTrue(
+        // Audio-only, so there is nothing to float: the card correctly offers no
+        // picture-in-picture control. Asserting the opposite is what shipped a
+        // control that silently did nothing when pressed.
+        XCTAssertFalse(
             env.canDrivePictureInPicture(for: tabID),
-            "The picture-in-picture control would be hidden, so the captured card would be missing a control."
+            "An audio-only now-playing tab has no video to float, so its card must not offer a picture-in-picture control."
         )
     }
 
@@ -562,6 +728,39 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
+    // Covers a folder, a nested subfolder inside it, and a loose (un-foldered) tab all archived
+    // together — the mix that exercises LibraryArchivedTabsView's folder reconstruction from
+    // each tab's captured archivedFolderTrail.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryArchivedTabsWithFolders
+
+    func test_libraryArchivedTabsWithFolders() async {
+        OrbitScreenshotFixtures.configure(env)
+        let spaceID = OrbitScreenshotFixtures.IDs.personalSpaceID
+
+        let parentFolderID = env.createFolder(name: "Reading", in: spaceID)
+        let childFolderID = env.createFolder(name: "Long Reads", in: spaceID, parent: parentFolderID)
+
+        let nestedTabID = env.openTab(url: URL(string: "https://example.com/nested-article")!, in: spaceID, section: .today, activate: false)
+        env.pinTab(nestedTabID, toParent: childFolderID, atIndex: 0, in: spaceID)
+        env.archiveTab(nestedTabID)
+
+        let siblingTabID = env.openTab(url: URL(string: "https://example.com/top-level-folder-tab")!, in: spaceID, section: .today, activate: false)
+        env.pinTab(siblingTabID, toParent: parentFolderID, atIndex: 0, in: spaceID)
+        env.archiveTab(siblingTabID)
+
+        let looseTabID = env.openTab(url: URL(string: "https://example.com/loose")!, in: spaceID, section: .today, activate: false)
+        env.archiveTab(looseTabID)
+
+        LibraryRouter.shared.selectedSection = .archivedTabs
+        let view = ScreenshotLibraryComposition(section: .archivedTabs)
+            .environment(env)
+        await renderAndSave(
+            view,
+            name: "library-archived-tabs-folders",
+            size: CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
+        )
+    }
+
     // The note's body is not shown: LibraryNotePreviewView puts its Text in a ScrollView, which ImageRenderer does not rasterise off-screen; only the preview column's chrome is visible here.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryEaselsAndNotes
     func test_libraryEaselsAndNotes() async {
@@ -625,6 +824,71 @@ final class ScreenshotGenerationTests: XCTestCase {
                 .orbitScreenshotModeDragDisabledForTests(),
             name: "new-space-panel",
             size: CGSize(width: OrbitMetrics.sidebarDefaultWidth, height: Self.windowSize.height)
+        )
+    }
+
+    // MARK: - Space switcher strip
+    // SidebarBottomBar hosts SpaceSwitcherPagerView (SpacePagerView is unused/superseded), so this
+    // renders SidebarBottomBar itself — the real view the sidebar's bottom row mounts.
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_spaceSwitcherMixedIcons
+    func test_spaceSwitcherMixedIcons() async {
+        guard let view = spaceSwitcherMixedIconsFixture() else { return }
+        await renderAndSave(
+            view,
+            name: "space-switcher-mixed-icons",
+            size: CGSize(width: env.sidebarWidth, height: OrbitMetrics.sidebarBottomBarHeight)
+        )
+    }
+
+    // Same fixture in light appearance: theme.readableForeground and the active capsule's
+    // fill must both still read against a light Space background, not just dark.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_spaceSwitcherMixedIconsLight
+    func test_spaceSwitcherMixedIconsLight() async {
+        guard let view = spaceSwitcherMixedIconsFixture() else { return }
+        await renderAndSave(
+            view,
+            name: "space-switcher-mixed-icons-light",
+            size: CGSize(width: env.sidebarWidth, height: OrbitMetrics.sidebarBottomBarHeight),
+            appearance: .aqua
+        )
+    }
+
+    private func spaceSwitcherMixedIconsFixture() -> AnyView? {
+        OrbitScreenshotFixtures.configure(env)
+        guard let fixtureSpace = env.space(OrbitScreenshotFixtures.IDs.workSpaceID) else {
+            XCTFail("Expected OrbitScreenshotFixtures' Work space to exist.")
+            return nil
+        }
+        let theme = fixtureSpace.theme
+        let profileID = fixtureSpace.profileID
+
+        var readingSpace = Space(name: "Reading", profileID: profileID)
+        readingSpace.setIcon(emoji: "📚")
+        readingSpace.theme = theme
+
+        var workSpace = Space(name: "Work", profileID: profileID)
+        workSpace.setIcon(symbol: "bolt.fill")
+        workSpace.theme = theme
+
+        var designSpace = Space(name: "Design", profileID: profileID)
+        designSpace.setIcon(emoji: "🎨")
+        designSpace.theme = theme
+
+        var travelSpace = Space(name: "Travel", profileID: profileID)
+        travelSpace.setIcon(symbol: "airplane")
+        travelSpace.theme = theme
+
+        var state = env.state
+        state.spaces = [readingSpace, workSpace, designSpace, travelSpace]
+        state.activeSpaceID = workSpace.id
+        env.state = state
+
+        return AnyView(
+            SidebarBottomBar(theme: theme)
+                .environment(env)
+                .background { ThemeBackgroundView(theme: theme) }
+                .orbitScreenshotModeDragDisabledForTests()
         )
     }
 

@@ -24,7 +24,9 @@ public enum MediaSessionObserverScript {
           // Captured now, before the engine deletes the global binding.
           var __orbitPost = window.__orbitPostMessage;
 
-          var __orbitDesiredMuted = false;
+          // null: Orbit has never asked; true/false: Orbit's own mute button asked and
+          // must keep winning against the page's own controls and newly added elements.
+          window.__orbitDesiredMuted = typeof window.__orbitDesiredMuted === 'boolean' ? window.__orbitDesiredMuted : null;
 
           function post(payload) {
             try { \(postExpression); } catch (e) {}
@@ -49,7 +51,8 @@ public enum MediaSessionObserverScript {
           }
 
           function enforceMute(el) {
-            if (__orbitDesiredMuted) { el.muted = true; }
+            if (window.__orbitDesiredMuted === null) { return; }
+            el.muted = window.__orbitDesiredMuted;
           }
 
           function sessionPlaybackState() {
@@ -166,6 +169,20 @@ public enum MediaSessionObserverScript {
             matchPatterns: ["<all_urls>"],
             allFrames: false
         )
+    }
+
+    // MARK: - Mute
+
+    /// Sets the observer's persistent desired-mute flag and mutes/unmutes every
+    /// element on the page right now, rather than waiting for the next poll tick.
+    public static func setDesiredMuted(_ muted: Bool) -> String {
+        """
+        (function() {
+          window.__orbitDesiredMuted = \(muted);
+          document.querySelectorAll('video, audio').forEach(function(el) { el.muted = \(muted); });
+          return true;
+        })();
+        """
     }
 
     // MARK: - Decoding

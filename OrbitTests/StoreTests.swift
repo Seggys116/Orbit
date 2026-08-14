@@ -192,7 +192,7 @@ final class StoreTests: XCTestCase {
         )
     }
 
-    func test_closeTabKeepingPin_picksTheSameHistoryBasedSuccessorAsCloseTab() {
+    func test_closeTabKeepingPin_deactivatesRatherThanPickingASuccessor() {
         let store = makeStore()
         let space = store.activeSpace!
         for seeded in store.space(space.id)?.today ?? [] { store.closeTab(seeded) }
@@ -205,9 +205,9 @@ final class StoreTests: XCTestCase {
 
         store.closeTabKeepingPin(pinnedTabID)
 
-        XCTAssertEqual(
-            store.activeTabBySpaceForTesting(space.id), tabA,
-            "closeTabKeepingPin must return to the tab the user came from (tabA), the same history-based rule closeTab uses — not tabB, which merely sits first in Today."
+        XCTAssertNil(
+            store.activeTabBySpaceForTesting(space.id),
+            "closeTabKeepingPin ('-') must leave no active tab — unlike closeTab, it must not fall back to tabA (the history-based successor) or tabB."
         )
     }
 
@@ -256,7 +256,7 @@ final class StoreTests: XCTestCase {
         )
     }
 
-    func test_closeTabKeepingPin_handsTheActiveSlotToAnotherTab() throws {
+    func test_closeTabKeepingPin_vacatesTheActiveSlotRatherThanHandingItToAnotherTab() {
         let store = makeStore()
         let space = store.activeSpace!
         store.openTab(url: URL(string: "https://today.example.com")!, in: space.id)
@@ -266,11 +266,10 @@ final class StoreTests: XCTestCase {
 
         store.closeTabKeepingPin(pinnedTabID)
 
-        let nowActive = store.activeTabBySpaceForTesting(space.id)
-        XCTAssertNotEqual(nowActive, pinnedTabID, "The Space must not still be showing the tab that was just closed.")
-        let stillOpen = store.todayTabs(in: space.id).map(\.id)
-            + store.pinnedNodes(in: space.id).flatMap(\.allTabIDs).filter { store.tab($0)?.isUnloaded == false }
-        XCTAssertTrue(stillOpen.contains(try XCTUnwrap(nowActive)), "The tab that took over must exist and be open.")
+        XCTAssertNil(
+            store.activeTabBySpaceForTesting(space.id),
+            "The Space must not still be showing the tab that was just closed, and must not have handed the slot to any other open tab either — the empty/new-tab state is the honest outcome."
+        )
     }
 
     func test_removeBookmark_takesTheRowOutOfPinnedAndArchivesIt() {

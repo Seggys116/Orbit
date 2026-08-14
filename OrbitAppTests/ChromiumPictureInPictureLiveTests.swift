@@ -10,7 +10,7 @@ import XCTest
 
 @MainActor
 // Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
-final class ChromiumPictureInPictureLiveTests: XCTestCase {
+final class ChromiumPictureInPictureLiveTests: LiveEnvironmentTestCase {
 
     private static func pageHTML(videoAttributes: String = "") -> String {
         "<!DOCTYPE html><html><body><video id=\"v\" src=\"/v.webm\" muted loop playsinline \(videoAttributes)></video></body></html>"
@@ -220,6 +220,76 @@ final class ChromiumPictureInPictureLiveTests: XCTestCase {
         XCTAssertTrue(
             outcome.hasPictureInPictureVideo,
             "content::WebContents::HasPictureInPictureVideo disagrees with the page, which really has a video in Picture-in-Picture"
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTogglingEntersPictureInPictureEvenWhileTheTabIsHidden
+
+    // The mini-player's PiP button targets a background tab -- Orbit calls
+    // setVisible(false) on any tab that is not the on-screen one.
+    func testTogglingEntersPictureInPictureEvenWhileTheTabIsHidden() throws {
+        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
+        let outcome = try LiveChromiumEngineHost.runLive(timeout: 90) { () -> (
+            pictureInPictureElementID: String?, mediaStateActive: Bool
+        ) in
+            try await self.withPlayingVideoPage { contents, _ in
+                contents.setVisible(false)
+                try await self.enterPictureInPicture(contents)
+                let elementID = try await contents.evaluateJavaScript(
+                    "document.pictureInPictureElement ? document.pictureInPictureElement.id : null"
+                ) as? String
+                let becameActive = try await self.waitUntil {
+                    contents.mediaState.isPictureInPictureActive
+                }
+                return (elementID, becameActive)
+            }
+        }
+
+        XCTAssertEqual(
+            outcome.pictureInPictureElementID, "v",
+            "a hidden tab's togglePictureInPicture() never put its real <video> into document.pictureInPictureElement"
+        )
+        XCTAssertTrue(
+            outcome.mediaStateActive,
+            "a hidden tab entered Picture-in-Picture but mediaState.isPictureInPictureActive never became true"
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTheMiniPlayerControlReachesTheRealEngineForTheBackgroundTab
+
+    // The exact production call chain: SidebarMiniPlayerView's control ->
+    // AppEnvironment.toggleMiniPlayerPictureInPicture -> a real, hidden background tab.
+    func testTheMiniPlayerControlReachesTheRealEngineForTheBackgroundTab() throws {
+        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
+        let outcome = try LiveChromiumEngineHost.runLive(timeout: 90) { () -> (
+            requestDispatched: Bool, pictureInPictureElementID: String?, mediaStateActive: Bool
+        ) in
+            try await self.withPlayingVideoPage { contents, _ in
+                let env = self.env
+                let spaceID = try XCTUnwrap(env.spaces.first?.id)
+                let tabID = env.openTab(url: URL(string: "https://example.com/")!, in: spaceID, activate: false)
+                env._test_attachWebContents(contents, for: tabID)
+                env._test_engineCapabilitiesOverride = [.pictureInPicture]
+                contents.setVisible(false)
+
+                let dispatched = env.toggleMiniPlayerPictureInPicture(for: tabID)
+                try await self.waitUntilTrue(contents, "!!document.pictureInPictureElement")
+                let elementID = try await contents.evaluateJavaScript(
+                    "document.pictureInPictureElement ? document.pictureInPictureElement.id : null"
+                ) as? String
+                let becameActive = try await self.waitUntil { contents.mediaState.isPictureInPictureActive }
+                return (dispatched, elementID, becameActive)
+            }
+        }
+
+        XCTAssertTrue(outcome.requestDispatched, "AppEnvironment.toggleMiniPlayerPictureInPicture refused a real, capable, live-contents tab")
+        XCTAssertEqual(
+            outcome.pictureInPictureElementID, "v",
+            "the mini-player's production call chain never put the real <video> into document.pictureInPictureElement"
+        )
+        XCTAssertTrue(
+            outcome.mediaStateActive,
+            "the mini-player's production call chain entered Picture-in-Picture but mediaState.isPictureInPictureActive never became true"
         )
     }
 

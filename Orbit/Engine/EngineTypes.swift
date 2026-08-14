@@ -466,6 +466,11 @@ nonisolated public struct MediaState: Equatable, Sendable {
     /// Distinct from merely containing a media element (`hasVideo`).
     public var hasActiveMediaSession: Bool
     public var isPictureInPictureActive: Bool
+    /// The engine's own answer to "would toggling PiP right now find something to float" --
+    /// content::WebContentsObserver's MediaPlayerInfo, per frame, main or sub-. This is what
+    /// gates the mini-player's PiP button; `hasVideo` is a page-side, main-frame-only scan
+    /// and must not be used for that (it misses iframe-hosted players).
+    public var isPictureInPictureAvailable: Bool
     public var isFullscreen: Bool
     public var nowPlayingTitle: String?
     public var nowPlayingArtist: String?
@@ -483,6 +488,7 @@ nonisolated public struct MediaState: Equatable, Sendable {
         hasVideo: Bool = false,
         hasActiveMediaSession: Bool = false,
         isPictureInPictureActive: Bool = false,
+        isPictureInPictureAvailable: Bool = false,
         isFullscreen: Bool = false,
         nowPlayingTitle: String? = nil,
         nowPlayingArtist: String? = nil,
@@ -494,6 +500,7 @@ nonisolated public struct MediaState: Equatable, Sendable {
         self.hasVideo = hasVideo
         self.hasActiveMediaSession = hasActiveMediaSession
         self.isPictureInPictureActive = isPictureInPictureActive
+        self.isPictureInPictureAvailable = isPictureInPictureAvailable
         self.isFullscreen = isFullscreen
         self.nowPlayingTitle = nowPlayingTitle
         self.nowPlayingArtist = nowPlayingArtist

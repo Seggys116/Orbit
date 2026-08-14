@@ -1,5 +1,9 @@
-//  Closing a bookmarked (pinned) tab must hand the pane to the next sensible
-//  tab. Backed by a fresh StateStore in a scratch temp directory.
+//  closeTabKeepingPin ("-" on a bookmarked tab) is a deactivation: closing the
+//  ACTIVE pinned tab with it must always leave the Space with no active tab,
+//  never hand the pane to a sibling — even one right next to it in the same
+//  folder. closeTab (the raw close verb / Cmd-W) is the one that still hands
+//  the pane to the next sensible tab. Backed by a fresh StateStore in a
+//  scratch temp directory.
 
 import XCTest
 
@@ -30,7 +34,7 @@ final class CloseTabSuccessorTests: XCTestCase {
 
     private func url(_ name: String) -> URL { URL(string: "https://\(name).example.com")! }
 
-    func test_closingTheOnlyOpenPinnedTab_landsOnATodayTab() {
+    func test_closingTheOnlyOpenPinnedTab_leavesNoActiveTab() {
         let store = makeStore()
         let space = store.activeSpace!
         let todayTabID = store.openTab(url: url("today"), in: space.id)
@@ -39,35 +43,36 @@ final class CloseTabSuccessorTests: XCTestCase {
 
         store.closeTabKeepingPin(pinnedTabID)
 
-        XCTAssertEqual(
-            store.activeTabBySpaceForTesting(space.id), todayTabID,
-            "Closing the only open pinned tab must fall out of Pinned into Today, not leave the Space with no active tab (a blank pane)."
+        XCTAssertNil(
+            store.activeTabBySpaceForTesting(space.id),
+            "The '-' on the active pinned tab is a deactivation, not a 'give me the next tab' gesture — it must never silently switch to the Today tab behind it."
         )
+        XCTAssertNotEqual(store.activeTabBySpaceForTesting(space.id), todayTabID)
     }
 
-    func test_closingAMiddlePinnedTab_landsOnTheFollowingPinnedRow() {
+    func test_closingAMiddlePinnedTab_leavesNoActiveTab() {
         let store = makeStore()
         let space = store.activeSpace!
         _ = store.openTab(url: url("first"), in: space.id, section: .pinned, activate: false)
         let second = store.openTab(url: url("second"), in: space.id, section: .pinned, activate: false)
-        let third = store.openTab(url: url("third"), in: space.id, section: .pinned, activate: false)
+        _ = store.openTab(url: url("third"), in: space.id, section: .pinned, activate: false)
         var seeded = store.state
         seeded.activeTabBySpace[space.id] = second
         store.state = seeded
 
         store.closeTabKeepingPin(second)
 
-        XCTAssertEqual(
-            store.activeTabBySpaceForTesting(space.id), third,
-            "Closing a pinned row with no activation history must land on the neighbour below it, in sidebar order."
+        XCTAssertNil(
+            store.activeTabBySpaceForTesting(space.id),
+            "Closing the active pinned row must never hand the pane to its neighbour, in sidebar order or otherwise."
         )
     }
 
-    func test_closingTheLastPinnedTab_landsOnThePrecedingPinnedRow() {
+    func test_closingTheLastPinnedTab_leavesNoActiveTab() {
         let store = makeStore()
         let space = store.activeSpace!
         _ = store.openTab(url: url("first"), in: space.id, section: .pinned, activate: false)
-        let second = store.openTab(url: url("second"), in: space.id, section: .pinned, activate: false)
+        _ = store.openTab(url: url("second"), in: space.id, section: .pinned, activate: false)
         let third = store.openTab(url: url("third"), in: space.id, section: .pinned, activate: false)
         var seeded = store.state
         seeded.activeTabBySpace[space.id] = third
@@ -75,28 +80,47 @@ final class CloseTabSuccessorTests: XCTestCase {
 
         store.closeTabKeepingPin(third)
 
-        XCTAssertEqual(
-            store.activeTabBySpaceForTesting(space.id), second,
-            "With nothing below it, the row above must take over."
+        XCTAssertNil(
+            store.activeTabBySpaceForTesting(space.id),
+            "With nothing below it, the row above must NOT take over — the empty state is the correct outcome, not the preceding row."
         )
     }
 
-    func test_closingAPinnedTabInAFolder_staysWithinThePinnedSection() {
+    func test_closingAPinnedTabInAFolder_leavesNoActiveTabAndDoesNotActivateItsSibling() {
         let store = makeStore()
         let space = store.activeSpace!
         let folderID = store.createFolder(name: "Work", in: space.id)
         let inFolder = store.openTab(url: url("infolder"), in: space.id, section: .pinned, activate: false)
         store.pin(inFolder, toParent: folderID, atIndex: 0, in: space.id)
         let sibling = store.openTab(url: url("sibling"), in: space.id, section: .pinned, activate: false)
+        store.pin(sibling, toParent: folderID, atIndex: 1, in: space.id)
         var seeded = store.state
         seeded.activeTabBySpace[space.id] = inFolder
         store.state = seeded
 
         store.closeTabKeepingPin(inFolder)
 
+        XCTAssertNil(
+            store.activeTabBySpaceForTesting(space.id),
+            "A pinned tab nested in a folder must not fall over onto its sibling in the same folder — this is exactly the reported 'closing the active bookmark loads another tab in that folder' bug."
+        )
+        XCTAssertNotEqual(store.activeTabBySpaceForTesting(space.id), sibling)
+    }
+
+    func test_closingANonActivePinnedTab_leavesTheActiveTabUntouched() {
+        let store = makeStore()
+        let space = store.activeSpace!
+        let first = store.openTab(url: url("first"), in: space.id, section: .pinned, activate: false)
+        let second = store.openTab(url: url("second"), in: space.id, section: .pinned, activate: false)
+        var seeded = store.state
+        seeded.activeTabBySpace[space.id] = second
+        store.state = seeded
+
+        store.closeTabKeepingPin(first)
+
         XCTAssertEqual(
-            store.activeTabBySpaceForTesting(space.id), sibling,
-            "A pinned tab nested in a folder must still find its neighbour in the flattened Pinned order."
+            store.activeTabBySpaceForTesting(space.id), second,
+            "Closing a pinned tab that is not the active one must not move the active tab at all."
         )
     }
 

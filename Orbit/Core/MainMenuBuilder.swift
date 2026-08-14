@@ -23,7 +23,7 @@ enum MainMenuBuilder {
     private static func orbitMenuItem() -> NSMenuItem {
         let item = NSMenuItem()
         let menu = NSMenu(title: "Orbit")
-        menu.addItem(ClosureMenuItem(title: "About Orbit") { AboutWindowController.show() })
+        menu.addItem(ClosureMenuItem(title: "About Orbit") { SettingsWindowController.show(pane: .general) })
         menu.addItem(.separator())
         menu.addItem(command("Settings…", .openSettings))
         menu.addItem(command("Set as Default Browser", .setAsDefaultBrowser) { !DefaultBrowserStatus.isDefault })
@@ -295,7 +295,7 @@ enum MainMenuBuilder {
         let item = NSMenuItem()
         let menu = NSMenu(title: "Help")
         menu.addItem(ClosureMenuItem(title: "Keybinds") { SettingsWindowController.show(pane: .shortcuts) })
-        menu.addItem(ClosureMenuItem(title: "About Orbit") { AboutWindowController.show() })
+        menu.addItem(ClosureMenuItem(title: "About Orbit") { SettingsWindowController.show(pane: .general) })
         menu.addItem(ClosureMenuItem(title: "Restore Data") { RestoreDataWindowController.show() })
         menu.addItem(.separator())
         menu.addItem(troubleshootingMenuItem())

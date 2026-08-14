@@ -13,6 +13,7 @@ final class ChromiumEngine: BrowserEngine {
     var capabilities: EngineCapabilities {
         var capabilities: EngineCapabilities = [
             .contentBlocking, .blockedRequestCounts, .backgroundSnapshots, .extensions, .developerTools,
+            .audioMuting,
         ]
         if OrbitChromiumBridge.shared.supportsPictureInPicture {
             capabilities.insert(.pictureInPicture)

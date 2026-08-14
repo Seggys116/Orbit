@@ -86,10 +86,16 @@ struct SpaceSwitcherPagerView: View {
         } label: {
             iconView(for: space, isActive: isActive, highlight: highlight)
                 .frame(width: OrbitMetrics.spacePagerDotSize * sizeScale, height: OrbitMetrics.spacePagerDotSize * sizeScale)
+                .background(
+                    // Same fill/opacity TabRowView and SettingsNavRow use for their own selected row,
+                    // so the active Space reads with Orbit's existing selection language rather than a new one.
+                    RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius, style: .continuous)
+                        .fill(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity * highlight))
+                )
         }
         .buttonStyle(.plain)
         .orbitHoverHighlight(
-            fill: theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity),
+            fill: theme.readableForeground.opacity(OrbitMetrics.sidebarHoverRowOpacity),
             cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius
         )
         .orbitTooltip(space.name)

@@ -80,6 +80,7 @@ final class OrbitMenuPanelController {
         sentinel?.onWindowLost = nil
         sentinel?.removeFromSuperview()
         sentinel = nil
+        let owner = ownerWindow
         for level in levels.reversed() {
             level.panel.parent?.removeChildWindow(level.panel)
             level.panel.orderOut(nil)
@@ -88,6 +89,13 @@ final class OrbitMenuPanelController {
         }
         levels.removeAll()
         ownerWindow = nil
+        // A .nonactivatingPanel child does not reliably hand key status back to its
+        // parent when it closes -- without this an action chosen from the menu (e.g.
+        // "New Tab") can run with no key window at all, silently dropping any focus
+        // request it makes.
+        if NSApp.keyWindow == nil, let owner, owner.isVisible, owner.canBecomeKey {
+            owner.makeKeyAndOrderFront(nil)
+        }
         let callback = onDismiss
         onDismiss = nil
         callback?()

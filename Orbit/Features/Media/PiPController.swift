@@ -44,7 +44,7 @@ final class PiPController {
 
         if let losingFocus = lastActiveTabID, losingFocus != pipTabID,
            pendingRequest?.tabID != losingFocus,
-           let state = env.mediaStates[losingFocus], state.hasVideo, state.isPlaying,
+           let state = env.mediaStates[losingFocus], state.isPictureInPictureAvailable, state.isPlaying,
            env.webContents[losingFocus] != nil {
             requestPiP(for: losingFocus, env: env)
         }

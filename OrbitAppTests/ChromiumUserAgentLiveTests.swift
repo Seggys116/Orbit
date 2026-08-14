@@ -36,7 +36,7 @@ final class ChromiumUserAgentLiveTests: XCTestCase {
 
     // MARK: - navigator.userAgentData
 
-    func testNavigatorUserAgentDataExposesOrbitChromeAndChromiumBrands() throws {
+    func testNavigatorUserAgentDataExposesOnlyChromeAndChromiumBrands() throws {
         try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         // 127.0.0.1, not about:blank: navigator.userAgentData is [SecureContext],
         // and a fresh about:blank's opaque origin is not one.
@@ -75,7 +75,12 @@ final class ChromiumUserAgentLiveTests: XCTestCase {
                 "navigator.userAgentData.brands is missing \(expected.brand);v=\"\(expected.version)\" — got \(Self.describe(brands))"
             )
         }
-        // Chromium's GREASE entry, on top of the three real brands above.
+        XCTAssertFalse(
+            brands.contains { $0.brand == "Orbit" },
+            "navigator.userAgentData.brands must never carry Orbit's own brand — Google's sign-in flow blocks any " +
+                "Sec-CH-UA brand it doesn't recognise, and this exact brand is what triggered that block — got \(Self.describe(brands))"
+        )
+        // Chromium's GREASE entry, on top of the two real brands above.
         XCTAssertEqual(brands.count, Self.expectedMajorVersionBrands.count + 1, Self.describe(brands))
     }
 
@@ -128,6 +133,11 @@ final class ChromiumUserAgentLiveTests: XCTestCase {
         for expected in Self.expectedMajorVersionBrands {
             XCTAssertTrue(headerBrands.contains(expected), "Sec-CH-UA is missing \(expected.brand): \(header)")
         }
+        XCTAssertFalse(
+            headerBrands.contains { $0.brand == "Orbit" },
+            "Sec-CH-UA must never carry Orbit's own brand — this is the header Google's sign-in flow reads, and " +
+                "an unrecognised brand on it is what blocks sign-in: \(header)"
+        )
     }
 
     // MARK: - The per-session override
@@ -179,12 +189,13 @@ final class ChromiumUserAgentLiveTests: XCTestCase {
     // MARK: - Helpers
 
     /// Major versions only -- Sec-CH-UA and navigator.userAgentData.brands
-    /// both carry the significant version.
+    /// both carry the significant version. Deliberately just Chromium and
+    /// Google Chrome, byte-for-byte stock Chrome's brand list: no Orbit
+    /// brand, ever -- see orbit_user_agent.cc.
     private static var expectedMajorVersionBrands: [BrandVersion] {
         [
             BrandVersion(brand: "Chromium", version: String(ChromiumBuild.majorVersion)),
             BrandVersion(brand: "Google Chrome", version: String(ChromiumBuild.majorVersion)),
-            BrandVersion(brand: "Orbit", version: "1"),
         ]
     }
 

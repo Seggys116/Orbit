@@ -52,6 +52,9 @@ final class SettingsWindowController: NSWindowController {
             SettingsRouter.shared.selectedPane = pane
             shared.showWindow(nil)
             shared.window?.makeKeyAndOrderFront(nil)
+            #if ORBIT_SPARKLE
+            Self.hookUpdaterFocus(to: shared.window)
+            #endif
             return shared
         }
         let window = NSWindow(
@@ -75,10 +78,22 @@ final class SettingsWindowController: NSWindowController {
         window.contentView = NSHostingView(rootView: SettingsRootView().orbitEnvironment(AppEnvironment.processRoot))
         let controller = SettingsWindowController(window: window)
         shared = controller
+        #if ORBIT_SPARKLE
+        Self.hookUpdaterFocus(to: window)
+        #endif
         controller.showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         return controller
     }
+
+    #if ORBIT_SPARKLE
+    private static func hookUpdaterFocus(to window: NSWindow?) {
+        UpdaterController.shared.onRequestFocus = { [weak window] in
+            SettingsRouter.shared.selectedPane = .general
+            window?.makeKeyAndOrderFront(nil)
+        }
+    }
+    #endif
 }
 
 enum SettingsFocusTarget: Equatable, Sendable {

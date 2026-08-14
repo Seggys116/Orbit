@@ -115,4 +115,178 @@ final class UpdaterStatusTests: XCTestCase {
     func test_idle_isEqualOnlyToIdle() {
         XCTAssertEqual(UpdaterStatus.idle, UpdaterStatus.idle)
     }
+
+    // MARK: - Manual-check wedge regression guards
+    //
+    // UpdaterController itself is `#if ORBIT_SPARKLE`-gated and lives in a target
+    // this host-less bundle cannot link (see CommandBarCheckForUpdatesActionTests
+    // and UpdaterChannelGatingSourceTests for the established precedent). These
+    // tests read its actual source and the actual function bodies out of it, the
+    // same way UpdaterChannelGatingSourceTests already does, so a regression in
+    // the exact statements that fixed the "Check for Updates wedges until relaunch,
+    // Cancel does nothing" bug fails a test instead of shipping silently.
+
+    private static var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private static var controllerSourceURL: URL {
+        repoRoot.appendingPathComponent("Orbit/Core/UpdaterController.swift")
+    }
+
+    private static var userDriverSourceURL: URL {
+        repoRoot.appendingPathComponent("Orbit/Core/UpdaterController+UserDriver.swift")
+    }
+
+    private func controllerSource() throws -> String {
+        try String(contentsOf: Self.controllerSourceURL, encoding: .utf8)
+    }
+
+    private func userDriverSource() throws -> String {
+        try String(contentsOf: Self.userDriverSourceURL, encoding: .utf8)
+    }
+
+    // Brace-balanced extraction of the body that follows signaturePrefix, which
+    // must itself end in the '{' that opens the block (as every call site below
+    // does): that '{' is the starting point, not something to search for again
+    // past the end of the already-matched prefix.
+    private func body(after signaturePrefix: String, in source: String, file: StaticString = #filePath, line: UInt = #line) throws -> String {
+        precondition(signaturePrefix.hasSuffix("{"), "signaturePrefix must end with the block's opening brace")
+        guard let sigRange = source.range(of: signaturePrefix) else {
+            throw XCTSkip("could not find \"\(signaturePrefix)\" — the implementation shape changed; this test needs to be revisited against the new shape rather than silently passing")
+        }
+        let openBrace = source.index(before: sigRange.upperBound)
+        var depth = 0
+        var idx = openBrace
+        var closeIndex: String.Index?
+        while idx < source.endIndex {
+            let character = source[idx]
+            if character == "{" { depth += 1 }
+            if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    closeIndex = source.index(after: idx)
+                    break
+                }
+            }
+            idx = source.index(after: idx)
+        }
+        guard let closeIndex else {
+            throw XCTSkip("unbalanced braces while extracting the body of \"\(signaturePrefix)\"")
+        }
+        return String(source[openBrace..<closeIndex])
+    }
+
+    // MARK: - 1. start()'s forced background check must never fake a "checking" status
+
+    // Root cause: checkForUpdatesInBackground() is Sparkle's silent/scheduled
+    // driver. When it finds nothing, Sparkle calls back into the SPUUserDriver
+    // with showErrorToUser == NO, which skips every one of
+    // showUpdateNotFoundWithError/showUpdaterError/dismissUpdateInstallation.
+    // If start() ever again optimistically sets status = .checking before that
+    // call, nothing will ever move it off .checking, and checkCancellation is
+    // never set either (that only happens for a user-initiated check) — so the
+    // About window shows "Checking…" with a Cancel button that does nothing,
+    // permanently, until the app is relaunched.
+    func test_start_automaticCheckBranch_neverSetsCheckingStatus() throws {
+        let body = try body(after: "if updater.automaticallyChecksForUpdates {", in: try controllerSource())
+        XCTAssertFalse(
+            body.contains("status = .checking"),
+            "start()'s automatic-check branch sets status = .checking before a silent checkForUpdatesInBackground() call — Sparkle never calls back into the user driver for a quiet \"no update found\" background result, so this status would be stuck forever with no cancellation block ever stored, wedging the updater until the app is relaunched"
+        )
+        XCTAssertTrue(body.contains("checkForUpdatesInBackground()"))
+    }
+
+    // MARK: - 2. cancelCheck() / cancelDownload() must recover unconditionally
+
+    // "no I cannot cancel": if either function only forwards to Sparkle's own
+    // stored cancellation block, a stale or nil block (e.g. left over from the
+    // silent background check above) makes Cancel a complete no-op with no
+    // other way back to idle. Asserting there is no `if`/`guard` anywhere in
+    // these bodies proves the local reset cannot be skipped.
+    func test_cancelCheck_recoversUnconditionally_notGatedOnSparklesOwnBlock() throws {
+        let body = try body(after: "func cancelCheck() {", in: try controllerSource())
+        XCTAssertFalse(body.contains("if "), "cancelCheck() must not gate its recovery behind a conditional — got body: \(body)")
+        XCTAssertFalse(body.contains("guard "), "cancelCheck() must not gate its recovery behind a conditional — got body: \(body)")
+        XCTAssertTrue(body.contains("checkCancellation?()"), "cancelCheck() must still tell Sparkle's real in-flight session to abort when one exists")
+        XCTAssertTrue(body.contains("clearPendingState()"))
+        XCTAssertTrue(body.contains("status = .idle"), "cancelCheck() must unconditionally return status to .idle so the UI can never be left showing a checking/cancel row forever")
+    }
+
+    func test_cancelDownload_recoversUnconditionally_notGatedOnSparklesOwnBlock() throws {
+        let body = try body(after: "func cancelDownload() {", in: try controllerSource())
+        XCTAssertFalse(body.contains("if "), "cancelDownload() must not gate its recovery behind a conditional — got body: \(body)")
+        XCTAssertFalse(body.contains("guard "), "cancelDownload() must not gate its recovery behind a conditional — got body: \(body)")
+        XCTAssertTrue(body.contains("downloadCancellation?()"))
+        XCTAssertTrue(body.contains("clearPendingState()"))
+        XCTAssertTrue(body.contains("status = .idle"))
+    }
+
+    // MARK: - 3. "check twice in a row" must never leak state between sessions
+
+    func test_checkForUpdates_clearsPendingStateBeforeStartingANewCheck() throws {
+        let body = try body(after: "func checkForUpdates() {", in: try controllerSource())
+        guard let clearRange = body.range(of: "clearPendingState()") else {
+            return XCTFail("checkForUpdates() must call clearPendingState() before marking a new check as .checking, or a second manual check in a row can inherit the first one's cancellation block or reply closure — got body: \(body)")
+        }
+        guard let statusRange = body.range(of: "status = .checking") else {
+            return XCTFail("checkForUpdates() no longer sets status = .checking at all — got body: \(body)")
+        }
+        XCTAssertTrue(
+            clearRange.lowerBound < statusRange.lowerBound,
+            "clearPendingState() must run before status = .checking in checkForUpdates(), not after — got body: \(body)"
+        )
+    }
+
+    // MARK: - 4. "check, cancel, check again" must never be blocked by leftover cancel state
+
+    func test_checkForUpdates_isNeverGatedOnStaleCancellationState() throws {
+        let body = try body(after: "func checkForUpdates() {", in: try controllerSource())
+        XCTAssertFalse(
+            body.contains("checkCancellation"),
+            "checkForUpdates() must not reference checkCancellation at all — its only precondition for starting a new check is sparkleUpdater.canCheckForUpdates. If a cancelled check's leftover checkCancellation state could block a fresh checkForUpdates() call, \"check, cancel, check again\" would never recover — got body: \(body)"
+        )
+    }
+
+    // MARK: - 5. The required SPUUserDriver acknowledgement/reply closures are always invoked
+    //
+    // Sparkle's own contract: a custom SPUUserDriver that fails to invoke an
+    // acknowledgement or reply block on any path leaves Sparkle's state machine
+    // permanently believing a check is still in progress, silently dropping
+    // every later checkForUpdates() call.
+
+    func test_showUpdateNotFoundWithError_alwaysInvokesAcknowledgement() throws {
+        let body = try body(after: "func showUpdateNotFoundWithError(_ error: any Error, acknowledgement: @escaping () -> Void) {", in: try userDriverSource())
+        XCTAssertTrue(body.contains("acknowledgement()"), "got body: \(body)")
+        XCTAssertTrue(body.contains("status = .upToDate"))
+        XCTAssertTrue(body.contains("clearPendingState()"))
+    }
+
+    func test_showUpdaterError_alwaysInvokesAcknowledgement() throws {
+        let body = try body(after: "func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {", in: try userDriverSource())
+        XCTAssertTrue(body.contains("acknowledgement()"), "got body: \(body)")
+        XCTAssertTrue(body.contains("clearPendingState()"))
+    }
+
+    func test_showUpdateInstalledAndRelaunched_alwaysInvokesAcknowledgement() throws {
+        let body = try body(after: "func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {", in: try userDriverSource())
+        XCTAssertTrue(body.contains("acknowledgement()"), "got body: \(body)")
+        XCTAssertTrue(body.contains("status = .idle"))
+        XCTAssertTrue(body.contains("clearPendingState()"))
+    }
+
+    func test_showPermissionRequest_alwaysInvokesReply() throws {
+        let body = try body(after: "func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {", in: try userDriverSource())
+        XCTAssertTrue(body.contains("reply("), "got body: \(body)")
+    }
+
+    // MARK: - 6. dismissUpdateInstallation is the one universal teardown, and must reach idle
+
+    func test_dismissUpdateInstallation_clearsStateAndReturnsToIdle() throws {
+        let body = try body(after: "func dismissUpdateInstallation() {", in: try userDriverSource())
+        XCTAssertTrue(body.contains("clearPendingState()"), "got body: \(body)")
+        XCTAssertTrue(body.contains("status = .idle"), "got body: \(body)")
+    }
 }

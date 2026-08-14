@@ -5,7 +5,6 @@
 #include "orbit/common/orbit_user_agent.h"
 
 #include <optional>
-#include <string_view>
 
 #include "base/strings/strcat.h"
 #include "base/version_info/version_info.h"
@@ -21,29 +20,19 @@ namespace {
 // which is the same reason GetProduct() below says Chrome.
 constexpr char kChromeBrand[] = "Google Chrome";
 
-// Both come from Chromium/Embedder/BUILD.gn (orbit_product_name,
-// orbit_version) so the brand list cannot drift from the bundle's own name
-// and version.
-constexpr std::string_view kOrbitBrand = ORBIT_PRODUCT_NAME;
-constexpr std::string_view kOrbitVersion = ORBIT_BROWSER_VERSION;
-
-std::string OrbitMajorVersion() {
-  const size_t dot = kOrbitVersion.find('.');
-  return std::string(dot == std::string_view::npos ? kOrbitVersion
-                                                   : kOrbitVersion.substr(0, dot));
-}
-
+// Deliberately just Chromium + Google Chrome + Chromium's own GREASE entry,
+// byte-for-byte what stock Chrome sends: Google's own sign-in flow rejects
+// any Sec-CH-UA brand list it doesn't recognise, including a real brand this
+// build adds on top, so Orbit's brand must never appear here. It stays out
+// of GetProduct()/GetUserAgent() above for the same reason.
 blink::UserAgentBrandList BrandList(blink::UserAgentBrandVersionType type) {
   const bool full = type == blink::UserAgentBrandVersionType::kFullVersion;
   const std::string chromium_version =
       full ? std::string(version_info::GetVersionNumber())
            : version_info::GetMajorVersionNumber();
-  const blink::UserAgentBrandVersion orbit_brand = {
-      std::string(kOrbitBrand),
-      full ? std::string(kOrbitVersion) : OrbitMajorVersion()};
   return embedder_support::GenerateBrandVersionList(
       version_info::GetMajorVersionNumberAsInt(), std::string(kChromeBrand),
-      chromium_version, type, orbit_brand);
+      chromium_version, type);
 }
 
 }  // namespace

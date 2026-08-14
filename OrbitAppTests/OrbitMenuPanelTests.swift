@@ -317,6 +317,43 @@ final class OrbitMenuPanelTests: XCTestCase {
         XCTAssertEqual(lost, 1, "The menu must learn that the view it was opened from left the window.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dismiss_restoresKeyStatusToTheOwningWindow
+
+    // The root cause of the New Tab focus bug: this panel is .nonactivatingPanel, and
+    // closing it does not reliably hand key status back to its parent -- leaving the
+    // sidebar's own window with no key window at all right as it presents the Command Bar.
+    // Asserts on the code path (dismiss() re-requests key status for its owner), not on
+    // live AppKit responder state: the OrbitAppTests host never grants a window real key
+    // status (confirmed: window.isKeyWindow stays false here even after
+    // makeKeyAndOrderFront), so isKeyWindow itself can't prove anything in this process.
+    func test_dismiss_restoresKeyStatusToTheOwningWindow() {
+        let controller = OrbitMenuPanelController()
+        let window = KeyRequestSpyWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = NSView(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        defer { window.close() }
+        window.makeKeyAndOrderFront(nil)
+        pump(seconds: 0.2)
+        let callsBeforeDismiss = window.makeKeyAndOrderFrontCallCount
+
+        controller.present(
+            entries: entries(count: 3), anchorRect: anchorRect(in: window), anchorView: window.contentView,
+            ownerWindow: window, mode: .pointCorner, preferredDirection: .down, showsArrow: false
+        )
+        pump(seconds: 0.2)
+
+        controller.dismiss()
+        pump(seconds: 0.2)
+
+        XCTAssertGreaterThan(
+            window.makeKeyAndOrderFrontCallCount, callsBeforeDismiss,
+            "Dismissing the menu must re-request key status for the window it was opened from, or nothing on screen can take keyboard focus afterward."
+        )
+    }
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dismiss_isIdempotentAndLeavesNoPanelBehind
 
     func test_dismiss_isIdempotentAndLeavesNoPanelBehind() {
@@ -376,6 +413,13 @@ final class OrbitMenuPanelTests: XCTestCase {
 
     // MARK: - Helpers
 
+    private func pump(seconds: TimeInterval) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+    }
+
     private func makeOwnerWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 400, height: 300),
@@ -393,5 +437,14 @@ final class OrbitMenuPanelTests: XCTestCase {
     private func assertNoPanelsLeaked(file: StaticString = #filePath, line: UInt = #line) {
         let leaked = NSApp.windows.filter { $0 is OrbitMenuPanel && $0.isVisible }
         XCTAssertTrue(leaked.isEmpty, "\(leaked.count) menu panel(s) left floating after dismissal.", file: file, line: line)
+    }
+}
+
+private final class KeyRequestSpyWindow: NSWindow {
+    private(set) var makeKeyAndOrderFrontCallCount = 0
+
+    override func makeKeyAndOrderFront(_ sender: Any?) {
+        makeKeyAndOrderFrontCallCount += 1
+        super.makeKeyAndOrderFront(sender)
     }
 }

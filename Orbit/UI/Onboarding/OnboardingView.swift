@@ -303,29 +303,40 @@ struct OnboardingView: View {
         return false
     }
 
-    private func runImportThenAdvance(_ browser: ImportableBrowser) {
+    static func isImportComplete(_ state: ImportState) -> Bool {
+        switch state {
+        case .finished, .finishedArc: return true
+        case .idle, .importing, .failed: return false
+        }
+    }
+
+    private var isImportComplete: Bool { Self.isImportComplete(importState) }
+
+    // Never advances the step itself — the caller decides when to move on,
+    // so a summary or caveat this returns always has a chance to be read
+    // rather than being replaced by the next step the instant it lands.
+    private func runImport(_ browser: ImportableBrowser) {
         guard let spaceID = env.activeSpace?.id ?? env.spaces.first?.id else {
             importState = .failed("Orbit has no Space to import into yet.")
             return
         }
         importState = .importing(browser)
+        let wantsLoginSessions = importLoginSessions
         Task { @MainActor in
-            do {
-                if browser.importsNativeStructure {
-                    let summary = try await ArcImportCoordinator.performImport(
-                        env: env,
-                        importCookies: importLoginSessions && browser.importsLoginSessions
-                    )
-                    importState = .finishedArc(summary)
-                } else {
+            if browser.importsNativeStructure {
+                importState = await OnboardingImportRunner.runArcImport(
+                    env: env,
+                    importLoginSessions: wantsLoginSessions
+                )
+            } else {
+                do {
                     let summary = try await BrowserImportCoordinator.performImport(browser, into: spaceID, env: env)
                     importState = .finished(summary)
+                } catch {
+                    importState = .failed(
+                        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    )
                 }
-                move(1)
-            } catch {
-                importState = .failed(
-                    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                )
             }
         }
     }
@@ -425,7 +436,11 @@ struct OnboardingView: View {
                 if step == .profileSetup { commitSpacesSetup() }
                 if step == .searchEngine { commitSearchEngine() }
                 if step == .importBrowser, let browser = selectedImportSource {
-                    runImportThenAdvance(browser)
+                    if isImportComplete {
+                        move(1)
+                    } else {
+                        runImport(browser)
+                    }
                     return
                 }
                 if step == .defaultBrowser {
@@ -458,12 +473,20 @@ struct OnboardingView: View {
         .accessibilityLabel("Step \(step.rawValue + 1) of \(OnboardingStep.allCases.count)")
     }
 
-    private var continueButtonTitle: String {
+    static func continueButtonTitle(
+        step: OnboardingStep,
+        selectedImportSource: ImportableBrowser?,
+        importState: ImportState
+    ) -> String {
         if step == .defaultBrowser { return "Finish" }
         if step == .importBrowser, let browser = selectedImportSource {
-            return "Import From \(browser.displayName)"
+            return isImportComplete(importState) ? "Continue" : "Import From \(browser.displayName)"
         }
         return "Continue"
+    }
+
+    private var continueButtonTitle: String {
+        Self.continueButtonTitle(step: step, selectedImportSource: selectedImportSource, importState: importState)
     }
 
     private func move(_ delta: Int) {

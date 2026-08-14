@@ -198,6 +198,158 @@ final class ArcImportCompletenessTests: XCTestCase {
         XCTAssertTrue(text.contains("Shortcuts"), "The user must be told where to set them again: \(text)")
     }
 
+    // MARK: - Onboarding's login-session toggle vs the Settings import
+    //
+    // The reported bug: "import sign ins from Arc doesn't work" in onboarding
+    // but does in Settings. Root cause — onboarding runs before any browser
+    // window exists, so AppEnvironment.engine is nil (OrbitWindowController is
+    // the only startEngineIfNeeded() caller), so a decrypted cookie has no
+    // session to be stored into (see ArcCookieImportOutcome.decryptedButEngineCannotInstall's
+    // doc comment). Settings never hits this because the app is already running.
+
+    private func sampleArcCookie(name: String = "session") -> ArcCookie {
+        ArcCookie(
+            hostKey: ".example.com",
+            name: name,
+            value: "abc123",
+            path: "/",
+            expiresAt: nil,
+            isSecure: true,
+            isHTTPOnly: true,
+            sameSitePolicy: .lax,
+            sourcePort: 443,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastAccessedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+
+    func testCookiesDecryptedWithNoEngineSessionAreReportedRatherThanSilentlyDropped() async {
+        let outcome = await ArcImportCoordinator.installOutcome([sampleArcCookie()], session: nil)
+
+        XCTAssertEqual(
+            outcome, .decryptedButEngineCannotInstall(count: 1),
+            "This is exactly the state onboarding used to land in: the cookie decrypted fine but there was nowhere to store it."
+        )
+    }
+
+    func testCookiesInstallWhenALiveSessionIsAvailable() async {
+        let session = RecordingEngineSession()
+
+        let outcome = await ArcImportCoordinator.installOutcome([sampleArcCookie()], session: session)
+
+        XCTAssertEqual(outcome, .imported(count: 1))
+        XCTAssertEqual(session.storedCookies.map(\.name), ["session"], "the decrypted cookie must actually reach the session, not just be counted")
+    }
+
+    func testResolvedImportCookiesIsTrueOnlyWhenToggledOnForABrowserThatSupportsIt() {
+        XCTAssertTrue(OnboardingImportRunner.resolvedImportCookies(toggleOn: true, browser: .arc))
+        XCTAssertFalse(
+            OnboardingImportRunner.resolvedImportCookies(toggleOn: false, browser: .arc),
+            "Declining the toggle must be honoured, not defaulted through the way an ignored NSAlert would be."
+        )
+        XCTAssertFalse(
+            OnboardingImportRunner.resolvedImportCookies(toggleOn: true, browser: .chrome),
+            "A browser with no login-session support must never report cookies as requested, regardless of the toggle."
+        )
+    }
+
+    func testEnsureEngineReadyStartsTheEngineOnlyWhenNoneIsRunningYet() {
+        var started = false
+
+        OnboardingImportRunner.ensureEngineReady(env: env) { _ in started = true }
+
+        XCTAssertTrue(
+            started,
+            "Onboarding's import step runs before any window exists, so env.engine is nil here — this is the exact gap that left Arc's cookies undeliverable."
+        )
+    }
+
+    func testEnsureEngineReadyLeavesAnAlreadyRunningEngineAlone() {
+        env._test_engineOverride = StubEngineForOnboardingImportTests()
+        var started = false
+
+        OnboardingImportRunner.ensureEngineReady(env: env) { _ in started = true }
+
+        XCTAssertFalse(started, "Settings' import runs with the engine already up; a second onboarding import must not restart it either.")
+    }
+
+    func testTurningTheToggleOnReachesTheActualPerformImportCall() async {
+        var capturedImportCookies: Bool?
+        let summary = ArcImportSummary(cookies: .imported(count: 3))
+
+        let state = await OnboardingImportRunner.runArcImport(
+            env: env,
+            importLoginSessions: true,
+            engineStarter: { _ in },
+            performImport: { _, importCookies in
+                capturedImportCookies = importCookies
+                return summary
+            }
+        )
+
+        XCTAssertEqual(capturedImportCookies, true, "Turning the toggle on must reach the real performImport(importCookies:) call — this is the exact value that used to get lost.")
+        XCTAssertEqual(state, .finishedArc(summary))
+    }
+
+    func testDecliningTheToggleIsHonouredJustAsFaithfully() async {
+        var capturedImportCookies: Bool?
+
+        _ = await OnboardingImportRunner.runArcImport(
+            env: env,
+            importLoginSessions: false,
+            engineStarter: { _ in },
+            performImport: { _, importCookies in
+                capturedImportCookies = importCookies
+                return ArcImportSummary()
+            }
+        )
+
+        XCTAssertEqual(capturedImportCookies, false, "Leaving the toggle off must reach performImport as false, not be silently upgraded to true.")
+    }
+
+    func testAFailedArcImportIsSurfacedRatherThanDropped() async {
+        struct ImportBoom: LocalizedError {
+            var errorDescription: String? { "boom" }
+        }
+
+        let state = await OnboardingImportRunner.runArcImport(
+            env: env,
+            importLoginSessions: true,
+            engineStarter: { _ in },
+            performImport: { _, _ in throw ImportBoom() }
+        )
+
+        XCTAssertEqual(state, .failed("boom"), "A thrown import error must reach onboarding's UI as a failure state, not vanish.")
+    }
+
+    func testOnboardingDoesNotHideACompletedArcImportBehindAnAutomaticAdvance() {
+        let cookieShortfall = ArcImportSummary(cookies: .decryptedButEngineCannotInstall(count: 2))
+
+        XCTAssertFalse(OnboardingView.isImportComplete(.importing(.arc)), "still running — nothing to show yet")
+        XCTAssertTrue(
+            OnboardingView.isImportComplete(.finishedArc(cookieShortfall)),
+            "A landed result, including one carrying a cookie caveat, must count as complete so the flow waits on the user instead of auto-advancing over it."
+        )
+
+        XCTAssertEqual(
+            OnboardingView.continueButtonTitle(step: .importBrowser, selectedImportSource: .arc, importState: .idle),
+            "Import From Arc"
+        )
+        XCTAssertEqual(
+            OnboardingView.continueButtonTitle(step: .importBrowser, selectedImportSource: .arc, importState: .finishedArc(cookieShortfall)),
+            "Continue",
+            "Once the import — and any caveat in its summary — has landed, the button must hand control back to the user rather than relabelling itself mid-read and stepping away."
+        )
+    }
+
+    func testTheMissingEngineSessionCaveatIsWordedForTheUser() {
+        let summary = ArcImportSummary(cookies: .decryptedButEngineCannotInstall(count: 5))
+        let text = OnboardingView.arcCaveats(summary).joined(separator: " ")
+
+        XCTAssertTrue(text.contains("5"), text)
+        XCTAssertTrue(text.lowercased().contains("sign in"), text)
+    }
+
     // MARK: - Key bindings, applied
 
     func testArcsRemapsLandOnOrbitsCommandsWithoutTouchingTheRunningApp() {
@@ -303,4 +455,59 @@ final class ArcImportCompletenessTests: XCTestCase {
             "The losing command must keep its own binding rather than gaining a dead one."
         )
     }
+}
+
+// MARK: - Test doubles
+
+@MainActor
+private final class RecordingEngineSession: EngineSession {
+    let identifier = "recording"
+    let isPersistent = true
+    var storageURL: URL? { nil }
+    private(set) var storedCookies: [EngineCookie] = []
+
+    func setUserAgent(_ userAgent: String) {}
+    func cookies(for url: URL) async -> [HTTPCookie] { [] }
+    func deleteCookies(for url: URL) async {}
+    func setCookies(_ cookies: [EngineCookie]) async -> Int {
+        storedCookies.append(contentsOf: cookies)
+        return cookies.count
+    }
+    func contentSetting(_ kind: PermissionKind, for url: URL) -> ContentSetting { .unsupported }
+    func setContentSetting(_ setting: ContentSetting, for kind: PermissionKind, url: URL) {}
+}
+
+/// Stands in for a started engine purely so AppEnvironment.engine is non-nil — none of the
+/// process a real one needs.
+@MainActor
+private final class StubEngineForOnboardingImportTests: BrowserEngine {
+    static let kind: EngineKind = .chromium
+    let capabilities: EngineCapabilities = []
+    let manageableContentSettings: Set<PermissionKind> = []
+    let extensionActivation: ExtensionActivation = .immediate
+    let versionDescription = "Stub (ArcImportCompletenessTests — no real engine is running)"
+
+    private lazy var stubSession = RecordingEngineSession()
+
+    func start() throws {}
+    func shutdown() -> Bool { true }
+    func tick() {}
+
+    func session(identifier: String, persistent: Bool) throws -> EngineSession { stubSession }
+    var defaultSession: EngineSession { stubSession }
+
+    func makeWebContents(session: EngineSession, initialURL: URL?) throws -> WebContents {
+        throw EngineError(code: .engineUnavailable)
+    }
+
+    func clearBrowsingData(_ scope: BrowsingDataScope, session: EngineSession, since: Date?) async {}
+    func addUserScript(_ script: UserScript, session: EngineSession) {}
+    func removeUserScript(id: UUID, session: EngineSession) {}
+    func applyContentBlocker(_ blocker: ContentBlocker?, session: EngineSession) async {}
+
+    func loadExtension(at directory: URL, session: EngineSession) async throws -> LoadedExtension {
+        throw EngineError(code: .engineUnavailable)
+    }
+    func unloadExtension(id: String, session: EngineSession) {}
+    func loadedExtensions(session: EngineSession) -> [LoadedExtension] { [] }
 }

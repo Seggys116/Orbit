@@ -67,13 +67,20 @@ enum PiPControl : NSInteger {
   kControlNextSlide,
 };
 
-constexpr CGFloat kControlSize = 30;
+constexpr CGFloat kControlSize = 36;
 constexpr CGFloat kPrimaryControlSize = 44;
 constexpr CGFloat kEdgeInset = 8;
 constexpr CGFloat kProgressHeight = 3;
 constexpr CGFloat kTitleHeight = 18;
 constexpr int kMinContentWidth = 284;
 constexpr int kMinContentHeight = 160;
+
+// Play/pause and hang-up are the "dominant" action of whichever mode is
+// active (playback vs. a call) so they get the larger button and survive
+// the small-window control drop.
+bool IsPrimaryCenterControl(NSInteger control) {
+  return control == kControlPlayPause || control == kControlHangUp;
+}
 
 NSImage* SymbolImage(NSString* name, CGFloat point_size) {
   NSImage* image = [NSImage imageWithSystemSymbolName:name
@@ -152,6 +159,9 @@ NSImage* ImageFromSkBitmap(const SkBitmap& bitmap) {
 // out by hand because which controls exist changes at runtime.
 @interface OrbitPiPControlsView : NSView {
   NSMutableDictionary<NSNumber*, NSButton*>* _buttons;
+  // Content's requested visibility per control, independent of whether the
+  // current window size has room to actually show it (see -layout).
+  NSMutableDictionary<NSNumber*, NSNumber*>* _requestedVisible;
   NSTrackingArea* _trackingArea;
 }
 @property(nonatomic, weak) OrbitPiPBridge* bridge;
@@ -160,6 +170,7 @@ NSImage* ImageFromSkBitmap(const SkBitmap& bitmap) {
 @property(nonatomic, strong) OrbitPiPProgressView* progressView;
 - (NSButton*)buttonForControl:(NSInteger)control;
 - (void)addControl:(NSInteger)control symbol:(NSString*)symbol primary:(BOOL)primary;
+- (void)setControl:(NSInteger)control requestedVisible:(BOOL)visible;
 @end
 
 @implementation OrbitPiPControlsView
@@ -171,6 +182,7 @@ NSImage* ImageFromSkBitmap(const SkBitmap& bitmap) {
 - (instancetype)initWithFrame:(NSRect)frame {
   if (self = [super initWithFrame:frame]) {
     _buttons = [NSMutableDictionary dictionary];
+    _requestedVisible = [NSMutableDictionary dictionary];
     self.wantsLayer = YES;
     self.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.32].CGColor;
 
@@ -192,7 +204,7 @@ NSImage* ImageFromSkBitmap(const SkBitmap& bitmap) {
 
 - (void)addControl:(NSInteger)control symbol:(NSString*)symbol primary:(BOOL)primary {
   const CGFloat size = primary ? kPrimaryControlSize : kControlSize;
-  NSButton* button = [NSButton buttonWithImage:SymbolImage(symbol, primary ? 19 : 12)
+  NSButton* button = [NSButton buttonWithImage:SymbolImage(symbol, primary ? 20 : 13)
                                         target:nil
                                         action:@selector(controlClicked:)];
   button.bordered = NO;
@@ -201,14 +213,27 @@ NSImage* ImageFromSkBitmap(const SkBitmap& bitmap) {
   button.tag = control;
   button.hidden = YES;
   button.wantsLayer = YES;
-  button.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.45].CGColor;
+  button.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.5].CGColor;
   button.layer.cornerRadius = size / 2;
+  button.layer.shadowColor = [NSColor blackColor].CGColor;
+  button.layer.shadowOpacity = 0.35;
+  button.layer.shadowRadius = 1.5;
+  button.layer.shadowOffset = NSMakeSize(0, -1);
   [self addSubview:button];
   _buttons[@(control)] = button;
 }
 
 - (NSButton*)buttonForControl:(NSInteger)control {
   return _buttons[@(control)];
+}
+
+- (BOOL)isControlRequestedVisible:(NSInteger)control {
+  return [_requestedVisible[@(control)] boolValue];
+}
+
+- (void)setControl:(NSInteger)control requestedVisible:(BOOL)visible {
+  _requestedVisible[@(control)] = @(visible);
+  self.needsLayout = YES;
 }
 
 - (void)setBridge:(OrbitPiPBridge*)bridge {
@@ -246,6 +271,14 @@ NSImage* ImageFromSkBitmap(const SkBitmap& bitmap) {
   [_bridge hoverChanged:NO];
 }
 
+// close/back-to-tab sit in the top corners (macOS PiP convention), mute
+// anchors the bottom-right corner above the progress bar, and every other
+// control -- transport, skip-ad, slide nav, call controls -- shares one
+// centred row so only one "mode" of controls is ever on screen at once.
+// kDropPriority trims that row from its weakest members inward whenever
+// the window is too narrow to hold everything requested, so play/pause
+// and hang-up (the two controls IsPrimaryCenterControl marks primary)
+// are the last things to disappear.
 - (void)layout {
   [super layout];
   const NSRect bounds = self.bounds;
@@ -254,11 +287,19 @@ NSImage* ImageFromSkBitmap(const SkBitmap& bitmap) {
   [_progressView setNeedsDisplay:YES];
 
   const CGFloat top = NSHeight(bounds) - kEdgeInset - kControlSize;
-  [self buttonForControl:kControlClose].frame =
-      NSMakeRect(kEdgeInset, top, kControlSize, kControlSize);
-  [self buttonForControl:kControlBackToTab].frame =
-      NSMakeRect(NSWidth(bounds) - kEdgeInset - kControlSize, top, kControlSize,
-                 kControlSize);
+  NSButton* closeButton = [self buttonForControl:kControlClose];
+  closeButton.hidden = ![self isControlRequestedVisible:kControlClose];
+  closeButton.frame = NSMakeRect(kEdgeInset, top, kControlSize, kControlSize);
+
+  NSButton* backButton = [self buttonForControl:kControlBackToTab];
+  backButton.hidden = ![self isControlRequestedVisible:kControlBackToTab];
+  backButton.frame = NSMakeRect(NSWidth(bounds) - kEdgeInset - kControlSize, top,
+                                 kControlSize, kControlSize);
+
+  NSButton* muteButton = [self buttonForControl:kControlToggleMute];
+  muteButton.hidden = ![self isControlRequestedVisible:kControlToggleMute];
+  muteButton.frame = NSMakeRect(NSWidth(bounds) - kEdgeInset - kControlSize,
+                                 kEdgeInset, kControlSize, kControlSize);
 
   const CGFloat titleLeft = kEdgeInset + kControlSize + kEdgeInset;
   const CGFloat titleWidth = std::max<CGFloat>(0, NSWidth(bounds) - 2 * titleLeft);
@@ -268,44 +309,55 @@ NSImage* ImageFromSkBitmap(const SkBitmap& bitmap) {
       NSMakeRect(titleLeft + kTitleHeight + 4, titleY,
                  std::max<CGFloat>(0, titleWidth - kTitleHeight - 4), kTitleHeight);
 
-  NSArray<NSNumber*>* centreOrder =
-      @[ @(kControlPreviousTrack), @(kControlPlayPause), @(kControlNextTrack) ];
-  CGFloat centreWidth = 0;
-  for (NSNumber* key in centreOrder) {
-    if (_buttons[key].hidden) {
-      continue;
-    }
-    centreWidth +=
-        (key.integerValue == kControlPlayPause ? kPrimaryControlSize : kControlSize) +
-        kEdgeInset;
+  // C arrays, not std::vector: Chromium builds with -Wexit-time-destructors.
+  static constexpr NSInteger kCentreOrder[] = {
+      kControlPreviousSlide,     kControlNextSlide,     kControlPreviousTrack,
+      kControlPlayPause,         kControlNextTrack,     kControlSkipAd,
+      kControlToggleMicrophone,  kControlToggleCamera,  kControlHangUp,
+  };
+  static constexpr NSInteger kDropPriority[] = {
+      kControlSkipAd,           kControlPreviousSlide,   kControlNextSlide,
+      kControlToggleMicrophone, kControlToggleCamera,
+      kControlPreviousTrack,    kControlNextTrack,
+  };
+
+  std::map<NSInteger, bool> centreVisible;
+  for (NSInteger control : kCentreOrder) {
+    centreVisible[control] = [self isControlRequestedVisible:control];
   }
-  centreWidth = std::max<CGFloat>(0, centreWidth - kEdgeInset);
-  CGFloat x = (NSWidth(bounds) - centreWidth) / 2;
-  for (NSNumber* key in centreOrder) {
-    NSButton* button = _buttons[key];
-    if (button.hidden) {
+
+  auto centre_width = [&] {
+    CGFloat total = 0;
+    for (NSInteger control : kCentreOrder) {
+      if (centreVisible[control]) {
+        total += (IsPrimaryCenterControl(control) ? kPrimaryControlSize
+                                                    : kControlSize) +
+                 kEdgeInset;
+      }
+    }
+    return total > 0 ? total - kEdgeInset : 0;
+  };
+
+  const CGFloat available = std::max<CGFloat>(0, NSWidth(bounds) - 2 * kEdgeInset);
+  for (NSInteger control : kDropPriority) {
+    if (centre_width() <= available) {
+      break;
+    }
+    centreVisible[control] = false;
+  }
+
+  CGFloat x = (NSWidth(bounds) - centre_width()) / 2;
+  for (NSInteger control : kCentreOrder) {
+    NSButton* button = [self buttonForControl:control];
+    const bool show = centreVisible[control];
+    button.hidden = !show;
+    if (!show) {
       continue;
     }
     const CGFloat size =
-        key.integerValue == kControlPlayPause ? kPrimaryControlSize : kControlSize;
-    button.frame = NSMakeRect(x, (NSHeight(bounds) - size) / 2, size, size);
+        IsPrimaryCenterControl(control) ? kPrimaryControlSize : kControlSize;
+    button.frame = NSMakeRect(std::round(x), (NSHeight(bounds) - size) / 2, size, size);
     x += size + kEdgeInset;
-  }
-
-  NSArray<NSNumber*>* bottomOrder = @[
-    @(kControlToggleMute), @(kControlSkipAd), @(kControlToggleMicrophone),
-    @(kControlToggleCamera), @(kControlHangUp), @(kControlPreviousSlide),
-    @(kControlNextSlide)
-  ];
-  CGFloat bx = kEdgeInset;
-  const CGFloat bottomY = kProgressHeight + kEdgeInset;
-  for (NSNumber* key in bottomOrder) {
-    NSButton* button = _buttons[key];
-    if (button.hidden) {
-      continue;
-    }
-    button.frame = NSMakeRect(bx, bottomY, kControlSize, kControlSize);
-    bx += kControlSize + kEdgeInset;
   }
 }
 
@@ -502,13 +554,17 @@ void OrbitVideoOverlayWindowMac::BuildWindow() {
   [native_->controls addControl:kControlToggleMute symbol:@"speaker.wave.2.fill" primary:NO];
   [native_->controls addControl:kControlToggleMicrophone symbol:@"mic.fill" primary:NO];
   [native_->controls addControl:kControlToggleCamera symbol:@"video.fill" primary:NO];
-  [native_->controls addControl:kControlHangUp symbol:@"phone.down.fill" primary:NO];
+  [native_->controls addControl:kControlHangUp symbol:@"phone.down.fill" primary:YES];
   [native_->controls addControl:kControlPreviousSlide
                          symbol:@"arrowtriangle.left.square.fill"
                         primary:NO];
   [native_->controls addControl:kControlNextSlide
                          symbol:@"arrowtriangle.right.square.fill"
                         primary:NO];
+  // Hang-up reads as the "end call" button, matching the red circular
+  // control every other Apple call UI uses for the same action.
+  [native_->controls buttonForControl:kControlHangUp].layer.backgroundColor =
+      [[NSColor systemRedColor] colorWithAlphaComponent:0.85].CGColor;
   native_->controls.bridge = native_->bridge;
   [container addSubview:native_->controls
              positioned:NSWindowAbove
@@ -761,13 +817,13 @@ void OrbitVideoOverlayWindowMac::SetPlaybackState(PlaybackState playback_state) 
 
 void OrbitVideoOverlayWindowMac::UpdateSymbols() {
   [native_->controls buttonForControl:kControlPlayPause].image =
-      SymbolImage(playback_state_ == kPlaying ? @"pause.fill" : @"play.fill", 19);
+      SymbolImage(playback_state_ == kPlaying ? @"pause.fill" : @"play.fill", 20);
   [native_->controls buttonForControl:kControlToggleMute].image = SymbolImage(
-      media_muted_ ? @"speaker.slash.fill" : @"speaker.wave.2.fill", 12);
+      media_muted_ ? @"speaker.slash.fill" : @"speaker.wave.2.fill", 13);
   [native_->controls buttonForControl:kControlToggleMicrophone].image =
-      SymbolImage(microphone_muted_ ? @"mic.slash.fill" : @"mic.fill", 12);
+      SymbolImage(microphone_muted_ ? @"mic.slash.fill" : @"mic.fill", 13);
   [native_->controls buttonForControl:kControlToggleCamera].image =
-      SymbolImage(camera_on_ ? @"video.fill" : @"video.slash.fill", 12);
+      SymbolImage(camera_on_ ? @"video.fill" : @"video.slash.fill", 13);
 }
 
 void OrbitVideoOverlayWindowMac::SetControlVisible(NSInteger control,
@@ -777,8 +833,7 @@ void OrbitVideoOverlayWindowMac::SetControlVisible(NSInteger control,
       control == kControlClose || control == kControlBackToTab;
   const bool effective =
       is_visible && (playback_controls_visible_ || is_window_chrome);
-  [native_->controls buttonForControl:control].hidden = !effective;
-  native_->controls.needsLayout = YES;
+  [native_->controls setControl:control requestedVisible:effective];
 }
 
 void OrbitVideoOverlayWindowMac::SetPlayPauseButtonVisibility(bool is_visible) {

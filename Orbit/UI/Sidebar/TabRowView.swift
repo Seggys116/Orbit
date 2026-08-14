@@ -64,12 +64,21 @@ struct TabRowView: View {
     var depth: Int = 0
     var theme: SpaceTheme
 
-    @State private var isHovering = false
+    @State private var isHovering: Bool
     @State private var rename = TabTitleRename()
     @FocusState private var titleFieldFocused: Bool
     @State private var previewTask: Task<Void, Never>?
     @State private var previewImage: NSImage?
     @State private var showPreview = false
+
+    // ImageRenderer has no pointer, so a genuinely hovered row (close button visible, title
+    // narrowed) could never be captured otherwise — see SidebarMiniPlayerView's alwaysExpanded.
+    init(tab: Tab, depth: Int = 0, theme: SpaceTheme, forcesHoveredAppearanceForTesting: Bool = false) {
+        self.tab = tab
+        self.depth = depth
+        self.theme = theme
+        _isHovering = State(initialValue: forcesHoveredAppearanceForTesting)
+    }
 
     private var isActive: Bool { env.activeTabID == tab.id }
 
@@ -87,34 +96,44 @@ struct TabRowView: View {
     private var mediaState: MediaState { env.mediaStates[tab.id] ?? .idle }
 
     var body: some View {
-        HStack(spacing: OrbitMetrics.sidebarRowContentSpacing) {
-            HStack(
-                spacing: showsPinnedSlash
-                    ? OrbitMetrics.sidebarPinnedSlashSpacing
-                    : OrbitMetrics.sidebarRowContentSpacing
-            ) {
-                favicon
-                if showsPinnedSlash { pinnedSlash }
-                titleLabel
-            }
-            Spacer(minLength: 4)
-            if PeekState.shared.activePreview?.sourceTabID == tab.id {
-                Image(systemName: "eye.fill")
-                    .font(.system(size: OrbitMetrics.sidebarRowFontSize - 1))
-                    .foregroundStyle(theme.readableSecondaryForeground)
-                    .orbitTooltip("Peeking a link")
-                    .accessibilityLabel("Peeking a link")
-            }
-            if tab.isMuted || mediaState.isAudible {
-                OrbitNSActionButton(action: { env.muteTab(tab.id, muted: !tab.isMuted) }) {
-                    Image(systemName: tab.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: OrbitMetrics.sidebarRowFontSize))
+        ZStack(alignment: .trailing) {
+            HStack(spacing: OrbitMetrics.sidebarRowContentSpacing) {
+                HStack(
+                    spacing: showsPinnedSlash
+                        ? OrbitMetrics.sidebarPinnedSlashSpacing
+                        : OrbitMetrics.sidebarRowContentSpacing
+                ) {
+                    favicon
+                    if showsPinnedSlash { pinnedSlash }
+                    titleLabel
+                }
+                Spacer(minLength: 4)
+                if PeekState.shared.activePreview?.sourceTabID == tab.id {
+                    Image(systemName: "eye.fill")
+                        .font(.system(size: OrbitMetrics.sidebarRowFontSize - 1))
                         .foregroundStyle(theme.readableSecondaryForeground)
+                        .orbitTooltip("Peeking a link")
+                        .accessibilityLabel("Peeking a link")
+                }
+                if tab.isMuted || mediaState.isAudible {
+                    OrbitNSActionButton(action: { env.muteTab(tab.id, muted: !tab.isMuted) }) {
+                        Image(systemName: tab.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.system(size: OrbitMetrics.sidebarRowFontSize))
+                            .foregroundStyle(theme.readableSecondaryForeground)
+                    }
                 }
             }
-            // Opacity, not conditional insertion: inserting the control only while hovering would let it materialise directly under the pointer, so a click aimed at the row body could land on it purely because the layout just shifted.
+            // Trailing padding, not a permanently reserved flow slot: the title gets the row's full width until
+            // the close control is actually visible, at which point this makes exactly as much room as it needs.
+            .padding(.trailing, isHovering ? trailingCloseControlReservedWidth : 0)
+            .animation(OrbitMotion.quick, value: isHovering)
+
+            // Overlay, opacity-only: the control sits at a fixed trailing position and never inserts/removes, so
+            // it is exactly as hit-testable the instant it's visible as it is once fully faded in, and a click
+            // aimed at the row body can't land on it just because the layout shifted underneath the pointer.
             trailingCloseControl
                 .opacity(isHovering ? 1 : 0)
+                .animation(OrbitMotion.quick, value: isHovering)
         }
         .padding(.leading, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset + CGFloat(depth) * OrbitMetrics.sidebarIndentPerDepth)
         .padding(.trailing, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
@@ -142,6 +161,10 @@ struct TabRowView: View {
     }
 
     // MARK: - Trailing close control (and what a bookmarked row's one is)
+
+    private var trailingCloseControlReservedWidth: CGFloat {
+        OrbitMetrics.sidebarCloseButtonSize + OrbitMetrics.sidebarRowContentSpacing
+    }
 
     private var trailingCloseControl: some View {
         let action = TabRowTrailingAction.resolve(section: tab.section, isOpen: env.isTabOpen(tab.id))

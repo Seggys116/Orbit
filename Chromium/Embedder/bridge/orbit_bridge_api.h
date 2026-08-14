@@ -242,6 +242,22 @@ typedef struct {
   // The frontend asked to be raised -- a debugger pause, a Reveal in
   // Elements. Swift should make whichever surface hosts the inspector key.
   void (*devtools_bring_to_front)(void* opaque);
+
+  // content::WebContentsDelegate::ActivateContents -- something asked this
+  // tab's own WebContents to become the active one, e.g. the PiP floating
+  // window's "back to tab" control (VideoPictureInPictureWindowController::
+  // CloseAndFocusInitiator). Distinct from picture_in_picture_changed: the
+  // PiP window's X button closes without ever firing this. Swift should
+  // resolve this handle's tab and switch to it, including across Spaces.
+  void (*activation_requested)(void* opaque);
+
+  // Fired when the answer to "would OrbitWebContentsTogglePictureInPicture
+  // succeed right now" changes, i.e. PictureInPictureCandidate() gaining or
+  // losing a value. Driven by content::WebContentsObserver's own
+  // MediaPlayerInfo for every <video>/<audio> element in every frame of this
+  // tab, main or subframe -- unlike a page-side element scan, this cannot
+  // miss an iframe-hosted player. is_available is 0/1.
+  void (*picture_in_picture_available_changed)(void* opaque, int is_available);
 } OrbitWebContentsCallbacks;
 
 // NULL if the browser has not reached the ready callback yet. Owns a
@@ -424,6 +440,14 @@ int OrbitWebContentsTogglePictureInPicture(OrbitWebContentsHandle handle);
 // content::WebContents::HasPictureInPictureVideo.
 __attribute__((visibility("default")))
 int OrbitWebContentsHasPictureInPictureVideo(OrbitWebContentsHandle handle);
+
+// 1 if OrbitWebContentsTogglePictureInPicture has something it could float
+// right now (PictureInPictureCandidate().has_value()) -- distinct from
+// OrbitWebContentsHasPictureInPictureVideo, which asks whether a PiP window
+// is already open. Reads the same state picture_in_picture_available_changed
+// reports; this is only for a caller that attached after the last edge.
+__attribute__((visibility("default")))
+int OrbitWebContentsHasPictureInPictureCandidate(OrbitWebContentsHandle handle);
 
 // success 0/1. On success rgba_data is `height` rows of `stride` bytes,
 // premultiplied RGBA (matches the compositor surface); on failure it is

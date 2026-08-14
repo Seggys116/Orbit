@@ -320,4 +320,48 @@ final class MediaSessionBridgeTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Mute
+
+    func test_theObserverExposesADesiredMuteFlagThatDefaultsToNoOverride() {
+        let source = MediaSessionObserverScript.source(postExpression: "noop()")
+        XCTAssertTrue(
+            source.contains("window.__orbitDesiredMuted"),
+            "The mute flag must live on window, or setDesiredMuted's separate evaluateJavaScript call could never reach it."
+        )
+        XCTAssertTrue(
+            source.contains("window.__orbitDesiredMuted === null"),
+            "With no override, enforceMute must leave the page's own mute state alone."
+        )
+    }
+
+    func test_setDesiredMutedTrue_setsTheFlagAndMutesEveryElementImmediately() {
+        let script = MediaSessionObserverScript.setDesiredMuted(true)
+        XCTAssertTrue(script.contains("window.__orbitDesiredMuted = true"), "The flag was not set to true.")
+        XCTAssertTrue(
+            script.contains("el.muted = true"),
+            "Existing elements must be muted immediately, not just on the next poll tick."
+        )
+    }
+
+    func test_setDesiredMutedFalse_clearsTheFlagAndUnmutesEveryElementImmediately() {
+        let script = MediaSessionObserverScript.setDesiredMuted(false)
+        XCTAssertTrue(script.contains("window.__orbitDesiredMuted = false"), "The flag was not set to false.")
+        XCTAssertTrue(
+            script.contains("el.muted = false"),
+            "Turning Orbit's mute off must really unmute the page's elements, not just stop re-muting future ones."
+        )
+    }
+
+    func test_theObserverEnforcesMuteOnBothTheEventsAndThePoll() {
+        let source = MediaSessionObserverScript.source(postExpression: "noop()")
+        XCTAssertTrue(
+            source.contains("document.querySelectorAll('video, audio').forEach(enforceMute)"),
+            "enforceMute must be swept over every media element, not just the one that fired an event."
+        )
+        XCTAssertTrue(
+            source.contains("setInterval"),
+            "Without a poll, a lazily inserted <video> (an ad, a carousel) would never pick up Orbit's mute state."
+        )
+    }
 }

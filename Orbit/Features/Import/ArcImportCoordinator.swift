@@ -646,11 +646,15 @@ public enum ArcImportCoordinator {
         case .decrypted(let value): cookies = value
         case .stopped(let outcome): return outcome
         }
-        guard !cookies.isEmpty else { return .imported(count: 0) }
 
-        guard let session = session(for: profileID, env: env) else {
-            return .decryptedButEngineCannotInstall(count: cookies.count)
-        }
+        return await installOutcome(cookies, session: session(for: profileID, env: env))
+    }
+
+    /// Isolated from decryption so the "no engine session to receive them" branch — the one onboarding
+    /// used to hit, since it runs before any window has started the engine — is directly testable.
+    static func installOutcome(_ cookies: [ArcCookie], session: EngineSession?) async -> ArcCookieImportOutcome {
+        guard !cookies.isEmpty else { return .imported(count: 0) }
+        guard let session else { return .decryptedButEngineCannotInstall(count: cookies.count) }
 
         let stored = await session.setCookies(cookies.map(engineCookie))
         if stored == cookies.count { return .imported(count: stored) }

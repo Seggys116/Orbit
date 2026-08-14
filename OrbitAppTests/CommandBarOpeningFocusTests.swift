@@ -42,7 +42,7 @@ final class CommandBarOpeningFocusTests: XCTestCase {
         }
     }
 
-    private func mountCommandBar(mode: CommandBarMode, settle: Bool = true) -> NSWindow {
+    private func mountCommandBar(mode: CommandBarMode, settle: Bool = true, makeKey: Bool = true) -> NSWindow {
         env.commandBarMode = mode
         env.isCommandBarPresented = true
 
@@ -62,7 +62,11 @@ final class CommandBarOpeningFocusTests: XCTestCase {
         hosting.autoresizingMask = [.width, .height]
         window.contentView = hosting
         window.setContentSize(NSSize(width: OrbitMetrics.commandBarWidth, height: 520))
-        window.makeKeyAndOrderFront(nil)
+        if makeKey {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            window.orderFront(nil)
+        }
         self.window = window
         if settle { pump(seconds: 0.5) }
         return window
@@ -155,6 +159,19 @@ final class CommandBarOpeningFocusTests: XCTestCase {
             NSRange(location: 0, length: (editor.string as NSString).length),
             "Focus came back but the URL was left unselected: \(editor.string) at \(editor.selectedRange())."
         )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_openingWithNoKeyWindowStillTakesTheKeyboard
+
+    // Reproduces the sidebar "+" menu's own dismissal race (see OrbitMenuPanelTests):
+    // its .nonactivatingPanel can close and leave NSApp.keyWindow nil right as
+    // presentCommandBar() fires. The window is only ever ordered front here, never keyed.
+    func test_openingWithNoKeyWindowStillTakesTheKeyboard() {
+        let window = mountCommandBar(mode: .newTab, makeKey: false)
+        XCTAssertFalse(window.isKeyWindow, "test precondition: the window must open without ever being made key.")
+
+        guard let editor = assertFocused(window, "A new-tab bar opened with no key window and never reclaimed one for itself.") else { return }
+        XCTAssertEqual(editor.string, "", "The new-tab bar should open with an empty query.")
     }
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_asecondOpeningGestureOverAnOpenBarReSeedsAndReSelects

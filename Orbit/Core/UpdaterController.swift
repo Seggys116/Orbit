@@ -67,7 +67,8 @@ final class UpdaterController: NSObject {
             return
         }
         if updater.automaticallyChecksForUpdates {
-            status = .checking
+            // No .checking here: a silent background check that finds nothing
+            // calls back into none of the driver's methods, so it would stick.
             updater.checkForUpdatesInBackground()
         }
     }
@@ -77,6 +78,10 @@ final class UpdaterController: NSObject {
     func checkForUpdates() {
         guard let sparkleUpdater else { return }
         if sparkleUpdater.canCheckForUpdates {
+            // Drop anything left over from a prior session before starting a new
+            // one, so two manual checks in a row can never leak the first one's
+            // cancellation block or reply closure into the second.
+            clearPendingState()
             // Set optimistically rather than waiting for the driver's own
             // callback, so a bound button reflects the click on the same run loop turn.
             status = .checking
@@ -114,12 +119,21 @@ final class UpdaterController: NSObject {
         reply(.skip)
     }
 
+    // Invokes Sparkle's own cancellation block if one is stored, but never
+    // depends on it to recover: that block can be a stale no-op (e.g. left over
+    // from a silent background check that never called showUserInitiatedUpdateCheck),
+    // and if nothing here unconditionally clears status, Cancel becomes a dead
+    // button with no way back to idle short of relaunching Orbit.
     func cancelCheck() {
         checkCancellation?()
+        clearPendingState()
+        status = .idle
     }
 
     func cancelDownload() {
         downloadCancellation?()
+        clearPendingState()
+        status = .idle
     }
 
     func retryQuitForInstall() {

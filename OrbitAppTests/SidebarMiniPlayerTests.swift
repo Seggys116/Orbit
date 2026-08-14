@@ -110,6 +110,7 @@ final class SidebarMiniPlayerTests: XCTestCase {
             isAudible: true,
             hasVideo: true,
             hasActiveMediaSession: true,
+            isPictureInPictureAvailable: true,
             nowPlayingTitle: title,
             nowPlayingArtist: artist,
             isPlaying: true
@@ -126,6 +127,7 @@ final class SidebarMiniPlayerTests: XCTestCase {
             isAudible: false,
             hasVideo: true,
             hasActiveMediaSession: true,
+            isPictureInPictureAvailable: true,
             nowPlayingTitle: title,
             nowPlayingArtist: artist,
             isPlaying: false
@@ -501,6 +503,23 @@ final class SidebarMiniPlayerTests: XCTestCase {
         XCTAssertTrue(env.tab(tabs.playing)?.isMuted ?? false, "...and must be recorded on the tab, which is what the glyph reads.")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_muteGoesToTheTabItWasSentTo_notWhicheverTabIsActive
+
+    func test_muteGoesToTheTabItWasSentTo_notWhicheverTabIsActive() throws {
+        let tabs = try twoTabs()
+        let playing = makePlaying(tabs.playing)
+        let otherContents = RecordingMediaWebContents()
+        env._test_attachWebContents(otherContents, for: tabs.other)
+
+        env.muteTab(tabs.playing, muted: true)
+
+        XCTAssertEqual(playing.muteCalls, [true])
+        XCTAssertTrue(
+            otherContents.muteCalls.isEmpty,
+            "Mute must be routed by TabID, never to whatever contents happened to be handy."
+        )
+    }
+
     // MARK: - Picture-in-picture
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_withoutTheEngineCapability_thePictureInPictureControlIsNotDrawn
@@ -546,6 +565,61 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
         XCTAssertFalse(env.toggleMiniPlayerPictureInPicture(for: tabs.playing))
         XCTAssertEqual(contents.pictureInPictureToggleCount, 0)
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_audioOnlyMediaSession_thePictureInPictureControlIsNotDrawn
+
+    // Regression: a tab with an active Media Session but no PiP candidate (Spotify, a
+    // podcast page -- audio only, nothing content:: would ever float) used to draw an
+    // enabled PiP button anyway, because the control was gated on webContents existing
+    // and the engine capability alone. Pressing it reached ChromiumWebContents
+    // .togglePictureInPicture, which found no PiP candidate and silently no-op'd -- the
+    // button did nothing, with no feedback to the user.
+    func test_audioOnlyMediaSession_thePictureInPictureControlIsNotDrawn() throws {
+        let tabs = try twoTabs()
+        let contents = RecordingMediaWebContents()
+        contents.mediaState = MediaState(
+            isAudible: true, hasVideo: false, hasActiveMediaSession: true,
+            isPictureInPictureAvailable: false, isPlaying: true
+        )
+        env._test_attachWebContents(contents, for: tabs.playing)
+        env._test_engineCapabilitiesOverride = [.pictureInPicture]
+
+        XCTAssertFalse(
+            env.canDrivePictureInPicture(for: tabs.playing),
+            "The engine reports no PiP candidate for this tab; the control must not be offered."
+        )
+        XCTAssertFalse(env.toggleMiniPlayerPictureInPicture(for: tabs.playing))
+        XCTAssertEqual(
+            contents.pictureInPictureToggleCount, 0,
+            "Must not reach the engine at all for a candidate with nothing to float."
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_iframeHostedVideo_thePictureInPictureControlIsStillDrawn
+
+    // Regression, the opposite direction: MediaSessionObserverScript's hasVideo is a
+    // document.querySelectorAll('video, audio') scan installed with allFrames: false (see
+    // that file), so it never sees a player inside an iframe -- a lot of embedded/streaming
+    // players. The button must not be gated on that field: it has to trust
+    // isPictureInPictureAvailable, the engine's own frame-agnostic PictureInPictureCandidate()
+    // answer, which is exactly what togglePictureInPicture() itself acts on.
+    func test_iframeHostedVideo_thePictureInPictureControlIsStillDrawn() throws {
+        let tabs = try twoTabs()
+        let contents = RecordingMediaWebContents()
+        contents.mediaState = MediaState(
+            isAudible: true, hasVideo: false, hasActiveMediaSession: true,
+            isPictureInPictureAvailable: true, isPlaying: true
+        )
+        env._test_attachWebContents(contents, for: tabs.playing)
+        env._test_engineCapabilitiesOverride = [.pictureInPicture]
+
+        XCTAssertTrue(
+            env.canDrivePictureInPicture(for: tabs.playing),
+            "The engine reports a real PiP candidate (an iframe-hosted player the top-frame scan missed); the control must still be offered."
+        )
+        XCTAssertTrue(env.toggleMiniPlayerPictureInPicture(for: tabs.playing))
+        XCTAssertEqual(contents.pictureInPictureToggleCount, 1)
     }
 
     // MARK: - Rendering

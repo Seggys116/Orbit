@@ -158,7 +158,12 @@ final class MockWebContents: NSObject, WebContents {
 
     // MARK: Media
 
-    func setMuted(_ muted: Bool) { mediaState.isMuted = muted }
+    private(set) var muteCalls: [Bool] = []
+
+    func setMuted(_ muted: Bool) {
+        muteCalls.append(muted)
+        mediaState.isMuted = muted
+    }
 
     private(set) var togglePictureInPictureCallCount = 0
 

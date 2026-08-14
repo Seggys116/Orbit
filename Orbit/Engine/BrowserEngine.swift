@@ -402,6 +402,11 @@ public protocol WebContentsDelegate: AnyObject {
     func webContents(_ contents: WebContents, didChangeMediaState state: MediaState)
     func webContents(_ contents: WebContents, didChangeFullscreen isFullscreen: Bool)
 
+    /// content::WebContentsDelegate::ActivateContents reached this tab, e.g.
+    /// the picture-in-picture window's "back to tab" control (distinct from
+    /// its X, which closes without activating anything).
+    func webContentsDidRequestActivation(_ contents: WebContents)
+
     // MARK: Zoom
 
     func webContents(_ contents: WebContents, didChangeZoomFactor factor: Double)
@@ -505,6 +510,7 @@ public extension WebContentsDelegate {
     func webContents(_ contents: WebContents, didUpdateFindResult result: FindResult) {}
     func webContents(_ contents: WebContents, didChangeMediaState state: MediaState) {}
     func webContents(_ contents: WebContents, didChangeFullscreen isFullscreen: Bool) {}
+    func webContentsDidRequestActivation(_ contents: WebContents) {}
     func webContents(_ contents: WebContents, didChangeZoomFactor factor: Double) {}
     func webContents(_ contents: WebContents, didChangePreferredSize size: CGSize) {}
 

@@ -235,8 +235,9 @@ final class ChromiumTabsExtensionAPILiveTests: LiveEnvironmentTestCase {
                     "document.documentElement.getAttribute('data-orbit-tabs-query-result')"
                 )
                 guard let found = self.parseTabsQueryResult(raw) else { return false }
-                // Not a count: closing the active tab activates another tab,
-                // which legitimately materialises a different tab's WebContents here.
+                // Not a count: closing the active bookmark leaves no active tab
+                // at all (it does not fall over onto observer); observer stays
+                // present here only because its own WebContents was already open.
                 return self.snapshot(withURLSuffix: "/subject", in: found) == nil
                     && self.snapshot(withURLSuffix: "/observer", in: found) != nil
             }

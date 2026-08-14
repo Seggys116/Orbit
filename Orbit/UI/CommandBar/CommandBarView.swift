@@ -17,6 +17,12 @@ struct CommandBarView: View {
 
     @State private var focusClaim: Task<Void, Never>?
 
+    // setupInitialState() assigns query itself and already refreshes results for it; without
+    // this, .onChange(of: query) below fires a second, redundant refreshResults() -- a second
+    // history search, a second possible suggestions fetch, and a second scrollRequest bump for
+    // work the seeding call already did.
+    @State private var isSeedingQuery = false
+
     @State private var lastPointerLocation: CGPoint?
 
     // serial makes this a request, not a value: two arrow presses landing on the same row (wrap-around) must still scroll, which an .onChange keyed on the id alone would drop.
@@ -202,7 +208,13 @@ struct CommandBarView: View {
         .onAppear(perform: setupInitialState)
         // Re-presenting over an already-open bar (e.g. Cmd+L while a Cmd+T bar is up) never fires .onAppear again, so the serial forces a re-seed.
         .onChange(of: env.commandBarPresentationSerial) { _, _ in setupInitialState() }
-        .onChange(of: query) { _, newValue in refreshResults(for: newValue) }
+        .onChange(of: query) { _, newValue in
+            guard !isSeedingQuery else {
+                isSeedingQuery = false
+                return
+            }
+            refreshResults(for: newValue)
+        }
         .onDisappear {
             focusClaim?.cancel()
             focusClaim = nil
@@ -294,9 +306,24 @@ struct CommandBarView: View {
 
     private func setupInitialState() {
         SiteSearchSettingsPresenter.present = { SiteSearchSettingsWindowController.show() }
-        activeSiteEngine = initialSiteSearchScope?.engine
-            ?? (env.commandBarMode == .chatGPT && isChatGPTCommandBarAvailable ? ChatGPTCommandBar.virtualEngine() : nil)
-        query = initialSiteSearchScope?.query ?? env.commandBarMode.initialQuery
+
+        // query, activeSiteEngine and refreshResults()'s own mutations are batched into one
+        // transaction, and claimFocus() only starts once all of them have been assigned.
+        isSeedingQuery = true
+        // Backstop for when the re-seeded query is textually identical to what was already
+        // showing: onChange(of: query) below never fires then, so nothing else clears this.
+        DispatchQueue.main.async { isSeedingQuery = false }
+
+        // Disables animation only for this seeding call, so the panel never lays out once at 52pt and springs to full height under BrowserWindowView's ambient animation.
+        var seeding = Transaction()
+        seeding.disablesAnimations = true
+        withTransaction(seeding) {
+            activeSiteEngine = initialSiteSearchScope?.engine
+                ?? (env.commandBarMode == .chatGPT && isChatGPTCommandBarAvailable ? ChatGPTCommandBar.virtualEngine() : nil)
+            query = initialSiteSearchScope?.query ?? env.commandBarMode.initialQuery
+            refreshResults(for: query, fetchSuggestions: false)
+        }
+
         #if DEBUG
         if !screenshotModeDragDisabled {
             claimFocus()
@@ -304,12 +331,6 @@ struct CommandBarView: View {
         #else
         claimFocus()
         #endif
-        // Disables animation only for this seeding call, so the panel never lays out once at 52pt and springs to full height under BrowserWindowView's ambient animation.
-        var seeding = Transaction()
-        seeding.disablesAnimations = true
-        withTransaction(seeding) {
-            refreshResults(for: query, fetchSuggestions: false)
-        }
     }
 
     private func refreshResults(for text: String, fetchSuggestions: Bool = true) {

@@ -125,12 +125,14 @@ public extension BrowserStore {
 
     // MARK: - Bookmarked (pinned) rows that are also open tabs
 
+    // No fallbackActiveTab: this is a deactivation, not "give me the next tab".
+    // A successor here materialises folder siblings, which was the reported bug.
     func closeTabKeepingPin(_ id: TabID) {
         guard let tab = state.tabs[id], tab.section == .pinned else { return }
         var newState = state
         newState.tabs[id]?.isUnloaded = true
         if newState.activeTabBySpace[tab.spaceID] == id {
-            newState.activeTabBySpace[tab.spaceID] = fallbackActiveTab(excluding: id, in: tab.spaceID, previousState: state, newState: newState)
+            newState.activeTabBySpace[tab.spaceID] = nil
         }
         state = newState
     }
@@ -304,10 +306,14 @@ public extension BrowserStore {
     func archiveTab(_ id: TabID) {
         guard var tab = state.tabs[id], tab.section != .archived else { return }
         var newState = state
+        let folderTrail = tab.section == .pinned
+            ? PinnedNodeTree.folderTrail(to: id, in: pinnedNodes(in: tab.spaceID))
+            : []
         removeFromAllContainers(id, spaceID: tab.spaceID, in: &newState)
         tab.section = .archived
         tab.archivedAt = Date()
         tab.isUnloaded = true
+        tab.archivedFolderTrail = folderTrail.isEmpty ? nil : folderTrail
         newState.tabs[id] = tab
 
         if newState.activeTabBySpace[tab.spaceID] == id {
@@ -319,14 +325,22 @@ public extension BrowserStore {
     func restoreFromArchive(_ id: TabID, to section: TabSection = .today) {
         guard var tab = state.tabs[id], tab.section == .archived else { return }
         var newState = state
+        let trail = tab.archivedFolderTrail ?? []
         tab.section = section
         tab.archivedAt = nil
         tab.isUnloaded = false
+        tab.archivedFolderTrail = nil
         newState.tabs[id] = tab
         if let spaceIndex = newState.spaces.firstIndex(where: { $0.id == tab.spaceID }) {
             switch section {
-            case .pinned: newState.spaces[spaceIndex].pinned.append(.tab(id))
-            default: newState.spaces[spaceIndex].today.append(id)
+            case .pinned where !trail.isEmpty:
+                newState.spaces[spaceIndex].pinned = PinnedNodeTree.restoring(
+                    .tab(id), intoTrail: trail, into: newState.spaces[spaceIndex].pinned
+                )
+            case .pinned:
+                newState.spaces[spaceIndex].pinned.append(.tab(id))
+            default:
+                newState.spaces[spaceIndex].today.append(id)
             }
         }
         state = newState

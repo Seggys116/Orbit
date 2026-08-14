@@ -24,7 +24,7 @@ final class PiPControllerTests: XCTestCase {
         let video = env.openTab(url: URL(string: "https://video.example.com/watch")!, in: spaceID, activate: true)
         let other = env.openTab(url: URL(string: "https://example.com/")!, in: spaceID, activate: false)
         let contents = MockWebContents()
-        contents.mediaState = MediaState(hasVideo: true, hasActiveMediaSession: true, isPlaying: true)
+        contents.mediaState = MediaState(hasVideo: true, hasActiveMediaSession: true, isPictureInPictureAvailable: true, isPlaying: true)
         env._test_attachWebContents(contents, for: video)
         // Seeds the controller's last-active tab so the first tick is not itself a spurious focus change.
         PiPController.shared._test_seedLastActiveTab(env.activeTabID)
@@ -185,6 +185,7 @@ final class PiPControllerTests: XCTestCase {
             hasVideo: true,
             hasActiveMediaSession: true,
             isPictureInPictureActive: true,
+            isPictureInPictureAvailable: true,
             isPlaying: false
         ))
 
@@ -195,6 +196,77 @@ final class PiPControllerTests: XCTestCase {
 
         env.webContents(tabs.contents, didChangeMediaState: MediaState())
         XCTAssertNil(controller.pipTabID)
+    }
+
+    // MARK: - The "back to tab" restore control
+
+    // orbit_video_overlay_window_mac.mm's kControlBackToTab calls content::
+    // VideoPictureInPictureWindowController::CloseAndFocusInitiator(), which
+    // reaches WebContentsDelegate::ActivateContents, which OrbitWebContentsHost
+    // now forwards through OrbitWebContentsCallbacks.activation_requested to
+    // ChromiumWebContents.handleActivationRequested to
+    // AppEnvironment.webContentsDidRequestActivation(_:).
+    func test_backToTabActivationRoutesToTheOriginatingTab() throws {
+        let (tabID, spaceID, contents) = try makeAttachedTabForActivation()
+        env.activateTab(env.openTab(url: URL(string: "https://elsewhere.example.com")!, in: spaceID, activate: false))
+        XCTAssertNotEqual(env.activeTabID, tabID, "Precondition: some other tab is active.")
+
+        env.webContentsDidRequestActivation(contents)
+
+        XCTAssertEqual(env.activeTabID, tabID, "The 'back to tab' control did not switch to the tab that floated it.")
+    }
+
+    // The originating tab can be in a Space that is not the currently active
+    // one -- e.g. PiP kept floating after the user switched Spaces.
+    func test_backToTabActivationSwitchesSpacesWhenTheOriginatingTabIsElsewhere() throws {
+        let profileID = env.createDefaultProfileIfNeeded()
+        let originSpaceID = try XCTUnwrap(env.spaces.first?.id)
+        let otherSpaceID = env.createSpace(
+            name: "Elsewhere", icon: "circle", iconIsEmoji: false, theme: SpaceTheme(), profileID: profileID
+        )
+        let tabID = env.openTab(url: URL(string: "https://video.example.com/watch")!, in: originSpaceID, activate: false)
+        let contents = MockWebContents()
+        env._test_attachWebContents(contents, for: tabID)
+        env.selectSpace(otherSpaceID)
+        XCTAssertEqual(env.activeSpace?.id, otherSpaceID, "Precondition.")
+
+        env.webContentsDidRequestActivation(contents)
+
+        XCTAssertEqual(
+            env.activeSpace?.id, originSpaceID,
+            "The 'back to tab' control did not switch to the Space the floating tab actually lives in."
+        )
+        XCTAssertEqual(env.activeTabID, tabID)
+    }
+
+    private func makeAttachedTabForActivation() throws -> (TabID, SpaceID, MockWebContents) {
+        let spaceID = try XCTUnwrap(env.spaces.first?.id)
+        let tabID = env.openTab(url: URL(string: "https://video.example.com/watch")!, in: spaceID, activate: true)
+        let contents = MockWebContents()
+        env._test_attachWebContents(contents, for: tabID)
+        return (tabID, spaceID, contents)
+    }
+
+    // activateTab must switch to the tab's own Space, not just materialise
+    // the tab in whichever Space happens to be active -- the property the
+    // "back to tab" control above relies on.
+    func test_activateTab_switchesToTheTabsOwnSpaceEvenWhenAnotherSpaceIsActive() throws {
+        let profileID = env.createDefaultProfileIfNeeded()
+        let originSpaceID = try XCTUnwrap(env.spaces.first?.id)
+        let otherSpaceID = env.createSpace(
+            name: "Elsewhere", icon: "circle", iconIsEmoji: false, theme: SpaceTheme(), profileID: profileID
+        )
+        let tabID = env.openTab(url: URL(string: "https://video.example.com/watch")!, in: originSpaceID, activate: false)
+        env.selectSpace(otherSpaceID)
+        XCTAssertEqual(env.activeSpace?.id, otherSpaceID, "Precondition.")
+
+        env.activateTab(tabID)
+
+        XCTAssertEqual(
+            env.activeSpace?.id, originSpaceID,
+            "activateTab did not switch back to the Space the floating tab actually lives in."
+        )
+        XCTAssertEqual(env.activeTabID, tabID, "activateTab did not make the floating tab the active one.")
     }
 }
 

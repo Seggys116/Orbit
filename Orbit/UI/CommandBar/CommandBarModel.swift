@@ -181,7 +181,7 @@ enum CommandBarEngine {
                 env.perform(.newLittleOrbit)
             },
             CommandAction(id: "about", title: "About Orbit", subtitle: ChromiumBuild.engineDescription, symbolName: "info.circle") { _ in
-                AboutWindowController.show()
+                SettingsWindowController.show(pane: .general)
             },
             // ORBIT_SPARKLE, not #if canImport(Sparkle): canImport(Sparkle) evaluates true even in OrbitTests, which doesn't link Sparkle, because Xcode's SwiftPM integration exposes a resolved product's build output to every target sharing the products directory.
             // ORBIT_SPARKLE is a SWIFT_ACTIVE_COMPILATION_CONDITIONS flag set on the Orbit target alone.

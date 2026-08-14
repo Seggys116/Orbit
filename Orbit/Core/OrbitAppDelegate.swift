@@ -96,6 +96,24 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    // Can fire with the app backgrounded or zero windows open, so every row
+    // activates the app itself rather than assuming a key window will dispatch it.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        OrbitAppDelegate.buildDockMenu()
+    }
+
+    static func buildDockMenu() -> NSMenu {
+        let menu = NSMenu(title: "Dock")
+        menu.addItem(DockCommandMenuItem(title: "New Window", command: .newWindow))
+        menu.addItem(DockCommandMenuItem(title: "New Incognito Window", command: .newIncognitoWindow))
+        // .newTabCommandBar only presents the command bar over an already-open window;
+        // ensure one exists first, or the Dock item would silently do nothing.
+        menu.addItem(DockCommandMenuItem(title: "New Tab", command: .newTabCommandBar) {
+            OrbitWindowController.activateBrowserWindow()
+        })
+        return menu
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             host.handleExternalOpen(url: url)
@@ -191,5 +209,30 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         } else {
             AppSmokeProbe.noteTeardownIncomplete()
         }
+    }
+}
+
+// Dispatches the identical ShortcutCommandID verb CommandMenuItem uses in the
+// menu bar, so the Dock menu can never drift from it. frontmost, not shared:
+// falls back to processRoot when no window exists yet.
+@MainActor
+final class DockCommandMenuItem: NSMenuItem {
+
+    let command: ShortcutCommandID
+    private let precondition: (() -> Void)?
+
+    init(title: String, command: ShortcutCommandID, precondition: (() -> Void)? = nil) {
+        self.command = command
+        self.precondition = precondition
+        super.init(title: title, action: #selector(invoke), keyEquivalent: "")
+        self.target = self
+    }
+
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func invoke() {
+        NSApp.activate(ignoringOtherApps: true)
+        precondition?()
+        AppEnvironment.frontmost.perform(command)
     }
 }

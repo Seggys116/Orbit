@@ -159,4 +159,44 @@ final class AppEnvironmentWebContentsDelegateTests: XCTestCase {
         XCTAssertEqual(env.themeColors[tabID]?.alpha ?? -1, 0.5, accuracy: 0.01, "Only barely-there colours are rejected; the rest keep their alpha for the consumer to composite.")
         XCTAssertEqual(env.themeColors[tabID]?.blue ?? -1, 0.8, accuracy: 0.01)
     }
+
+    // MARK: - Mute survives navigation
+
+    // Mute is driven by JavaScript against a document-start observer that is
+    // reinstalled fresh on every navigation, so it has to be resent on commit.
+    func testMutedTabIsRemutedOnEveryCommittedNavigation() {
+        let (tabID, mock) = makeAttachedTab()
+        defer { detach(tabID) }
+        env.muteTab(tabID, muted: true)
+        XCTAssertEqual(mock.muteCalls, [true], "Precondition.")
+
+        env.webContents(mock, didCommitNavigationTo: URL(string: "https://www.google.com/search")!, kind: .typed)
+
+        XCTAssertEqual(
+            mock.muteCalls, [true, true],
+            "A committed navigation did not resend the tab's mute state to the fresh document."
+        )
+    }
+
+    func testAnUnmutedTabIsNotToldToMuteItselfOnNavigation() {
+        let (tabID, mock) = makeAttachedTab()
+        defer { detach(tabID) }
+
+        env.webContents(mock, didCommitNavigationTo: URL(string: "https://www.google.com/search")!, kind: .typed)
+
+        XCTAssertTrue(mock.muteCalls.isEmpty, "A tab nobody muted must not be told to mute itself on navigation.")
+    }
+
+    func testMuteReapplicationGoesToTheRightTabsContentsOnly() {
+        let (mutedTabID, mutedMock) = makeAttachedTab(url: "https://muted.example.com")
+        defer { detach(mutedTabID) }
+        let (otherTabID, otherMock) = makeAttachedTab(url: "https://other.example.com")
+        defer { detach(otherTabID) }
+        env.muteTab(mutedTabID, muted: true)
+
+        env.webContents(otherMock, didCommitNavigationTo: URL(string: "https://other.example.com/next")!, kind: .typed)
+
+        XCTAssertTrue(otherMock.muteCalls.isEmpty, "Navigating an unrelated tab must not mute it.")
+        XCTAssertEqual(mutedMock.muteCalls, [true], "...and must not touch the muted tab either.")
+    }
 }

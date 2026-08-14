@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Orbit
 
@@ -142,6 +143,97 @@ final class MainMenuStructureTests: XCTestCase {
             }
         }
         XCTAssertTrue(inert.isEmpty, "Dead menu rows: \(inert)")
+    }
+
+    // MARK: About Orbit — folded into Settings, reached from three doors
+
+    // The command bar's "about" action (CommandBarModel.swift) also calls
+    // SettingsWindowController.show(pane: .general); these two menu rows
+    // must route to the same place.
+    // By controller, not by hosting-view generic: the root view is wrapped in
+    // .orbitEnvironment(), so NSHostingView<SettingsRootView> never matches.
+    private func settingsWindow() -> NSWindow? {
+        NSApp.windows.first { $0.windowController is SettingsWindowController }
+    }
+
+    func testAboutOrbitRowsAreClosureItemsNotAppKitsStandardPanel() throws {
+        let standardAboutSelector = #selector(NSApplication.orderFrontStandardAboutPanel(_:))
+        for path in [["Orbit", "About Orbit"], ["Help", "About Orbit"]] {
+            let item = try row(path)
+            let label = path.joined(separator: " > ")
+            XCTAssertTrue(item is ClosureMenuItem, "\(label) must be Orbit's own closure-routed row.")
+            XCTAssertNotEqual(item.action, standardAboutSelector, "\(label) must never fall back to AppKit's standard About panel.")
+            XCTAssertTrue(
+                item.target === item,
+                "\(label) must target itself, never nil — a nil target falls through the responder chain to AppKit's standard About panel."
+            )
+        }
+    }
+
+    func testNoRowInTheMenuBarUsesAppKitsStandardAboutPanel() {
+        let standardAboutSelector = #selector(NSApplication.orderFrontStandardAboutPanel(_:))
+        let allItems = topLevelMenus().flatMap { walk($0, prefix: [$0.title]) }.map(\.item)
+        XCTAssertFalse(
+            allItems.contains { $0.action == standardAboutSelector },
+            "No row in the menu bar may route to AppKit's standard About panel; Orbit has its own About surface."
+        )
+    }
+
+    func testAboutOrbitRowsFromBothMenusOpenSettingsOnTheGeneralPane() throws {
+        let orbitItem = try row(["Orbit", "About Orbit"])
+        let orbitAction = try XCTUnwrap(orbitItem.action)
+        NSApp.sendAction(orbitAction, to: orbitItem.target, from: orbitItem)
+        let first = try XCTUnwrap(settingsWindow(), "About Orbit must open Orbit's Settings window.")
+        XCTAssertEqual(SettingsRouter.shared.selectedPane, .general, "About Orbit must land on the General pane.")
+
+        let helpItem = try row(["Help", "About Orbit"])
+        let helpAction = try XCTUnwrap(helpItem.action)
+        NSApp.sendAction(helpAction, to: helpItem.target, from: helpItem)
+        let second = try XCTUnwrap(settingsWindow())
+
+        XCTAssertIdentical(first, second, "Help's About Orbit must reuse the same Settings window the Orbit menu opened, not a second copy.")
+        XCTAssertEqual(SettingsRouter.shared.selectedPane, .general)
+        first.close()
+    }
+
+    // MARK: Dock menu
+
+    func testDockMenuOffersNewWindowIncognitoAndNewTab() {
+        let items = OrbitAppDelegate.buildDockMenu().items
+        XCTAssertEqual(items.map(\.title), ["New Window", "New Incognito Window", "New Tab"])
+    }
+
+    func testDockMenuItemsAreAllTargetedAndActionable() {
+        for item in OrbitAppDelegate.buildDockMenu().items {
+            XCTAssertNotNil(item.target, "Dock row \(item.title) has a nil target and would fall through the responder chain, which is empty for a Dock menu click.")
+            XCTAssertNotNil(item.action, "Dock row \(item.title) must be wired to something")
+        }
+    }
+
+    // Structural, not invoked: proves the Dock rows carry the identical
+    // ShortcutCommandID the File menu's own rows dispatch through, so the two
+    // surfaces can never drift apart.
+    func testDockMenuReusesTheSameCommandsAsTheFileMenu() throws {
+        let dockItems = OrbitAppDelegate.buildDockMenu().items.compactMap { $0 as? DockCommandMenuItem }
+        XCTAssertEqual(dockItems.count, 3, "Every Dock row must be a DockCommandMenuItem")
+
+        let newWindowRow = try row(["File", "New Window"]) as? CommandMenuItem
+        let incognitoRow = try row(["File", "New Incognito Window"]) as? CommandMenuItem
+        let newTabRow = try row(["File", "New Tab"]) as? CommandMenuItem
+
+        XCTAssertEqual(dockItems.first { $0.title == "New Window" }?.command, newWindowRow?.command)
+        XCTAssertEqual(dockItems.first { $0.title == "New Incognito Window" }?.command, incognitoRow?.command)
+        XCTAssertEqual(dockItems.first { $0.title == "New Tab" }?.command, newTabRow?.command)
+
+        XCTAssertEqual(dockItems.first { $0.title == "New Window" }?.command, .newWindow)
+        XCTAssertEqual(dockItems.first { $0.title == "New Incognito Window" }?.command, .newIncognitoWindow)
+        XCTAssertEqual(dockItems.first { $0.title == "New Tab" }?.command, .newTabCommandBar)
+    }
+
+    func testOrbitDelegateSuppliesTheDockMenu() {
+        let delegate = OrbitAppDelegate()
+        let menu = delegate.applicationDockMenu(NSApp)
+        XCTAssertEqual(menu?.items.map(\.title), ["New Window", "New Incognito Window", "New Tab"])
     }
 
     func testDumpMenuBarForComparisonWithArcsNib() {

@@ -47,8 +47,17 @@ extension AppEnvironment {
 
     // MARK: - Picture-in-picture
 
+    // Gated on mediaStates[tabID].isPictureInPictureAvailable, not hasVideo: the mini-player
+    // shows for any active Media Session, including audio-only ones (Spotify, podcasts) that
+    // have no video to float, and hasVideo itself only scans the top document (see
+    // MediaSessionObserverScript's allFrames: false) so it misses an iframe-hosted player —
+    // gating on it would hide the button for a tab PiP would actually work on. This flag is
+    // the engine's own PictureInPictureCandidate() answer, forwarded through
+    // picture_in_picture_available_changed, which is exactly what togglePictureInPicture()
+    // acts on: the button and the toggle can never disagree.
     func canDrivePictureInPicture(for tabID: TabID) -> Bool {
         guard webContents[tabID] != nil else { return false }
+        guard mediaStates[tabID]?.isPictureInPictureAvailable == true else { return false }
         return engineCapabilities.contains(.pictureInPicture)
     }
 

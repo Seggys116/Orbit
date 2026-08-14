@@ -1107,12 +1107,19 @@ void OrbitWebContentsHost::ClosePictureInPictureWindow(bool should_pause_video) 
           ->Close(should_pause_video);
 }
 
+void OrbitWebContentsHost::ActivateContents(content::WebContents*) {
+  if (callbacks_.activation_requested) {
+    callbacks_.activation_requested(callbacks_.opaque);
+  }
+}
+
 void OrbitWebContentsHost::MediaStartedPlaying(
     const MediaPlayerInfo& media_info,
     const content::MediaPlayerId& id) {
   MediaPlayerEntry& entry = media_players_[id];
   entry.has_video = media_info.has_video;
   entry.is_playing = true;
+  ReportPictureInPictureCandidateIfChanged();
 }
 
 void OrbitWebContentsHost::MediaStoppedPlaying(
@@ -1125,21 +1132,25 @@ void OrbitWebContentsHost::MediaStoppedPlaying(
   }
   it->second.has_video = media_info.has_video;
   it->second.is_playing = false;
+  ReportPictureInPictureCandidateIfChanged();
 }
 
 void OrbitWebContentsHost::MediaMetadataChanged(
     const MediaPlayerInfo& media_info,
     const content::MediaPlayerId& id) {
   media_players_[id].has_video = media_info.has_video;
+  ReportPictureInPictureCandidateIfChanged();
 }
 
 void OrbitWebContentsHost::MediaDestroyed(const content::MediaPlayerId& id) {
   media_players_.erase(id);
+  ReportPictureInPictureCandidateIfChanged();
 }
 
 void OrbitWebContentsHost::PrimaryPageChanged(content::Page& page) {
   media_players_.clear();
   ClosePictureInPictureWindow(/*should_pause_video=*/false);
+  ReportPictureInPictureCandidateIfChanged();
 }
 
 std::optional<content::MediaPlayerId>
@@ -1162,6 +1173,21 @@ OrbitWebContentsHost::PictureInPictureCandidate() const {
     }
   }
   return idle;
+}
+
+bool OrbitWebContentsHost::HasPictureInPictureCandidate() {
+  return PictureInPictureCandidate().has_value();
+}
+
+void OrbitWebContentsHost::ReportPictureInPictureCandidateIfChanged() {
+  bool available = HasPictureInPictureCandidate();
+  if (available == reported_picture_in_picture_candidate_) {
+    return;
+  }
+  reported_picture_in_picture_candidate_ = available;
+  if (callbacks_.picture_in_picture_available_changed) {
+    callbacks_.picture_in_picture_available_changed(callbacks_.opaque, available ? 1 : 0);
+  }
 }
 
 bool OrbitWebContentsHost::TogglePictureInPicture() {

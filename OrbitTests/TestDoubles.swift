@@ -212,7 +212,7 @@ final class AppEnvironment {
     func prepareHistorySearch(for query: String) async {}
 }
 
-// MARK: - SettingsWindowController / AboutWindowController doubles
+// MARK: - SettingsWindowController double
 
 enum SettingsPane {
     case general, profiles, links, shortcuts, extensions, adBlocker
@@ -220,10 +220,6 @@ enum SettingsPane {
 
 enum SettingsWindowController {
     static func show(pane: SettingsPane = .general) {}
-}
-
-enum AboutWindowController {
-    static func show() {}
 }
 
 // MARK: - TaskManagerWindowController double
