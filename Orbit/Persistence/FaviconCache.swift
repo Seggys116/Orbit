@@ -377,7 +377,7 @@ public final class FaviconCache {
     /// Chains `work` after whatever disk work is already queued, so removes, writes and eviction scans on the same cache never race each other even though none of them run on the main actor.
     private func enqueueDiskWork(_ work: @escaping @Sendable () async -> Void) {
         let previous = pendingDiskWork
-        pendingDiskWork = Task.detached(priority: .utility) {
+        pendingDiskWork = Task.detached {
             _ = await previous?.value
             await work()
         }
