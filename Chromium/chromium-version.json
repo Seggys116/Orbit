@@ -43,8 +43,8 @@
         "platforms": {
           "macosarm64": {
             "asset": "orbit-chromium-152.0.7977.42-macosarm64-dcheck.tar.xz",
-            "sha256": "9e3bf3045ce12e5a21536a1cf9fd80db5d42f984fc2e5684debdcce6fe8fd547",
-            "size": 94537160
+            "sha256": "c3a03ac19f582f9e170d21a228d6b11442820b85e5f4bd597b1c7d7873b465e5",
+            "size": 94821428
           }
         }
       },
@@ -52,8 +52,8 @@
         "platforms": {
           "macosarm64": {
             "asset": "orbit-chromium-152.0.7977.42-macosarm64-shipping.tar.xz",
-            "sha256": "c019e980a388a270ca45ed4413d9d6a1e6f501225c2c69c01773fb94734a1e81",
-            "size": 72410464
+            "sha256": "9e60e2a80716d13a4782e8d0d280d54b08b8cc013277eab32ec1a46f46578657",
+            "size": 70060160
           }
         }
       }
