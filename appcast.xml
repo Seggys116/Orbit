@@ -18,25 +18,7 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/Seggys116/Orbit/releases/download/v1.0.2/Orbit-1.0.2-arm64.dmg" length="114403917" type="application/octet-stream" sparkle:edSignature="UeYuy0MOuy4zrXdlGFV3NGa+VIjhpTaTwWTihitQLrqZysvpWnqh9JJX76tf+knDqvmg9EayQM5osnjzHpPeCQ=="></enclosure>
         </item>
-    <item>
-            <title>1.0.1</title>
-            <pubDate>Fri, 14 Aug 2026 00:07:27 +0000</pubDate>
-            <sparkle:version>3</sparkle:version>
-            <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/Seggys116/Orbit/releases/download/v1.0.1/Orbit-1.0.1-arm64.dmg" length="114409322" type="application/octet-stream" sparkle:edSignature="sB0i/kgcYWv2FePedOHa8c82zixjDQwJ8+73COFHL+MowmDIOALvvgNJJXm48OjMmPMN6ldyn72Yp1ExkRksDw=="></enclosure>
-        </item>
-    <item>
-            <title>1.0.0</title>
-            <pubDate>Thu, 13 Aug 2026 23:09:52 +0000</pubDate>
-            <sparkle:version>2</sparkle:version>
-            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/Seggys116/Orbit/releases/download/v1.0.0/Orbit-1.0.0-arm64.dmg" length="114402827" type="application/octet-stream" sparkle:edSignature="0bXyVizGZMkBx1IWoXGulDrIXyv4t5HKmn0SBSzv0kUHMUN6w1Ke/0TeO04d+nOkCQf9ZmAGW15fbqImzmK/Bw=="></enclosure>
-        </item>
     </channel></rss><!-- sparkle-signatures:
-edSignature: +VqhfTEL69l/6q/Hac55Y01FLKVAvNlSqYxHFCYJmqH40mrMu1gt86lsIncN8BLB2w8gp2vNOrfJuwVCzxmHBQ==
-length: 3183
+edSignature: 1dGxS0qoW4T5e2bQham5ap5S/SbO+B74T4kQKkOPa93zxPEX3LAeAeu7qk310pZDlOfm2KGncy5etlB8uSacDw==
+length: 1803
 -->
