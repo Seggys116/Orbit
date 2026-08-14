@@ -153,8 +153,11 @@ final class BlankPaneCommandBarTests: XCTestCase {
 
         let results = CommandBarEngine.results(query: "orbit", mode: .blankPane(blank.id), env: env, suggestions: [])
         let switchTargets = results.compactMap { result -> TabID? in
-            if case .switchToTab(let id) = result.kind.activationIntent { return id }
-            return nil
+            switch result.kind.activationIntent {
+            case .switchToTab(let id): return id
+            case .switchToSpaceAndTab(_, let id): return id
+            default: return nil
+            }
         }
 
         XCTAssertFalse(switchTargets.contains(blank.id), "The blank pane must not be offered as a result in its own Command Bar.")

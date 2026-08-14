@@ -459,6 +459,7 @@
 		59C51374F53C082235239AD8 /* GlobalKeyEventMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F87C29CD6A6C74440C33511B /* GlobalKeyEventMonitor.swift */; };
 		5A12DF332457B75DCFE0D2BA /* ChromeWebStoreLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6136EE8AE89400680B1D7AB /* ChromeWebStoreLocator.swift */; };
 		5A3F8451CEAF3813FEE98DB1 /* SafariImportReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D81E58DBA58F8DAE307A3AC /* SafariImportReader.swift */; };
+		5AB3BAB5A4B0C02BB5959007 /* CloseTabSuccessorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0F66A7939841356676BF868 /* CloseTabSuccessorTests.swift */; };
 		5AB54D795C9F3BB3ACEF6CB9 /* OrbitMenuPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C94D4BEA6A3A7B33549F7CF /* OrbitMenuPanel.swift */; };
 		5B9FEA59AF7689BAF2899538 /* ThemeSwatchStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FB9110A71F2FF6B15577BA3 /* ThemeSwatchStripView.swift */; };
 		5BB226EDA8C909FEBDFEEC4B /* LiveCalendarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20CE583F0D4D245FB67C4A28 /* LiveCalendarStore.swift */; };
@@ -591,6 +592,7 @@
 		725864E979536D7486475E0A /* CaptureController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BCEB8E1105866DE42FC4B4B /* CaptureController.swift */; };
 		726AA7FF3FB0C388893B064D /* LibraryComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AF06A8D4AC75E19FDCDBEA2 /* LibraryComponents.swift */; };
 		726AE4A209DD5FFF57C1B696 /* FaviconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8FAE10238BC4469E8D00C20 /* FaviconView.swift */; };
+		72828DC769D47639D29AA1EA /* CommandBarSpaceRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C06B360BC5E7C6381F578959 /* CommandBarSpaceRoutingTests.swift */; };
 		72FEFC8808D7244D2D0048D8 /* TidyTabTitlesCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67FFE7E154BAE9E9036BBEF5 /* TidyTabTitlesCoordinator.swift */; };
 		72FF59C3E7F70D0A32F272D6 /* BrowserStore+Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DAEF44D4E3A6D4460CEB5BF /* BrowserStore+Tabs.swift */; };
 		7308EE99C48F32B12FC8DC47 /* CommandBarModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A615EA078834C0D4115D7AF6 /* CommandBarModel.swift */; };
@@ -1116,6 +1118,7 @@
 		DF7650DABF79567561241D63 /* ThemeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAACBB4F620797B4D3ABC614 /* ThemeEditorView.swift */; };
 		DF7A018E5ED8F98608B1252A /* OrbitContextMenuModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C087CC8FF4831A5412F3C79 /* OrbitContextMenuModel.swift */; };
 		DFC21261EDBFD6066AAE1478 /* FaviconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8FAE10238BC4469E8D00C20 /* FaviconView.swift */; };
+		DFD454A88737045F5968F034 /* CommandBarActivation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03671C45380B97AAD433D031 /* CommandBarActivation.swift */; };
 		DFE0891CB956282746FD32F7 /* CorpusStylusLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24915877156353A18F3D04C5 /* CorpusStylusLiveTests.swift */; };
 		E03F0588C0897D0563945436 /* SidebarResizeHandleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64644C682F070A913B06296 /* SidebarResizeHandleTests.swift */; };
 		E081B58DA8189D4D155885E5 /* HoverEdgeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F51B33A870453A4C03AC687 /* HoverEdgeDetector.swift */; };
@@ -1164,6 +1167,7 @@
 		E8C6E06F6B9E60416679F8D2 /* MediaSessionObserverScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C064DDBAE9B3E1AC7787B9C /* MediaSessionObserverScript.swift */; };
 		E8CD6A2179C7C15B60DEF508 /* BoostsAndObserverScriptsLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 420610EA94BCE84FB2318A3F /* BoostsAndObserverScriptsLiveTests.swift */; };
 		E8D0385D9C3484AFE09A24E6 /* SchemaMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC958CC4A3FF9D84EC981171 /* SchemaMigration.swift */; };
+		E8F0B087E9EB8788833EE0F1 /* CloseTabPathsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22DEA7E237FC86D32E99E3A9 /* CloseTabPathsTests.swift */; };
 		E96AEB6BCBFC74DAAFA7468E /* SidebarNewItemMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A25ACC6A2F41B822E541E4 /* SidebarNewItemMenuView.swift */; };
 		E97000638B509BB8E18AD3C2 /* DevToolsDockingLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6372AD10BE3C5A1B8439F3A /* DevToolsDockingLiveTests.swift */; };
 		E98125E2CD9E23D7155BF5A3 /* FilterTokenizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B78D3C2D2CA980CC673D23D /* FilterTokenizer.swift */; };
@@ -1214,6 +1218,7 @@
 		F1DE2EDBEC508757AD7532B6 /* SidebarDragDrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F60101AC6028493ECAD977B /* SidebarDragDrop.swift */; };
 		F1FFC448452C3CE4161D426D /* ChatGPTCommandBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903C90725AD4CA96C56203B7 /* ChatGPTCommandBar.swift */; };
 		F2214CEC0E04D7747D77AA0B /* WebContentsPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8016E86AFAB7F46D53D99B /* WebContentsPresentation.swift */; };
+		F2ACF5499BF95E0BCB890A51 /* CommandBarActivation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03671C45380B97AAD433D031 /* CommandBarActivation.swift */; };
 		F2F1CB89EEC07A795C2E3546 /* FirefoxImportReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D84794AC7349F622977CE3F /* FirefoxImportReader.swift */; };
 		F32294953E9D5F40A4074140 /* LinkPreviewFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71DF9999C76D7D07E54D6BA5 /* LinkPreviewFetcher.swift */; };
 		F36AE5365F0E8FF9E150F79D /* LittleOrbitSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE2F6B6345DF23C93790250 /* LittleOrbitSettings.swift */; };
@@ -1330,6 +1335,7 @@
 		02E1DECDC4EE2B2EE4C8A382 /* UpdaterController+UserDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpdaterController+UserDriver.swift"; sourceTree = "<group>"; };
 		02F7C5037FC30CB51A096671 /* BoostsEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoostsEditorView.swift; sourceTree = "<group>"; };
 		032B7D1D3474724B44056CC0 /* ManageSpacesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageSpacesView.swift; sourceTree = "<group>"; };
+		03671C45380B97AAD433D031 /* CommandBarActivation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandBarActivation.swift; sourceTree = "<group>"; };
 		0416388A02B7FD6FF01FDFA4 /* OrbitHelper-Alerts.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "OrbitHelper-Alerts.entitlements"; sourceTree = "<group>"; };
 		0477478E31C28868BA66539E /* ModalHangGuardInstallationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalHangGuardInstallationTests.swift; sourceTree = "<group>"; };
 		047A67A2E18E6C8BC9CFC121 /* LiveHTTPTestServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveHTTPTestServer.swift; sourceTree = "<group>"; };
@@ -1428,6 +1434,7 @@
 		21A555645D5B04798B749083 /* ChromiumExtensionActionBadgeLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromiumExtensionActionBadgeLiveTests.swift; sourceTree = "<group>"; };
 		223760ACB532776EC6FFB412 /* CommandBarIrrelevantResultsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandBarIrrelevantResultsTests.swift; sourceTree = "<group>"; };
 		224B6E524E6DB944ED754F94 /* ArcSiteDataStager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcSiteDataStager.swift; sourceTree = "<group>"; };
+		22DEA7E237FC86D32E99E3A9 /* CloseTabPathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloseTabPathsTests.swift; sourceTree = "<group>"; };
 		22EE9FFDD79D982E292F9A90 /* SyncSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSettingsPane.swift; sourceTree = "<group>"; };
 		23C1253432F931DD905F867F /* TaskManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskManagerView.swift; sourceTree = "<group>"; };
 		23F1A2EE79919E87ABC6ADDD /* ChatGPTCommandBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTCommandBarTests.swift; sourceTree = "<group>"; };
@@ -1975,6 +1982,7 @@
 		BF9520CF8FD9C79393E547B3 /* WebStorePrivateBridgeScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebStorePrivateBridgeScript.swift; sourceTree = "<group>"; };
 		C04D992F3021CA44000D4F2C /* Orbit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orbit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C06B25725184EFE84318F754 /* ExtensionActionPopupSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionActionPopupSupport.swift; sourceTree = "<group>"; };
+		C06B360BC5E7C6381F578959 /* CommandBarSpaceRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandBarSpaceRoutingTests.swift; sourceTree = "<group>"; };
 		C0BF2C2A29344FBDCF67B7AF /* ChromiumWebContents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromiumWebContents.swift; sourceTree = "<group>"; };
 		C0C39E997A130653E2CAFE12 /* LittleWindowPaneChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowPaneChromeTests.swift; sourceTree = "<group>"; };
 		C0E0E994AF8BA075464E96AE /* ModalHangGuardPrincipalClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalHangGuardPrincipalClass.swift; sourceTree = "<group>"; };
@@ -2087,6 +2095,7 @@
 		E00C27776983470DA2E50649 /* PendingSiteDataInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSiteDataInstaller.swift; sourceTree = "<group>"; };
 		E04224F2A5A839156F68994A /* OrbitAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitAppDelegate.swift; sourceTree = "<group>"; };
 		E042D8DA3CC856323F258088 /* ChromiumPaneVisibilityLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromiumPaneVisibilityLiveTests.swift; sourceTree = "<group>"; };
+		E0F66A7939841356676BF868 /* CloseTabSuccessorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloseTabSuccessorTests.swift; sourceTree = "<group>"; };
 		E0FDF540740AE891C38E8D38 /* ShortcutModifierMaskingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutModifierMaskingTests.swift; sourceTree = "<group>"; };
 		E1F15D50C5924FD92CFADBA9 /* SafariImportReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariImportReader.swift; sourceTree = "<group>"; };
 		E25CF28584D1E7C4DD8AF326 /* AppEnvironmentSpacesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironmentSpacesTests.swift; sourceTree = "<group>"; };
@@ -2367,6 +2376,7 @@
 				D97A559AE07848E0FFCE222E /* ChromeExtensionManifestTests.swift */,
 				09F74133A234158B6C9D636F /* ChromeWebStoreClientTests.swift */,
 				4F0BCC8A79726C1E155143E5 /* ChromeWebStoreLocatorTests.swift */,
+				E0F66A7939841356676BF868 /* CloseTabSuccessorTests.swift */,
 				35A4063000F6B627964427AA /* CommandBarCheckForUpdatesActionTests.swift */,
 				939F3C981AF66BE625A3EB60 /* CommandBarRankingTests.swift */,
 				65F2E9BECE1D153300ECE14A /* CommandBarRenderTests.swift */,
@@ -2771,6 +2781,7 @@
 		663F341D5EA0C05AD8413A94 /* CommandBar */ = {
 			isa = PBXGroup;
 			children = (
+				03671C45380B97AAD433D031 /* CommandBarActivation.swift */,
 				A11F05844F888983FC7E158C /* CommandBarFieldFocus.swift */,
 				A615EA078834C0D4115D7AF6 /* CommandBarModel.swift */,
 				9F3D24E35185743B4852444A /* CommandBarOverlay.swift */,
@@ -3120,6 +3131,7 @@
 				8392539D06D6F7A7B3DD9418 /* ChromiumTabsQueryConformanceLiveTests.swift */,
 				EF655AD2C5F6266C22E4446C /* ChromiumUserAgentLiveTests.swift */,
 				521D0ECB846D5E61777C86BD /* ClickCatcherHitTestCoordinateSpaceTests.swift */,
+				22DEA7E237FC86D32E99E3A9 /* CloseTabPathsTests.swift */,
 				4F22A8CA6A2DEE1EAE5875BA /* CloudSyncEngineTests.swift */,
 				6D04ECA5121449A0DD5C31F5 /* CollapsedSidebarChromeTests.swift */,
 				399B67B6978816501F48C6FB /* CommandBarCommitTests.swift */,
@@ -3129,6 +3141,7 @@
 				6D9374598B0578EC14F1C280 /* CommandBarPlacementTests.swift */,
 				84AB1721E7A20EC7809AF252 /* CommandBarPointerHoverTests.swift */,
 				DFA996B89FA8EFA881C04129 /* CommandBarQueryTests.swift */,
+				C06B360BC5E7C6381F578959 /* CommandBarSpaceRoutingTests.swift */,
 				D18CACF2A43D99C1BF7C6131 /* CommandBarStaleResultsTests.swift */,
 				CCAB0B160F25D66254D2A2DE /* ContentBlockingBundledListTests.swift */,
 				06D9F63BF56DF0FE533F11A4 /* ContentBlockingChromiumWiringTests.swift */,
@@ -4068,6 +4081,7 @@
 				8574F29C35553EB4641520DD /* SyncTransport.swift in Sources */,
 				78A159510EC39B1C59D1E91E /* AboutWindowController.swift in Sources */,
 				CAAF351BA66D057ECD65082B /* UpdaterStatusView.swift in Sources */,
+				F2ACF5499BF95E0BCB890A51 /* CommandBarActivation.swift in Sources */,
 				53D322F136B536F9C44F3B37 /* CommandBarFieldFocus.swift in Sources */,
 				61AC77438C37BE5114F0A278 /* CommandBarModel.swift in Sources */,
 				A7F03EEAF6965B6474374F01 /* CommandBarOverlay.swift in Sources */,
@@ -4270,6 +4284,7 @@
 				02E74C29F5C5ACA6B02252E8 /* ChromeExtensionManifestTests.swift in Sources */,
 				136DE221B302711D2D2B4BA4 /* ChromeWebStoreClientTests.swift in Sources */,
 				43B619751EAE0105B5C649F2 /* ChromeWebStoreLocatorTests.swift in Sources */,
+				5AB3BAB5A4B0C02BB5959007 /* CloseTabSuccessorTests.swift in Sources */,
 				7B302B7CA868BBE7740E177B /* CommandBarCheckForUpdatesActionTests.swift in Sources */,
 				CF2B2F9D2974030464E9F5C6 /* CommandBarRankingTests.swift in Sources */,
 				BF70A8B1E66D410B17E7AADB /* CommandBarRenderTests.swift in Sources */,
@@ -4588,6 +4603,7 @@
 				166B1CEB15837CC3D90AC26A /* ChromiumTabsQueryConformanceLiveTests.swift in Sources */,
 				E6AF4F5FFED68AAC80F50CA1 /* ChromiumUserAgentLiveTests.swift in Sources */,
 				CCD69BF632168BDA7C9F8B4F /* ClickCatcherHitTestCoordinateSpaceTests.swift in Sources */,
+				E8F0B087E9EB8788833EE0F1 /* CloseTabPathsTests.swift in Sources */,
 				E4797E77AF8BE5028CEA0E7B /* CloudSyncEngineTests.swift in Sources */,
 				4B5F033CC0653BA4AD649A68 /* CollapsedSidebarChromeTests.swift in Sources */,
 				849FEFBDAE31066A49010CA2 /* CommandBarCommitTests.swift in Sources */,
@@ -4597,6 +4613,7 @@
 				5E2538EFBDEB88866A0F0633 /* CommandBarPlacementTests.swift in Sources */,
 				7178E58B07A5BF3C4A4E5384 /* CommandBarPointerHoverTests.swift in Sources */,
 				350287007ABA36755D52FDEE /* CommandBarQueryTests.swift in Sources */,
+				72828DC769D47639D29AA1EA /* CommandBarSpaceRoutingTests.swift in Sources */,
 				AEB7F34BB7A804BBBF72868C /* CommandBarStaleResultsTests.swift in Sources */,
 				5D143F55D213044F90AB00FE /* ContentBlockingBundledListTests.swift in Sources */,
 				7ACC7E87C15BF81FC74F4895 /* ContentBlockingChromiumWiringTests.swift in Sources */,
@@ -4972,6 +4989,7 @@
 				3F0AF14BA7BEF1D966CF8C6E /* SyncTransport.swift in Sources */,
 				9217B567C5190DFB8E7AF86D /* AboutWindowController.swift in Sources */,
 				385C15B749C81E768AB1AABD /* UpdaterStatusView.swift in Sources */,
+				DFD454A88737045F5968F034 /* CommandBarActivation.swift in Sources */,
 				07A453250312939CAEF2E5E1 /* CommandBarFieldFocus.swift in Sources */,
 				7308EE99C48F32B12FC8DC47 /* CommandBarModel.swift in Sources */,
 				110671CD8ED3428A8AC53D39 /* CommandBarOverlay.swift in Sources */,
@@ -5457,6 +5475,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.Orbit";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -5497,6 +5516,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.Orbit";
 				PRODUCT_NAME = "$(TARGET_NAME)";

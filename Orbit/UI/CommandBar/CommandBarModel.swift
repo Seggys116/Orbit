@@ -28,6 +28,8 @@ enum CommandResultKind {
     case typedURL(URL)
     case searchSuggestion(String)
     case openTab(TabID)
+    // A tab in a Space the user is not in — the only row kind allowed to move them.
+    case tabInOtherSpace(TabID, spaceID: SpaceID)
     case pinnedTab(TabID)
     case favorite(Favorite)
     case history(HistoryEntry)
@@ -41,6 +43,7 @@ extension CommandResultKind {
         case navigate(URL)
         case searchGoogle(String)
         case switchToTab(TabID)
+        case switchToSpaceAndTab(spaceID: SpaceID, tabID: TabID)
         case activateFavoriteResult(Favorite)
         case runAction(id: String)
     }
@@ -53,6 +56,8 @@ extension CommandResultKind {
             return .searchGoogle(text)
         case .openTab(let tabID), .pinnedTab(let tabID):
             return .switchToTab(tabID)
+        case .tabInOtherSpace(let tabID, let spaceID):
+            return .switchToSpaceAndTab(spaceID: spaceID, tabID: tabID)
         case .favorite(let favorite):
             return .activateFavoriteResult(favorite)
         case .history(let entry):
@@ -297,19 +302,24 @@ enum CommandBarEngine {
         }()
         var claimedDestinations = Set<String>()
 
+        let currentSpaceID = env.activeSpace?.id
         for tab in env.state.tabs.values where tab.section != .archived && tab.id != excludedTabID {
             let fields = [tab.displayTitle] + searchFields(for: tab.url)
             guard let score = FuzzyMatcher.matchQuery(trimmed, in: fields, strictness: .substring) else { continue }
             claimedDestinations.insert(dedupeKey(for: tab.url))
+            let host = tab.url.host() ?? tab.url.absoluteString
+            let isElsewhere = currentSpaceID != nil && tab.spaceID != currentSpaceID
+            let spaceName = isElsewhere ? env.spaces.first(where: { $0.id == tab.spaceID })?.name : nil
             items.append(CommandResult(
                 id: "tab-\(tab.id)",
-                kind: .openTab(tab.id),
+                kind: isElsewhere ? .tabInOtherSpace(tab.id, spaceID: tab.spaceID) : .openTab(tab.id),
                 title: tab.displayTitle,
-                subtitle: tab.url.host() ?? tab.url.absoluteString,
+                subtitle: spaceName.map { "\($0) · \(host)" } ?? host,
                 symbolName: "square.on.square",
-                score: score + 30, // open tabs rank above equivalent history/suggestions
+                // +30 lets an open tab outrank equivalent history/suggestions; another Space's tab does not earn it.
+                score: isElsewhere ? score : score + 30,
                 faviconURL: tab.faviconURL ?? faviconGuessURL(for: tab.url),
-                faviconHost: tab.url.host() ?? tab.url.absoluteString
+                faviconHost: host
             ))
         }
 
@@ -396,7 +406,9 @@ enum CommandBarEngine {
         if let askIndex = remaining.firstIndex(where: { if case .chatGPTAsk = $0.kind { return true }; return false }) {
             block.append(remaining.remove(at: askIndex))
         }
-        remaining.insert(contentsOf: block, at: min(verbatimIndex, 1))
+        // A cross-Space row must never hold the default selection, or Enter on typed text would move the user Spaces.
+        let leadsWithCrossSpaceRow = remaining.first.map { if case .tabInOtherSpace = $0.kind { return true } else { return false } } ?? false
+        remaining.insert(contentsOf: block, at: leadsWithCrossSpaceRow ? 0 : min(verbatimIndex, 1))
         return remaining
     }
 

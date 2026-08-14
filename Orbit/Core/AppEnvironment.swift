@@ -847,10 +847,21 @@ final class AppEnvironment {
         store.closeTab(id)
         // BrowserStore's successor has no live renderer yet, so activateTab materialises it and pushes
         // the activation through syncChromiumActiveTab — same as closeTabKeepingBookmark/removeBookmark.
-        if let spaceID, let nowActive = store.activeTab(in: spaceID)?.id, nowActive != id {
-            activateTab(nowActive)
+        if let spaceID, let nowActive = store.activeTab(in: spaceID)?.id {
+            if nowActive != id {
+                activateTab(nowActive)
+            } else if let survivor = store.tab(id) {
+                // Closing a pinned tab unpins it, and with nothing else open it stays on screen — it needs the renderer back that was released above.
+                materializeWebContents(for: id, url: survivor.url)
+            }
         }
         syncChromiumActiveTab()
+    }
+
+    // Every user-facing close verb funnels through here so a bookmarked tab closes by the same rule as the minus beside its row, rather than being silently unpinned.
+    func closeTabPreservingBookmark(_ id: TabID) {
+        guard store.tab(id)?.section == .pinned else { return closeTab(id) }
+        closeTabKeepingBookmark(id)
     }
 
     func reopenLastClosedTab() {

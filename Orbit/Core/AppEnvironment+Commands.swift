@@ -37,7 +37,7 @@ extension AppEnvironment {
             openIncognitoWindow()
         case .closeTabOrWindow:
             if let activeTabID {
-                closeTab(activeTabID)
+                closeTabPreservingBookmark(activeTabID)
             } else {
                 NSApp.keyWindow?.performClose(nil)
             }

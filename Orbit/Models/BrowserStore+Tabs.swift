@@ -102,7 +102,14 @@ public extension BrowserStore {
             archiveTab(id)
             pushRecentlyClosed(ClosedTabRecord(tabID: id, previousSection: .today))
         case .pinned:
+            // The unpin leaves the closed tab in the Space, so without this it also stays active — and its caller has already released the renderer, which is a blank pane.
+            let previousState = state
+            let wasActive = state.activeTabBySpace[tab.spaceID] == id
             unpin(id)
+            if wasActive,
+               let successor = fallbackActiveTab(excluding: id, in: tab.spaceID, previousState: previousState, newState: state) {
+                state.activeTabBySpace[tab.spaceID] = successor
+            }
             pushRecentlyClosed(
                 ClosedTabRecord(
                     tabID: id,

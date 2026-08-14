@@ -398,7 +398,7 @@ struct CommandBarView: View {
         case .searchSuggestion(let text): query = text
         case .history(let entry): query = entry.url.absoluteString
         case .favorite(let favorite): query = favorite.url.absoluteString
-        case .openTab(let tabID), .pinnedTab(let tabID):
+        case .openTab(let tabID), .pinnedTab(let tabID), .tabInOtherSpace(let tabID, _):
             if let url = env.tab(tabID)?.url { query = url.absoluteString }
         case .action:
             break
@@ -417,67 +417,14 @@ struct CommandBarView: View {
         commitTypedTextDirectly()
     }
 
-    // Same three rules, same order, as CommandBarEngine.results' row 1, so this backstop can never disagree with the list about where a query goes.
     private func commitTypedTextDirectly() {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let spaceID = env.activeSpace?.id else { return }
-        let destination: URL?
-        if let engine = activeSiteEngine {
-            destination = SiteSearchMatcher.searchURL(for: trimmed, using: engine)
-        } else {
-            destination = CommandBarEngine.detectTypedURL(trimmed) ?? env.searchEngine.searchURL(for: trimmed)
-        }
-        guard let destination else { return }
-        navigate(to: destination, spaceID: spaceID)
+        guard CommandBarActivation.commitTypedText(query, siteEngine: activeSiteEngine, in: env) else { return }
         dismiss()
     }
 
     private func activate(_ result: CommandResult, instant: Bool = false) {
-        guard let spaceID = env.activeSpace?.id else { return }
-        if instant, let instantURL = result.instantOpenURL {
-            navigate(to: instantURL, spaceID: spaceID)
-            dismiss()
-            return
-        }
-        switch result.kind.activationIntent {
-        case .navigate(let url):
-            navigate(to: url, spaceID: spaceID)
-        case .searchGoogle(let text):
-            guard let url = env.searchEngine.searchURL(for: text) else { break }
-            navigate(to: url, spaceID: spaceID)
-        case .switchToTab(let tabID):
-            env.activateTab(tabID)
-        case .activateFavoriteResult(let favorite):
-            env.activateFavorite(favorite, in: spaceID)
-        case .runAction:
-            if case .action(let action) = result.kind {
-                action.perform(env)
-            }
-        }
+        guard CommandBarActivation.activate(result, in: env, instant: instant) else { return }
         dismiss()
-    }
-
-    private func navigate(to url: URL, spaceID: SpaceID) {
-        switch env.commandBarMode {
-        case .newTab, .chatGPT:
-            env.openTab(url: url, in: spaceID)
-        case .blankPane(let tabID):
-            // Falls back to a new tab only if the pane went away underneath the bar while it was open.
-            if env.tab(tabID) != nil {
-                env.loadInTab(tabID, url: url)
-                env.activateTab(tabID)
-            } else {
-                env.openTab(url: url, in: spaceID)
-            }
-        case .editURL:
-            if let tabID = env.activeTabID {
-                // loadInTab, not the tab's live WebContents directly: a tab still waiting on content blocking's readiness gate has a deferred load queued, and only loadInTab's bookkeeping lets it notice this one superseded it.
-                env.loadInTab(tabID, url: url)
-                env.activateTab(tabID)
-            } else {
-                env.openTab(url: url, in: spaceID)
-            }
-        }
     }
 
     private func dismiss() {

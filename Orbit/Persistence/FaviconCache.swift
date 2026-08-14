@@ -80,6 +80,49 @@ public final class FaviconCache {
         return stored
     }
 
+    // MARK: - Browser import
+
+    private var importManifestURL: URL {
+        diskDirectory.appendingPathComponent("imported-hosts.json", isDirectory: false)
+    }
+
+    /// Discards what the last import wrote before writing this one — a wrong icon already on disk outlives any fix to the reader that produced it.
+    @discardableResult
+    public func cacheImported(imageDataByHost icons: [String: Data]) -> Int {
+        discardPreviousImport()
+
+        var stored: [String] = []
+        for (host, data) in icons {
+            guard let image = FaviconCache.decodedImage(data) else { continue }
+            let key = host.lowercased()
+            memoryCache.setObject(image, forKey: key as NSString)
+            writeToDisk(image, forHost: key)
+            stored.append(key)
+        }
+
+        if let manifest = try? JSONEncoder().encode(stored.sorted()) {
+            try? manifest.write(to: importManifestURL, options: .atomic)
+        }
+        if !stored.isEmpty { evictDiskCacheIfNeeded() }
+        return stored.count
+    }
+
+    public func removeCachedImage(forHost host: String) {
+        memoryCache.removeObject(forKey: host.lowercased() as NSString)
+        try? FileManager.default.removeItem(at: diskURL(forHost: host))
+    }
+
+    private func discardPreviousImport() {
+        guard let manifest = try? Data(contentsOf: importManifestURL),
+              let hosts = try? JSONDecoder().decode([String].self, from: manifest)
+        else {
+            // No manifest means the cache predates import tracking, so any file in it may be an icon an earlier import filed under the wrong host.
+            removeAllIcons()
+            return
+        }
+        for host in hosts { removeCachedImage(forHost: host) }
+    }
+
     private nonisolated static func decodedImage(_ data: Data) -> NSImage? {
         guard let image = NSImage(data: data), image.size.width > 0, image.size.height > 0 else { return nil }
         return image
@@ -322,7 +365,7 @@ public final class FaviconCache {
 
         var entries: [(url: URL, size: Int64, date: Date)] = []
         var total: Int64 = 0
-        for url in urls {
+        for url in urls where url.pathExtension == "png" {
             guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else { continue }
             let size = Int64(values.fileSize ?? 0)
             let date = values.contentModificationDate ?? .distantPast
@@ -342,10 +385,15 @@ public final class FaviconCache {
     // MARK: - Bulk clear
 
     public func removeAll() {
-        memoryCache.removeAllObjects()
         inFlightTasks.removeAll()
+        removeAllIcons()
+        try? FileManager.default.removeItem(at: importManifestURL)
+    }
+
+    private func removeAllIcons() {
+        memoryCache.removeAllObjects()
         guard let urls = try? FileManager.default.contentsOfDirectory(at: diskDirectory, includingPropertiesForKeys: nil) else { return }
-        for url in urls {
+        for url in urls where url.pathExtension == "png" {
             try? FileManager.default.removeItem(at: url)
         }
     }

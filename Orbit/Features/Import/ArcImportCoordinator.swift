@@ -302,7 +302,7 @@ public enum ArcImportCoordinator {
     static func applyFavicons(_ favicons: [ArcFavicon], cache: FaviconCache) -> Int {
         guard !favicons.isEmpty else { return 0 }
         let byHost = Dictionary(favicons.map { ($0.host, $0.imageData) }, uniquingKeysWith: { first, _ in first })
-        return cache.cache(imageDataByHost: byHost)
+        return cache.cacheImported(imageDataByHost: byHost)
     }
 
     // MARK: Key bindings

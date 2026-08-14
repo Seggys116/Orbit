@@ -30,8 +30,8 @@ struct CommandResultRow: View {
                 }
             }
             Spacer(minLength: 8)
-            if showsSwitchToTabHint {
-                Text("Switch to Tab")
+            if let switchHintLabel {
+                Text(switchHintLabel)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             } else if result.instantOpenURL != nil {
@@ -69,10 +69,11 @@ struct CommandResultRow: View {
         return colorScheme == .dark ? OrbitColor.selectionFillDark : OrbitColor.selectionFillLight
     }
 
-    private var showsSwitchToTabHint: Bool {
+    private var switchHintLabel: String? {
         switch result.kind {
-        case .openTab, .pinnedTab: return true
-        default: return false
+        case .openTab, .pinnedTab: return "Switch to Tab"
+        case .tabInOtherSpace: return "Switch to Space"
+        default: return nil
         }
     }
 

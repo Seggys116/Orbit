@@ -15,7 +15,9 @@ final class LiveSuiteTabIsolationGuardTests: XCTestCase {
     /// live suite, so a suite cannot be one for the runner and not for this.
     private static let liveGateMarker = "LiveChromiumEngineHost.isEnabled"
 
-    private static let tabMutations = [".openTab(", ".closeTab(", ".closeTabKeepingBookmark(", ".archiveTab("]
+    private static let tabMutations = [
+        ".openTab(", ".closeTab(", ".closeTabPreservingBookmark(", ".closeTabKeepingBookmark(", ".archiveTab(",
+    ]
 
     private static let isolatedBases = [": LiveEnvironmentTestCase {", ": CorpusLiveTestCase {"]
 

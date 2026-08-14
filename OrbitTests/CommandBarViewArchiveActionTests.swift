@@ -67,7 +67,7 @@ final class CommandBarViewArchiveActionTests: XCTestCase {
 
         let offeredTabIDs: [TabID] = results.compactMap { result in
             switch result.kind {
-            case .openTab(let id), .pinnedTab(let id): return id
+            case .openTab(let id), .pinnedTab(let id), .tabInOtherSpace(let id, _): return id
             default: return nil
             }
         }
@@ -109,7 +109,7 @@ final class CommandBarViewArchiveActionTests: XCTestCase {
         XCTAssertFalse(
             results.contains { result in
                 switch result.kind {
-                case .openTab, .pinnedTab: return true
+                case .openTab, .pinnedTab, .tabInOtherSpace: return true
                 default: return false
                 }
             },

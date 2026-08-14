@@ -100,6 +100,11 @@ final class CommandBarCommitTests: XCTestCase {
             env.activateTab(tabID)
             XCTAssertEqual(env.activeTabID, tabID, "Switching to an open tab must actually select it.")
             return
+        case .switchToSpaceAndTab(let targetSpaceID, let tabID):
+            env.selectSpace(targetSpaceID)
+            env.activateTab(tabID)
+            XCTAssertEqual(env.activeTabID, tabID, "A deliberately chosen cross-Space row must select its tab.")
+            return
         case .activateFavoriteResult(let favorite):
             env.activateFavorite(favorite, in: activeSpaceID)
         case .runAction:

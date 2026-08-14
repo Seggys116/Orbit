@@ -74,6 +74,7 @@ final class AppEnvironment {
     func perform(_ command: ShortcutCommandID) { recordedActions.append("perform(\(command.rawValue))") }
     func muteTab(_ id: TabID, muted: Bool) { recordedActions.append("muteTab") }
     func closeTab(_ id: TabID) { recordedActions.append("closeTab") }
+    func closeTabPreservingBookmark(_ id: TabID) { recordedActions.append("closeTabPreservingBookmark") }
     func activateTab(_ id: TabID) { recordedActions.append("activateTab") }
 
     // Not a recording stub: TabRowView reads this while rendering to pick between the

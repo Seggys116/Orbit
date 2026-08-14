@@ -121,10 +121,10 @@ struct SplitGroupRowView: View {
             Button("Separate All Tabs") { env.separateAllTabs(group.id) }
             Divider()
             ForEach(tabs) { tab in
-                Button("Close \(tab.displayTitle)") { env.closeTab(tab.id) }
+                Button("Close \(tab.displayTitle)") { env.closeTabPreservingBookmark(tab.id) }
             }
             Button("Close Split", role: .destructive) {
-                for tab in tabs { env.closeTab(tab.id) }
+                for tab in tabs { env.closeTabPreservingBookmark(tab.id) }
             }
         }
     }
@@ -190,7 +190,7 @@ struct SplitGroupRowView: View {
     }
 
     private func paneCloseControl(_ tab: Tab) -> some View {
-        OrbitNSActionButton(action: { env.closeTab(tab.id) }) {
+        OrbitNSActionButton(action: { env.closeTabPreservingBookmark(tab.id) }) {
             Image(systemName: "xmark")
                 .font(.system(size: OrbitMetrics.sidebarUtilityGlyphSize, weight: .bold))
                 .frame(width: OrbitMetrics.sidebarCloseButtonSize, height: OrbitMetrics.sidebarCloseButtonSize)

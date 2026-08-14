@@ -118,6 +118,92 @@ final class ArcFaviconReaderTests: XCTestCase {
         )
     }
 
+    // MARK: - Icons reached through another host's links
+
+    func testAHostsOwnIconWinsOverOneReachedThroughItsRedirectorLinks() throws {
+        let blobs = try writeDatabase([
+            Row(
+                pageURL: "https://www.youtube.com/redirect?q=https%3A%2F%2Fgithub.com%2F",
+                iconID: 2,
+                width: 32,
+                height: 32,
+                iconURL: "https://github.githubassets.com/favicons/favicon-dark.svg",
+                lastUpdated: 13_400_000_000_000_000,
+                fill: .systemGreen
+            ),
+            Row(
+                pageURL: "https://www.youtube.com/",
+                iconID: 1,
+                width: 32,
+                height: 32,
+                iconURL: "https://www.youtube.com/s/desktop/img/favicon.ico",
+                lastUpdated: 13_300_000_000_000_000,
+                fill: .systemRed
+            ),
+            Row(
+                pageURL: "https://www.youtube.com/watch?v=1",
+                iconID: 1,
+                width: 32,
+                height: 32,
+                iconURL: "https://www.youtube.com/s/desktop/img/favicon.ico",
+                lastUpdated: 13_300_000_000_000_000,
+                fill: .systemRed
+            ),
+        ])
+
+        let favicons = try ArcFaviconReader.read(profileDirectory: profile, browser: .arc)
+
+        XCTAssertEqual(favicons.map(\.host), ["www.youtube.com"])
+        XCTAssertEqual(
+            favicons.first?.imageData,
+            blobs[1],
+            "youtube.com/redirect?q=github.com really does show GitHub's icon, so Arc maps it under youtube.com — importing it as youtube.com's own icon is the crossed mapping."
+        )
+    }
+
+    func testAnIconServedFromTheHostItselfBreaksATieAgainstAForeignOne() throws {
+        let blobs = try writeDatabase([
+            Row(
+                pageURL: "https://shop.example/out?to=vendor",
+                iconID: 2,
+                width: 32,
+                height: 32,
+                iconURL: "https://vendor.invalid/favicon.ico",
+                lastUpdated: 13_400_000_000_000_000,
+                fill: .systemGreen
+            ),
+            Row(
+                pageURL: "https://shop.example/",
+                iconID: 1,
+                width: 32,
+                height: 32,
+                iconURL: "https://shop.example/favicon.ico",
+                lastUpdated: 13_300_000_000_000_000,
+                fill: .systemRed
+            ),
+        ])
+
+        XCTAssertEqual(
+            try ArcFaviconReader.read(profileDirectory: profile, browser: .arc).first?.imageData,
+            blobs[1],
+            "With one page URL each, the icon the host serves itself is the only trustworthy signal."
+        )
+    }
+
+    func testAHostWithFewPageURLsIsStillImportedAlongsideOneWithMany() throws {
+        var rows: [Row] = (0..<20).map { index in
+            Row(pageURL: "https://busy.example/page\(index)", iconID: 1, width: 32, height: 32)
+        }
+        rows.append(Row(pageURL: "https://quiet.example/", iconID: 2, width: 32, height: 32))
+        try writeDatabase(rows)
+
+        XCTAssertEqual(
+            try ArcFaviconReader.read(profileDirectory: profile, browser: .arc, limit: 2).map(\.host),
+            ["busy.example", "quiet.example"],
+            "A row limit spent on one busy host's page URLs is what left most sites with no icon at all."
+        )
+    }
+
     // MARK: - Landing in Orbit's cache
 
     @MainActor
@@ -180,6 +266,46 @@ final class ArcFaviconReaderTests: XCTestCase {
         )
     }
 
+    // MARK: - Correcting what an earlier import wrote
+
+    @MainActor
+    func testAReImportReplacesAnIconAnEarlierImportFiledUnderTheWrongHost() throws {
+        let directory = temporaryCacheDirectory()
+        let wrong = try pngData(width: 16, height: 16, fill: .systemGreen)
+        let right = try pngData(width: 32, height: 32, fill: .systemRed)
+
+        XCTAssertEqual(FaviconCache(diskDirectory: directory).cache(imageDataByHost: ["youtube.com": wrong]), 1)
+        XCTAssertEqual(FaviconCache(diskDirectory: directory).cachedImage(forHost: "youtube.com")?.size, NSSize(width: 16, height: 16))
+
+        XCTAssertEqual(FaviconCache(diskDirectory: directory).cacheImported(imageDataByHost: ["youtube.com": right]), 1)
+        XCTAssertEqual(
+            FaviconCache(diskDirectory: directory).cachedImage(forHost: "youtube.com")?.size,
+            NSSize(width: 32, height: 32),
+            "A reader fix is worthless while the wrong PNG is still the one on disk."
+        )
+
+        XCTAssertEqual(FaviconCache(diskDirectory: directory).cacheImported(imageDataByHost: ["other.example": right]), 1)
+        XCTAssertNil(
+            FaviconCache(diskDirectory: directory).cachedImage(forHost: "youtube.com"),
+            "A host the newest import no longer covers must not keep the previous import's icon."
+        )
+    }
+
+    @MainActor
+    func testAnImportLeavesIconsOrbitFetchedItselfAfterwardsAlone() throws {
+        let directory = temporaryCacheDirectory()
+        let icon = try pngData(width: 32, height: 32)
+
+        XCTAssertEqual(FaviconCache(diskDirectory: directory).cacheImported(imageDataByHost: ["imported.example": icon]), 1)
+        FaviconCache(diskDirectory: directory).cache(FaviconCache.fallbackIcon(forHost: "fetched.example"), forHost: "fetched.example")
+
+        XCTAssertEqual(FaviconCache(diskDirectory: directory).cacheImported(imageDataByHost: ["imported.example": icon]), 1)
+        XCTAssertNotNil(
+            FaviconCache(diskDirectory: directory).cachedImage(forHost: "fetched.example"),
+            "Only what an import wrote is the import's to replace."
+        )
+    }
+
     // MARK: - Fixture
 
     private struct Row {
@@ -189,6 +315,9 @@ final class ArcFaviconReaderTests: XCTestCase {
         var height: Int
         var iconType: Int = 1
         var imageData: Data?
+        var iconURL: String?
+        var lastUpdated: Int64?
+        var fill: NSColor = .systemBlue
     }
 
     private func temporaryCacheDirectory() -> URL {
@@ -197,7 +326,9 @@ final class ArcFaviconReaderTests: XCTestCase {
         return url
     }
 
-    private func writeDatabase(_ rows: [Row]) throws {
+    /// Returns the bytes inserted for each row, in the order given, so a test can name the exact icon it expects.
+    @discardableResult
+    private func writeDatabase(_ rows: [Row]) throws -> [Data] {
         let handle = try openDatabase(at: profile.appendingPathComponent("Favicons", isDirectory: false))
         defer { sqlite3_close(handle) }
 
@@ -225,26 +356,31 @@ final class ArcFaviconReaderTests: XCTestCase {
         """)
 
         var declaredIcons = Set<Int>()
+        var blobs: [Data] = []
         for (offset, row) in rows.enumerated() {
             if declaredIcons.insert(row.iconID).inserted {
+                let iconURL = row.iconURL ?? "https://icons.example/\(row.iconID).png"
                 try exec(handle, """
                 INSERT INTO favicons (id, url, icon_type)
-                VALUES (\(row.iconID), 'https://icons.example/\(row.iconID).png', \(row.iconType));
+                VALUES (\(row.iconID), '\(iconURL)', \(row.iconType));
                 """)
             }
-            let bytes = try row.imageData ?? pngData(width: max(row.width, 1), height: max(row.height, 1))
+            let bytes = try row.imageData ?? pngData(width: max(row.width, 1), height: max(row.height, 1), fill: row.fill)
+            blobs.append(bytes)
+            let lastUpdated = row.lastUpdated ?? Int64(13_322_774_400_000_000 - offset)
             try exec(handle, """
             INSERT INTO favicon_bitmaps (icon_id, last_updated, image_data, width, height, last_requested)
-            VALUES (\(row.iconID), \(13_322_774_400_000_000 - offset), X'\(hex(bytes))', \(row.width), \(row.height), 0);
+            VALUES (\(row.iconID), \(lastUpdated), X'\(hex(bytes))', \(row.width), \(row.height), 0);
             """)
             try exec(handle, """
             INSERT INTO icon_mapping (page_url, icon_id, page_url_type)
             VALUES ('\(row.pageURL)', \(row.iconID), 0);
             """)
         }
+        return blobs
     }
 
-    private func pngData(width: Int, height: Int) throws -> Data {
+    private func pngData(width: Int, height: Int, fill: NSColor = .systemBlue) throws -> Data {
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
             pixelsWide: width,
@@ -263,7 +399,7 @@ final class ArcFaviconReaderTests: XCTestCase {
 
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        NSColor.systemBlue.setFill()
+        fill.setFill()
         NSBezierPath(rect: NSRect(x: 0, y: 0, width: width, height: height)).fill()
         NSGraphicsContext.restoreGraphicsState()
 
