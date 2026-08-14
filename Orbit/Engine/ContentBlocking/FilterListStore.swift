@@ -54,7 +54,6 @@ public actor FilterListStore {
     private let now: @Sendable () -> Date
     private var index: [String: FilterListCacheEntry] = [:]
     private var didLoadIndex = false
-    private var bundledLists: [String: (entry: FilterListCacheEntry, text: String)] = [:]
 
     private var indexURL: URL { directory.appendingPathComponent("index.json") }
 
@@ -99,48 +98,6 @@ public actor FilterListStore {
         return directory.appendingPathComponent(String(safe) + ".compiled")
     }
 
-    // MARK: Bundled lists
-
-    // A bundled list is read straight out of the app bundle: it is never
-    // fetched, never written to the cache directory, and never stale.
-    private func bundledList(_ listID: String) -> (entry: FilterListCacheEntry, text: String)? {
-        if let loaded = bundledLists[listID] { return loaded }
-        guard let descriptor = FilterListCatalog.descriptor(id: listID), descriptor.isBundled,
-              let text = FilterListCatalog.bundledText(for: descriptor),
-              let data = text.data(using: .utf8)
-        else { return nil }
-
-        let header = Self.parseHeader(text)
-        let timestamp = now()
-        let entry = FilterListCacheEntry(
-            listID: listID,
-            sourceURLs: [],
-            declaredVersion: header.version,
-            declaredTitle: header.title,
-            expiresAfter: nil,
-            fetchedAt: timestamp,
-            lastCheckedAt: timestamp,
-            etag: nil,
-            lastModified: nil,
-            byteCount: data.count,
-            contentHash: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        )
-        let loaded = (entry, text)
-        bundledLists[listID] = loaded
-        return loaded
-    }
-
-    private func bundledState(_ listID: String) -> FilterListState {
-        guard let loaded = bundledList(listID) else {
-            return .failed(message: "Bundled filter list \(listID) is missing from the app bundle", previous: nil)
-        }
-        return .cached(loaded.entry)
-    }
-
-    private func isBundled(_ listID: String) -> Bool {
-        FilterListCatalog.descriptor(id: listID)?.isBundled == true
-    }
-
     // MARK: Reading
 
     public func states() -> [String: FilterListState] {
@@ -153,7 +110,6 @@ public actor FilterListStore {
     }
 
     public func state(of listID: String) -> FilterListState {
-        if isBundled(listID) { return bundledState(listID) }
         loadIndexIfNeeded()
         guard let entry = index[listID],
               FileManager.default.fileExists(atPath: fileURL(for: listID).path)
@@ -162,14 +118,12 @@ public actor FilterListStore {
     }
 
     public func cachedText(for listID: String) -> String? {
-        if isBundled(listID) { return bundledList(listID)?.text }
         loadIndexIfNeeded()
         guard index[listID] != nil else { return nil }
         return try? String(contentsOf: fileURL(for: listID), encoding: .utf8)
     }
 
     public func cacheEntry(for listID: String) -> FilterListCacheEntry? {
-        if isBundled(listID) { return bundledList(listID)?.entry }
         loadIndexIfNeeded()
         return index[listID]
     }
@@ -189,7 +143,6 @@ public actor FilterListStore {
 
     @discardableResult
     public func update(_ descriptor: FilterListDescriptor, force: Bool = false) async -> FilterListState {
-        if descriptor.isBundled { return bundledState(descriptor.id) }
         loadIndexIfNeeded()
         let existing = index[descriptor.id]
         let haveFile = FileManager.default.fileExists(atPath: fileURL(for: descriptor.id).path)
@@ -299,7 +252,6 @@ public actor FilterListStore {
     }
 
     public func discard(_ listID: String) {
-        bundledLists[listID] = nil
         loadIndexIfNeeded()
         index[listID] = nil
         try? FileManager.default.removeItem(at: fileURL(for: listID))

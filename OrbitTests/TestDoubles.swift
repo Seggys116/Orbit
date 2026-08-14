@@ -215,7 +215,7 @@ final class AppEnvironment {
 // MARK: - SettingsWindowController / AboutWindowController doubles
 
 enum SettingsPane {
-    case general, profiles, links, shortcuts, extensions
+    case general, profiles, links, shortcuts, extensions, adBlocker
 }
 
 enum SettingsWindowController {

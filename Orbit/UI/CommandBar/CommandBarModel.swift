@@ -142,6 +142,9 @@ enum CommandBarEngine {
             CommandAction(id: "settings-extensions", title: "Settings: Extensions", subtitle: "Install and manage extensions", symbolName: "puzzlepiece.extension", keywords: ["extension", "chrome", "crx", "add-on"]) { _ in
                 SettingsWindowController.show(pane: .extensions)
             },
+            CommandAction(id: "settings-ad-blocker", title: "Settings: Ad Blocker", subtitle: "Toggle content-blocking filter lists", symbolName: "shield.lefthalf.filled", keywords: ["ad blocker", "content blocking", "filter lists", "privacy"]) { _ in
+                SettingsWindowController.show(pane: .adBlocker)
+            },
             CommandAction(
                 id: SiteSearchSettingsPresenter.commandActionID,
                 title: "Site Search Settings",

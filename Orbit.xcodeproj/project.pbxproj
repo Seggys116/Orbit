@@ -468,7 +468,6 @@
 		5C8725836027A02BF1E4A74C /* ShortcutsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F92CF1C7D8A1C23356EC6C /* ShortcutsSettingsPane.swift */; };
 		5CAA769EEC3DA8C082377153 /* ShortcutModifierMaskingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0FDF540740AE891C38E8D38 /* ShortcutModifierMaskingTests.swift */; };
 		5CE166D19D17895686982100 /* ExtensionActionPopupSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76201701462391651095A80E /* ExtensionActionPopupSupport.swift */; };
-		5D143F55D213044F90AB00FE /* ContentBlockingBundledListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAB0B160F25D66254D2A2DE /* ContentBlockingBundledListTests.swift */; };
 		5D2794E1B4E527AB8DC86201 /* SpacePagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4F1ABF19486E59A492326F /* SpacePagerView.swift */; };
 		5D46C1C60E8C271D34854136 /* ArcSettingsReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D218650080DEA54CB3C2567 /* ArcSettingsReader.swift */; };
 		5DBA5AC4B57001B6B748FBF7 /* ContentBlockingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8741B3DEEBED156C2C48BFC /* ContentBlockingController.swift */; };
@@ -506,6 +505,7 @@
 		62FB29AB8A365793FD156649 /* HistoryStoreWALTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54BF341BCB87350A473C4318 /* HistoryStoreWALTests.swift */; };
 		6314D21830D940D74946F9C4 /* OrbitChromiumPermissionsBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01691DCFCBACCF5FAFB7F956 /* OrbitChromiumPermissionsBridge.swift */; };
 		63AA446B8A53E6A08A6761BE /* AppEnvironmentSidebarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7694FC5BDBA4DE3B4860E25B /* AppEnvironmentSidebarTests.swift */; };
+		63AFEE5836CA22F6342ED939 /* AdBlockerSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12BDF96A394B50CAE7D40621 /* AdBlockerSettingsPane.swift */; };
 		63BEF23BC00315913C61B58F /* SyncStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D5AA9E5283D26E0159F75B1 /* SyncStatus.swift */; };
 		63DA46987F47FA902681914B /* SpaceThemeEditorWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EC942278E213C2E2A2BD440 /* SpaceThemeEditorWindowController.swift */; };
 		6433E50F1A05D2DE5BE14ABC /* LibrarySpacesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D3AFCE51D7EBF1C26BD644 /* LibrarySpacesView.swift */; };
@@ -583,6 +583,7 @@
 		709CD3DBB0710007C1322BF1 /* SidebarNodeRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2387A54C0F259B05CE2A0A /* SidebarNodeRow.swift */; };
 		71076CB5EB8B19E07C8E80B3 /* R3SpacesAndSplitViewStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3722BA1B638D55B5555E5DD /* R3SpacesAndSplitViewStoreTests.swift */; };
 		713789CD8DE07DA136DF6359 /* UIExtensionPoints.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4E6FF5B564132313291792B /* UIExtensionPoints.swift */; };
+		7141DBF3510B9E58FA495286 /* AdBlockerSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12BDF96A394B50CAE7D40621 /* AdBlockerSettingsPane.swift */; };
 		7142A3B0EA652A427AD26499 /* WebStorePrivateBridgeScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF9520CF8FD9C79393E547B3 /* WebStorePrivateBridgeScript.swift */; };
 		7145480864E8FEC827C6DDD8 /* ChromeExtensionManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1264A6E03076C2AC4EF2A21B /* ChromeExtensionManifest.swift */; };
 		7178E58B07A5BF3C4A4E5384 /* CommandBarPointerHoverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84AB1721E7A20EC7809AF252 /* CommandBarPointerHoverTests.swift */; };
@@ -726,7 +727,6 @@
 		8DF3D0D65256C80BD87286C2 /* ImportFlowRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7573EE9FED1283C4FD54FA53 /* ImportFlowRunner.swift */; };
 		8E13057FF19917FC42AA4309 /* AssistPrivacyDisclosureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513BBBF67AC2F3919C297D26 /* AssistPrivacyDisclosureTests.swift */; };
 		8E3FABCA7CE9DE1F43EC10BA /* TidyTabsRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 520ACBDC77C078CE5D801EF9 /* TidyTabsRuntimeTests.swift */; };
-		8E9E0E047652268449AB04C0 /* orbit-unbreak.txt in Resources */ = {isa = PBXBuildFile; fileRef = 019F6919A28690717320A6E4 /* orbit-unbreak.txt */; };
 		8EEE03C76870F63E41783075 /* OrbitScreenshotMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8F548F42CF5556A6DDA397D /* OrbitScreenshotMode.swift */; };
 		8F0BDD40F89B09C560258753 /* TestDoublesPinnedTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE139734D311FB5ACB1E9F5 /* TestDoublesPinnedTabs.swift */; };
 		8F21C6FF3AD9DCE79993DF15 /* SidebarResizeHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECB7FF5AF0AA01A230A62DFC /* SidebarResizeHandle.swift */; };
@@ -947,7 +947,6 @@
 		BBB52D093537B821B8273094 /* BoostShuffleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A9D50ECEFEADE5C6B87ACA6 /* BoostShuffleTests.swift */; };
 		BBD9C3476EA0B13F46D7728A /* RecentPagesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C2D16A32E4FEE96E9706238 /* RecentPagesModels.swift */; };
 		BBDEEED48D7E848A6459BC8A /* ChromiumExtensionEventLivenessLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C12A34D5DC8EF75036DEF95B /* ChromiumExtensionEventLivenessLiveTests.swift */; };
-		BBE0F535C6ED2A786B32C1F3 /* orbit-unbreak.txt in Resources */ = {isa = PBXBuildFile; fileRef = 019F6919A28690717320A6E4 /* orbit-unbreak.txt */; };
 		BC0B0197C6D07E57CD851A61 /* OrbitContextMenuPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DA18FD307BC225A1FA44CBD /* OrbitContextMenuPresenter.swift */; };
 		BC387AFB99BFA9B5CD76DFCF /* SpaceIconImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF0E6739FE350BEAA8C85C6 /* SpaceIconImageStore.swift */; };
 		BC3E0EF128994B18BB37B434 /* SpaceSwitcherPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B22AD8EDCC1F7BAFC09752B /* SpaceSwitcherPagerView.swift */; };
@@ -1177,7 +1176,6 @@
 		E999410DB9CE87BE36532232 /* GlobalKeyEventMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F87C29CD6A6C74440C33511B /* GlobalKeyEventMonitor.swift */; };
 		E9C96960B1487F41433C24E0 /* SiteCertificateDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FC397C3D4B7A41C45F8CBA3 /* SiteCertificateDetailView.swift */; };
 		E9FE879C9E99D63C8ED1E3A9 /* AppEnvironment+DataReset.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB3356F79E2BAA03F4A05CF2 /* AppEnvironment+DataReset.swift */; };
-		EA12B3DB58A5831E89BC4019 /* ContentBlockingUnbreakListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4238883955971AAD996BFA /* ContentBlockingUnbreakListTests.swift */; };
 		EA34415C71A9978FF85CA53D /* ModelTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C841E1CFCE1072C67AE5A3D /* ModelTypes.swift */; };
 		EA3E039C144FD52ABCFD0A2C /* SplitViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DB8B72F03516C111FE2412F /* SplitViewContainer.swift */; };
 		EA51BFA4536D0C812BCC9FA2 /* ModelTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C841E1CFCE1072C67AE5A3D /* ModelTypes.swift */; };
@@ -1329,7 +1327,6 @@
 		006AC61C3A511B2E02064120 /* SidebarMiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarMiniPlayerView.swift; sourceTree = "<group>"; };
 		014ED3C0487B9495B62F1E78 /* DocumentEditorFlushRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentEditorFlushRegistryTests.swift; sourceTree = "<group>"; };
 		01691DCFCBACCF5FAFB7F956 /* OrbitChromiumPermissionsBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitChromiumPermissionsBridge.swift; sourceTree = "<group>"; };
-		019F6919A28690717320A6E4 /* orbit-unbreak.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "orbit-unbreak.txt"; sourceTree = "<group>"; };
 		01E087C4B028425ACBB96746 /* Orbit-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Orbit-Bridging-Header.h"; sourceTree = "<group>"; };
 		01FC35DCD632F631F22AAEA2 /* _index.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = _index.json; sourceTree = "<group>"; };
 		0226FF130402B0BFC517E4D5 /* OrbitDemoAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitDemoAppDelegate.swift; sourceTree = "<group>"; };
@@ -1385,6 +1382,7 @@
 		119791A9FC5579AFE18EE461 /* FindBarVisualTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindBarVisualTests.swift; sourceTree = "<group>"; };
 		1264A6E03076C2AC4EF2A21B /* ChromeExtensionManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeExtensionManifest.swift; sourceTree = "<group>"; };
 		12861046E4D23075E011E4F3 /* OrbitButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitButton.swift; sourceTree = "<group>"; };
+		12BDF96A394B50CAE7D40621 /* AdBlockerSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdBlockerSettingsPane.swift; sourceTree = "<group>"; };
 		12D3AFCE51D7EBF1C26BD644 /* LibrarySpacesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySpacesView.swift; sourceTree = "<group>"; };
 		12D81AF067ED68830D3E2DA1 /* LiveChromiumEngineHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveChromiumEngineHost.swift; sourceTree = "<group>"; };
 		132245B88144B82FA72D32F0 /* PiPController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiPController.swift; sourceTree = "<group>"; };
@@ -2022,7 +2020,6 @@
 		CA7369C2A9DAED2BF29A219B /* ChromiumEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromiumEngine.swift; sourceTree = "<group>"; };
 		CB3356F79E2BAA03F4A05CF2 /* AppEnvironment+DataReset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppEnvironment+DataReset.swift"; sourceTree = "<group>"; };
 		CBDFD973213DEA7247FB074C /* ChromiumEngineSurfaceLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromiumEngineSurfaceLiveTests.swift; sourceTree = "<group>"; };
-		CCAB0B160F25D66254D2A2DE /* ContentBlockingBundledListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentBlockingBundledListTests.swift; sourceTree = "<group>"; };
 		CD5D8B08C0CD1CAABC7D1345 /* RoutingRuleHostMatchingRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingRuleHostMatchingRegressionTests.swift; sourceTree = "<group>"; };
 		CD7664B842B25F44856BC75C /* OnboardingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindowController.swift; sourceTree = "<group>"; };
 		CDEE74DD173C81D0E0ADDB0D /* ArcExtensionInventory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcExtensionInventory.swift; sourceTree = "<group>"; };
@@ -2140,7 +2137,6 @@
 		EE3713A3674970EF951FC1A9 /* AppEnvironment+Commands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppEnvironment+Commands.swift"; sourceTree = "<group>"; };
 		EE8EE914486CE467DA0C2B01 /* AppEnvironment+PinnedTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppEnvironment+PinnedTabs.swift"; sourceTree = "<group>"; };
 		EEFC73F5EC423DCA8FFD21D3 /* ModalHangGuardObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalHangGuardObserver.swift; sourceTree = "<group>"; };
-		EF4238883955971AAD996BFA /* ContentBlockingUnbreakListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentBlockingUnbreakListTests.swift; sourceTree = "<group>"; };
 		EF616FD856C231B142C87689 /* WindowSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSession.swift; sourceTree = "<group>"; };
 		EF655AD2C5F6266C22E4446C /* ChromiumUserAgentLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromiumUserAgentLiveTests.swift; sourceTree = "<group>"; };
 		EF8C9919EB3B7C4E41251205 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -2393,7 +2389,6 @@
 				B51F2CEF784B1F63A8FB8DCF /* ContentBlockingLowercaseFusionTests.swift */,
 				97246EFE8F77E018FBFAE806 /* ContentBlockingRedirectTests.swift */,
 				42162192036BFD9180C57A1C /* ContentBlockingTests.swift */,
-				EF4238883955971AAD996BFA /* ContentBlockingUnbreakListTests.swift */,
 				E35E4772184B20E88D5CEDEE /* ControlsAndSettingsTests.swift */,
 				E983F752FD968253F0899A0F /* CRX3ArchiveTests.swift */,
 				09A04E6728D38886C1AF5929 /* CRX3VerifierTests.swift */,
@@ -2805,7 +2800,6 @@
 		6C2CEFA9FC44C2087DD8ABD1 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				D4C79263C9B67803F6B92C04 /* ContentBlocking */,
 				734A0553666533AA10F7CE55 /* Info.plist */,
 				D8FA8509289BA4D5B6BCE0B4 /* Orbit.entitlements */,
 				0416388A02B7FD6FF01FDFA4 /* OrbitHelper-Alerts.entitlements */,
@@ -3148,7 +3142,6 @@
 				DFA996B89FA8EFA881C04129 /* CommandBarQueryTests.swift */,
 				C06B360BC5E7C6381F578959 /* CommandBarSpaceRoutingTests.swift */,
 				D18CACF2A43D99C1BF7C6131 /* CommandBarStaleResultsTests.swift */,
-				CCAB0B160F25D66254D2A2DE /* ContentBlockingBundledListTests.swift */,
 				06D9F63BF56DF0FE533F11A4 /* ContentBlockingChromiumWiringTests.swift */,
 				1A29CA556EDA4BDBEFAD536A /* ContentBlockingEngineTests.swift */,
 				651439FFAF59D3399853DC00 /* CorpusDarkReaderLiveTests.swift */,
@@ -3524,14 +3517,6 @@
 			path = Peek;
 			sourceTree = "<group>";
 		};
-		D4C79263C9B67803F6B92C04 /* ContentBlocking */ = {
-			isa = PBXGroup;
-			children = (
-				019F6919A28690717320A6E4 /* orbit-unbreak.txt */,
-			);
-			path = ContentBlocking;
-			sourceTree = "<group>";
-		};
 		DFC4A7FD450ED63C4426A953 /* Spaces */ = {
 			isa = PBXGroup;
 			children = (
@@ -3564,6 +3549,7 @@
 		E82C70C8E9C4994A2BE9D17C /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				12BDF96A394B50CAE7D40621 /* AdBlockerSettingsPane.swift */,
 				7084B230E2287EB9E78112EC /* AssistSettingsPane.swift */,
 				A5127A9DECD4E0E532E92A58 /* DataSettingsPane.swift */,
 				6A30F63F0B3A4A96AAD78EBD /* ExtensionConsentSheetView.swift */,
@@ -3810,7 +3796,6 @@
 			files = (
 				895C5D90558DBF78E6BE6E7F /* Assets.xcassets in Resources */,
 				5C4772BBA9A544CE59AB4E9E /* icon.icon in Resources */,
-				BBE0F535C6ED2A786B32C1F3 /* orbit-unbreak.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3820,7 +3805,6 @@
 			files = (
 				406D490BF8C4345113E67825 /* Assets.xcassets in Resources */,
 				24B54916A7E7566487E32D10 /* icon.icon in Resources */,
-				8E9E0E047652268449AB04C0 /* orbit-unbreak.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4160,6 +4144,7 @@
 				646F901ABAD928C36FF4B0DB /* RestoreDataWindowController.swift in Sources */,
 				3F480138B32BD4619161BBDA /* BrowserWindowView.swift in Sources */,
 				8D2EF3A850EA236055736860 /* RootView.swift in Sources */,
+				7141DBF3510B9E58FA495286 /* AdBlockerSettingsPane.swift in Sources */,
 				EC4F278D26B00FF9438AA3C8 /* AssistSettingsPane.swift in Sources */,
 				4F8F53985E1F81EA20799FE1 /* DataSettingsPane.swift in Sources */,
 				C6FA6181B5CBBB40F2019000 /* ExtensionConsentSheetView.swift in Sources */,
@@ -4303,7 +4288,6 @@
 				14D8F6529522E8F541FA2551 /* ContentBlockingLowercaseFusionTests.swift in Sources */,
 				C7E60E4C057B08BF79677EC2 /* ContentBlockingRedirectTests.swift in Sources */,
 				D19BBAE9B6E3B9B0737168A3 /* ContentBlockingTests.swift in Sources */,
-				EA12B3DB58A5831E89BC4019 /* ContentBlockingUnbreakListTests.swift in Sources */,
 				FFB446C7DE266D438BDA62AB /* ControlsAndSettingsTests.swift in Sources */,
 				D951F18CDB988CE408C679E1 /* CRX3ArchiveTests.swift in Sources */,
 				D2D153E8FE42BFC4E2AC2915 /* CRX3VerifierTests.swift in Sources */,
@@ -4621,7 +4605,6 @@
 				350287007ABA36755D52FDEE /* CommandBarQueryTests.swift in Sources */,
 				72828DC769D47639D29AA1EA /* CommandBarSpaceRoutingTests.swift in Sources */,
 				AEB7F34BB7A804BBBF72868C /* CommandBarStaleResultsTests.swift in Sources */,
-				5D143F55D213044F90AB00FE /* ContentBlockingBundledListTests.swift in Sources */,
 				7ACC7E87C15BF81FC74F4895 /* ContentBlockingChromiumWiringTests.swift in Sources */,
 				BA9645D8D1F221F445201C9B /* ContentBlockingEngineTests.swift in Sources */,
 				27F8AF3444383BEFDE47AFAB /* CorpusDarkReaderLiveTests.swift in Sources */,
@@ -5070,6 +5053,7 @@
 				9E80A3486C9AA2B4626E0AAC /* RestoreDataWindowController.swift in Sources */,
 				7A0A39F9D158D52A7176CB66 /* BrowserWindowView.swift in Sources */,
 				E4DD229F67708BC908AB0A5E /* RootView.swift in Sources */,
+				63AFEE5836CA22F6342ED939 /* AdBlockerSettingsPane.swift in Sources */,
 				420636CB119CDCF3DE3878FC /* AssistSettingsPane.swift in Sources */,
 				3A9C1C0E0FB6869A88A11B4C /* DataSettingsPane.swift in Sources */,
 				853E2FFACDA41F4192A22B8F /* ExtensionConsentSheetView.swift in Sources */,
@@ -5218,7 +5202,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.OrbitDemo";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -5245,7 +5229,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.OrbitTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -5270,7 +5254,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.OrbitTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -5297,7 +5281,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.OrbitAppTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -5325,7 +5309,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.OrbitAppTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -5392,7 +5376,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -5450,7 +5434,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -5483,7 +5467,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.Orbit";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -5524,7 +5508,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.Orbit";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -5584,7 +5568,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.OrbitDemo";
 				PRODUCT_NAME = "$(TARGET_NAME)";

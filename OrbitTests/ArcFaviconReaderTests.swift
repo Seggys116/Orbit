@@ -23,6 +23,64 @@ final class ArcFaviconReaderTests: XCTestCase {
         super.tearDown()
     }
 
+    // MARK: - The main actor must not do the disk work
+
+    // A bulk import used to PNG-encode, atomically write and stat-scan the whole
+    // cache directory synchronously on the main actor, once per icon, which froze
+    // the app. The disk work still costs what it costs; it just must not be
+    // billed to the main actor.
+    @MainActor
+    func testABulkImportDoesNotBlockTheMainActorOnDiskWork() async throws {
+        let directory = profile.appendingPathComponent("favicons", isDirectory: true)
+        let cache = FaviconCache(diskDirectory: directory)
+        var icons: [String: Data] = [:]
+        for index in 0..<200 {
+            icons["host\(index).example"] = try pngData(width: 32, height: 32)
+        }
+
+        let started = DispatchTime.now().uptimeNanoseconds
+        let accepted = cache.cacheImported(imageDataByHost: icons)
+        let onMainActor = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+
+        await cache._test_awaitPendingWrites()
+        let includingDisk = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+
+        XCTAssertEqual(accepted, 200)
+        XCTAssertEqual(
+            FileManager.default.fileExists(atPath: directory.path), true,
+            "the icons must genuinely have been written, or this measures nothing"
+        )
+        XCTAssertLessThan(
+            onMainActor, includingDisk,
+            "the main actor returned only after the disk work finished, so the work is still synchronous on it — \(onMainActor)ms of \(includingDisk)ms total"
+        )
+        XCTAssertLessThan(
+            onMainActor, 250,
+            "storing 200 icons blocked the main actor for \(onMainActor)ms; the PNG encode, atomic write and eviction scan have moved back onto it"
+        )
+    }
+
+    // The decode stays on the main actor because the accepted-count is returned
+    // synchronously; measured at ~55ms per 200 icons, and only on a one-off
+    // import. Fails if that ever grows into the per-page path's territory.
+    @MainActor
+    func testASinglePageLoadsFaviconBarelyTouchesTheMainActor() async throws {
+        let cache = FaviconCache(diskDirectory: profile.appendingPathComponent("favicons", isDirectory: true))
+        let icon = try pngData(width: 32, height: 32)
+
+        let started = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(cache.cache(imageData: icon, forHost: "example.com"))
+        let onMainActor = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+
+        XCTAssertNotNil(cache.cachedImage(forHost: "example.com"),
+                        "the icon must be readable synchronously the instant it is cached, or tab rows flicker")
+        XCTAssertLessThan(
+            onMainActor, 10,
+            "caching one favicon blocked the main actor for \(onMainActor)ms; this runs on every page load"
+        )
+        await cache._test_awaitPendingWrites()
+    }
+
     // MARK: - Absence
 
     func testAProfileWithNoFaviconsDatabaseImportsNothing() throws {
@@ -233,16 +291,21 @@ final class ArcFaviconReaderTests: XCTestCase {
     }
 
     @MainActor
-    func testAnImportedIconSurvivesARestartByBeingOnDiskAndNotOnlyInMemory() throws {
+    func testAnImportedIconSurvivesARestartByBeingOnDiskAndNotOnlyInMemory() async throws {
         try writeDatabase([
             Row(pageURL: "https://example.com/", iconID: 1, width: 32, height: 32),
         ])
         let directory = temporaryCacheDirectory()
         let favicons = try ArcFaviconReader.read(profileDirectory: profile, browser: .arc)
-        _ = FaviconCache(diskDirectory: directory).cache(
+        let writer = FaviconCache(diskDirectory: directory)
+        _ = writer.cache(
             imageData: try XCTUnwrap(favicons.first?.imageData),
             forHost: "example.com"
         )
+        // The write lands on a background actor now; wait for it the way a real
+        // restart would, by letting time pass, rather than racing a fresh
+        // instance's disk read against it.
+        await writer._test_awaitPendingWrites()
 
         XCTAssertNotNil(
             FaviconCache(diskDirectory: directory).cachedImage(forHost: "example.com"),
@@ -269,22 +332,28 @@ final class ArcFaviconReaderTests: XCTestCase {
     // MARK: - Correcting what an earlier import wrote
 
     @MainActor
-    func testAReImportReplacesAnIconAnEarlierImportFiledUnderTheWrongHost() throws {
+    func testAReImportReplacesAnIconAnEarlierImportFiledUnderTheWrongHost() async throws {
         let directory = temporaryCacheDirectory()
         let wrong = try pngData(width: 16, height: 16, fill: .systemGreen)
         let right = try pngData(width: 32, height: 32, fill: .systemRed)
 
-        XCTAssertEqual(FaviconCache(diskDirectory: directory).cache(imageDataByHost: ["youtube.com": wrong]), 1)
+        let firstImport = FaviconCache(diskDirectory: directory)
+        XCTAssertEqual(firstImport.cache(imageDataByHost: ["youtube.com": wrong]), 1)
+        await firstImport._test_awaitPendingWrites()
         XCTAssertEqual(FaviconCache(diskDirectory: directory).cachedImage(forHost: "youtube.com")?.size, NSSize(width: 16, height: 16))
 
-        XCTAssertEqual(FaviconCache(diskDirectory: directory).cacheImported(imageDataByHost: ["youtube.com": right]), 1)
+        let secondImport = FaviconCache(diskDirectory: directory)
+        XCTAssertEqual(secondImport.cacheImported(imageDataByHost: ["youtube.com": right]), 1)
+        await secondImport._test_awaitPendingWrites()
         XCTAssertEqual(
             FaviconCache(diskDirectory: directory).cachedImage(forHost: "youtube.com")?.size,
             NSSize(width: 32, height: 32),
             "A reader fix is worthless while the wrong PNG is still the one on disk."
         )
 
-        XCTAssertEqual(FaviconCache(diskDirectory: directory).cacheImported(imageDataByHost: ["other.example": right]), 1)
+        let thirdImport = FaviconCache(diskDirectory: directory)
+        XCTAssertEqual(thirdImport.cacheImported(imageDataByHost: ["other.example": right]), 1)
+        await thirdImport._test_awaitPendingWrites()
         XCTAssertNil(
             FaviconCache(diskDirectory: directory).cachedImage(forHost: "youtube.com"),
             "A host the newest import no longer covers must not keep the previous import's icon."
@@ -292,14 +361,22 @@ final class ArcFaviconReaderTests: XCTestCase {
     }
 
     @MainActor
-    func testAnImportLeavesIconsOrbitFetchedItselfAfterwardsAlone() throws {
+    func testAnImportLeavesIconsOrbitFetchedItselfAfterwardsAlone() async throws {
         let directory = temporaryCacheDirectory()
         let icon = try pngData(width: 32, height: 32)
 
-        XCTAssertEqual(FaviconCache(diskDirectory: directory).cacheImported(imageDataByHost: ["imported.example": icon]), 1)
-        FaviconCache(diskDirectory: directory).cache(FaviconCache.fallbackIcon(forHost: "fetched.example"), forHost: "fetched.example")
+        let firstImport = FaviconCache(diskDirectory: directory)
+        XCTAssertEqual(firstImport.cacheImported(imageDataByHost: ["imported.example": icon]), 1)
+        await firstImport._test_awaitPendingWrites()
 
-        XCTAssertEqual(FaviconCache(diskDirectory: directory).cacheImported(imageDataByHost: ["imported.example": icon]), 1)
+        let fetched = FaviconCache(diskDirectory: directory)
+        fetched.cache(FaviconCache.fallbackIcon(forHost: "fetched.example"), forHost: "fetched.example")
+        await fetched._test_awaitPendingWrites()
+
+        let secondImport = FaviconCache(diskDirectory: directory)
+        XCTAssertEqual(secondImport.cacheImported(imageDataByHost: ["imported.example": icon]), 1)
+        await secondImport._test_awaitPendingWrites()
+
         XCTAssertNotNil(
             FaviconCache(diskDirectory: directory).cachedImage(forHost: "fetched.example"),
             "Only what an import wrote is the import's to replace."

@@ -152,6 +152,116 @@ final class SettingsBindingRoundTripTests: XCTestCase {
         }
     }
 
+    // MARK: Ad Blocker — grouping is pure catalogue data; toggles bind straight to ContentBlockingController
+
+    func test_adBlockerPane_everyCatalogueListAppearsExactlyOnceWhenGroupedByCategory() {
+        let grouped = FilterListCategory.allCases.flatMap { FilterListCatalog.lists(in: $0) }
+        XCTAssertEqual(Set(grouped.map(\.id)), Set(FilterListCatalog.all.map(\.id)),
+                       "every catalogue list must show up somewhere once the pane groups by category")
+        XCTAssertEqual(grouped.count, FilterListCatalog.all.count,
+                       "no catalogue list may be returned under more than one category")
+    }
+
+    func test_adBlockerPane_groupedListsMatchTheirOwnDeclaredCategory() {
+        for category in FilterListCategory.allCases {
+            for descriptor in FilterListCatalog.lists(in: category) {
+                XCTAssertEqual(descriptor.category, category,
+                               "\(descriptor.id) was grouped under \(category) but declares category \(descriptor.category)")
+            }
+        }
+    }
+
+    func test_adBlockerPane_freshControllerDefaultsMatchTheCatalogsDeclaredDefaults() {
+        let controller = ContentBlockingController(
+            store: FilterListStore(directory: scratchDirectory),
+            defaults: defaults
+        )
+        XCTAssertEqual(controller.enabledListIDs, FilterListCatalog.defaultEnabledIDs,
+                       "with nothing persisted yet, the pane's toggles must reflect exactly the lists the catalogue marks isDefaultEnabled")
+    }
+
+    // Seeds a cache entry + raw list text directly on disk so the store
+    // treats the list as already-cached and never fetches over the network.
+    private func seedCachedList(_ listID: String, text: String) throws {
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        try text.write(to: scratchDirectory.appendingPathComponent("\(listID).txt"), atomically: true, encoding: .utf8)
+        let entry = FilterListCacheEntry(
+            listID: listID,
+            sourceURLs: [],
+            declaredVersion: "1",
+            declaredTitle: listID,
+            expiresAfter: 4 * 86_400,
+            fetchedAt: Date(),
+            lastCheckedAt: Date(),
+            etag: nil,
+            lastModified: nil,
+            byteCount: text.utf8.count,
+            contentHash: "seed"
+        )
+        let data = try JSONEncoder.orbitContentBlocking.encode([listID: entry])
+        try data.write(to: scratchDirectory.appendingPathComponent("index.json"), options: .atomic)
+    }
+
+    // Pre-marks the one-shot list migrations as already applied: these two
+    // tests exercise the toggle/master-switch, not migration (that has its
+    // own dedicated test class), so an explicit empty/single-list selection
+    // must not be silently topped up by migrateEnabledLists.
+    private func disableListMigrations() {
+        defaults.set(true, forKey: "contentBlocking.enabledLists.didAddUBlockDefault")
+        defaults.set(true, forKey: "contentBlocking.enabledLists.didAddUBlockUnbreakDefault")
+    }
+
+    func test_adBlockerPane_perListToggle_writesThroughTheControllerAndPersists() async throws {
+        disableListMigrations()
+        defaults.set([String](), forKey: "contentBlocking.enabledLists")
+        try seedCachedList("EasyList", text: "[Adblock Plus 2.0]\n||toggle-test.example^\n")
+        let controller = ContentBlockingController(
+            store: FilterListStore(directory: scratchDirectory),
+            defaults: defaults
+        )
+        XCTAssertTrue(controller.enabledListIDs.isEmpty, "an explicit empty selection must start empty, not be reseeded")
+
+        let listID = "EasyList"
+
+        await controller.setList(listID, enabled: true)
+        XCTAssertTrue(controller.enabledListIDs.contains(listID))
+        XCTAssertEqual(defaults.stringArray(forKey: "contentBlocking.enabledLists"), [listID],
+                       "the pane's per-list toggle must persist through the same UserDefaults key a fresh controller reads on launch")
+        XCTAssertGreaterThan(controller.compiledRuleCount, 0,
+                             "enabling a list must actually recompile it into the live rule set, not just flip a flag")
+
+        await controller.setList(listID, enabled: false)
+        XCTAssertFalse(controller.enabledListIDs.contains(listID))
+        XCTAssertEqual(defaults.stringArray(forKey: "contentBlocking.enabledLists"), [])
+        XCTAssertEqual(controller.compiledRuleCount, 0, "disabling the only enabled list must drop it back out of the compiled rule set")
+    }
+
+    func test_adBlockerPane_masterSwitch_reachesTheContentBlockerTheEngineQueries() async throws {
+        disableListMigrations()
+        try seedCachedList("EasyList", text: "[Adblock Plus 2.0]\n||master-switch-test.example^\n")
+        defaults.set(["EasyList"], forKey: "contentBlocking.enabledLists")
+        let controller = ContentBlockingController(
+            store: FilterListStore(directory: scratchDirectory),
+            defaults: defaults
+        )
+        await controller.awaitInitialCacheLoad()
+        XCTAssertGreaterThan(controller.compiledRuleCount, 0, "fixture must have something real compiled before exercising the master switch")
+
+        XCTAssertTrue(controller.isEnabled)
+        XCTAssertTrue(controller.blocker.isEnabled)
+
+        await controller.setEnabled(false)
+        XCTAssertFalse(controller.isEnabled)
+        XCTAssertFalse(controller.blocker.isEnabled,
+                       "the pane's master switch must reach ContentBlocker, the object the engine actually asks for a decision")
+        XCTAssertFalse(defaults.bool(forKey: "contentBlocking.enabled"))
+
+        await controller.setEnabled(true)
+        XCTAssertTrue(controller.isEnabled)
+        XCTAssertTrue(controller.blocker.isEnabled)
+        XCTAssertTrue(defaults.bool(forKey: "contentBlocking.enabled"))
+    }
+
 }
 
 // MARK: - 2. Real control rendering — see file header

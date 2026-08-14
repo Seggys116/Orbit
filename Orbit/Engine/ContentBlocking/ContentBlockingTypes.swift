@@ -104,6 +104,10 @@ nonisolated public struct ContentBlockingCompileStats: Equatable, Sendable {
         blockingRules + exceptionRules + redirectRules + unblockRules
     }
 
+    public var totalCompiledRules: Int {
+        totalNetworkRules + cosmeticRules
+    }
+
     public init() {}
 
     static func + (lhs: ContentBlockingCompileStats, rhs: ContentBlockingCompileStats) -> ContentBlockingCompileStats {

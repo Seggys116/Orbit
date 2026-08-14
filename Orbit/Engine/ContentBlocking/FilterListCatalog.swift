@@ -37,16 +37,6 @@ nonisolated public enum FilterListCategory: String, Codable, Sendable, CaseItera
     }
 }
 
-nonisolated public struct BundledFilterListResource: Sendable, Hashable, Codable {
-    public var name: String
-    public var fileExtension: String
-
-    public init(name: String, fileExtension: String) {
-        self.name = name
-        self.fileExtension = fileExtension
-    }
-}
-
 nonisolated public struct FilterListDescriptor: Identifiable, Sendable, Hashable, Codable {
     public var id: String
     public var displayName: String
@@ -56,9 +46,6 @@ nonisolated public struct FilterListDescriptor: Identifiable, Sendable, Hashable
     public var licence: String
     public var licenceURL: URL?
     public var isDefaultEnabled: Bool
-    public var bundledResource: BundledFilterListResource? = nil
-
-    public var isBundled: Bool { bundledResource != nil }
 }
 
 nonisolated public enum FilterListCatalog {
@@ -75,8 +62,6 @@ nonisolated public enum FilterListCatalog {
     private static let gplV3URL = URL(string: "https://www.gnu.org/licenses/gpl-3.0.html")
     private static let easyListLicence = "GNU GPL v3 / CC BY-SA 3.0"
     private static let easyListLicenceURL = URL(string: "https://easylist.to/pages/licence.html")
-
-    public static let orbitUnbreakID = "OrbitUnbreak"
 
     public static let all: [FilterListDescriptor] = [
         // MARK: Generic — ads
@@ -106,12 +91,10 @@ nonisolated public enum FilterListCatalog {
             category: .generic,
             urls: [
                 url("https://ublockorigin.github.io/uAssets/filters/filters.txt"),
-                url("https://ublockorigin.github.io/uAssets/filters/filters-2020.txt"),
-                url("https://ublockorigin.github.io/uAssets/filters/filters-2021.txt"),
-                url("https://ublockorigin.github.io/uAssets/filters/filters-2022.txt"),
-                url("https://ublockorigin.github.io/uAssets/filters/filters-2023.txt"),
-                url("https://ublockorigin.github.io/uAssets/filters/filters-2024.txt"),
+                url("https://ublockorigin.github.io/uAssets/filters/filters-2026.txt"),
                 url("https://ublockorigin.github.io/uAssets/filters/ubo-link-shorteners.txt"),
+                url("https://ublockorigin.github.io/uAssets/filters/badware.txt"),
+                url("https://ublockorigin.github.io/uAssets/filters/privacy.txt"),
             ],
             infoURL: url("https://github.com/uBlockOrigin/uAssets"),
             licence: gplV3,
@@ -195,15 +178,17 @@ nonisolated public enum FilterListCatalog {
 
         // MARK: Site compatibility
         FilterListDescriptor(
-            id: orbitUnbreakID,
-            displayName: "Orbit Unbreak",
+            id: "uBlockUnbreak",
+            displayName: "uBlock Origin – Unbreak",
             category: .compatibility,
-            urls: [],
-            infoURL: nil,
-            licence: "Orbit",
-            licenceURL: nil,
-            isDefaultEnabled: true,
-            bundledResource: BundledFilterListResource(name: "orbit-unbreak", fileExtension: "txt")
+            urls: [
+                url("https://ublockorigin.github.io/uAssets/filters/unbreak.txt"),
+                url("https://ublockorigin.github.io/uAssets/filters/quick-fixes.txt"),
+            ],
+            infoURL: url("https://github.com/uBlockOrigin/uAssets"),
+            licence: gplV3,
+            licenceURL: gplV3URL,
+            isDefaultEnabled: true
         ),
 
         // MARK: Regional
@@ -243,22 +228,6 @@ nonisolated public enum FilterListCatalog {
 
     public static func descriptor(id: String) -> FilterListDescriptor? {
         all.first { $0.id == id }
-    }
-
-    // Bundle.main is the app; Bundle(for:) is the bundle this code was compiled
-    // into, which is the test bundle when OrbitTests recompiles these sources.
-    public static func bundledText(for descriptor: FilterListDescriptor) -> String? {
-        guard let resource = descriptor.bundledResource else { return nil }
-        var searched: [Bundle] = [.main]
-        let owning = Bundle(for: ContentBlocker.self)
-        if owning != .main { searched.append(owning) }
-        for bundle in searched {
-            guard let url = bundle.url(forResource: resource.name, withExtension: resource.fileExtension),
-                  let text = try? String(contentsOf: url, encoding: .utf8)
-            else { continue }
-            return text
-        }
-        return nil
     }
 
     public static func lists(in category: FilterListCategory) -> [FilterListDescriptor] {

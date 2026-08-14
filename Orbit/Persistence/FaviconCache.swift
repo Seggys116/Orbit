@@ -9,8 +9,12 @@ public final class FaviconCache {
 
     private let memoryCache = NSCache<NSString, NSImage>()
     let diskDirectory: URL
-    private let diskCapBytes: Int64
     private var inFlightTasks: [String: Task<NSImage, Never>] = [:]
+
+    // pendingDiskWork chains each mutation after the last, so a discarded
+    // import's removes finish before a fresh import's writes.
+    private let diskStore: FaviconDiskStore
+    private var pendingDiskWork: Task<Void, Never>?
 
     public init(
         diskDirectory: URL = FaviconCache.defaultDiskDirectory,
@@ -18,7 +22,7 @@ public final class FaviconCache {
         diskCapBytes: Int64 = 25 * 1024 * 1024
     ) {
         self.diskDirectory = diskDirectory
-        self.diskCapBytes = diskCapBytes
+        self.diskStore = FaviconDiskStore(diskDirectory: diskDirectory, diskCapBytes: diskCapBytes)
         memoryCache.countLimit = memoryCountLimit
         try? FileManager.default.createDirectory(at: diskDirectory, withIntermediateDirectories: true)
     }
@@ -69,15 +73,17 @@ public final class FaviconCache {
     /// One eviction pass for the whole batch; evicting per icon rescans the directory once per file.
     @discardableResult
     public func cache(imageDataByHost icons: [String: Data]) -> Int {
-        var stored = 0
+        var toWrite: [(host: String, image: NSImage)] = []
         for (host, data) in icons {
             guard let image = FaviconCache.decodedImage(data) else { continue }
-            memoryCache.setObject(image, forKey: host.lowercased() as NSString)
-            writeToDisk(image, forHost: host)
-            stored += 1
+            let key = host.lowercased()
+            memoryCache.setObject(image, forKey: key as NSString)
+            toWrite.append((key, image))
         }
-        if stored > 0 { evictDiskCacheIfNeeded() }
-        return stored
+        if !toWrite.isEmpty {
+            enqueueWriteBatchThenEvict(toWrite)
+        }
+        return toWrite.count
     }
 
     // MARK: - Browser import
@@ -91,25 +97,28 @@ public final class FaviconCache {
     public func cacheImported(imageDataByHost icons: [String: Data]) -> Int {
         discardPreviousImport()
 
-        var stored: [String] = []
+        var toWrite: [(host: String, image: NSImage)] = []
         for (host, data) in icons {
             guard let image = FaviconCache.decodedImage(data) else { continue }
             let key = host.lowercased()
             memoryCache.setObject(image, forKey: key as NSString)
-            writeToDisk(image, forHost: key)
-            stored.append(key)
+            toWrite.append((key, image))
         }
 
-        if let manifest = try? JSONEncoder().encode(stored.sorted()) {
+        if let manifest = try? JSONEncoder().encode(toWrite.map(\.host).sorted()) {
             try? manifest.write(to: importManifestURL, options: .atomic)
         }
-        if !stored.isEmpty { evictDiskCacheIfNeeded() }
-        return stored.count
+        if !toWrite.isEmpty {
+            enqueueWriteBatchThenEvict(toWrite)
+        }
+        return toWrite.count
     }
 
     public func removeCachedImage(forHost host: String) {
-        memoryCache.removeObject(forKey: host.lowercased() as NSString)
-        try? FileManager.default.removeItem(at: diskURL(forHost: host))
+        let key = host.lowercased()
+        memoryCache.removeObject(forKey: key as NSString)
+        let store = diskStore
+        enqueueDiskWork { await store.remove(host: key) }
     }
 
     private func discardPreviousImport() {
@@ -337,49 +346,48 @@ public final class FaviconCache {
 
     // MARK: - Storage / eviction
 
+    // The memory cache is updated inline, so a synchronous cachedImage(forHost:)
+    // call right after this returns still finds the image; only the PNG encode,
+    // the atomic disk write and the eviction scan move to the background actor.
     private func store(_ image: NSImage, forHost host: String) {
         let key = host.lowercased()
         memoryCache.setObject(image, forKey: key as NSString)
-        writeToDisk(image, forHost: host)
-        evictDiskCacheIfNeeded()
+        let store = diskStore
+        enqueueDiskWork {
+            await store.write(image, forHost: key)
+            await store.evictIfNeeded()
+        }
     }
 
     private func diskURL(forHost host: String) -> URL {
-        let safeName = host.lowercased()
-            .addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? UUID().uuidString
-        return diskDirectory.appendingPathComponent("\(safeName).png", isDirectory: false)
+        FaviconDiskStore.diskURL(forHost: host, in: diskDirectory)
     }
 
-    private func writeToDisk(_ image: NSImage, forHost host: String) {
-        guard let tiff = image.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else { return }
-        try? png.write(to: diskURL(forHost: host), options: .atomic)
+    /// Runs a batch of writes on the background actor followed by a single eviction pass, chained after whatever disk work is already queued.
+    private func enqueueWriteBatchThenEvict(_ items: [(host: String, image: NSImage)]) {
+        let store = diskStore
+        enqueueDiskWork {
+            for item in items {
+                await store.write(item.image, forHost: item.host)
+            }
+            await store.evictIfNeeded()
+        }
     }
 
-    private func evictDiskCacheIfNeeded() {
-        guard let urls = try? FileManager.default.contentsOfDirectory(
-            at: diskDirectory,
-            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]
-        ) else { return }
-
-        var entries: [(url: URL, size: Int64, date: Date)] = []
-        var total: Int64 = 0
-        for url in urls where url.pathExtension == "png" {
-            guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else { continue }
-            let size = Int64(values.fileSize ?? 0)
-            let date = values.contentModificationDate ?? .distantPast
-            entries.append((url, size, date))
-            total += size
+    /// Chains `work` after whatever disk work is already queued, so removes, writes and eviction scans on the same cache never race each other even though none of them run on the main actor.
+    private func enqueueDiskWork(_ work: @escaping @Sendable () async -> Void) {
+        let previous = pendingDiskWork
+        pendingDiskWork = Task.detached(priority: .utility) {
+            _ = await previous?.value
+            await work()
         }
-        guard total > diskCapBytes else { return }
+    }
 
-        var remaining = total
-        for entry in entries.sorted(by: { $0.date < $1.date }) {
-            guard remaining > diskCapBytes else { break }
-            try? FileManager.default.removeItem(at: entry.url)
-            remaining -= entry.size
-        }
+    // MARK: - Test seam
+
+    /// Awaits every disk write, remove and eviction scan queued so far. Production code never needs this — the memory cache is always current — but a test that reopens the same directory in a fresh FaviconCache has no memory cache to fall back on and needs the background write to have actually landed.
+    func _test_awaitPendingWrites() async {
+        await pendingDiskWork?.value
     }
 
     // MARK: - Bulk clear
@@ -387,15 +395,14 @@ public final class FaviconCache {
     public func removeAll() {
         inFlightTasks.removeAll()
         removeAllIcons()
-        try? FileManager.default.removeItem(at: importManifestURL)
+        let manifestURL = importManifestURL
+        enqueueDiskWork { try? FileManager.default.removeItem(at: manifestURL) }
     }
 
     private func removeAllIcons() {
         memoryCache.removeAllObjects()
-        guard let urls = try? FileManager.default.contentsOfDirectory(at: diskDirectory, includingPropertiesForKeys: nil) else { return }
-        for url in urls where url.pathExtension == "png" {
-            try? FileManager.default.removeItem(at: url)
-        }
+        let store = diskStore
+        enqueueDiskWork { await store.removeAllPNGs() }
     }
 
     // MARK: - Generated fallback icon
@@ -449,6 +456,69 @@ public final class FaviconCache {
     }
 }
 
+/// The disk side of FaviconCache: PNG encoding, atomic writes, removes and the
+/// eviction scan, all off the main actor. Every FaviconCache instance owns
+/// exactly one of these, and FaviconCache serialises access to it through
+/// `enqueueDiskWork` rather than through the actor's own scheduling.
+private actor FaviconDiskStore {
+    private let diskDirectory: URL
+    private let diskCapBytes: Int64
+
+    init(diskDirectory: URL, diskCapBytes: Int64) {
+        self.diskDirectory = diskDirectory
+        self.diskCapBytes = diskCapBytes
+    }
+
+    nonisolated static func diskURL(forHost host: String, in directory: URL) -> URL {
+        let safeName = host.lowercased()
+            .addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? UUID().uuidString
+        return directory.appendingPathComponent("\(safeName).png", isDirectory: false)
+    }
+
+    func write(_ image: NSImage, forHost host: String) {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: FaviconDiskStore.diskURL(forHost: host, in: diskDirectory), options: .atomic)
+    }
+
+    func remove(host: String) {
+        try? FileManager.default.removeItem(at: FaviconDiskStore.diskURL(forHost: host, in: diskDirectory))
+    }
+
+    func removeAllPNGs() {
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: diskDirectory, includingPropertiesForKeys: nil) else { return }
+        for url in urls where url.pathExtension == "png" {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    func evictIfNeeded() {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: diskDirectory,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]
+        ) else { return }
+
+        var entries: [(url: URL, size: Int64, date: Date)] = []
+        var total: Int64 = 0
+        for url in urls where url.pathExtension == "png" {
+            guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else { continue }
+            let size = Int64(values.fileSize ?? 0)
+            let date = values.contentModificationDate ?? .distantPast
+            entries.append((url, size, date))
+            total += size
+        }
+        guard total > diskCapBytes else { return }
+
+        var remaining = total
+        for entry in entries.sorted(by: { $0.date < $1.date }) {
+            guard remaining > diskCapBytes else { break }
+            try? FileManager.default.removeItem(at: entry.url)
+            remaining -= entry.size
+        }
+    }
+}
+
 private extension NSColor {
     var contrastingForegroundColor: NSColor {
         let rgb = usingColorSpace(.sRGB) ?? self
@@ -467,18 +537,25 @@ extension FaviconCache {
         store(probe, forHost: host)
 
         let expectedURL = diskURL(forHost: host)
-        let exists = FileManager.default.fileExists(atPath: expectedURL.path)
-        let readable = NSImage(contentsOf: expectedURL) != nil
+        Task { [weak self] in
+            guard let self else { return }
+            // store() queued the probe's write on the background actor; wait
+            // for it so this diagnostic reads the real outcome, not a race.
+            await self._test_awaitPendingWrites()
 
-        faviconSelfCheckLogger.info("""
-        diskDirectory=\(self.diskDirectory.path, privacy: .public) \
-        directoryExists=\(FileManager.default.fileExists(atPath: self.diskDirectory.path)) \
-        probeFile=\(expectedURL.path, privacy: .public) \
-        probeFileExists=\(exists) probeFileReadable=\(readable)
-        """)
+            let exists = FileManager.default.fileExists(atPath: expectedURL.path)
+            let readable = NSImage(contentsOf: expectedURL) != nil
 
-        try? FileManager.default.removeItem(at: expectedURL)
-        memoryCache.removeObject(forKey: host as NSString)
+            faviconSelfCheckLogger.info("""
+            diskDirectory=\(self.diskDirectory.path, privacy: .public) \
+            directoryExists=\(FileManager.default.fileExists(atPath: self.diskDirectory.path)) \
+            probeFile=\(expectedURL.path, privacy: .public) \
+            probeFileExists=\(exists) probeFileReadable=\(readable)
+            """)
+
+            try? FileManager.default.removeItem(at: expectedURL)
+            self.memoryCache.removeObject(forKey: host as NSString)
+        }
     }
 }
 #endif

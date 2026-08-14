@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, data, profiles, assist, links, shortcuts, extensions, icloud
+    case general, data, profiles, assist, links, shortcuts, extensions, adBlocker, icloud
 
     var id: String { rawValue }
 
@@ -16,6 +16,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         // Display title only; case stays `shortcuts` — deep links depend on that spelling.
         case .shortcuts: return "Keybinds"
         case .extensions: return "Extensions"
+        case .adBlocker: return "Ad Blocker"
         case .icloud: return "iCloud"
         }
     }
@@ -29,6 +30,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .links: return "arrow.triangle.branch"
         case .shortcuts: return "keyboard"
         case .extensions: return "puzzlepiece.extension"
+        case .adBlocker: return "shield.lefthalf.filled"
         case .icloud: return "icloud"
         }
     }
@@ -159,6 +161,7 @@ struct SettingsRootView: View {
         case .links: LinksSettingsPane()
         case .shortcuts: ShortcutsSettingsPane()
         case .extensions: ExtensionsSettingsPane()
+        case .adBlocker: AdBlockerSettingsPane()
         case .icloud: SyncSettingsPane()
         }
     }

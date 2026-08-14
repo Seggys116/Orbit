@@ -475,14 +475,13 @@ final class ContentBlockingTests: XCTestCase {
         }
         for descriptor in FilterListCatalog.all {
             XCTAssertFalse(descriptor.licence.isEmpty, "\(descriptor.id) has no licence recorded")
-            XCTAssertTrue(!descriptor.urls.isEmpty || descriptor.isBundled,
-                          "\(descriptor.id) has neither a source URL nor a bundled resource")
+            XCTAssertFalse(descriptor.urls.isEmpty, "\(descriptor.id) has no source URL")
             for url in descriptor.urls {
                 XCTAssertEqual(url.scheme, "https", "\(descriptor.id) must fetch over https")
             }
         }
         XCTAssertEqual(FilterListCatalog.defaultEnabledIDs,
-                       ["EasyList", "EasyPrivacy", "uBlock", FilterListCatalog.orbitUnbreakID])
+                       ["EasyList", "EasyPrivacy", "uBlock", "uBlockUnbreak"])
     }
 
     func testCategoryLabelsMatchArcsOwnWording() {
@@ -531,6 +530,27 @@ final class ContentBlockingTests: XCTestCase {
                                "\(descriptor.id) points at Arc's own CDN")
             }
         }
+    }
+
+    // MARK: - uBlock compatibility/unbreak subscriptions
+
+    // Owner's call: only the latest year archive, no mixing of years.
+    func testUblockDescriptorSubscribesOnlyTheLatestYearArchive() throws {
+        let uBlock = try XCTUnwrap(FilterListCatalog.descriptor(id: "uBlock"))
+        XCTAssertEqual(
+            Set(uBlock.urls.map(\.lastPathComponent)),
+            ["filters.txt", "filters-2026.txt", "ubo-link-shorteners.txt", "badware.txt", "privacy.txt"]
+        )
+    }
+
+    func testUblockUnbreakDescriptorSubscribesUpstreamsCompatibilityListsAndIsDefaultEnabled() throws {
+        let unbreak = try XCTUnwrap(FilterListCatalog.descriptor(id: "uBlockUnbreak"))
+        XCTAssertEqual(unbreak.category, .compatibility)
+        XCTAssertEqual(Set(unbreak.urls.map(\.lastPathComponent)), ["unbreak.txt", "quick-fixes.txt"])
+        XCTAssertTrue(unbreak.isDefaultEnabled,
+                      "an unbreak list that isn't default-enabled is worse than useless")
+        XCTAssertTrue(FilterListCatalog.defaultEnabledIDs.contains("uBlockUnbreak"))
+        XCTAssertEqual(FilterListCatalog.lists(in: .compatibility).map(\.id), ["uBlockUnbreak"])
     }
 
     // MARK: - Engine capability honesty

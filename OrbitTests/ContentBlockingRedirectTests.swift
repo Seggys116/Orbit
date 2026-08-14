@@ -486,7 +486,7 @@ final class ContentBlockingRedirectTests: XCTestCase {
 
     func testUBlockOriginFiltersAreEnabledByDefault() {
         XCTAssertEqual(FilterListCatalog.defaultEnabledIDs,
-                       ["EasyList", "EasyPrivacy", "uBlock", FilterListCatalog.orbitUnbreakID])
+                       ["EasyList", "EasyPrivacy", "uBlock", "uBlockUnbreak"])
         XCTAssertTrue(FilterListCatalog.descriptor(id: "uBlock")?.isDefaultEnabled == true)
     }
 }
@@ -507,7 +507,7 @@ final class ContentBlockingUBlockListMigrationTests: XCTestCase {
 
         defaults.set(["EasyList", "EasyPrivacy"], forKey: "contentBlocking.enabledLists")
 
-        let expected = ["EasyList", "EasyPrivacy", "uBlock", FilterListCatalog.orbitUnbreakID]
+        let expected = ["EasyList", "EasyPrivacy", "uBlock", "uBlockUnbreak"]
         let migrated = ContentBlockingController(defaults: defaults)
         XCTAssertEqual(migrated.enabledListIDs, Set(expected),
                        "an existing selection must gain the countermeasure list")
@@ -535,7 +535,7 @@ final class ContentBlockingUBlockListMigrationTests: XCTestCase {
         let (defaults, name) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: name) }
 
-        let existing = ["EasyList", "uBlock", FilterListCatalog.orbitUnbreakID]
+        let existing = ["EasyList", "uBlock", "uBlockUnbreak"]
         defaults.set(existing, forKey: "contentBlocking.enabledLists")
         let controller = ContentBlockingController(defaults: defaults)
         XCTAssertEqual(controller.enabledListIDs, Set(existing))
@@ -550,7 +550,7 @@ final class ContentBlockingUBlockListMigrationTests: XCTestCase {
         defaults.set(["EasyList", "uBlock"], forKey: "contentBlocking.enabledLists")
 
         let migrated = ContentBlockingController(defaults: defaults)
-        XCTAssertTrue(migrated.enabledListIDs.contains(FilterListCatalog.orbitUnbreakID),
+        XCTAssertTrue(migrated.enabledListIDs.contains("uBlockUnbreak"),
                       "a profile that predates the unbreak list must still get the site fixes")
 
         defaults.set(["EasyList", "uBlock"], forKey: "contentBlocking.enabledLists")

@@ -94,9 +94,7 @@ ORBIT_APP_TESTS_REUSED_SOURCES = [
 
 # Loose files are only copied into a bundle when they are named here: the scan below adds
 # sources and resource directories, and nothing else.
-APP_RESOURCES = [
-    "Orbit/Resources/ContentBlocking/orbit-unbreak.txt",
-]
+APP_RESOURCES: list[str] = []
 
 TARGETS = {
     "Orbit": {

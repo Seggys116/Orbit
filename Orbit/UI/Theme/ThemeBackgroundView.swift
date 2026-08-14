@@ -11,7 +11,7 @@ struct WindowSlicedThemeBackground: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let window = proxy.bounds(of: .named(OrbitWindowCoordinateSpace.name))
+            let window = Self.windowBounds(proxy)
 
             ThemeBackgroundView(theme: theme, blur: blur)
                 .frame(
@@ -22,6 +22,14 @@ struct WindowSlicedThemeBackground: View {
         }
         .clipped() // the painted gradient is deliberately larger than this view
         .allowsHitTesting(false)
+    }
+
+    private static func windowBounds(_ proxy: GeometryProxy) -> CGRect? {
+        if #available(macOS 15.0, *) {
+            return proxy.bounds(of: .named(OrbitWindowCoordinateSpace.name))
+        }
+        let frame = proxy.frame(in: .named(OrbitWindowCoordinateSpace.name))
+        return frame == .zero ? nil : frame
     }
 }
 
@@ -90,7 +98,11 @@ struct ThemePaintView: View {
             )
         case .mesh:
             if colors.count >= 2 {
-                MeshGradient(width: 3, height: 3, points: meshPoints(seed: theme.meshSeed), colors: meshColors(colors))
+                if #available(macOS 15.0, *) {
+                    MeshGradient(width: 3, height: 3, points: meshPoints(seed: theme.meshSeed), colors: meshColors(colors))
+                } else {
+                    LegacyMeshGradient(colors: colors, stopPositions: theme.stopPositions)
+                }
             } else {
                 LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
             }
@@ -158,6 +170,40 @@ struct ThemePaintView: View {
 
             return Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
         }
+    }
+}
+
+// Layered radial gradients centred on the same stop positions MeshGradient
+// would use, for macOS versions below the one that ships MeshGradient.
+struct LegacyMeshGradient: View {
+    var colors: [Color]
+    var stopPositions: [ThemeStopPosition]?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let radius = max(proxy.size.width, proxy.size.height) * 0.75
+            ZStack {
+                colors[0]
+                ForEach(Array(colors.enumerated()), id: \.offset) { index, color in
+                    RadialGradient(
+                        colors: [color, color.opacity(0)],
+                        center: unitPoint(for: index),
+                        startRadius: 0,
+                        endRadius: radius
+                    )
+                }
+            }
+        }
+    }
+
+    private func unitPoint(for index: Int) -> UnitPoint {
+        if let stopPositions, stopPositions.indices.contains(index) {
+            let stop = stopPositions[index]
+            return UnitPoint(x: stop.x, y: stop.y)
+        }
+        let count = max(colors.count, 1)
+        let angle = Double(index) / Double(count) * 2 * .pi - .pi / 2
+        return UnitPoint(x: 0.5 + cos(angle) * 0.5, y: 0.5 + sin(angle) * 0.5)
     }
 }
 

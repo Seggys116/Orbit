@@ -483,6 +483,21 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsAdBlocker
+
+    func test_settingsAdBlocker() async {
+        OrbitScreenshotFixtures.configure(env)
+        SettingsRouter.shared.selectedPane = .adBlocker
+        let view = ScreenshotSettingsComposition(pane: .adBlocker)
+            .environment(env)
+            .orbitScreenshotModeDragDisabledForTests()
+        await renderAndSave(
+            view,
+            name: "settings-ad-blocker",
+            size: CGSize(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight)
+        )
+    }
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsICloud
 
     func test_settingsICloud() async {
@@ -844,6 +859,7 @@ private struct ScreenshotSettingsComposition: View {
         case .shortcuts: ShortcutsSettingsPane()
         case .extensions: ExtensionsSettingsPane()
         case .icloud: SyncSettingsPane()
+        case .adBlocker: AdBlockerSettingsPane()
         }
     }
 }

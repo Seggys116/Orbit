@@ -14,6 +14,7 @@ public final class ContentBlockingController: ObservableObject {
     @Published public private(set) var allowlistedHosts: Set<String>
     @Published public private(set) var listStates: [String: FilterListState] = [:]
     @Published public private(set) var compileStats = ContentBlockingCompileStats()
+    @Published public private(set) var listCompileStats: [String: ContentBlockingCompileStats] = [:]
     @Published public private(set) var isUpdating = false
     @Published public private(set) var lastUpdatedAt: Date?
     @Published public private(set) var compiledRuleCount = 0
@@ -55,7 +56,7 @@ public final class ContentBlockingController: ObservableObject {
         static let allowlist = "contentBlocking.allowlist"
         static let lastUpdated = "contentBlocking.lastUpdatedAt"
         static let uBlockListMigration = "contentBlocking.enabledLists.didAddUBlockDefault"
-        static let unbreakListMigration = "contentBlocking.enabledLists.didAddUnbreakDefault"
+        static let uBlockUnbreakListMigration = "contentBlocking.enabledLists.didAddUBlockUnbreakDefault"
     }
 
     // MARK: - Init
@@ -87,12 +88,7 @@ public final class ContentBlockingController: ObservableObject {
     ) {
         guard hadPersistedSelection else { return }
         adoptDefault("uBlock", migrationKey: Key.uBlockListMigration, into: &ids, defaults: defaults)
-        adoptDefault(
-            FilterListCatalog.orbitUnbreakID,
-            migrationKey: Key.unbreakListMigration,
-            into: &ids,
-            defaults: defaults
-        )
+        adoptDefault("uBlockUnbreak", migrationKey: Key.uBlockUnbreakListMigration, into: &ids, defaults: defaults)
     }
 
     private static func adoptDefault(
@@ -260,11 +256,12 @@ public final class ContentBlockingController: ObservableObject {
         let ids = enabledListIDs
         let store = self.store
 
-        let built = await Self.buildRuleSet(ids: ids, store: store)
+        let (built, perListStats) = await Self.buildRuleSet(ids: ids, store: store)
 
         blocker.setRuleSet(built)
         compiledRuleCount = built.networkRuleCount
         compileStats = built.stats
+        listCompileStats = perListStats
         Self.logger.info(
             """
             Compiled \(built.networkRuleCount, privacy: .public) network rules \
@@ -285,7 +282,7 @@ public final class ContentBlockingController: ObservableObject {
     private nonisolated static func buildRuleSet(
         ids: Set<String>,
         store: FilterListStore
-    ) async -> ContentBlockerRuleSet {
+    ) async -> (ContentBlockerRuleSet, [String: ContentBlockingCompileStats]) {
         let descriptors = FilterListCatalog.all.filter { ids.contains($0.id) }
 
         let outputs: [String: FilterListParser.Output] = await withTaskGroup(
@@ -308,7 +305,7 @@ public final class ContentBlockingController: ObservableObject {
             guard let output = outputs[descriptor.id] else { continue }
             ruleSet.add(parsed: output, listID: descriptor.id)
         }
-        return ruleSet
+        return (ruleSet, outputs.mapValues(\.stats))
     }
 
     @concurrent
