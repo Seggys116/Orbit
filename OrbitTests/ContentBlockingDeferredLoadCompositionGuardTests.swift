@@ -16,11 +16,22 @@ final class ContentBlockingDeferredLoadCompositionGuardTests: XCTestCase {
             .appendingPathComponent("Orbit/Core/AppEnvironment+PinnedTabs.swift")
     }
 
-    private func commandBarSourceURL() -> URL {
+    private func commandBarDirectoryURL() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("Orbit/UI/CommandBar/CommandBarView.swift")
+            .appendingPathComponent("Orbit/UI/CommandBar")
+    }
+
+    private func commandBarSources() throws -> String {
+        let directory = commandBarDirectoryURL()
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            .filter { $0.hasSuffix(".swift") }
+            .sorted()
+        XCTAssertGreaterThan(names.count, 1, "Found \(names.count) Swift file(s) in \(directory.path). The command bar is more than one file — the path resolution is wrong and every check below would pass vacuously.")
+        return try names
+            .map { try text(at: directory.appendingPathComponent($0)) }
+            .joined(separator: "\n")
     }
 
     private func text(at url: URL) throws -> String {
@@ -98,10 +109,10 @@ final class ContentBlockingDeferredLoadCompositionGuardTests: XCTestCase {
     }
 
     func test_commandBarEditURLNavigatesThroughLoadInTabNotDirectly() throws {
-        let text = try text(at: commandBarSourceURL())
+        let text = try commandBarSources()
         XCTAssertTrue(
             text.contains("env.loadInTab(tabID, url: url)"),
-            "the Cmd+L / edit-URL path must navigate through env.loadInTab(_:url:), not env.webContents[tabID]?.load(url) directly, or a navigation made through this path can be silently undone by a content-blocking deferred load that was already queued."
+            "the Cmd+L / edit-URL path must navigate through env.loadInTab(_:url:), not env.webContents[tabID]?.load(url) directly, or a navigation made through this path can be silently undone by a content-blocking deferred load that was already queued. This reads every Swift file under Orbit/UI/CommandBar, so moving the path between files is fine — removing it is not."
         )
         XCTAssertFalse(
             text.contains("env.webContents[tabID]?.load(url)"),
