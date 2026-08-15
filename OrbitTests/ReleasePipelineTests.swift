@@ -194,6 +194,93 @@ final class ReleasePipelineTests: XCTestCase {
         }
     }
 
+    // MARK: - Passkeys and the provisioning profile
+
+    func testTheBrowserPasskeyEntitlementsShipOnlyWithAProvisioningProfile() throws {
+        let plain = try entitlementsPlist(role: "app", provisioned: false)
+        let provisioned = try entitlementsPlist(role: "app", provisioned: true)
+
+        for key in Self.profileOnlyEntitlements {
+            XCTAssertNil(
+                plain[key],
+                "\(key) is restricted: AMFI kills any process carrying it with no "
+                + "embedded.provisionprofile granting it, so it must never reach the plist on "
+                + "disk that an unprovisioned build signs with"
+            )
+            XCTAssertNotNil(
+                provisioned[key],
+                "\(key) is missing from the provisioned rendering, which is what "
+                + "`Scripts/release sign` signs with when a profile is supplied. Without it "
+                + "AuthenticationServices does not treat Orbit as a browser and every passkey "
+                + "ceremony fails"
+            )
+        }
+
+        XCTAssertEqual(
+            provisioned["com.apple.developer.web-browser.public-key-credential"] as? Bool, true
+        )
+        XCTAssertEqual(
+            provisioned["com.apple.application-identifier"] as? String,
+            "H2X57PJPJ6.com.zak-noble-clarke.Orbit"
+        )
+        XCTAssertEqual(
+            provisioned["com.apple.developer.team-identifier"] as? String, "H2X57PJPJ6"
+        )
+    }
+
+    func testTheKeychainGroupMatchesTheOneTheEngineAsksTheKeychainFor() throws {
+        let provisioned = try entitlementsPlist(role: "app", provisioned: true)
+        let groups = try XCTUnwrap(
+            provisioned["keychain-access-groups"] as? [String],
+            "the browser role must carry keychain-access-groups when provisioned"
+        )
+        let webAuthn = "H2X57PJPJ6.com.zak-noble-clarke.Orbit.webauthn"
+        XCTAssertEqual(
+            groups, [webAuthn],
+            "the browser role must carry exactly the passkey keychain group and nothing else: "
+            + "an unused group is credential surface with no code behind it"
+        )
+
+        let delegate = Self.repoRoot.appendingPathComponent(
+            "Chromium/Embedder/browser/orbit_web_authentication_delegate.cc"
+        )
+        let source = try String(contentsOf: delegate, encoding: .utf8)
+        XCTAssertTrue(
+            source.contains(webAuthn),
+            "the passkeys agent passes its access group to the keychain as a literal string, so "
+            + "it has to be byte for byte the one the entitlement grants. A mismatch fails every "
+            + "passkey silently, at the point the credential is read back rather than written"
+        )
+    }
+
+    func testNoHelperReachesTheKeychainOrTheBrowserEntitlement() throws {
+        for role in ["utility", "renderer", "gpu", "alerts"] {
+            let provisioned = try entitlementsPlist(role: role, provisioned: true)
+            for key in Self.profileOnlyEntitlements {
+                XCTAssertNil(
+                    provisioned[key],
+                    "\(role) must not hold \(key). A helper renders untrusted web content; the "
+                    + "browser process is the only place the relying party origin is checked, "
+                    + "and it is where Chrome runs its Touch ID authenticator for that reason"
+                )
+            }
+        }
+    }
+
+    func testSignRefusesAProvisioningProfileThatIsNotThere() throws {
+        let app = try makeBundle()
+        let missing = try makeScratchDirectory().appendingPathComponent("absent.provisionprofile")
+        let run = try release([
+            "sign", "--adhoc", "--app", app.path, "--profile", missing.path,
+        ])
+        XCTAssertFalse(run.succeeded, run.output)
+        XCTAssertTrue(
+            run.output.contains("no provisioning profile at"),
+            "signing must stop rather than quietly drop the entitlements a profile carries:\n"
+            + run.output
+        )
+    }
+
     // MARK: - Bundle structure validation
 
     func testVerifyAcceptsACorrectlyShapedBundle() throws {
@@ -420,6 +507,24 @@ final class ReleasePipelineTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         scratchDirectories.append(directory)
         return directory
+    }
+
+    private static let profileOnlyEntitlements = [
+        "com.apple.developer.web-browser.public-key-credential",
+        "keychain-access-groups",
+        "com.apple.application-identifier",
+        "com.apple.developer.team-identifier",
+    ]
+
+    private func entitlementsPlist(role: String, provisioned: Bool) throws -> [String: Any] {
+        let run = try release(
+            ["entitlements", "--print", role] + (provisioned ? ["--provisioned"] : [])
+        )
+        XCTAssertTrue(run.succeeded, "entitlements --print \(role) failed:\n\(run.output)")
+        let parsed = try PropertyListSerialization.propertyList(
+            from: Data(run.output.utf8), format: nil
+        ) as? [String: Any]
+        return try XCTUnwrap(parsed, "entitlements --print \(role) did not emit a plist")
     }
 
     private func grantedEntitlements(role: String) throws -> Set<String> {
