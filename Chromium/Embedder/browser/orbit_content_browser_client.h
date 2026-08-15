@@ -26,6 +26,8 @@ class CookieEncryptionProviderImpl;
 
 namespace orbit {
 
+class OrbitWebAuthenticationDelegate;
+
 // Orbit's content::ContentBrowserClient. Only overrides that are security
 // load-bearing per the sandbox/process design are implemented; see Chromium/README.md.
 class OrbitContentBrowserClient : public content::ContentBrowserClient {
@@ -229,6 +231,11 @@ class OrbitContentBrowserClient : public content::ContentBrowserClient {
   std::unique_ptr<content::DevToolsManagerDelegate>
   CreateDevToolsManagerDelegate() override;
 
+  // Base class returns a default WebAuthenticationDelegate whose
+  // GetTouchIdAuthenticatorConfig is nullopt, which disables the platform
+  // authenticator outright; see orbit_web_authentication_delegate.h.
+  content::WebAuthenticationDelegate* GetWebAuthenticationDelegate() override;
+
   // Floating AppKit panel PiP is presented in. Base class returns nullptr,
   // which StartSession dereferences unconditionally, so this must land
   // together with OrbitWebContentsHost::EnterPictureInPicture.
@@ -246,6 +253,8 @@ class OrbitContentBrowserClient : public content::ContentBrowserClient {
   // cookie_encryption_provider. Process-lifetime, like this object.
   std::unique_ptr<os_crypt_async::OSCryptAsync> os_crypt_async_;
   std::unique_ptr<CookieEncryptionProviderImpl> cookie_encryption_provider_;
+
+  std::unique_ptr<OrbitWebAuthenticationDelegate> web_authentication_delegate_;
 };
 
 }  // namespace orbit
