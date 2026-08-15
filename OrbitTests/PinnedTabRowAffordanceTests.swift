@@ -40,8 +40,15 @@ final class PinnedTabRowAffordanceTests: XCTestCase {
 
     private static let rowRenderSize = CGSize(width: 240, height: OrbitMetrics.sidebarRowHeight)
 
+    // Screenshot mode: the row's full-size click catcher is an NSViewRepresentable,
+    // which ImageRenderer paints as an opaque block over everything below it.
     private func renderRow(_ tab: Tab) -> RenderedImage {
-        render(TabRowView(tab: tab, theme: SpaceTheme()).environment(AppEnvironment()), size: Self.rowRenderSize)
+        render(
+            TabRowView(tab: tab, theme: SpaceTheme())
+                .environment(AppEnvironment())
+                .environment(\.orbitScreenshotModeDragDisabled, true),
+            size: Self.rowRenderSize
+        )
     }
 
     private func differingPointCount(_ a: RenderedImage, _ b: RenderedImage) -> Int {

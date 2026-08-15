@@ -6,6 +6,10 @@ import XCTest
 @MainActor
 final class SpaceIconViewRenderTests: XCTestCase {
 
+    // One environment for the whole suite: four separate AppEnvironment.demo
+    // evaluations build four unrelated environments.
+    private lazy var env: AppEnvironment = AppEnvironment.demo
+
     private let background = Color(red: 0.2, green: 0.2, blue: 0.9)
 
     private func renderOnBackground(_ icon: SpaceIcon, size: CGFloat, foreground: Color = .white, canvas: CGFloat = 60) -> RenderedImage {
@@ -187,7 +191,6 @@ final class SpaceIconViewRenderTests: XCTestCase {
     }
 
     func test_spaceTitleRow_emojiIcon_rendersUncroppedInTheRealHeader() {
-        let env = AppEnvironment.demo
         let space = Space(name: "Reading List", icon: "📚", iconIsEmoji: true, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
         let image = render(
@@ -199,7 +202,6 @@ final class SpaceIconViewRenderTests: XCTestCase {
     }
 
     func test_spaceTitleRow_symbolIcon_rendersUncroppedInTheRealHeader() {
-        let env = AppEnvironment.demo
         let space = Space(name: "Systems", icon: "display", iconIsEmoji: false, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
         let image = render(
@@ -213,7 +215,6 @@ final class SpaceIconViewRenderTests: XCTestCase {
     // Both icon kinds in the same header row's own icon slot, stacked into one PNG for a single
     // side-by-side human look — the top row is the emoji case, the bottom the SF Symbol case.
     func test_spaceTitleRow_emojiAndSymbol_sideBySide_forHumanInspection() {
-        let env = AppEnvironment.demo
         let emojiSpace = Space(name: "Reading List", icon: "📚", iconIsEmoji: true, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
         let symbolSpace = Space(name: "Systems", icon: "display", iconIsEmoji: false, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
 
@@ -234,7 +235,6 @@ final class SpaceIconViewRenderTests: XCTestCase {
     // MARK: - End to end: Create Space with nothing picked really renders the dot
 
     func test_aSpaceCreatedWithoutPickingAnIcon_rendersTheDot() throws {
-        let env = AppEnvironment.demo
         let id = try XCTUnwrap(NewSpaceFlowAction.create(
             name: "No Icon Chosen",
             icon: "circle.grid.2x2",
