@@ -12,6 +12,10 @@ enum OrbitMetrics {
     static let sidebarFolderToggleSize: CGFloat = iconFavicon
 
     static let spaceIconEmojiScaleFraction: CGFloat = 0.8
+    // SF Symbols drawn at their own frame size render edge-to-edge with no margin and get
+    // clipped by the hosting layer (see SidebarTopRow's sidebarToggleGlyphScale); this leaves
+    // the same margin so a Space's symbol icon never crops against its container.
+    static let spaceIconSymbolScaleFraction: CGFloat = 0.78
 
     // MARK: Sidebar
 

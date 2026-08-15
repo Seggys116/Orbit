@@ -143,27 +143,27 @@ struct SpaceSwitchingSidebarContainer: View {
             return
         }
 
-        let distanceFraction = finalTranslation / width
-        let velocityFraction = velocity / width
+        let destinationIndex = Self.commitDestinationIndex(
+            finalTranslation: finalTranslation,
+            velocity: velocity,
+            width: width,
+            activeIndex: activeIndex,
+            spaceCount: orderedSpaces.count
+        )
 
-        // -1 = commit next, +1 = commit previous, 0 = spring back.
-        var direction = 0
-        if distanceFraction <= -Self.commitDistanceFraction || velocityFraction <= -Self.commitVelocityFraction {
-            direction = -1
-        } else if distanceFraction >= Self.commitDistanceFraction || velocityFraction >= Self.commitVelocityFraction {
-            direction = 1
-        }
-
-        let destinationIndex = activeIndex - direction
-        let canCommit = direction != 0 && orderedSpaces.indices.contains(destinationIndex)
-
-        if canCommit {
+        if let destinationIndex {
             let destination = orderedSpaces[destinationIndex]
-            let settleTarget: CGFloat = direction < 0 ? -width : width
+            let originID = orderedSpaces[activeIndex].id
+            let settleTarget: CGFloat = destinationIndex > activeIndex ? -width : width
             withAnimation(OrbitMotion.interactive, completionCriteria: .logicallyComplete) {
                 translation = settleTarget
             } completion: {
-                env.selectSpace(destination.id)
+                // A click (e.g. on the bottom pager) made while this settle animation was still
+                // running must win, not be clobbered once the animation catches up — only apply
+                // the swipe's own destination if nothing else already moved the active Space.
+                if Self.shouldApplySwipeDestination(activeSpaceIDAtCompletion: env.activeSpace?.id, originSpaceID: originID) {
+                    env.selectSpace(destination.id)
+                }
                 translation = 0
                 isDragging = false
             }
@@ -174,6 +174,42 @@ struct SpaceSwitchingSidebarContainer: View {
                 isDragging = false
             }
         }
+    }
+
+    // MARK: Gesture end — pure logic (regression-tested directly, no animation/timing involved)
+
+    /// -1 = commit next (index increases), +1 = commit previous (index decreases), 0 = spring back.
+    /// `nil` covers both "spring back" and "no such neighbour Space" — the caller doesn't need to
+    /// tell those apart.
+    static func commitDestinationIndex(
+        finalTranslation: CGFloat,
+        velocity: CGFloat,
+        width: CGFloat,
+        activeIndex: Int,
+        spaceCount: Int
+    ) -> Int? {
+        guard width > 0 else { return nil }
+        let distanceFraction = finalTranslation / width
+        let velocityFraction = velocity / width
+
+        var direction = 0
+        if distanceFraction <= -commitDistanceFraction || velocityFraction <= -commitVelocityFraction {
+            direction = -1
+        } else if distanceFraction >= commitDistanceFraction || velocityFraction >= commitVelocityFraction {
+            direction = 1
+        }
+        guard direction != 0 else { return nil }
+
+        let destinationIndex = activeIndex - direction
+        guard (0..<spaceCount).contains(destinationIndex) else { return nil }
+        return destinationIndex
+    }
+
+    /// Whether a swipe's own destination should still be applied once its settle animation's
+    /// completion runs, or whether something else (most often a click on the bottom pager) already
+    /// moved the active Space in the meantime and must win instead.
+    static func shouldApplySwipeDestination(activeSpaceIDAtCompletion: SpaceID?, originSpaceID: SpaceID) -> Bool {
+        activeSpaceIDAtCompletion == originSpaceID
     }
 
     // MARK: Rubber banding

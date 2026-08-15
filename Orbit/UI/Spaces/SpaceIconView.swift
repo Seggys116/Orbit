@@ -32,9 +32,19 @@ struct SpaceIconView: View {
         case .symbol(let symbol):
             // Falls back to `dot`: `Image(systemName:)` draws nothing for an unresolvable name.
             if OrbitSymbolName.isResolvable(symbol) {
+                // .resizable() + .aspectRatio(.fit), not a fixed .font(size:): some symbols (a display
+                // or tv glyph, for instance) are natively wider than tall, so a point-size scale alone
+                // still overflows a square box on the long axis. Fitting guarantees every symbol's own
+                // aspect ratio stays inside the size x size box the hosting layer clips to.
                 Image(systemName: symbol)
-                    .font(.system(size: size, weight: .semibold))
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .fontWeight(.semibold)
                     .foregroundStyle(foregroundColor)
+                    .frame(
+                        width: size * OrbitMetrics.spaceIconSymbolScaleFraction,
+                        height: size * OrbitMetrics.spaceIconSymbolScaleFraction
+                    )
                     // Every sibling case below frames itself to size x size; without this the glyph's own
                     // tight bounding box (which varies per symbol) becomes what the caller centers, not size.
                     .frame(width: size, height: size, alignment: .center)

@@ -87,7 +87,10 @@ struct LibraryRootView: View {
         ]
     }
 
-    private var showsPreview: Bool { router.selectedSection.supportsPreview }
+    // Gated on an actual selection, not just section capability: with nothing selected there is
+    // nothing to preview, and reserving the pane's width anyway is what pinned the list to a
+    // narrow column with the rest of the window left empty.
+    private var showsPreview: Bool { router.selectedSection.supportsPreview && router.selection != nil }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -113,6 +116,7 @@ struct LibraryRootView: View {
                 } else {
                     ScrollView {
                         LibrarySectionDetailView(section: router.selectedSection, searchQuery: searchQuery)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, LibraryMetrics.contentHorizontalPadding)
                             .padding(.top, 4)
                             .padding(.bottom, 24)
@@ -174,8 +178,10 @@ private struct LibrarySectionDetailView: View {
     }
 }
 
-private struct LibraryBoostsFallbackView: View {
+// internal, not private: ScreenshotLibraryComposition (OrbitAppTests) renders this directly.
+struct LibraryBoostsFallbackView: View {
     @Environment(AppEnvironment.self) private var env
+    @State private var router = LibraryRouter.shared
     var searchQuery: String
 
     private var filtered: [Boost] {
@@ -183,6 +189,10 @@ private struct LibraryBoostsFallbackView: View {
         let query = searchQuery.lowercased()
         return env.boostStore.boosts.filter { $0.name.lowercased().contains(query) || $0.host.lowercased().contains(query) }
     }
+
+    // Only worth spreading into columns once the list isn't squeezed down to make room for the
+    // preview pane (see LibraryRootView.showsPreview).
+    private var isWide: Bool { router.selection == nil }
 
     var body: some View {
         if !filtered.isEmpty {
@@ -193,11 +203,20 @@ private struct LibraryBoostsFallbackView: View {
                             Image(systemName: "bolt.circle")
                                 .font(.system(size: 13))
                                 .foregroundStyle(LibraryPalette.accent)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(boost.name).font(.system(size: 12.5, weight: .medium)).foregroundStyle(LibraryPalette.textPrimary)
-                                Text(boost.host).font(.system(size: 11)).foregroundStyle(LibraryPalette.textSecondary)
+                            if isWide {
+                                Text(boost.name)
+                                    .font(.system(size: 12.5, weight: .medium))
+                                    .foregroundStyle(LibraryPalette.textPrimary)
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                LibraryColumnText(text: boost.host, width: LibraryMetrics.rowMetaColumnWidth)
+                            } else {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(boost.name).font(.system(size: 12.5, weight: .medium)).foregroundStyle(LibraryPalette.textPrimary)
+                                    Text(boost.host).font(.system(size: 11)).foregroundStyle(LibraryPalette.textSecondary)
+                                }
+                                Spacer()
                             }
-                            Spacer()
                             Toggle("", isOn: Binding(
                                 get: { boost.isEnabled },
                                 set: { env.boostStore.setEnabled($0, forBoost: boost.id) }
@@ -209,6 +228,7 @@ private struct LibraryBoostsFallbackView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

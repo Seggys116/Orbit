@@ -21,6 +21,9 @@ struct LibraryEaselsNotesView: View {
 
     var body: some View {
         if !notes.isEmpty || !easels.isEmpty {
+            // Only worth spreading into columns once the list isn't squeezed down to make room
+            // for the preview pane (see LibraryRootView.showsPreview).
+            let isWide = router.selection == nil
             VStack(spacing: LibraryMetrics.rowSpacing) {
                 ForEach(notes) { note in
                     EntryRow(
@@ -28,6 +31,7 @@ struct LibraryEaselsNotesView: View {
                         title: note.title,
                         updatedAt: note.updatedAt,
                         isSelected: router.selection == .note(note.id),
+                        isWide: isWide,
                         select: { router.select(.note(note.id)) },
                         open: { open(url: URL(string: "orbit://note/\(note.id.uuidString)")) }
                     )
@@ -39,12 +43,14 @@ struct LibraryEaselsNotesView: View {
                         subtitle: "\(easel.itemCount) item\(easel.itemCount == 1 ? "" : "s")",
                         updatedAt: easel.updatedAt,
                         isSelected: router.selection == .easel(easel.id),
+                        isWide: isWide,
                         select: { router.select(.easel(easel.id)) },
                         open: { open(url: URL(string: "orbit://easel/\(easel.id.uuidString)")) },
                         exportAsImage: { EaselExporter.presentExportPanel(for: easel.id, store: env.easelStore) }
                     )
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -60,6 +66,7 @@ private struct EntryRow: View {
     var subtitle: String?
     var updatedAt: Date
     var isSelected: Bool
+    var isWide: Bool
     var select: () -> Void
     var open: () -> Void
     var exportAsImage: (() -> Void)?
@@ -85,23 +92,34 @@ private struct EntryRow: View {
                     .foregroundStyle(LibraryPalette.accent)
                     .frame(width: LibraryMetrics.rowIconSize, height: LibraryMetrics.rowIconSize)
 
-                VStack(alignment: .leading, spacing: 3) {
+                if isWide {
                     Text(title)
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(LibraryPalette.textPrimary)
                         .lineLimit(1)
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 11))
-                            .foregroundStyle(LibraryPalette.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    LibraryColumnText(text: subtitle ?? "", width: LibraryMetrics.rowSecondaryColumnWidth)
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(LibraryPalette.textPrimary)
+                            .lineLimit(1)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.system(size: 11))
+                                .foregroundStyle(LibraryPalette.textSecondary)
+                        }
                     }
-                }
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
+                }
 
                 Text(updatedAt.formatted(date: .abbreviated, time: .omitted))
                     .font(.system(size: 11))
                     .foregroundStyle(LibraryPalette.textTertiary)
+                    .lineLimit(1)
+                    .frame(width: isWide ? LibraryMetrics.rowDateColumnWidth + 30 : nil, alignment: .trailing)
             }
         }
     }

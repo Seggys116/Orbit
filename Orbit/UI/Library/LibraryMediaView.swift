@@ -25,6 +25,7 @@ struct LibraryMediaView: View {
                     MediaRow(tab: tab, state: state)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -39,6 +40,14 @@ private struct MediaRow: View {
         router.selection == .media(tab.id)
     }
 
+    // Only worth spreading into columns once the list isn't squeezed down to make room for the
+    // preview pane (see LibraryRootView.showsPreview).
+    private var isWide: Bool { router.selection == nil }
+
+    private var subtitleText: String {
+        state.nowPlayingArtist ?? (tab.url.host() ?? tab.url.absoluteString)
+    }
+
     var body: some View {
         LibraryRowCard(isSelected: isSelected) {
             HStack(spacing: 10) {
@@ -47,15 +56,24 @@ private struct MediaRow: View {
                     .foregroundStyle(LibraryPalette.accent)
                     .frame(width: LibraryMetrics.rowIconSize, height: LibraryMetrics.rowIconSize)
 
-                VStack(alignment: .leading, spacing: 3) {
+                if isWide {
                     Text(state.nowPlayingTitle ?? tab.displayTitle)
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(LibraryPalette.textPrimary)
                         .lineLimit(1)
-                    Text(state.nowPlayingArtist ?? (tab.url.host() ?? tab.url.absoluteString))
-                        .font(.system(size: 11))
-                        .foregroundStyle(LibraryPalette.textSecondary)
-                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    LibraryColumnText(text: subtitleText, width: LibraryMetrics.rowMetaColumnWidth)
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(state.nowPlayingTitle ?? tab.displayTitle)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(LibraryPalette.textPrimary)
+                            .lineLimit(1)
+                        Text(subtitleText)
+                            .font(.system(size: 11))
+                            .foregroundStyle(LibraryPalette.textSecondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: 8)

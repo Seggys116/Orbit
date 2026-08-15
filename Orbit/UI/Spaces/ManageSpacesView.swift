@@ -28,6 +28,8 @@ enum ManageSpacesMetrics {
     static let headerPadding: CGFloat = 10
     static let footerHeight: CGFloat = 34
     static let addButtonDiameter: CGFloat = 32
+    // Same per-depth indent the sidebar and LibraryArchivedTabsView use for folder nesting.
+    static let nodeIndentPerDepth: CGFloat = OrbitMetrics.sidebarIndentPerDepth
 }
 
 struct ManageSpacesColumnsView: View {
@@ -106,15 +108,16 @@ struct ManageSpacesColumnsView: View {
 
             columnScroller {
                 VStack(alignment: .leading, spacing: 2) {
-                    let pinned = env.pinnedNodes(in: space.id).flatMap(\.allTabIDs)
+                    // The real pinned tree, not env.pinnedNodes(...).flatMap(\.allTabIDs): flattening
+                    // spilled every tab inside a folder into the same list as the loose ones, losing
+                    // the folder entirely. ManageSpacesNodeRow renders the tree as-is instead.
+                    let pinnedNodes = env.pinnedNodes(in: space.id)
                     let today = env.todayTabs(in: space.id).map(\.id)
 
-                    ForEach(pinned, id: \.self) { tabID in
-                        if let tab = env.tab(tabID) {
-                            ManageSpacesTabRow(tab: tab, originSpaceID: space.id)
-                        }
+                    ForEach(pinnedNodes, id: \.id) { node in
+                        ManageSpacesNodeRow(node: node, originSpaceID: space.id, depth: 0)
                     }
-                    if !pinned.isEmpty || !today.isEmpty {
+                    if !pinnedNodes.isEmpty || !today.isEmpty {
                         todayDivider(for: space.id)
                     }
                     ForEach(today, id: \.self) { tabID in
@@ -406,6 +409,115 @@ private struct ManageSpacesColumnFooter: View {
         let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { env.renameSpace(space.id, to: trimmed) }
         isRenaming = false
+    }
+}
+
+// MARK: - Pinned tree (folders + tabs)
+//
+// Renders env.pinnedNodes(in:) as the tree it actually is, instead of flattening it. Deliberately
+// self-contained, mirroring LibraryArchivedTabsView's ArchivedFolderRow rather than SidebarNodeRow:
+// expand/collapse is local @State here, not env.toggleFolderExpanded(folder.id, in:) — this column
+// is a preview surface, not the sidebar, and must not mutate the real Folder.isExpanded (another
+// agent hit exactly that coupling trap building the Archive view's own tree and had to back it out
+// into local rows). For the same reason there is no folder-level .draggable here: only individual
+// tabs (ManageSpacesTabRow, reused unchanged at every depth) can be dragged to another Space's
+// column, exactly as before this file rendered a tree at all.
+
+private struct ManageSpacesNodeRow: View {
+    var node: SidebarNode
+    var originSpaceID: SpaceID
+    var depth: Int
+
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        switch node {
+        case .tab(let tabID):
+            if let tab = env.tab(tabID) {
+                ManageSpacesTabRow(tab: tab, originSpaceID: originSpaceID)
+                    .padding(.leading, CGFloat(depth) * ManageSpacesMetrics.nodeIndentPerDepth)
+            }
+        case .folder(let folder):
+            ManageSpacesFolderRow(folder: folder, originSpaceID: originSpaceID, depth: depth)
+        }
+    }
+}
+
+// A click here toggles this row's own local expand/collapse only — it neither activates the
+// folder's tabs nor selects the Space (the column's own background .onTapGesture does that; a
+// Button here claims the tap first, which is the deliberate, existing behaviour ArchivedFolderRow
+// already relies on).
+private struct ManageSpacesFolderRow: View {
+    var folder: Folder
+    var originSpaceID: SpaceID
+    var depth: Int
+
+    @State private var isExpanded: Bool
+
+    init(folder: Folder, originSpaceID: SpaceID, depth: Int) {
+        self.folder = folder
+        self.originSpaceID = originSpaceID
+        self.depth = depth
+        _isExpanded = State(initialValue: folder.isExpanded)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(LibraryPalette.textTertiary)
+                        .frame(width: 10, height: 10)
+                    folderGlyph
+                    Text(folder.name)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(LibraryPalette.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    // Same TabRowView.swift PinnedFolderRowView.trailingControls model: children.count,
+                    // an immediate-child count (tabs and subfolders each count as one), not a recursive
+                    // tab total — so this row reads identically to the folder's own sidebar row.
+                    Text("\(folder.children.count)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryPalette.textTertiary)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.001)))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, CGFloat(depth) * ManageSpacesMetrics.nodeIndentPerDepth)
+
+            if isExpanded {
+                ForEach(folder.children, id: \.id) { child in
+                    ManageSpacesNodeRow(node: child, originSpaceID: originSpaceID, depth: depth + 1)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var folderGlyph: some View {
+        if let icon = folder.icon, !icon.isEmpty, folder.iconIsEmoji || OrbitSymbolName.isResolvable(icon) {
+            if folder.iconIsEmoji {
+                Text(icon).font(.system(size: 12))
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(LibraryPalette.textSecondary)
+                    .frame(width: OrbitMetrics.iconFavicon, height: OrbitMetrics.iconFavicon)
+            }
+        } else {
+            Image(systemName: "folder")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(LibraryPalette.textSecondary)
+                .frame(width: OrbitMetrics.iconFavicon, height: OrbitMetrics.iconFavicon)
+        }
     }
 }
 

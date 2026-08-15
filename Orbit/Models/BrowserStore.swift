@@ -9,10 +9,21 @@ public final class BrowserStore {
 
     public internal(set) var state: OrbitState {
         didSet {
+            archivedTabsCache = [:]
             recordActiveTabTransitions(from: oldValue)
             scheduleAutosave()
         }
     }
+
+    // MARK: - archivedTabs(in:) cache
+    //
+    // `state` is the one property every mutation anywhere in the app (archiving, restoring, the
+    // auto-archive sweep, iCloud sync) passes through, so invalidating here on its didSet is the
+    // only chokepoint that can't be missed by a call site this cache doesn't know about. Filtering
+    // and sorting state.tabs.values measured at tens of milliseconds with a few thousand archived
+    // tabs, and the Library window reads it more than once per redraw (badge count, then list).
+    @ObservationIgnored
+    var archivedTabsCache: [SpaceID?: [Tab]] = [:]
 
     // MARK: - Recently closed (session-only; not persisted)
 

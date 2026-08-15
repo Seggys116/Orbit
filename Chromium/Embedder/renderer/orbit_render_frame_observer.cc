@@ -11,6 +11,7 @@
 #include "gin/converter.h"
 #include "gin/function_template.h"
 #include "orbit/common/orbit_match_pattern.h"
+#include "orbit_load_times_bindings.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/public/web/web_document.h"
@@ -84,6 +85,15 @@ void OrbitRenderFrameObserver::HandlePostMessage(const std::string& channel,
 
 void OrbitRenderFrameObserver::DidClearWindowObject() {
   RunDocumentStartScripts();
+}
+
+// Chrome installs these from DidCreateScriptContext, not DidClearWindowObject:
+// the window object is cleared before the context is usable, and touching V8
+// there takes the renderer down.
+void OrbitRenderFrameObserver::DidCreateScriptContext(
+    v8::Local<v8::Context> context,
+    int32_t world_id) {
+  InstallLoadTimesBindings(context);
 }
 
 void OrbitRenderFrameObserver::RunDocumentStartScripts() {

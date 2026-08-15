@@ -246,6 +246,8 @@ source_set("orbit_lib") {
     "renderer/orbit_extensions_renderer_api_provider.h",
     "renderer/orbit_extensions_renderer_client.cc",
     "renderer/orbit_extensions_renderer_client.h",
+    "renderer/orbit_load_times_bindings.cc",
+    "renderer/orbit_load_times_bindings.h",
     "renderer/orbit_render_frame_observer.cc",
     "renderer/orbit_render_frame_observer.h",
     "renderer/orbit_tabs_hooks_delegate.cc",

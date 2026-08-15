@@ -246,8 +246,18 @@ final class SidebarRenderTests: XCTestCase {
         var titledTab = hostOnlyTab
         titledTab.title = "Google"
 
-        let hostRender = render(TabRowView(tab: hostOnlyTab, theme: theme).environment(env), size: rowSize)
-        let titledRender = render(TabRowView(tab: titledTab, theme: theme).environment(env), size: rowSize)
+        // orbitScreenshotModeDragDisabled: ImageRenderer paints a corrupted block over an
+        // NSViewRepresentable click catcher it can't flatten (see ToolbarHoverHighlightTests.swift's
+        // own note) — TabRowView's full-row activation catcher is exactly that, and without this flag
+        // its own block dominates boundingBoxOfContent regardless of the title text this test measures.
+        let hostRender = render(
+            TabRowView(tab: hostOnlyTab, theme: theme).environment(env).environment(\.orbitScreenshotModeDragDisabled, true),
+            size: rowSize
+        )
+        let titledRender = render(
+            TabRowView(tab: titledTab, theme: theme).environment(env).environment(\.orbitScreenshotModeDragDisabled, true),
+            size: rowSize
+        )
 
         guard let hostBox = hostRender.boundingBoxOfContent(tolerance: 0.03),
               let titledBox = titledRender.boundingBoxOfContent(tolerance: 0.03) else {

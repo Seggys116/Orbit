@@ -443,6 +443,139 @@ final class CommandBarRankingTests: XCTestCase {
         XCTAssertEqual(CommandBarRelativeTime.string(from: now.addingTimeInterval(-3600), relativeTo: now), "1 hour ago")
     }
 
+    // MARK: - Partial domains: the known-TLD gate (Chromium's has_known_tld, autocomplete_input.cc)
+
+    func test_detectTypedURL_knownTLDTable() {
+        let cases: [(input: String, isURL: Bool, reason: String)] = [
+            ("google.c", false, "\".c\" is not a registered TLD; this is the reported defect."),
+            ("google.co", true, "\".co\" is a real ccTLD (Colombia), unlike \".c\"."),
+            ("example.com", true, "\".com\" is a known TLD."),
+            ("sub.example.co.uk/path", true, "\".uk\" is a known ccTLD regardless of subdomain depth."),
+            ("java.awt.event", false, "\"event\" is not a TLD; this is Chromium's own textbook false-positive to avoid."),
+            ("weather", false, "No dot at all."),
+            ("192.168.1.1", true, "A fully-dotted IPv4 quad is navigable independent of the known-TLD table."),
+            ("999.999.999.999", false, "Digits that fail the 0–255 octet range are not a real IP, and \"999\" is not a TLD either."),
+        ]
+        for testCase in cases {
+            let detected = CommandBarEngine.detectTypedURL(testCase.input) != nil
+            XCTAssertEqual(detected, testCase.isURL, "\(testCase.input): \(testCase.reason)")
+        }
+    }
+
+    func test_results_partialDomainWithTypedHistoryMatchNavigatesToTheFullDomainNotTheLiteralText() {
+        let env = AppEnvironment()
+        let profile = Profile(name: "Personal")
+        env.state.profiles = [profile]
+        let space = Space(name: "Personal", profileID: profile.id)
+        env.state.spaces = [space]
+        env.state.activeSpaceID = space.id
+
+        env.historyEntries = [
+            HistoryEntry(
+                url: URL(string: "https://google.com")!,
+                title: "Google",
+                visitedAt: Date().addingTimeInterval(-3600),
+                visitCount: 12,
+                profileID: profile.id,
+                wasTyped: true
+            ),
+        ]
+
+        let results = CommandBarEngine.results(query: "google.c", mode: .newTab, env: env, suggestions: [])
+
+        guard let top = results.first else {
+            XCTFail("\"google.c\" produced no rows at all.")
+            return
+        }
+        guard case .navigate(let url) = top.kind.activationIntent else {
+            XCTFail("Expected the top (and Enter-activated) row for \"google.c\" to navigate, got \(top.kind.activationIntent).")
+            return
+        }
+        XCTAssertEqual(url.host(), "google.com", "\"google.c\" with google.com in history must complete to google.com, not stop at the literal typed text.")
+        XCTAssertNotEqual(url.absoluteString, "https://google.c", "Must not navigate to the bogus, never-visited \"google.c\" domain.")
+    }
+
+    func test_results_partialDomainWithNoHistoryFallsBackToSearchingTheLiteralText() {
+        let env = AppEnvironment()
+        let profile = Profile(name: "Personal")
+        env.state.profiles = [profile]
+        let space = Space(name: "Personal", profileID: profile.id)
+        env.state.spaces = [space]
+        env.state.activeSpaceID = space.id
+
+        let results = CommandBarEngine.results(query: "google.c", mode: .newTab, env: env, suggestions: [])
+
+        guard case .searchSuggestion(let text) = results.first?.kind else {
+            XCTFail("With no history for \"google.c\", the documented choice is to search the literal text, not guess a destination; got \(String(describing: results.first?.kind)).")
+            return
+        }
+        XCTAssertEqual(text, "google.c")
+    }
+
+    func test_results_multiWordPhraseAlwaysSearchesEvenWithADomainLikeWord() {
+        let env = AppEnvironment()
+        let profile = Profile(name: "Personal")
+        env.state.profiles = [profile]
+        let space = Space(name: "Personal", profileID: profile.id)
+        env.state.spaces = [space]
+        env.state.activeSpaceID = space.id
+
+        let results = CommandBarEngine.results(query: "visit example.com today", mode: .newTab, env: env, suggestions: [])
+        guard case .searchGoogle = results.first?.kind.activationIntent else {
+            XCTFail("A multi-word query must search, even when a word inside it looks like a domain; got \(String(describing: results.first?.kind)).")
+            return
+        }
+    }
+
+    func test_results_localhostWithPortStillNavigates_endToEnd() {
+        let env = AppEnvironment()
+        let profile = Profile(name: "Personal")
+        env.state.profiles = [profile]
+        let space = Space(name: "Personal", profileID: profile.id)
+        env.state.spaces = [space]
+        env.state.activeSpaceID = space.id
+
+        let results = CommandBarEngine.results(query: "localhost:3000", mode: .newTab, env: env, suggestions: [])
+        guard case .navigate(let url) = results.first?.kind.activationIntent else {
+            XCTFail("Expected \"localhost:3000\" to navigate, got \(String(describing: results.first?.kind)).")
+            return
+        }
+        XCTAssertEqual(url.absoluteString, "http://localhost:3000")
+    }
+
+    // The row CommandBarView highlights (selectedIndex, reset to 0 on every refresh) is always
+    // results[0]; commit(instant:) always activates results[selectedIndex]. Asserting against
+    // results.first?.kind.activationIntent is therefore exactly "what Enter does" for these cases —
+    // there is no second code path that could disagree with the highlighted row.
+    func test_results_topRowIsWhatEnterActivates_forThePartialDomainCases() {
+        let withHistory = AppEnvironment()
+        let profile = Profile(name: "Personal")
+        withHistory.state.profiles = [profile]
+        let space = Space(name: "Personal", profileID: profile.id)
+        withHistory.state.spaces = [space]
+        withHistory.state.activeSpaceID = space.id
+        withHistory.historyEntries = [
+            HistoryEntry(url: URL(string: "https://google.com")!, title: "Google", visitCount: 5, profileID: profile.id, wasTyped: true),
+        ]
+        let withHistoryResults = CommandBarEngine.results(query: "google.c", mode: .newTab, env: withHistory, suggestions: [])
+        guard case .navigate(let url) = withHistoryResults.first?.kind.activationIntent else {
+            XCTFail("Expected the highlighted row to navigate; got \(String(describing: withHistoryResults.first?.kind)).")
+            return
+        }
+        XCTAssertEqual(url.host(), "google.com")
+
+        let withoutHistory = AppEnvironment()
+        withoutHistory.state.profiles = [profile]
+        withoutHistory.state.spaces = [space]
+        withoutHistory.state.activeSpaceID = space.id
+        let withoutHistoryResults = CommandBarEngine.results(query: "google.c", mode: .newTab, env: withoutHistory, suggestions: [])
+        guard case .searchGoogle(let text) = withoutHistoryResults.first?.kind.activationIntent else {
+            XCTFail("Expected the highlighted row to search; got \(String(describing: withoutHistoryResults.first?.kind)).")
+            return
+        }
+        XCTAssertEqual(text, "google.c")
+    }
+
     func test_results_historyRowSubtitleIsRelativeTime() {
         let env = AppEnvironment()
         let profile = Profile(name: "Personal")
@@ -459,5 +592,25 @@ final class CommandBarRankingTests: XCTestCase {
         let results = CommandBarEngine.results(query: "example", mode: .newTab, env: env, suggestions: [])
         let historyResult = results.first { if case .history = $0.kind { return true }; return false }
         XCTAssertEqual(historyResult?.subtitle, "2 minutes ago", "refs/reference/arc-bookmarks-search.png shows a relative-time secondary line under a history result, not the host.")
+    }
+
+    // The table is hand-curated, so it rots: a real TLD missing from it silently
+    // turns a domain the user typed into a search. These are the ones whose
+    // absence would be most visible.
+    func test_knownTLDs_coverTheTLDsPeopleActuallyType() {
+        let mustKnow = [
+            "com", "org", "net", "edu", "gov", "io", "co", "uk", "de", "fr", "jp", "au", "ca",
+            "dev", "app", "ai", "me", "tv", "xyz", "sh", "gg", "zip", "mov", "blog", "design",
+            "cloud", "site", "online", "store", "tech", "news", "chat", "art", "click",
+        ]
+        let missing = mustKnow.filter { !KnownTLDs.isKnown(tld: $0) }
+        XCTAssertEqual(
+            missing, [],
+            "These are real, registered TLDs absent from KnownTLDs, so a domain ending in one is treated as a search instead of a navigation: \(missing)"
+        )
+        XCTAssertGreaterThan(
+            KnownTLDs.count, 400,
+            "KnownTLDs holds only \(KnownTLDs.count) entries — it has been gutted, and most typed domains will fall through to search."
+        )
     }
 }

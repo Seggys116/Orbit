@@ -45,7 +45,14 @@ struct SpaceSwitcherPagerView: View {
             Capsule()
                 .fill(Color.clear)
                 .contentShape(Capsule())
-                .gesture(mouseDragGesture)
+                // .simultaneousGesture, not .gesture: a plain .gesture() here competed for
+                // exclusive recognition against each dot's own Button tap, and a click with even
+                // a few points of ordinary pointer jitter could lose that race to this DragGesture
+                // — the click was then silently swallowed (translation never reached
+                // mouseDragCommitThreshold, so nothing happened) and the user had to click again.
+                // Simultaneous recognition lets both live side by side: a real drag still pages
+                // through Spaces, but a tap on a dot always reaches that dot's own Button.
+                .simultaneousGesture(mouseDragGesture)
         )
         .offset(x: mouseDragOffset * 0.3)
         .popover(isPresented: $isEditPresented) {
@@ -81,26 +88,32 @@ struct SpaceSwitcherPagerView: View {
         let isActive = space.id == env.activeSpace?.id
         let highlight = highlightIntensity(forIndex: index, isActive: isActive)
 
-        let base = Button {
-            withAnimation(OrbitMotion.dramatic) { env.selectSpace(space.id) }
-        } label: {
-            iconView(for: space, isActive: isActive, highlight: highlight)
-                .frame(width: OrbitMetrics.spacePagerDotSize * sizeScale, height: OrbitMetrics.spacePagerDotSize * sizeScale)
-                .background(
-                    // Same fill/opacity TabRowView and SettingsNavRow use for their own selected row,
-                    // so the active Space reads with Orbit's existing selection language rather than a new one.
-                    RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius, style: .continuous)
-                        .fill(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity * highlight))
-                )
-        }
-        .buttonStyle(.plain)
-        .orbitHoverHighlight(
-            fill: theme.readableForeground.opacity(OrbitMetrics.sidebarHoverRowOpacity),
-            cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius
-        )
-        .orbitTooltip(space.name)
-        .scaleEffect(tabDropTargetID == space.id ? 1.18 : 1)
-        .animation(OrbitMotion.quick, value: tabDropTargetID)
+        // Plain .onTapGesture, not Button: a Button's own tap gesture raced .onDrag below for an
+        // ordinary click's few points of pointer jitter and lost, silently swallowing the click
+        // (measured directly in SpacePagerClickReliabilityTests). FavoritesGridView hit the exact
+        // same failure with the exact same combination and documents the same fix at its own
+        // sidebarDragSource call sites — .onTapGesture is what actually coexists with a drag source.
+        let base = iconView(for: space, isActive: isActive, highlight: highlight)
+            .frame(width: OrbitMetrics.spacePagerDotSize * sizeScale, height: OrbitMetrics.spacePagerDotSize * sizeScale)
+            .background(
+                // Same fill/opacity TabRowView and SettingsNavRow use for their own selected row,
+                // so the active Space reads with Orbit's existing selection language rather than a new one.
+                RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius, style: .continuous)
+                    .fill(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity * highlight))
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(OrbitMotion.dramatic) { env.selectSpace(space.id) }
+            }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(space.name)
+            .orbitHoverHighlight(
+                fill: theme.readableForeground.opacity(OrbitMetrics.sidebarHoverRowOpacity),
+                cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius
+            )
+            .orbitTooltip(space.name)
+            .scaleEffect(tabDropTargetID == space.id ? 1.18 : 1)
+            .animation(OrbitMotion.quick, value: tabDropTargetID)
 
         return Group {
             #if DEBUG
@@ -117,7 +130,15 @@ struct SpaceSwitcherPagerView: View {
 
     private func decoratedDot(_ base: some View, space: Space, index: Int) -> some View {
         base
-            .draggable(SpacePagerDragPayload(spaceID: space.id)) {
+            // .onDrag, not .draggable: see SidebarDragDrop.swift's own header — .draggable's
+            // gesture recognizer competed with this dot's Button tap for an ordinary click's few
+            // points of pointer jitter and silently swallowed it (measured directly in
+            // SpacePagerClickReliabilityTests). .onDrag is the pattern already proven elsewhere in
+            // this sidebar to coexist with a reliable click; .dropDestination(for:) still decodes
+            // whatever it hands the pasteboard, so the drop side below is unchanged.
+            .onDrag {
+                Self.itemProvider(for: SpacePagerDragPayload(spaceID: space.id))
+            } preview: {
                 iconView(for: space, isActive: true, highlight: 1)
                     .padding(6)
             }
@@ -210,8 +231,14 @@ struct SpaceSwitcherPagerView: View {
 
     // MARK: - Mouse click-and-drag swipe
 
+    // minimumDistance 24, not 6: onChanged below applies a real .offset() to the whole row the
+    // instant this gesture recognizes, and that live layout shift — not just gesture-priority —
+    // is what broke a dot's own Button tap on an ordinary click carrying a few points of pointer
+    // jitter (measured empirically at ~7pt; see SpacePagerClickReliabilityTests). 24pt is comfortably
+    // past any accidental click jitter but well short of mouseDragCommitThreshold (46), so a real
+    // click-and-drag swipe still recognizes immediately once the user actually starts dragging.
     private var mouseDragGesture: some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .local)
+        DragGesture(minimumDistance: 24, coordinateSpace: .local)
             .onChanged { value in
                 mouseDragOffset = value.translation.width
             }
@@ -224,6 +251,18 @@ struct SpaceSwitcherPagerView: View {
                     _ = Self.commitMouseDrag(translation: translation, in: env)
                 }
             }
+    }
+
+    // .all visibility, deliberately, matching SidebarDragSession.itemProvider(for:): narrowing
+    // this risks the type not being advertised on the pasteboard at all, silently disabling drops.
+    static func itemProvider(for payload: SpacePagerDragPayload) -> NSItemProvider {
+        let provider = NSItemProvider()
+        let data = (try? JSONEncoder().encode(payload)) ?? Data()
+        provider.registerDataRepresentation(for: .orbitSpacePagerPayload, visibility: .all) { completion in
+            completion(data, nil)
+            return nil
+        }
+        return provider
     }
 
     @discardableResult

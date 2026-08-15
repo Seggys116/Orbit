@@ -34,9 +34,12 @@ public extension BrowserStore {
     }
 
     func archivedTabs(in spaceID: SpaceID? = nil) -> [Tab] {
-        state.tabs.values
+        if let cached = archivedTabsCache[spaceID] { return cached }
+        let result = state.tabs.values
             .filter { $0.section == .archived && (spaceID == nil || $0.spaceID == spaceID) }
             .sorted { ($0.archivedAt ?? .distantPast) > ($1.archivedAt ?? .distantPast) }
+        archivedTabsCache[spaceID] = result
+        return result
     }
 
     // MARK: - Opening

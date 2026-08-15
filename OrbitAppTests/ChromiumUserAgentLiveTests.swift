@@ -237,4 +237,43 @@ final class ChromiumUserAgentLiveTests: XCTestCase {
     private static func describe(_ brands: Set<BrandVersion>) -> String {
         brands.map { "\($0.brand);v=\"\($0.version)\"" }.sorted().joined(separator: ", ")
     }
+
+    // MARK: - Browser identity surface
+
+    // Real Chrome always populates window.chrome (loadTimes/csi) from
+    // //chrome's renderer observer, and ships a PDF viewer plugin. Orbit is a
+    // //content-tier embedder, so it may have neither -- both are long-standing
+    // "is this a real browser" signals that sites, including Google's sign-in, read.
+    func testBrowserIdentitySurfaceMatchesChrome() throws {
+        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
+        let readings = try LiveChromiumEngineHost.runLive { () -> [String: String] in
+            let contents = try await LiveChromiumEngineHost.makeContents()
+            defer { contents.close() }
+            var out: [String: String] = [:]
+            for (key, expression) in [
+                ("typeofChrome", "typeof window.chrome"),
+                ("chromeKeys", "window.chrome ? Object.keys(window.chrome).sort().join(',') : '<none>'"),
+                ("hasLoadTimes", "String(!!(window.chrome && window.chrome.loadTimes))"),
+                ("hasCsi", "String(!!(window.chrome && window.chrome.csi))"),
+                ("pluginCount", "String(navigator.plugins.length)"),
+                ("mimeTypeCount", "String(navigator.mimeTypes.length)"),
+                ("webdriver", "String(navigator.webdriver)"),
+            ] {
+                out[key] = try await contents.evaluateJavaScript(expression) as? String ?? "<nil>"
+            }
+            return out
+        }
+
+        for (key, value) in readings.sorted(by: { $0.key < $1.key }) {
+            print("ORBIT-IDENTITY \(key)=\(value)")
+        }
+
+        XCTAssertEqual(readings["webdriver"], "false", "navigator.webdriver must not advertise automation")
+        XCTAssertEqual(
+            readings["typeofChrome"], "object",
+            "window.chrome is absent. Every Chromium-derived browser exposes it, and its absence is a long-standing signal that a client is not a real browser."
+        )
+        XCTAssertEqual(readings["hasLoadTimes"], "true", "window.chrome.loadTimes is missing")
+        XCTAssertEqual(readings["hasCsi"], "true", "window.chrome.csi is missing")
+    }
 }

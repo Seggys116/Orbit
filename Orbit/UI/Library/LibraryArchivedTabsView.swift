@@ -20,18 +20,23 @@ struct LibraryArchivedTabsView: View {
 
     var body: some View {
         if !groups.isEmpty {
-            VStack(alignment: .leading, spacing: LibraryMetrics.dateGroupSpacing) {
+            // Lazy, not VStack: with a few thousand archived tabs a plain VStack built and laid
+            // out every row up front, on open, before any of it was scrolled into view.
+            LazyVStack(alignment: .leading, spacing: LibraryMetrics.dateGroupSpacing) {
                 ForEach(groups) { group in
                     VStack(alignment: .leading, spacing: 6) {
                         LibraryDateSectionHeader(title: group.title)
-                        VStack(spacing: LibraryMetrics.rowSpacing) {
+                        LazyVStack(spacing: LibraryMetrics.rowSpacing) {
                             ForEach(ArchivedTabTreeBuilder.build(from: group.items)) { node in
                                 ArchivedTreeNodeRow(node: node, depth: 0)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -84,6 +89,7 @@ private struct ArchivedFolderRow: View {
                         .foregroundStyle(LibraryPalette.textTertiary)
                         .frame(width: 10, height: 10)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, LibraryMetrics.rowHorizontalPadding)
                 .padding(.vertical, LibraryMetrics.rowVerticalPadding)
                 .background(
@@ -137,6 +143,16 @@ private struct ArchivedTabRow: View {
         router.selection == .archivedTab(tab.id)
     }
 
+    // Only worth spreading into columns once the list isn't squeezed down to make room for the
+    // preview pane (see LibraryRootView.showsPreview).
+    private var isWide: Bool { router.selection == nil }
+
+    private var hostText: String { tab.url.host() ?? tab.url.absoluteString }
+
+    private var archivedTimeText: String {
+        (tab.archivedAt ?? tab.lastAccessedAt).formatted(date: .omitted, time: .shortened)
+    }
+
     var body: some View {
         LibraryRowCard(isSelected: isSelected) {
             HStack(spacing: 10) {
@@ -144,21 +160,32 @@ private struct ArchivedTabRow: View {
                     .frame(width: 16, height: 16)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
 
-                VStack(alignment: .leading, spacing: 3) {
+                if isWide {
                     Text(tab.displayTitle)
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(LibraryPalette.textPrimary)
                         .lineLimit(1)
-                    HStack(spacing: 4) {
-                        Text(tab.url.host() ?? tab.url.absoluteString)
-                        if let spaceName {
-                            Text("·")
-                            Text(spaceName)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    LibraryColumnText(text: hostText, width: LibraryMetrics.rowMetaColumnWidth)
+                    LibraryColumnText(text: spaceName ?? "", width: LibraryMetrics.rowSecondaryColumnWidth)
+                    LibraryColumnText(text: archivedTimeText, width: LibraryMetrics.rowDateColumnWidth, alignment: .trailing, color: LibraryPalette.textTertiary)
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(tab.displayTitle)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(LibraryPalette.textPrimary)
+                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text(hostText)
+                            if let spaceName {
+                                Text("·")
+                                Text(spaceName)
+                            }
                         }
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryPalette.textSecondary)
+                        .lineLimit(1)
                     }
-                    .font(.system(size: 11))
-                    .foregroundStyle(LibraryPalette.textSecondary)
-                    .lineLimit(1)
                 }
 
                 Spacer(minLength: 8)

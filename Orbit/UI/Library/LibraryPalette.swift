@@ -50,6 +50,12 @@ enum LibraryMetrics {
 
     static let actionButtonSize: CGFloat = 22
 
+    // MARK: Wide-row columns (used once the list has the full window to itself, i.e. no preview selection)
+
+    static let rowMetaColumnWidth: CGFloat = 160
+    static let rowSecondaryColumnWidth: CGFloat = 120
+    static let rowDateColumnWidth: CGFloat = 76
+
     // MARK: Three-column layout (rail + list + preview)
 
     static let listColumnWidth: CGFloat = 346

@@ -59,6 +59,70 @@ final class SpaceIconViewRenderTests: XCTestCase {
         XCTAssertFalse(centre.isApproximately(backgroundColor), "an SF Symbol icon drew nothing")
     }
 
+    // MARK: - Clipping (Defect 1: the sidebar header's Space icon was cropped)
+
+    // Mirrors the sidebar header's own container exactly: a size x size frame with .clipped(),
+    // which is how the real hosting layer treats an oversized glyph in this app (see
+    // TabRowView's folder-icon frame, and SidebarTopRow's sidebarToggleGlyphScale comment).
+    // A symbol whose font size equals its container (the pre-fix behaviour) fills that box
+    // edge-to-edge with no margin, so its own glyph bounding box crops against these walls.
+    private func renderClipped(_ icon: SpaceIcon, size: CGFloat, foreground: Color = .white) -> RenderedImage {
+        render(
+            ZStack {
+                background
+                SpaceIconView(icon: icon, size: size, foregroundColor: foreground)
+            }
+            .frame(width: size, height: size)
+            .clipped(),
+            size: CGSize(width: size, height: size)
+        )
+    }
+
+    // "display" is a wide, edge-filling SF Symbol design (the monitor/screen glyph the owner's
+    // screenshot showed cropped) — a good stand-in for any symbol whose own bounding box is not
+    // comfortably inset within the point size the app renders it at.
+    private static let wideSymbols = ["display", "tv", "rectangle.on.rectangle", "star.fill"]
+
+    func test_symbol_atSidebarHeaderSize_leavesMarginOnAllFourEdges() {
+        let size = OrbitMetrics.sidebarSpaceIconSize
+        for symbol in Self.wideSymbols {
+            let image = renderClipped(.symbol(symbol), size: size)
+            let backgroundColor = image.color(atX: 0, y: 0)
+            let edgeRing = image.containsNonBackgroundPixels(
+                in: CGRect(x: 0, y: 0, width: size, height: 1),
+                background: backgroundColor
+            ) || image.containsNonBackgroundPixels(
+                in: CGRect(x: 0, y: size - 1, width: size, height: 1),
+                background: backgroundColor
+            ) || image.containsNonBackgroundPixels(
+                in: CGRect(x: 0, y: 0, width: 1, height: size),
+                background: backgroundColor
+            ) || image.containsNonBackgroundPixels(
+                in: CGRect(x: size - 1, y: 0, width: 1, height: size),
+                background: backgroundColor
+            )
+            XCTAssertFalse(
+                edgeRing,
+                "'\(symbol)' painted right up to (or past) its \(size)pt container's own edge — " +
+                "SpaceIconView's .symbol case must leave a margin (OrbitMetrics.spaceIconSymbolScaleFraction) " +
+                "so the sidebar header's clipped container never crops the glyph"
+            )
+        }
+    }
+
+    func test_symbol_atBottomSwitcherSize_leavesMarginOnAllFourEdges() {
+        let size: CGFloat = 28
+        for symbol in Self.wideSymbols {
+            let image = renderClipped(.symbol(symbol), size: size)
+            let backgroundColor = image.color(atX: 0, y: 0)
+            let touchesTop = image.containsNonBackgroundPixels(in: CGRect(x: 0, y: 0, width: size, height: 1), background: backgroundColor)
+            let touchesBottom = image.containsNonBackgroundPixels(in: CGRect(x: 0, y: size - 1, width: size, height: 1), background: backgroundColor)
+            let touchesLeft = image.containsNonBackgroundPixels(in: CGRect(x: 0, y: 0, width: 1, height: size), background: backgroundColor)
+            let touchesRight = image.containsNonBackgroundPixels(in: CGRect(x: size - 1, y: 0, width: 1, height: size), background: backgroundColor)
+            XCTAssertFalse(touchesTop || touchesBottom || touchesLeft || touchesRight, "'\(symbol)' at the bottom switcher's icon size crops against its container")
+        }
+    }
+
     func test_emoji_drawsSomethingAtTheCentre() {
         let image = renderOnBackground(.emoji("🚀"), size: 40)
         let backgroundColor = image.color(atX: 1, y: 1)
@@ -103,6 +167,68 @@ final class SpaceIconViewRenderTests: XCTestCase {
 
         XCTAssertFalse(missingCentre.isApproximately(backgroundColor), "a missing custom image must not render as an empty box")
         XCTAssertTrue(missingCentre.isApproximately(dotCentre, tolerance: 0.06), "a missing custom image must fall back to exactly the dot, not some other placeholder")
+    }
+
+    // MARK: - Defect 1: the sidebar header (SpaceTitleRow), emoji AND SF Symbol, human-inspected
+
+    // A dark, opaque backing: SpaceTitleRow itself paints none (the real sidebar's own
+    // ThemeBackgroundView does that), and its text/icon foreground is near-white — invisible
+    // against a transparent PNG composited over a white viewer without this.
+    private func onDarkBacking<V: View>(_ content: V, size: CGSize) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color(red: 0.14, green: 0.13, blue: 0.17)
+            content
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    func test_symbol_display_isAResolvableSFSymbol() {
+        XCTAssertTrue(OrbitSymbolName.isResolvable("display"), "'display' (the monitor/screen glyph) must resolve as a real SF Symbol on this OS, or this test's own fixture needs a different symbol name.")
+    }
+
+    func test_spaceTitleRow_emojiIcon_rendersUncroppedInTheRealHeader() {
+        let env = AppEnvironment.demo
+        let space = Space(name: "Reading List", icon: "📚", iconIsEmoji: true, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
+        let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
+        let image = render(
+            onDarkBacking(SpaceTitleRow(space: space).environment(env), size: size),
+            size: size
+        )
+        image.writeDiagnosticPNG(named: "SpaceTitleRow-emoji")
+        XCTAssertNotNil(image.boundingBoxOfContent(), "the header drew nothing at all")
+    }
+
+    func test_spaceTitleRow_symbolIcon_rendersUncroppedInTheRealHeader() {
+        let env = AppEnvironment.demo
+        let space = Space(name: "Systems", icon: "display", iconIsEmoji: false, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
+        let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
+        let image = render(
+            onDarkBacking(SpaceTitleRow(space: space).environment(env), size: size),
+            size: size
+        )
+        image.writeDiagnosticPNG(named: "SpaceTitleRow-symbol")
+        XCTAssertNotNil(image.boundingBoxOfContent(), "the header drew nothing at all")
+    }
+
+    // Both icon kinds in the same header row's own icon slot, stacked into one PNG for a single
+    // side-by-side human look — the top row is the emoji case, the bottom the SF Symbol case.
+    func test_spaceTitleRow_emojiAndSymbol_sideBySide_forHumanInspection() {
+        let env = AppEnvironment.demo
+        let emojiSpace = Space(name: "Reading List", icon: "📚", iconIsEmoji: true, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
+        let symbolSpace = Space(name: "Systems", icon: "display", iconIsEmoji: false, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
+
+        let width: CGFloat = 260
+        let rowHeight = OrbitMetrics.sidebarSpaceNameRowHeight
+        let size = CGSize(width: width, height: rowHeight * 2)
+        let content = VStack(spacing: 0) {
+            SpaceTitleRow(space: emojiSpace)
+            SpaceTitleRow(space: symbolSpace)
+        }
+        .environment(env)
+
+        let image = render(onDarkBacking(content, size: size), size: size)
+        image.writeDiagnosticPNG(named: "SpaceTitleRow-emoji-and-symbol")
+        XCTAssertNotNil(image.boundingBoxOfContent(), "the header drew nothing at all")
     }
 
     // MARK: - End to end: Create Space with nothing picked really renders the dot

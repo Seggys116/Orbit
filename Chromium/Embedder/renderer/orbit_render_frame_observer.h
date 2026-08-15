@@ -47,6 +47,8 @@ class OrbitRenderFrameObserver
   // content::RenderFrameObserver:
   void OnDestruct() override;
   void DidClearWindowObject() override;
+  void DidCreateScriptContext(v8::Local<v8::Context> context,
+                              int32_t world_id) override;
   bool OnAssociatedInterfaceRequestForFrame(
       const std::string& interface_name,
       mojo::ScopedInterfaceEndpointHandle* handle) override;

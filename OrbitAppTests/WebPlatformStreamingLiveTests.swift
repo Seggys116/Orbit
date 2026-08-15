@@ -1,6 +1,7 @@
 //  Live coverage for streamed delivery: chunked-transfer fetch() read progressively via the
 //  Streams API, and byte-range (206) loading. Real inter-chunk delays make single-read pass vacuously.
 
+import AppKit
 import Foundation
 import XCTest
 @testable import Orbit
@@ -127,5 +128,174 @@ final class WebPlatformStreamingLiveTests: XCTestCase {
         XCTAssertEqual(firstStatus, 206, "a Range request for the first half must get 206 Partial Content")
         XCTAssertEqual(secondStatus, 206, "a Range request for the second half must get 206 Partial Content")
         XCTAssertEqual(reassembled, fullBody, "the two range-requested halves did not reassemble into the original resource -- progressive range loading is broken")
+    }
+
+    // MARK: - PDF handling (no plugin viewer implemented; reports observed behaviour, asserts nothing about it)
+
+    private static func minimalPDFData() -> Data {
+        let objects = [
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>\nendobj\n",
+        ]
+        var body = "%PDF-1.4\n"
+        var offsets: [Int] = []
+        for object in objects {
+            offsets.append(body.utf8.count)
+            body += object
+        }
+        let xrefOffset = body.utf8.count
+        body += "xref\n0 \(objects.count + 1)\n0000000000 65535 f \n"
+        for offset in offsets { body += String(format: "%010d 00000 n \n", offset) }
+        body += "trailer\n<< /Size \(objects.count + 1) /Root 1 0 R >>\nstartxref\n\(xrefOffset)\n%%EOF"
+        return Data(body.utf8)
+    }
+
+    func testNavigatingToAPDFReportsWhatOrbitActuallyDoesWithIt() throws {
+        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrbitAppTests-PDFNavigationProbe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let pdfBytes = Self.minimalPDFData()
+
+        let readings = try LiveChromiumEngineHost.runLive { () -> [String: String] in
+            let server = try LiveHTTPTestServer(routes: [
+                "/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-pdf-navigation-probe</body></html>"),
+                "/document.pdf": LiveHTTPTestServer.Route(contentType: "application/pdf", data: pdfBytes),
+            ])
+            defer { server.stop() }
+
+            let contents = try await LiveChromiumEngineHost.makeContents()
+            defer { contents.close() }
+            let recorder = DownloadRecordingDelegate(destinationDirectory: scratch)
+            contents.delegate = recorder
+
+            contents.load(server.baseURL.appendingPathComponent("document.pdf"))
+            let settleDeadline = ContinuousClock.now + .seconds(10)
+            while recorder.willBeginDownloadCall == nil && contents.navigationState.isLoading {
+                guard ContinuousClock.now < settleDeadline else { break }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            if recorder.willBeginDownloadCall != nil {
+                let downloadDeadline = ContinuousClock.now + .seconds(10)
+                while recorder.finalState == nil || recorder.finalState == .pending || recorder.finalState == .inProgress {
+                    guard ContinuousClock.now < downloadDeadline else { break }
+                    try await Task.sleep(for: .milliseconds(50))
+                }
+            } else {
+                try await Task.sleep(for: .milliseconds(300))
+            }
+
+            var out: [String: String] = [:]
+            out["serverSawRequest"] = String(server.requestLog.first(path: "/document.pdf") != nil)
+            out["didBeginDownload"] = String(recorder.willBeginDownloadCall != nil)
+            out["downloadMimeType"] = recorder.willBeginDownloadCall?.mimeType ?? "<none>"
+            out["downloadSuggestedName"] = recorder.willBeginDownloadCall?.suggestedName ?? "<none>"
+            out["downloadFinalState"] = recorder.finalState?.rawValue ?? "<none>"
+            let downloadedFile = recorder.destinationURL.flatMap { try? Data(contentsOf: $0) }
+            out["downloadedFileExists"] = String(downloadedFile != nil)
+            out["downloadedByteCount"] = String(downloadedFile?.count ?? -1)
+            out["sourceByteCount"] = String(pdfBytes.count)
+            out["finalNavigationURL"] = contents.navigationState.url?.absoluteString ?? "<none>"
+            out["isLoadingAfterSettle"] = String(contents.navigationState.isLoading)
+            out["documentContentType"] = (try? await contents.evaluateJavaScript("document.contentType")) as? String ?? "<js-failed>"
+            return out
+        }
+
+        for (key, value) in readings.sorted(by: { $0.key < $1.key }) {
+            print("ORBIT-PDF-NAVIGATION \(key)=\(value)")
+        }
+
+        XCTAssertEqual(readings["serverSawRequest"], "true", "the local server never saw the PDF request -- the navigation never left the test harness")
+    }
+
+    func testEmbeddingAPDFReportsWhatOrbitActuallyInstantiates() throws {
+        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
+        let pdfBytes = Self.minimalPDFData()
+
+        let readings = try LiveChromiumEngineHost.runLive { () -> [String: String] in
+            let server = try LiveHTTPTestServer(routes: [
+                "/": LiveHTTPTestServer.Route(
+                    contentType: "text/html",
+                    body: "<html><body><embed id=\"probe\" type=\"application/pdf\" src=\"/document.pdf\" width=\"200\" height=\"200\"></body></html>"
+                ),
+                "/document.pdf": LiveHTTPTestServer.Route(contentType: "application/pdf", data: pdfBytes),
+            ])
+            defer { server.stop() }
+
+            let contents = try await LiveChromiumEngineHost.makeContents()
+            defer { contents.close() }
+            let recorder = DownloadRecordingDelegate(destinationDirectory: nil)
+            contents.delegate = recorder
+
+            contents.load(server.baseURL)
+            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await Task.sleep(for: .milliseconds(300)) // let a late plugin-placeholder swap settle
+
+            var out: [String: String] = [:]
+            out["serverSawEmbedRequest"] = String(server.requestLog.first(path: "/document.pdf") != nil)
+            out["didBeginDownloadForEmbed"] = String(recorder.willBeginDownloadCall != nil)
+            out["embedOuterHTML"] = (try? await contents.evaluateJavaScript(
+                "document.getElementById('probe') ? document.getElementById('probe').outerHTML : '<removed>'"
+            )) as? String ?? "<js-failed>"
+            let offsetWidth = try? await contents.evaluateJavaScript(
+                "document.getElementById('probe') ? document.getElementById('probe').offsetWidth : -1"
+            )
+            out["embedOffsetWidth"] = String((offsetWidth as? NSNumber)?.intValue ?? -1)
+            let offsetHeight = try? await contents.evaluateJavaScript(
+                "document.getElementById('probe') ? document.getElementById('probe').offsetHeight : -1"
+            )
+            out["embedOffsetHeight"] = String((offsetHeight as? NSNumber)?.intValue ?? -1)
+            out["documentReadyState"] = (try? await contents.evaluateJavaScript("document.readyState")) as? String ?? "<js-failed>"
+            return out
+        }
+
+        for (key, value) in readings.sorted(by: { $0.key < $1.key }) {
+            print("ORBIT-PDF-EMBED \(key)=\(value)")
+        }
+
+        XCTAssertEqual(readings["documentReadyState"], "complete", "the host page around the <embed> never finished loading -- nothing to report about the plugin")
+    }
+}
+
+/// Records the real content::DownloadManagerDelegate callback Chromium fires
+/// -- see ChromiumWebContents.willBeginDownloadTrampoline. `destinationDirectory`
+/// nil declines the download (still records that it was offered).
+@MainActor
+private final class DownloadRecordingDelegate: WebContentsDelegate {
+    struct Call {
+        let suggestedName: String
+        let mimeType: String
+        let totalBytes: Int64
+        let sourceURL: URL
+    }
+
+    private(set) var willBeginDownloadCall: Call?
+    private(set) var finalState: DownloadState?
+    private(set) var destinationURL: URL?
+    private let destinationDirectory: URL?
+
+    init(destinationDirectory: URL?) {
+        self.destinationDirectory = destinationDirectory
+    }
+
+    func webContents(
+        _ contents: WebContents,
+        willBeginDownload suggestedName: String,
+        mimeType: String,
+        totalBytes: Int64,
+        sourceURL: URL,
+        downloadID: UUID
+    ) async -> URL? {
+        willBeginDownloadCall = Call(suggestedName: suggestedName, mimeType: mimeType, totalBytes: totalBytes, sourceURL: sourceURL)
+        guard let destinationDirectory else { return nil }
+        let destination = destinationDirectory.appendingPathComponent(suggestedName.isEmpty ? "download.pdf" : suggestedName)
+        destinationURL = destination
+        return destination
+    }
+
+    func webContents(_ contents: WebContents, download id: UUID, didUpdate progress: DownloadProgress) {
+        finalState = progress.state
     }
 }

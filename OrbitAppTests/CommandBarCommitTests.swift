@@ -276,4 +276,49 @@ final class CommandBarCommitTests: XCTestCase {
         env.openTab(url: try XCTUnwrap(env.searchEngine.searchURL(for: text)), in: activeSpaceID)
         XCTAssertEqual(env.state.tabs.count, before + 1)
     }
+
+    // MARK: - 5. Partial domains: "google.c" (reported defect)
+    //
+    // topIntent(for:mode:) is rows.first.kind.activationIntent. CommandBarView's
+    // commit(instant:) activates results[selectedIndex], and selectedIndex resets to 0 on every
+    // refresh — so rows.first is always the row the panel highlights, and Enter always activates
+    // exactly that row. Every space (spec: BrowserStore.defaultFavorites()) starts with a "Google"
+    // favourite at https://www.google.com, so "google.c" is a real, no-setup regression case: before
+    // the known-TLD gate, its hardcoded typedURL score (200) beat that favourite outright.
+
+    func test_partialDomainMatchingTheDefaultGoogleFavorite_theHighlightedRowGoesToTheRealDomain() throws {
+        let rows = CommandBarEngine.results(
+            query: "google.c",
+            mode: .newTab,
+            env: env,
+            suggestions: [],
+            searchEngine: env.searchEngine,
+            siteSearch: env.siteSearchStore.state(active: nil)
+        )
+        let top = try XCTUnwrap(rows.first, "\"google.c\" produced no rows at all.")
+
+        let resolvedHost: String?
+        switch top.kind.activationIntent {
+        case .navigate(let url): resolvedHost = url.host()
+        case .activateFavoriteResult(let favorite): resolvedHost = favorite.url.host()
+        default: resolvedHost = nil
+        }
+        XCTAssertEqual(
+            resolvedHost, "www.google.com",
+            "\"google.c\" must resolve to the real, already-known google.com destination, not a bogus \"https://google.c\" address; got \(top.kind.activationIntent)."
+        )
+
+        let before = env.state.tabs.count
+        CommandBarActivation.activate(top, in: env)
+        XCTAssertEqual(env.state.tabs.count, before + 1, "Activating the highlighted row must open a real tab.")
+        XCTAssertTrue(env.state.tabs.values.contains { $0.url.host()?.hasSuffix("google.com") == true })
+    }
+
+    func test_partialDomainWithNoMatchAtAll_theHighlightedRowSearchesTheLiteralText() throws {
+        let intent = try topIntent(for: "qzxnotarealdomain.c", mode: .newTab)
+        guard case .searchGoogle(let text) = intent else {
+            return XCTFail("Expected the highlighted row for an unmatched domain to search, got \(intent).")
+        }
+        XCTAssertEqual(text, "qzxnotarealdomain.c")
+    }
 }

@@ -31,9 +31,12 @@ struct LibraryDownloadsView: View {
                                 DownloadRow(item: item)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -70,52 +73,77 @@ private struct DownloadRow: View {
         }
     }
 
-    private var statusLine: String {
+    private var detailText: String {
         switch item.state {
         case .completed:
             let sizeText = item.totalBytes > 0 ? LibraryByteFormat.string(item.totalBytes) : LibraryByteFormat.string(item.receivedBytes)
-            return fileExists ? "\(sourceHost) · \(sizeText)" : "\(sourceHost) · file no longer on disk"
+            return fileExists ? sizeText : "file no longer on disk"
         case .cancelled:
-            return "\(sourceHost) · Cancelled"
+            return "Cancelled"
         case .interrupted:
-            return "\(sourceHost) · Failed"
+            return "Failed"
         case .pending:
-            return "\(sourceHost) · Starting…"
+            return "Starting…"
         case .inProgress, .paused:
             let receivedText = LibraryByteFormat.string(item.receivedBytes)
             if item.totalBytes > 0 {
-                return "\(sourceHost) · \(receivedText) of \(LibraryByteFormat.string(item.totalBytes))"
+                return "\(receivedText) of \(LibraryByteFormat.string(item.totalBytes))"
             }
-            return "\(sourceHost) · \(receivedText)"
+            return receivedText
         }
     }
 
+    private var statusLine: String { "\(sourceHost) · \(detailText)" }
+
+    private var startedTimeText: String {
+        item.startedAt.formatted(date: .omitted, time: .shortened)
+    }
+
+    // Only worth spreading into columns once the list isn't squeezed down to make room for the
+    // preview pane (see LibraryRootView.showsPreview).
+    private var isWide: Bool { router.selection == nil }
+
     var body: some View {
         LibraryRowCard(isSelected: isSelected) {
-            HStack(spacing: 10) {
-                Image(nsImage: DownloadFileIcon.icon(for: item, fileExists: fileExists))
-                    .resizable()
-                    .frame(width: LibraryMetrics.rowIconSize, height: LibraryMetrics.rowIconSize)
-                    .opacity(item.state == .cancelled || item.state == .interrupted ? 0.55 : 1)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    Image(nsImage: DownloadFileIcon.icon(for: item, fileExists: fileExists))
+                        .resizable()
+                        .frame(width: LibraryMetrics.rowIconSize, height: LibraryMetrics.rowIconSize)
+                        .opacity(item.state == .cancelled || item.state == .interrupted ? 0.55 : 1)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(displayName)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(LibraryPalette.textPrimary)
-                        .lineLimit(1)
-                    Text(statusLine)
-                        .font(.system(size: 11))
-                        .foregroundStyle(LibraryPalette.textSecondary)
-                        .lineLimit(1)
-                    if isInFlight {
-                        LibraryProgressBar(fraction: progress.fraction)
-                            .frame(maxWidth: 220)
+                    if isWide {
+                        Text(displayName)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(LibraryPalette.textPrimary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        LibraryColumnText(text: sourceHost, width: LibraryMetrics.rowMetaColumnWidth)
+                        LibraryColumnText(text: detailText, width: LibraryMetrics.rowSecondaryColumnWidth)
+                        LibraryColumnText(text: startedTimeText, width: LibraryMetrics.rowDateColumnWidth, alignment: .trailing, color: LibraryPalette.textTertiary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(displayName)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(LibraryPalette.textPrimary)
+                                .lineLimit(1)
+                            Text(statusLine)
+                                .font(.system(size: 11))
+                                .foregroundStyle(LibraryPalette.textSecondary)
+                                .lineLimit(1)
+                        }
                     }
+
+                    Spacer(minLength: 8)
+
+                    actions
                 }
 
-                Spacer(minLength: 8)
-
-                actions
+                if isInFlight {
+                    LibraryProgressBar(fraction: progress.fraction)
+                        .frame(maxWidth: isWide ? .infinity : 220)
+                        .padding(.leading, LibraryMetrics.rowIconSize + 10)
+                }
             }
         }
         .contentShape(Rectangle())

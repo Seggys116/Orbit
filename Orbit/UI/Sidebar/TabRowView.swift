@@ -127,6 +127,11 @@ struct TabRowView: View {
             // the close control is actually visible, at which point this makes exactly as much room as it needs.
             .padding(.trailing, isHovering ? trailingCloseControlReservedWidth : 0)
             .animation(OrbitMotion.quick, value: isHovering)
+            // .overlay, not a ZStack sibling: a sibling's flexible frame feeds back into the
+            // ZStack's sizing pass. An AppKit catcher, not .onTapGesture: SwiftUI gestures and
+            // AppKit mouseDown are independent, so both fired and a tab reactivated as its own
+            // "-" closed it.
+            .overlay(rowActivationCatcher)
 
             // Overlay, opacity-only: the control sits at a fixed trailing position and never inserts/removes, so
             // it is exactly as hit-testable the instant it's visible as it is once fully faded in, and a click
@@ -143,9 +148,6 @@ struct TabRowView: View {
             if navigationState.isLoading { loadingProgressBar }
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            if !rename.isEditing { env.activateTab(tab.id) }
-        }
         .onHover { hovering in
             isHovering = hovering
             handleHoverPreview(hovering)
@@ -158,6 +160,16 @@ struct TabRowView: View {
             }
         }
         .sidebarRecentPagesPreview(tab: tab)
+    }
+
+    // Behind trailingCloseControl in child order, so AppKit's hit test gives the overlap to it.
+    private var rowActivationCatcher: some View {
+        OrbitNSActionButton(action: {
+            guard !rename.isEditing else { return }
+            env.activateTab(tab.id)
+        }) {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     // MARK: - Trailing close control (and what a bookmarked row's one is)

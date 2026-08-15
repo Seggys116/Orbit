@@ -728,6 +728,42 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
+    // Covers a folder, a nested subfolder inside it, and loose (un-foldered) tabs all pinned
+    // together — ManageSpacesColumnsView must render the tree (folder rows with item counts,
+    // nesting intact), not flatten every tab into one list.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_librarySpacesWithFolders
+
+    func test_librarySpacesWithFolders() async {
+        OrbitScreenshotFixtures.configure(env)
+        let spaceID = OrbitScreenshotFixtures.IDs.personalSpaceID
+
+        let systemsFolderID = env.createFolder(name: "Systems", in: spaceID)
+        let networkingFolderID = env.createFolder(name: "Networking", in: spaceID, parent: systemsFolderID)
+
+        let routerTabID = env.openTab(url: URL(string: "https://example.com/router")!, in: spaceID, section: .today, activate: false)
+        env.pinTab(routerTabID, toParent: networkingFolderID, atIndex: 0, in: spaceID)
+        let switchTabID = env.openTab(url: URL(string: "https://example.com/switch")!, in: spaceID, section: .today, activate: false)
+        env.pinTab(switchTabID, toParent: networkingFolderID, atIndex: 1, in: spaceID)
+
+        let nasTabID = env.openTab(url: URL(string: "https://example.com/nas")!, in: spaceID, section: .today, activate: false)
+        env.pinTab(nasTabID, toParent: systemsFolderID, atIndex: 0, in: spaceID)
+        let hypervisorTabID = env.openTab(url: URL(string: "https://example.com/hypervisor")!, in: spaceID, section: .today, activate: false)
+        env.pinTab(hypervisorTabID, toParent: systemsFolderID, atIndex: 1, in: spaceID)
+
+        let looseTabID = env.openTab(url: URL(string: "https://example.com/homelab-dashboard")!, in: spaceID, section: .today, activate: false)
+        env.pinTab(looseTabID, toParent: nil, atIndex: 0, in: spaceID)
+
+        LibraryRouter.shared.selectedSection = .spaces
+        let view = ScreenshotLibraryComposition(section: .spaces)
+            .environment(env)
+            .orbitScreenshotModeDragDisabledForTests()
+        await renderAndSave(
+            view,
+            name: "library-spaces-folders",
+            size: CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
+        )
+    }
+
     // Covers a folder, a nested subfolder inside it, and a loose (un-foldered) tab all archived
     // together — the mix that exercises LibraryArchivedTabsView's folder reconstruction from
     // each tab's captured archivedFolderTrail.
@@ -793,6 +829,138 @@ final class ScreenshotGenerationTests: XCTestCase {
             name: "library-easels-notes",
             size: CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
         )
+    }
+
+    // MARK: - Library layout: wide window / no selection uses the full width, narrow degrades
+    // With nothing selected the preview pane no longer reserves its width (LibraryRootView.showsPreview),
+    // so these renders exercise the list at both a very wide window and the window's own minimum size.
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloadsWideNoSelection
+
+    func test_libraryDownloadsWideNoSelection() async {
+        OrbitScreenshotFixtures.configure(env)
+        LibraryRouter.shared.selectedSection = .downloads
+        LibraryRouter.shared.selection = nil
+        let view = ScreenshotLibraryComposition(section: .downloads).environment(env)
+        await renderAndSave(view, name: "library-downloads-wide", size: CGSize(width: 2000, height: 900))
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloadsNarrowMinWidth
+
+    func test_libraryDownloadsNarrowMinWidth() async {
+        OrbitScreenshotFixtures.configure(env)
+        LibraryRouter.shared.selectedSection = .downloads
+        LibraryRouter.shared.selection = nil
+        let view = ScreenshotLibraryComposition(section: .downloads).environment(env)
+        await renderAndSave(
+            view,
+            name: "library-downloads-narrow",
+            size: CGSize(width: LibraryMetrics.windowMinWidth, height: LibraryMetrics.windowMinHeight)
+        )
+    }
+
+    // Proves the fix, not just "non-blank": with nothing selected, ink from the row's own date
+    // column must reach near the right edge of a 2000pt window — the exact region that used to be
+    // idle preview-pane background reserved despite there being nothing to preview.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloads_noSelectionUsesFullWindowWidth
+    func test_libraryDownloads_noSelectionUsesFullWindowWidth() {
+        OrbitScreenshotFixtures.configure(env)
+        LibraryRouter.shared.selectedSection = .downloads
+        LibraryRouter.shared.selection = nil
+        let size = CGSize(width: 2000, height: 900)
+        let view = ScreenshotLibraryComposition(section: .downloads).environment(env)
+        let rendered = render(view, size: size)
+
+        let background = rendered.color(atX: Int(size.width) - 4, y: Int(size.height) - 4)
+        let farRight = CGRect(x: size.width - 110, y: 80, width: 90, height: 160)
+        if !rendered.containsNonBackgroundPixels(in: farRight, background: background) {
+            rendered.writeDiagnosticPNG(named: "library-downloads-FAILED-noSelectionNotFullWidth")
+        }
+        XCTAssertTrue(
+            rendered.containsNonBackgroundPixels(in: farRight, background: background),
+            "With nothing selected, a download row's date column should reach near the right edge of a \(Int(size.width))pt window; found nothing painted at \(farRight) — the list is still pinned to a narrow column."
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryArchivedTabsWideNoSelection
+
+    func test_libraryArchivedTabsWideNoSelection() async {
+        OrbitScreenshotFixtures.configure(env)
+        let spaceID = OrbitScreenshotFixtures.IDs.personalSpaceID
+
+        let parentFolderID = env.createFolder(name: "Reading", in: spaceID)
+        let childFolderID = env.createFolder(name: "Long Reads", in: spaceID, parent: parentFolderID)
+
+        let nestedTabID = env.openTab(url: URL(string: "https://example.com/nested-article")!, in: spaceID, section: .today, activate: false)
+        env.pinTab(nestedTabID, toParent: childFolderID, atIndex: 0, in: spaceID)
+        env.archiveTab(nestedTabID)
+
+        let siblingTabID = env.openTab(url: URL(string: "https://example.com/top-level-folder-tab")!, in: spaceID, section: .today, activate: false)
+        env.pinTab(siblingTabID, toParent: parentFolderID, atIndex: 0, in: spaceID)
+        env.archiveTab(siblingTabID)
+
+        let looseTabID = env.openTab(url: URL(string: "https://example.com/loose")!, in: spaceID, section: .today, activate: false)
+        env.archiveTab(looseTabID)
+
+        LibraryRouter.shared.selectedSection = .archivedTabs
+        LibraryRouter.shared.selection = nil
+        let view = ScreenshotLibraryComposition(section: .archivedTabs).environment(env)
+        await renderAndSave(view, name: "library-archived-tabs-wide", size: CGSize(width: 2000, height: 900))
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryArchivedTabsNarrowMinWidth
+
+    func test_libraryArchivedTabsNarrowMinWidth() async {
+        OrbitScreenshotFixtures.configure(env)
+        let spaceID = OrbitScreenshotFixtures.IDs.personalSpaceID
+        let looseTabID = env.openTab(url: URL(string: "https://example.com/loose")!, in: spaceID, section: .today, activate: false)
+        env.archiveTab(looseTabID)
+
+        LibraryRouter.shared.selectedSection = .archivedTabs
+        LibraryRouter.shared.selection = nil
+        let view = ScreenshotLibraryComposition(section: .archivedTabs).environment(env)
+        await renderAndSave(
+            view,
+            name: "library-archived-tabs-narrow",
+            size: CGSize(width: LibraryMetrics.windowMinWidth, height: LibraryMetrics.windowMinHeight)
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryMediaWideNoSelection
+
+    func test_libraryMediaWideNoSelection() async {
+        OrbitScreenshotFixtures.configure(env)
+        LibraryRouter.shared.selectedSection = .media
+        LibraryRouter.shared.selection = nil
+        let view = ScreenshotLibraryComposition(section: .media).environment(env)
+        await renderAndSave(view, name: "library-media-wide", size: CGSize(width: 2000, height: 900))
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryEaselsAndNotesWideNoSelection
+
+    func test_libraryEaselsAndNotesWideNoSelection() async {
+        OrbitScreenshotFixtures.configure(env)
+        let note = env.noteStore.createNote(title: "Q4 launch notes")
+        _ = env.easelStore.createEasel(title: "Sprint retro board")
+
+        LibraryRouter.shared.selectedSection = .easelsAndNotes
+        LibraryRouter.shared.selection = nil
+        let view = ScreenshotLibraryComposition(section: .easelsAndNotes).environment(env)
+        await renderAndSave(view, name: "library-easels-notes-wide", size: CGSize(width: 2000, height: 900))
+        _ = note
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryBoostsWideNoSelection
+
+    func test_libraryBoostsWideNoSelection() async {
+        OrbitScreenshotFixtures.configure(env)
+        _ = env.boostStore.createBoost(name: "Reader mode", host: "example.com")
+        _ = env.boostStore.createBoost(name: "Dark theme", host: "news.ycombinator.com")
+
+        LibraryRouter.shared.selectedSection = .boosts
+        LibraryRouter.shared.selection = nil
+        let view = ScreenshotLibraryComposition(section: .boosts).environment(env)
+        await renderAndSave(view, name: "library-boosts-wide", size: CGSize(width: 2000, height: 900))
     }
 
     // MARK: - Site Control Center
@@ -1016,6 +1184,9 @@ private struct ScreenshotLibraryComposition: View {
         ]
     }
 
+    // Mirrors LibraryRootView.showsPreview: gated on an actual selection, not just section capability.
+    private var showsPreview: Bool { section.supportsPreview && router.selection != nil }
+
     var body: some View {
         HStack(spacing: 0) {
             LibrarySidebarView(selection: .constant(section), counts: counts)
@@ -1044,16 +1215,17 @@ private struct ScreenshotLibraryComposition: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                     sectionList
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, LibraryMetrics.contentHorizontalPadding)
                         .padding(.top, 4)
                         .padding(.bottom, 24)
                 }
             }
-            .frame(width: section.supportsPreview ? LibraryMetrics.listColumnWidth : nil, alignment: .top)
-            .frame(maxWidth: section.supportsPreview ? nil : .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(width: showsPreview ? LibraryMetrics.listColumnWidth : nil, alignment: .top)
+            .frame(maxWidth: showsPreview ? nil : .infinity, maxHeight: .infinity, alignment: .top)
             .background(LibraryPalette.contentBackground)
 
-            if section.supportsPreview {
+            if showsPreview {
                 LibraryPreviewPaneView(selection: router.selection)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -1074,7 +1246,7 @@ private struct ScreenshotLibraryComposition: View {
                 .padding(.horizontal, LibraryMetrics.contentHorizontalPadding)
                 .padding(.bottom, LibraryMetrics.contentHorizontalPadding)
         case .archivedTabs: LibraryArchivedTabsView(searchQuery: "")
-        case .boosts: EmptyView()
+        case .boosts: LibraryBoostsFallbackView(searchQuery: "")
         }
     }
 }

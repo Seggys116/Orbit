@@ -502,20 +502,30 @@ enum CommandBarEngine {
 
     // MARK: Typed URL detection
 
+    // "Has a dot" is not enough: Chromium's omnibox only calls a bare host
+    // navigable when its final label is a real, registered TLD
+    // (AutocompleteInput::Parse's has_known_tld gate in
+    // components/omnibox/browser/autocomplete_input.cc) — otherwise "google.c"
+    // would out-rank the "google.com" the user actually meant. A host with an
+    // unrecognised TLD falls through to nil here and is left for history to
+    // resolve via ordinary ranking, exactly as Chromium leaves it to the
+    // HistoryURLProvider's inline-autocomplete pass rather than the
+    // what-you-typed match.
     static func detectTypedURL(_ text: String) -> URL? {
         guard !text.contains(" ") else { return nil }
         if let url = URL(string: text), let scheme = url.scheme, ["http", "https", "file", "orbit", "view-source"].contains(scheme) {
             return url
         }
         let hostCandidate = text.split(separator: "/").first.map(String.init) ?? text
-        // "localhost"/"localhost:3000" have no dot, so the bare-domain heuristic below would otherwise reject them.
+        // "localhost"/"localhost:3000" have no dot, so the known-TLD gate below would otherwise reject them.
         let hostOnly = hostCandidate.split(separator: ":").first.map(String.init) ?? hostCandidate
         if hostOnly.lowercased() == "localhost",
            hostCandidate.allSatisfy({ $0.isLetter || $0.isNumber || $0 == ":" }) {
             return URL(string: "http://\(text)")
         }
         guard hostCandidate.contains("."), !hostCandidate.hasSuffix("."),
-              hostCandidate.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == ":" }) else {
+              hostCandidate.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == ":" }),
+              KnownTLDs.isNavigableHost(hostOnly) else {
             return nil
         }
         return URL(string: "https://\(text)")
