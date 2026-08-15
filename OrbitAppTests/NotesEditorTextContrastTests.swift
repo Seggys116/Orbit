@@ -4,6 +4,11 @@ import XCTest
 @testable import Orbit
 
 // Real NSWindow pixels: ImageRenderer cannot flatten an NSViewRepresentable, it paints an opaque placeholder.
+// ORBIT-HOSTED-RUNNER: CANNOT-RUN test_savedNoteWithBakedBlackBodyIsReadableInDarkMode
+// ORBIT-HOSTED-RUNNER: CANNOT-RUN test_savedNoteWithBakedWhiteBodyIsReadableInLightMode
+// ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pastedBlackRichTextIsReadableInDarkMode
+// ORBIT-HOSTED-RUNNER: CANNOT-RUN test_plainTypedNoteStaysDarkInkOnLightPaper
+// ORBIT-HOSTED-RUNNER: CANNOT-RUN test_deliberatelyColouredPasteKeepsItsHue
 @MainActor
 final class NotesEditorTextContrastTests: XCTestCase {
 
