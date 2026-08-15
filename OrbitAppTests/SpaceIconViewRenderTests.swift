@@ -65,11 +65,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
 
     // MARK: - Clipping (Defect 1: the sidebar header's Space icon was cropped)
 
-    // Mirrors the sidebar header's own container exactly: a size x size frame with .clipped(),
-    // which is how the real hosting layer treats an oversized glyph in this app (see
-    // TabRowView's folder-icon frame, and SidebarTopRow's sidebarToggleGlyphScale comment).
-    // A symbol whose font size equals its container (the pre-fix behaviour) fills that box
-    // edge-to-edge with no margin, so its own glyph bounding box crops against these walls.
+    // size x size with .clipped(), as the real hosting layer treats an oversized glyph.
     private func renderClipped(_ icon: SpaceIcon, size: CGFloat, foreground: Color = .white) -> RenderedImage {
         render(
             ZStack {
@@ -82,9 +78,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
         )
     }
 
-    // "display" is a wide, edge-filling SF Symbol design (the monitor/screen glyph the owner's
-    // screenshot showed cropped) — a good stand-in for any symbol whose own bounding box is not
-    // comfortably inset within the point size the app renders it at.
+    // "display" is a wide, edge-filling symbol design.
     private static let wideSymbols = ["display", "tv", "rectangle.on.rectangle", "star.fill"]
 
     func test_symbol_atSidebarHeaderSize_leavesMarginOnAllFourEdges() {
@@ -175,9 +169,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
 
     // MARK: - Defect 1: the sidebar header (SpaceTitleRow), emoji AND SF Symbol, human-inspected
 
-    // A dark, opaque backing: SpaceTitleRow itself paints none (the real sidebar's own
-    // ThemeBackgroundView does that), and its text/icon foreground is near-white — invisible
-    // against a transparent PNG composited over a white viewer without this.
+    // SpaceTitleRow paints no background and its foreground is near-white.
     private func onDarkBacking<V: View>(_ content: V, size: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
             Color(red: 0.14, green: 0.13, blue: 0.17)
@@ -190,7 +182,108 @@ final class SpaceIconViewRenderTests: XCTestCase {
         XCTAssertTrue(OrbitSymbolName.isResolvable("display"), "'display' (the monitor/screen glyph) must resolve as a real SF Symbol on this OS, or this test's own fixture needs a different symbol name.")
     }
 
-    func test_spaceTitleRow_emojiIcon_rendersUncroppedInTheRealHeader() {
+    // Computed from the real layout constants, so a constant change fails this rather than moving it.
+    private static var spaceTitleRowIconRegion: CGRect {
+        let leading = OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset
+        let iconSize = OrbitMetrics.sidebarSpaceIconSize
+        let top = (OrbitMetrics.sidebarSpaceNameRowHeight - iconSize) / 2
+        return CGRect(x: leading, y: top, width: iconSize, height: iconSize)
+    }
+
+    // Alpha scan bounded to one sub-rect: a whole-image scan would fold in the Space name.
+    private func inkBoundingBox(in image: RenderedImage, region: CGRect, tolerance: Double = 0.08) -> CGRect? {
+        var minX = Int.max, minY = Int.max, maxX = Int.min, maxY = Int.min
+        let x0 = Int(region.minX.rounded(.down)), x1 = Int(region.maxX.rounded(.up))
+        let y0 = Int(region.minY.rounded(.down)), y1 = Int(region.maxY.rounded(.up))
+        for y in y0..<y1 {
+            for x in x0..<x1 {
+                if image.color(atX: x, y: y).a > tolerance {
+                    minX = min(minX, x)
+                    minY = min(minY, y)
+                    maxX = max(maxX, x + 1)
+                    maxY = max(maxY, y + 1)
+                }
+            }
+        }
+        guard minX <= maxX, minY <= maxY, minX != Int.max else { return nil }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private func assertInkHasMarginAndIsCentered(
+        _ ink: CGRect?, in container: CGRect, minimumMargin: CGFloat = 1, centerTolerance: CGFloat = 2.5,
+        label: String, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        guard let ink else {
+            XCTFail("\(label): nothing drawn inside its own container", file: file, line: line)
+            return
+        }
+        let left = ink.minX - container.minX
+        let top = ink.minY - container.minY
+        let right = container.maxX - ink.maxX
+        let bottom = container.maxY - ink.maxY
+        XCTAssertGreaterThanOrEqual(left, minimumMargin, "\(label): ink touches (or crops past) the container's left edge — left margin \(left)pt", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(top, minimumMargin, "\(label): ink touches (or crops past) the container's top edge — top margin \(top)pt", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(right, minimumMargin, "\(label): ink touches (or crops past) the container's right edge — right margin \(right)pt", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(bottom, minimumMargin, "\(label): ink touches (or crops past) the container's bottom edge — bottom margin \(bottom)pt", file: file, line: line)
+
+        let centerDX = abs(ink.midX - container.midX)
+        let centerDY = abs(ink.midY - container.midY)
+        XCTAssertLessThanOrEqual(centerDX, centerTolerance, "\(label): ink's own centre sits \(centerDX)pt off the container's horizontal centre", file: file, line: line)
+        XCTAssertLessThanOrEqual(centerDY, centerTolerance, "\(label): ink's own centre sits \(centerDY)pt off the container's vertical centre", file: file, line: line)
+    }
+
+    // Spread of glyph shapes: smiley, ZWJ sequence, flag, skin-tone modifier, monitor.
+    private static let emojiSpread = ["🖥️", "😀", "📚", "🚀", "👨‍👩‍👧‍👦", "🧑🏽‍💻"]
+
+    // No onDarkBacking: an opaque backing would make the alpha ink scan find ink everywhere.
+    func test_spaceTitleRow_emojiIcon_inkHasMarginAndIsCenteredInTheRealHeader() {
+        let region = Self.spaceTitleRowIconRegion
+        for emoji in Self.emojiSpread {
+            let space = Space(name: "Systems", icon: emoji, iconIsEmoji: true, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
+            let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
+            let image = render(SpaceTitleRow(space: space).environment(env), size: size)
+            let ink = inkBoundingBox(in: image, region: region)
+            assertInkHasMarginAndIsCentered(ink, in: region, label: "SpaceTitleRow emoji '\(emoji)'")
+        }
+    }
+
+    func test_spaceTitleRow_symbolIcon_inkHasMarginAndIsCenteredInTheRealHeader() {
+        let region = Self.spaceTitleRowIconRegion
+        for symbol in ["display", "tv", "desktopcomputer", "star.fill"] {
+            let space = Space(name: "Systems", icon: symbol, iconIsEmoji: false, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
+            let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
+            let image = render(SpaceTitleRow(space: space).environment(env), size: size)
+            let ink = inkBoundingBox(in: image, region: region)
+            assertInkHasMarginAndIsCentered(ink, in: region, label: "SpaceTitleRow symbol '\(symbol)'")
+        }
+    }
+
+    // SpaceEditPopover hosts SpaceIconView at exactly `size`, with no ancestor slack.
+    func test_emoji_atSpaceEditPopoverSize_inkHasMarginAndIsCentered() {
+        let size: CGFloat = 16
+        let container = CGRect(x: 0, y: 0, width: size, height: size)
+        for emoji in Self.emojiSpread {
+            let image = render(SpaceIconView(icon: .emoji(emoji), size: size, foregroundColor: .white), size: CGSize(width: size, height: size))
+            let ink = inkBoundingBox(in: image, region: container)
+            assertInkHasMarginAndIsCentered(ink, in: container, label: "SpaceIconView emoji '\(emoji)' at SpaceEditPopover's 16pt size")
+        }
+    }
+
+    // The pager dot's own icon (OrbitMetrics.iconFavicon inside SpaceSwitcherPagerView) and
+    // ManageSpacesColumnsView's header icon both pass this size through to SpaceIconView directly.
+    func test_emoji_atPagerAndManageSpacesIconSize_inkHasMarginAndIsCentered() {
+        let size = OrbitMetrics.iconFavicon
+        let container = CGRect(x: 0, y: 0, width: size, height: size)
+        for emoji in Self.emojiSpread {
+            let image = render(SpaceIconView(icon: .emoji(emoji), size: size, foregroundColor: .white), size: CGSize(width: size, height: size))
+            let ink = inkBoundingBox(in: image, region: container)
+            assertInkHasMarginAndIsCentered(ink, in: container, label: "SpaceIconView emoji '\(emoji)' at iconFavicon size")
+        }
+    }
+
+    // Cropping is asserted by test_spaceTitleRow_emojiIcon_inkHasMarginAndIsCenteredInTheRealHeader
+    // above; this only writes the PNG and smoke-checks that the header drew at all.
+    func test_spaceTitleRow_emojiIcon_writesHeaderPNGForHumanInspection() {
         let space = Space(name: "Reading List", icon: "📚", iconIsEmoji: true, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
         let image = render(
@@ -201,7 +294,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
         XCTAssertNotNil(image.boundingBoxOfContent(), "the header drew nothing at all")
     }
 
-    func test_spaceTitleRow_symbolIcon_rendersUncroppedInTheRealHeader() {
+    func test_spaceTitleRow_symbolIcon_writesHeaderPNGForHumanInspection() {
         let space = Space(name: "Systems", icon: "display", iconIsEmoji: false, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
         let image = render(

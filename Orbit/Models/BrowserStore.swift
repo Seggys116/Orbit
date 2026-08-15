@@ -27,7 +27,14 @@ public final class BrowserStore {
 
     // MARK: - Recently closed (session-only; not persisted)
 
-    var recentlyClosedRecords: [ClosedTabRecord] = []
+    // Posted here rather than at the mutation sites so the clears in
+    // BrowserStore+Spaces and AppEnvironment+DataReset can't be the ones that forget.
+    var recentlyClosedRecords: [ClosedTabRecord] = [] {
+        didSet {
+            guard recentlyClosedRecords != oldValue else { return }
+            NotificationCenter.default.post(name: .orbitRecentlyClosedDidChange, object: self)
+        }
+    }
     let recentlyClosedCapacity = 25
 
     public var recentlyClosed: [Tab] {

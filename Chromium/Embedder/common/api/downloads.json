@@ -1,0 +1,638 @@
+// Copyright 2026 The Orbit Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+[
+  {
+    "namespace": "downloads",
+    "description": "Use the <code>chrome.downloads</code> API to programmatically initiate, monitor, manipulate, and search for downloads.",
+    "compiler_options": {
+      "implemented_in": "orbit/browser/api/downloads/orbit_downloads_api.h"
+    },
+    "types": [
+      {
+        "id": "HeaderNameValuePair",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the HTTP header."
+          },
+          "value": {
+            "type": "string",
+            "description": "Value of the HTTP header."
+          }
+        }
+      },
+      {
+        "id": "FilenameConflictAction",
+        "type": "string",
+        "enum": [{
+          "name": "uniquify",
+          "description": "To avoid duplication, the <code>filename</code> is changed to include a counter before the filename extension."
+        }, {
+          "name": "overwrite",
+          "description": "The existing file will be overwritten with the new file."
+        }]
+      },
+      {
+        "id": "HttpMethod",
+        "type": "string",
+        "enum": ["GET", "POST"]
+      },
+      {
+        "id": "InterruptReason",
+        "type": "string",
+        "enum": [
+          "FILE_FAILED",
+          "FILE_ACCESS_DENIED",
+          "FILE_NO_SPACE",
+          "FILE_NAME_TOO_LONG",
+          "FILE_TOO_LARGE",
+          "FILE_VIRUS_INFECTED",
+          "FILE_TRANSIENT_ERROR",
+          "FILE_BLOCKED",
+          "FILE_SECURITY_CHECK_FAILED",
+          "FILE_TOO_SHORT",
+          "FILE_HASH_MISMATCH",
+          "FILE_SAME_AS_SOURCE",
+          "NETWORK_FAILED",
+          "NETWORK_TIMEOUT",
+          "NETWORK_DISCONNECTED",
+          "NETWORK_SERVER_DOWN",
+          "NETWORK_INVALID_REQUEST",
+          "SERVER_FAILED",
+          "SERVER_NO_RANGE",
+          "SERVER_BAD_CONTENT",
+          "SERVER_UNAUTHORIZED",
+          "SERVER_CERT_PROBLEM",
+          "SERVER_FORBIDDEN",
+          "SERVER_UNREACHABLE",
+          "SERVER_CONTENT_LENGTH_MISMATCH",
+          "SERVER_CROSS_ORIGIN_REDIRECT",
+          "USER_CANCELED",
+          "USER_SHUTDOWN",
+          "CRASH"
+        ]
+      },
+      {
+        "id": "DownloadOptions",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL to download."
+          },
+          "filename": {
+            "type": "string",
+            "optional": true,
+            "description": "A file path relative to the Downloads directory to contain the downloaded file, possibly containing subdirectories. Absolute paths, empty paths, and paths containing back-references \"..\" will cause an error."
+          },
+          "conflictAction": {
+            "$ref": "FilenameConflictAction",
+            "optional": true,
+            "description": "The action to take if <code>filename</code> already exists. Defaults to <code>uniquify</code>; <code>overwrite</code> requires <code>filename</code>."
+          },
+          "method": {
+            "$ref": "HttpMethod",
+            "optional": true,
+            "description": "The HTTP method to use if the URL uses the HTTP[S] protocol."
+          },
+          "headers": {
+            "type": "array",
+            "optional": true,
+            "items": {"$ref": "HeaderNameValuePair"},
+            "description": "Extra HTTP headers to send with the request if the URL uses the HTTP[s] protocol. Each header is represented as a dictionary containing the keys <code>name</code> and either <code>value</code> or <code>binaryValue</code>, restricted to those allowed by XMLHttpRequest."
+          },
+          "body": {
+            "type": "string",
+            "optional": true,
+            "description": "Post body."
+          }
+        }
+      },
+      {
+        "id": "DangerType",
+        "type": "string",
+        "enum": [{
+          "name": "safe",
+          "description": "The download presents no known danger to the user's computer."
+        }],
+        "description": "Orbit ships no download-protection stack, so the only classification it can report is \"safe\"."
+      },
+      {
+        "id": "State",
+        "type": "string",
+        "enum": [{
+          "name": "in_progress",
+          "description": "The download is currently receiving data from the server."
+        }, {
+          "name": "interrupted",
+          "description": "An error broke the connection with the file host."
+        }, {
+          "name": "complete",
+          "description": "The download completed successfully."
+        }]
+      },
+      {
+        "id": "DownloadItem",
+        "type": "object",
+        "description": "The state of the process of downloading a file.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "An identifier that is persistent across browser sessions."
+          },
+          "url": {
+            "type": "string",
+            "description": "The absolute URL that this download initiated from, before any redirects."
+          },
+          "finalUrl": {
+            "type": "string",
+            "description": "The absolute URL that this download is being made from, after all redirects. Orbit records only the URL the download delegate reported, which is already the final URL, so this is always equal to <code>url</code>."
+          },
+          "referrer": {
+            "type": "string",
+            "description": "Absolute URL."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Absolute local path."
+          },
+          "danger": {
+            "$ref": "DangerType",
+            "description": "Indication of whether this download is thought to be safe or known to be suspicious."
+          },
+          "mime": {
+            "type": "string",
+            "description": "The file's MIME type."
+          },
+          "startTime": {
+            "type": "string",
+            "description": "The time when the download began in ISO 8601 format. May be passed directly to the Date constructor: <code>chrome.downloads.search({}, function(items){items.forEach(function(item){console.log(new Date(item.startTime))})})</code>"
+          },
+          "endTime": {
+            "type": "string",
+            "optional": true,
+            "description": "The time when the download ended in ISO 8601 format. May be passed directly to the Date constructor: <code>chrome.downloads.search({}, function(items){items.forEach(function(item){if (item.endTime) console.log(new Date(item.endTime))})})</code>"
+          },
+          "state": {
+            "$ref": "State",
+            "description": "Indicates whether the download is progressing, interrupted, or complete."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "True if the download has stopped reading data from the host, but kept the connection open."
+          },
+          "canResume": {
+            "type": "boolean",
+            "description": "True if the download is in progress and paused, or else if it is interrupted and can be resumed starting from where it was interrupted."
+          },
+          "error": {
+            "$ref": "InterruptReason",
+            "optional": true,
+            "description": "Why the download was interrupted. Several kinds of HTTP errors may be grouped under one of the errors beginning with <code>SERVER_</code>. Errors relating to the network begin with <code>NETWORK_</code>, errors relating to the process of writing the file to the file system begin with <code>FILE_</code>, and interruptions initiated by the user begin with <code>USER_</code>."
+          },
+          "bytesReceived": {
+            "type": "number",
+            "description": "Number of bytes received so far from the host, without considering file compression."
+          },
+          "totalBytes": {
+            "type": "number",
+            "description": "Number of bytes in the whole file, without considering file compression, or -1 if unknown."
+          },
+          "exists": {
+            "type": "boolean",
+            "description": "Whether the downloaded file still exists. This information may be out of date because Orbit does not automatically watch for file removal. Call $(ref:search)() in order to trigger the check for file existence. When the existence check completes, if the file has been deleted, then an $(ref:onChanged) event will fire."
+          }
+        }
+      },
+      {
+        "id": "DownloadQuery",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "array",
+            "optional": true,
+            "items": {"type": "string"},
+            "description": "This array of search terms limits results to $(ref:DownloadItem) whose <code>filename</code> or <code>url</code> or <code>finalUrl</code> contain all of the search terms that do not begin with a dash '-' and none of the search terms that do begin with a dash."
+          },
+          "startedBefore": {
+            "type": "string",
+            "optional": true,
+            "description": "Limits results to $(ref:DownloadItem) that started before the given ms in ISO 8601 format."
+          },
+          "startedAfter": {
+            "type": "string",
+            "optional": true,
+            "description": "Limits results to $(ref:DownloadItem) that started after the given ms in ISO 8601 format."
+          },
+          "endedBefore": {
+            "type": "string",
+            "optional": true,
+            "description": "Limits results to $(ref:DownloadItem) that ended before the given ms in ISO 8601 format."
+          },
+          "endedAfter": {
+            "type": "string",
+            "optional": true,
+            "description": "Limits results to $(ref:DownloadItem) that ended after the given ms in ISO 8601 format"
+          },
+          "totalBytesGreater": {
+            "type": "number",
+            "optional": true,
+            "description": "Limits results to $(ref:DownloadItem) whose <code>totalBytes</code> is greater than the given integer."
+          },
+          "totalBytesLess": {
+            "type": "number",
+            "optional": true,
+            "description": "Limits results to $(ref:DownloadItem) whose <code>totalBytes</code> is less than the given integer."
+          },
+          "filenameRegex": {
+            "type": "string",
+            "optional": true,
+            "description": "Limits results to $(ref:DownloadItem) whose <code>filename</code> matches the given regular expression."
+          },
+          "urlRegex": {
+            "type": "string",
+            "optional": true,
+            "description": "Limits results to $(ref:DownloadItem) whose <code>url</code> matches the given regular expression."
+          },
+          "finalUrlRegex": {
+            "type": "string",
+            "optional": true,
+            "description": "Limits results to $(ref:DownloadItem) whose <code>finalUrl</code> matches the given regular expression."
+          },
+          "limit": {
+            "type": "integer",
+            "optional": true,
+            "description": "The maximum number of matching $(ref:DownloadItem) returned. Defaults to 1000. Set to 0 in order to return all matching $(ref:DownloadItem). See $(ref:search) for how to page through results."
+          },
+          "orderBy": {
+            "type": "array",
+            "optional": true,
+            "items": {"type": "string"},
+            "description": "Set elements of this array to $(ref:DownloadItem) properties in order to sort search results. For example, setting <code>orderBy=['startTime']</code> sorts the $(ref:DownloadItem) by their start time in ascending order. To specify descending order, prefix with a hyphen: '-startTime'."
+          },
+          "id": {
+            "type": "integer",
+            "optional": true,
+            "description": "The <code>id</code> of the $(ref:DownloadItem) to query."
+          },
+          "url": {
+            "type": "string",
+            "optional": true,
+            "description": "The absolute URL that this download initiated from, before any redirects."
+          },
+          "finalUrl": {
+            "type": "string",
+            "optional": true,
+            "description": "The absolute URL that this download is being made from, after all redirects."
+          },
+          "filename": {
+            "type": "string",
+            "optional": true,
+            "description": "Absolute local path."
+          },
+          "danger": {
+            "$ref": "DangerType",
+            "optional": true,
+            "description": "Indication of whether this download is thought to be safe or known to be suspicious."
+          },
+          "mime": {
+            "type": "string",
+            "optional": true,
+            "description": "The file's MIME type."
+          },
+          "startTime": {
+            "type": "string",
+            "optional": true,
+            "description": "The time when the download began in ISO 8601 format."
+          },
+          "endTime": {
+            "type": "string",
+            "optional": true,
+            "description": "The time when the download ended in ISO 8601 format."
+          },
+          "state": {
+            "$ref": "State",
+            "optional": true,
+            "description": "Indicates whether the download is progressing, interrupted, or complete."
+          },
+          "paused": {
+            "type": "boolean",
+            "optional": true,
+            "description": "True if the download has stopped reading data from the host, but kept the connection open."
+          },
+          "error": {
+            "$ref": "InterruptReason",
+            "optional": true,
+            "description": "Why a download was interrupted."
+          },
+          "bytesReceived": {
+            "type": "number",
+            "optional": true,
+            "description": "Number of bytes received so far from the host, without considering file compression."
+          },
+          "totalBytes": {
+            "type": "number",
+            "optional": true,
+            "description": "Number of bytes in the whole file, without considering file compression, or -1 if unknown."
+          },
+          "exists": {
+            "type": "boolean",
+            "optional": true,
+            "description": "Whether the downloaded file exists;"
+          }
+        }
+      },
+      {
+        "id": "StringDelta",
+        "type": "object",
+        "properties": {
+          "previous": {"type": "string", "optional": true},
+          "current": {"type": "string", "optional": true}
+        }
+      },
+      {
+        "id": "DoubleDelta",
+        "type": "object",
+        "properties": {
+          "previous": {"type": "number", "optional": true},
+          "current": {"type": "number", "optional": true}
+        }
+      },
+      {
+        "id": "BooleanDelta",
+        "type": "object",
+        "properties": {
+          "previous": {"type": "boolean", "optional": true},
+          "current": {"type": "boolean", "optional": true}
+        }
+      },
+      {
+        "id": "DownloadDelta",
+        "type": "object",
+        "description": "Encapsulates a change in a DownloadItem.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The <code>id</code> of the $(ref:DownloadItem) that changed."
+          },
+          "url": {
+            "$ref": "StringDelta",
+            "optional": true,
+            "description": "The change in <code>url</code>, if any."
+          },
+          "finalUrl": {
+            "$ref": "StringDelta",
+            "optional": true,
+            "description": "The change in <code>finalUrl</code>, if any."
+          },
+          "filename": {
+            "$ref": "StringDelta",
+            "optional": true,
+            "description": "The change in <code>filename</code>, if any."
+          },
+          "danger": {
+            "$ref": "StringDelta",
+            "optional": true,
+            "description": "The change in <code>danger</code>, if any."
+          },
+          "mime": {
+            "$ref": "StringDelta",
+            "optional": true,
+            "description": "The change in <code>mime</code>, if any."
+          },
+          "startTime": {
+            "$ref": "StringDelta",
+            "optional": true,
+            "description": "The change in <code>startTime</code>, if any."
+          },
+          "endTime": {
+            "$ref": "StringDelta",
+            "optional": true,
+            "description": "The change in <code>endTime</code>, if any."
+          },
+          "state": {
+            "$ref": "StringDelta",
+            "optional": true,
+            "description": "The change in <code>state</code>, if any."
+          },
+          "canResume": {
+            "$ref": "BooleanDelta",
+            "optional": true,
+            "description": "The change in <code>canResume</code>, if any."
+          },
+          "paused": {
+            "$ref": "BooleanDelta",
+            "optional": true,
+            "description": "The change in <code>paused</code>, if any."
+          },
+          "error": {
+            "$ref": "StringDelta",
+            "optional": true,
+            "description": "The change in <code>error</code>, if any."
+          },
+          "totalBytes": {
+            "$ref": "DoubleDelta",
+            "optional": true,
+            "description": "The change in <code>totalBytes</code>, if any."
+          },
+          "exists": {
+            "$ref": "BooleanDelta",
+            "optional": true,
+            "description": "The change in <code>exists</code>, if any."
+          }
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "download",
+        "type": "function",
+        "description": "Download a URL. If the URL uses the HTTP[S] protocol, then the request will include all cookies currently set for its hostname. If the download started successfully, <code>callback</code> will be called with the new $(ref:DownloadItem)'s <code>downloadId</code>. If there was an error starting the download, then <code>callback</code> will be called with <code>downloadId=undefined</code> and $(ref:runtime.lastError) will contain a descriptive string. The error strings are not guaranteed to remain backwards compatible between releases. Extensions must not parse it.",
+        "parameters": [
+          {
+            "name": "options",
+            "$ref": "DownloadOptions",
+            "description": "What to download and how."
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": [
+            {"name": "downloadId", "type": "integer"}
+          ]
+        }
+      },
+      {
+        "name": "search",
+        "type": "function",
+        "description": "Find $(ref:DownloadItem). Set <code>query</code> to the empty object to get all $(ref:DownloadItem). To get a specific $(ref:DownloadItem), set only the <code>id</code> field. To page through a large number of items, set <code>orderBy: ['-startTime']</code>, set <code>limit</code> to the number of items per page, and set <code>startedAfter</code> to the <code>startTime</code> of the last item from the last page.",
+        "parameters": [
+          {
+            "name": "query",
+            "$ref": "DownloadQuery"
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": [
+            {"name": "results", "type": "array", "items": {"$ref": "DownloadItem"}}
+          ]
+        }
+      },
+      {
+        "name": "pause",
+        "type": "function",
+        "description": "Pause the download. If the request was successful the download is in a paused state. Otherwise $(ref:runtime.lastError) contains an error message. The request will fail if the download is not active.",
+        "parameters": [
+          {
+            "name": "downloadId",
+            "type": "integer",
+            "description": "The id of the download to pause."
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": []
+        }
+      },
+      {
+        "name": "resume",
+        "type": "function",
+        "description": "Resume a paused download. If the request was successful the download is in progress and unpaused. Otherwise $(ref:runtime.lastError) contains an error message. The request will fail if the download is not active.",
+        "parameters": [
+          {
+            "name": "downloadId",
+            "type": "integer",
+            "description": "The id of the download to resume."
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": []
+        }
+      },
+      {
+        "name": "cancel",
+        "type": "function",
+        "description": "Cancel a download. When <code>callback</code> is run, the download is cancelled, completed, interrupted or doesn't exist anymore.",
+        "parameters": [
+          {
+            "name": "downloadId",
+            "type": "integer",
+            "description": "The id of the download to cancel."
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": []
+        }
+      },
+      {
+        "name": "open",
+        "type": "function",
+        "description": "Opens the downloaded file now if the $(ref:DownloadItem) is complete; otherwise returns an error through $(ref:runtime.lastError). This method requires the <code>\"downloads.open\"</code> permission in addition to the <code>\"downloads\"</code> permission. An $(ref:onChanged) event fires when the item is opened for the first time. This method can only be called in response to a user gesture.",
+        "parameters": [
+          {
+            "name": "downloadId",
+            "type": "integer",
+            "description": "The identifier for the downloaded file."
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": []
+        }
+      },
+      {
+        "name": "show",
+        "type": "function",
+        "description": "Show the downloaded file in its folder in a file manager.",
+        "parameters": [
+          {
+            "name": "downloadId",
+            "type": "integer",
+            "description": "The identifier for the downloaded file."
+          }
+        ]
+      },
+      {
+        "name": "showDefaultFolder",
+        "type": "function",
+        "description": "Show the default Downloads folder in a file manager.",
+        "parameters": []
+      },
+      {
+        "name": "erase",
+        "type": "function",
+        "description": "Erase matching $(ref:DownloadItem) from history without deleting the downloaded file. An $(ref:onErased) event will fire for each $(ref:DownloadItem) that matches <code>query</code>, then <code>callback</code> will be called.",
+        "parameters": [
+          {
+            "name": "query",
+            "$ref": "DownloadQuery"
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": [
+            {"name": "erasedIds", "type": "array", "items": {"type": "integer"}}
+          ]
+        }
+      },
+      {
+        "name": "removeFile",
+        "type": "function",
+        "description": "Remove the downloaded file if it exists and the $(ref:DownloadItem) is complete; otherwise return an error through $(ref:runtime.lastError).",
+        "parameters": [
+          {
+            "name": "downloadId",
+            "type": "integer"
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": []
+        }
+      }
+    ],
+    "events": [
+      {
+        "name": "onCreated",
+        "type": "function",
+        "description": "This event fires with the $(ref:DownloadItem) object when a download begins.",
+        "parameters": [
+          {"$ref": "DownloadItem", "name": "downloadItem"}
+        ]
+      },
+      {
+        "name": "onErased",
+        "type": "function",
+        "description": "Fires with the <code>downloadId</code> when a download is erased from history.",
+        "parameters": [
+          {
+            "name": "downloadId",
+            "type": "integer",
+            "description": "The <code>id</code> of the $(ref:DownloadItem) that was erased."
+          }
+        ]
+      },
+      {
+        "name": "onChanged",
+        "type": "function",
+        "description": "When any of a $(ref:DownloadItem)'s properties except <code>bytesReceived</code> changes, this event fires with the <code>downloadId</code> and an object containing the properties that changed.",
+        "parameters": [
+          {"$ref": "DownloadDelta", "name": "downloadDelta"}
+        ]
+      }
+    ]
+  }
+]

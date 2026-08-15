@@ -1,0 +1,67 @@
+// Copyright 2026 The Orbit Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+[
+  {
+    "namespace": "search",
+    "description": "Use the <code>chrome.search</code> API to search via the default provider.",
+    "types": [
+      {
+        "id": "Disposition",
+        "type": "string",
+        "enum": [
+          {
+            "name": "CURRENT_TAB",
+            "description": "Specifies that the search results display in the calling tab or the tab from the active browser."
+          },
+          {
+            "name": "NEW_TAB",
+            "description": "Specifies that the search results display in a new tab."
+          },
+          {
+            "name": "NEW_WINDOW",
+            "description": "Specifies that the search results display in a new window."
+          }
+        ]
+      },
+      {
+        "id": "QueryInfo",
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "String to query with the default search provider."
+          },
+          "disposition": {
+            "$ref": "Disposition",
+            "optional": true,
+            "description": "Location where search results should be displayed. <code>CURRENT_TAB</code> is the default."
+          },
+          "tabId": {
+            "type": "integer",
+            "optional": true,
+            "description": "Location where search results should be displayed. <code>tabId</code> cannot be used with <code>disposition</code>."
+          }
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "query",
+        "type": "function",
+        "description": "Used to query the default search provider. In case of an error, $(ref:runtime.lastError) will be set.",
+        "parameters": [
+          {
+            "name": "queryInfo",
+            "$ref": "QueryInfo"
+          }
+        ],
+        "returns_async": {
+          "name": "callback",
+          "optional": true,
+          "parameters": []
+        }
+      }
+    ]
+  }
+]

@@ -11,11 +11,15 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "orbit/bridge/orbit_bridge_internal.h"
+#include "orbit/browser/orbit_bookmark_registry.h"
 #include "orbit/browser/orbit_browser_context.h"
+#include "orbit/browser/orbit_command_service.h"
 #include "orbit/browser/orbit_cookies_event_router.h"
+#include "orbit/browser/orbit_download_registry.h"
 #include "orbit/browser/orbit_devtools_web_ui.h"
 #include "orbit/browser/orbit_extension_action_dispatcher.h"
 #include "orbit/browser/orbit_extensions_browser_client.h"
+#include "orbit/browser/orbit_menu_manager.h"
 #include "orbit/browser/orbit_permissions_event_router.h"
 #include "orbit/browser/orbit_preference_event_router.h"
 #include "ui/display/screen.h"
@@ -51,7 +55,11 @@ int OrbitBrowserMainParts::PreMainMessageLoopRun() {
 
   OrbitExtensionActionDispatcher::GetInstance().StartObserving(
       browser_context_.get());
+  OrbitBookmarkRegistry::GetInstance().StartObserving(browser_context_.get());
+  OrbitCommandService::GetInstance().StartObserving(browser_context_.get());
   OrbitCookiesEventRouter::GetInstance().StartObserving(browser_context_.get());
+  OrbitDownloadRegistry::GetInstance().StartObserving(browser_context_.get());
+  OrbitMenuManager::GetInstance().StartObserving(browser_context_.get());
   OrbitPermissionsEventRouter::GetInstance().StartObserving(browser_context_.get());
   OrbitPreferenceEventRouter::GetInstance().StartObserving(browser_context_.get());
 
@@ -68,7 +76,15 @@ void OrbitBrowserMainParts::PostMainMessageLoopRun() {
   ClearOrbitBrowserState();
   OrbitExtensionActionDispatcher::GetInstance().StopObserving();
   OrbitExtensionActionDispatcher::GetInstance().SetCallback(nullptr, nullptr);
+  OrbitBookmarkRegistry::GetInstance().StopObserving();
+  OrbitBookmarkRegistry::GetInstance().SetRequestCallback(nullptr, nullptr);
+  OrbitDownloadRegistry::GetInstance().StopObserving();
+  OrbitDownloadRegistry::GetInstance().SetRequestCallback(nullptr, nullptr);
+  OrbitCommandService::GetInstance().StopObserving();
+  OrbitCommandService::GetInstance().SetCommandsCallback(nullptr, nullptr);
+  OrbitCommandService::GetInstance().SetActionActivatedCallback(nullptr, nullptr);
   OrbitCookiesEventRouter::GetInstance().StopObserving();
+  OrbitMenuManager::GetInstance().StopObserving();
   OrbitPermissionsEventRouter::GetInstance().StopObserving();
   OrbitPreferenceEventRouter::GetInstance().StopObserving();
   OrbitPreferenceEventRouter::GetInstance().SetSearchSuggestCallback(nullptr, nullptr);

@@ -60,6 +60,7 @@
 #include "orbit/bridge/orbit_bridge_internal.h"
 #include "orbit/browser/orbit_devtools_frontend.h"
 #include "orbit/browser/orbit_extension_web_contents_observer.h"
+#include "orbit/browser/orbit_menu_manager.h"
 #include "orbit/browser/orbit_print_manager.h"
 #include "orbit/browser/orbit_tab_registry.h"
 #include "orbit/browser/orbit_web_navigation_event_router.h"
@@ -565,6 +566,40 @@ const char* OrbitWebContentsHost::SessionHistoryJSON() {
     session_history_json_ = "[]";
   }
   return session_history_json_.c_str();
+}
+
+const char* OrbitWebContentsHost::ExtensionContextMenuJSON() {
+  extension_context_menu_json_ = "[]";
+  if (!last_context_menu_params_) {
+    return extension_context_menu_json_.c_str();
+  }
+  base::ListValue groups =
+      OrbitMenuManager::GetInstance().MatchingItemsValue(
+          *last_context_menu_params_);
+  if (!base::JSONWriter::Write(groups, &extension_context_menu_json_)) {
+    extension_context_menu_json_ = "[]";
+  }
+  return extension_context_menu_json_.c_str();
+}
+
+void OrbitWebContentsHost::ExecuteExtensionContextMenuItem(
+    const std::string& extension_id,
+    bool has_uid,
+    int uid,
+    const std::string& string_uid) {
+  if (!last_context_menu_params_) {
+    return;
+  }
+  OrbitMenuItemId id(extension_id);
+  if (has_uid) {
+    id.uid = uid;
+  } else {
+    id.string_uid = string_uid;
+  }
+  OrbitMenuManager::GetInstance().ExecuteCommand(
+      web_contents_.get(),
+      content::RenderFrameHost::FromID(last_context_menu_frame_id_),
+      *last_context_menu_params_, id);
 }
 
 void OrbitWebContentsHost::LoadHTML(const std::string& html,
@@ -1589,6 +1624,11 @@ void OrbitWebContentsHost::ResizeDueToAutoResize(
 bool OrbitWebContentsHost::HandleContextMenu(
     content::RenderFrameHost& render_frame_host,
     const content::ContextMenuParams& params) {
+  // Recorded even with no Swift callback installed: chrome.contextMenus is
+  // still queryable from a test harness that presents no menu of its own.
+  last_context_menu_params_ = params;
+  last_context_menu_frame_id_ = render_frame_host.GetGlobalId();
+
   if (!callbacks_.show_context_menu) {
     return false;
   }

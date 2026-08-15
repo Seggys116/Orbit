@@ -44,6 +44,20 @@ constexpr extensions::APIPermissionInfo::InitInfo kOrbitPermissionsToRegister[] 
     {APIPermissionID::kScripting, "scripting",
      extensions::APIPermissionInfo::kFlagRequiresManagementUIWarning},
     {APIPermissionID::kManagement, "management", 0},
+    {APIPermissionID::kContextMenus, "contextMenus",
+     extensions::APIPermissionInfo::
+         kFlagDoesNotRequireManagedSessionFullLoginWarning},
+    {APIPermissionID::kHistory, "history",
+     extensions::APIPermissionInfo::kFlagRequiresManagementUIWarning},
+    {APIPermissionID::kSessions, "sessions", 0},
+    {APIPermissionID::kSearch, "search",
+     extensions::APIPermissionInfo::
+         kFlagDoesNotRequireManagedSessionFullLoginWarning},
+    {APIPermissionID::kBookmark, "bookmarks", 0},
+    {APIPermissionID::kDownloads, "downloads", 0},
+    // kDownloadsShelf/kDownloadsUi are deliberately unregistered: Orbit has no
+    // download shelf and no setShelfEnabled/setUiOptions to gate.
+    {APIPermissionID::kDownloadsOpen, "downloads.open", 0},
 };
 
 // chrome.windows has always been implemented by the same code as chrome.tabs

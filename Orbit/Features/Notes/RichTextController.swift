@@ -122,6 +122,56 @@ final class RichTextController {
     }
 }
 
+enum NotesTextColor {
+
+    // Greyscale near-black or near-white was authored against one appearance and cannot follow the other.
+    private static func isSingleAppearanceBodyColor(_ color: NSColor) -> Bool {
+        guard color.type != .catalog, let srgb = color.usingColorSpace(.sRGB) else { return false }
+        let red = srgb.redComponent, green = srgb.greenComponent, blue = srgb.blueComponent
+        guard abs(red - green) < 0.06, abs(green - blue) < 0.06, abs(red - blue) < 0.06 else { return false }
+        let luminance = 0.299 * red + 0.587 * green + 0.114 * blue
+        return luminance < 0.35 || luminance > 0.65
+    }
+
+    private static func rangesNeedingDynamicColor(in string: NSAttributedString, range: NSRange) -> [NSRange] {
+        var found: [NSRange] = []
+        string.enumerateAttribute(.foregroundColor, in: range) { value, subrange, _ in
+            guard let color = value as? NSColor else { found.append(subrange); return }
+            if isSingleAppearanceBodyColor(color) { found.append(subrange) }
+        }
+        return found
+    }
+
+    static func applyDynamicTextColor(to storage: NSTextStorage, in range: NSRange) {
+        guard range.length > 0, range.upperBound <= storage.length else { return }
+        let ranges = rangesNeedingDynamicColor(in: storage, range: range)
+        guard !ranges.isEmpty else { return }
+        for subrange in ranges {
+            storage.addAttribute(.foregroundColor, value: NSColor.textColor, range: subrange)
+        }
+    }
+
+    static func normalized(_ input: NSAttributedString) -> NSAttributedString {
+        let ranges = rangesNeedingDynamicColor(in: input, range: NSRange(location: 0, length: input.length))
+        guard !ranges.isEmpty else { return input }
+        let mutable = NSMutableAttributedString(attributedString: input)
+        for subrange in ranges {
+            mutable.addAttribute(.foregroundColor, value: NSColor.textColor, range: subrange)
+        }
+        return mutable
+    }
+
+    @MainActor
+    static func normalizeTypingAttributes(of textView: NSTextView) {
+        guard let color = textView.typingAttributes[.foregroundColor] as? NSColor else {
+            textView.typingAttributes[.foregroundColor] = NSColor.textColor
+            return
+        }
+        guard isSingleAppearanceBodyColor(color) else { return }
+        textView.typingAttributes[.foregroundColor] = NSColor.textColor
+    }
+}
+
 struct RichTextEditorView: NSViewRepresentable {
     @Binding var attributedText: NSAttributedString
     var controller: RichTextController
@@ -212,8 +262,15 @@ struct RichTextEditorView: NSViewRepresentable {
             self.onEdit = onEdit
         }
 
+        // Fires for every route into the storage: typing, paste, drag, dictation, services and undo.
+        // Repairing here rather than from an NSTextStorageDelegate is deliberate — mutating the storage
+        // inside didProcessEditing swallows the character edit, and the note then never saves.
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            NotesTextColor.normalizeTypingAttributes(of: textView)
+            if let storage = textView.textStorage {
+                NotesTextColor.applyDynamicTextColor(to: storage, in: NSRange(location: 0, length: storage.length))
+            }
             attributedText.wrappedValue = textView.attributedString()
             onEdit?()
         }

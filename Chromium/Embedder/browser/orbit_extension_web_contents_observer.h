@@ -3,9 +3,10 @@
 // found in the LICENSE file.
 //
 // Required subclass of ExtensionWebContentsObserver (WebContentsUserData
-// needs a concrete type to key on). Overrides nothing, unlike Chrome's
-// equivalent: Orbit has no error console or crashed-extension reload yet.
-// Owns the per-tab ScriptExecutor, which Chrome parks on TabHelper instead.
+// needs a concrete type to key on). Unlike Chrome's equivalent it overrides
+// only CreateExtensionFrameHost: Orbit has no error console or
+// crashed-extension reload yet. Owns the per-tab ScriptExecutor, which Chrome
+// parks on TabHelper instead.
 
 #ifndef ORBIT_EMBEDDER_BROWSER_ORBIT_EXTENSION_WEB_CONTENTS_OBSERVER_H_
 #define ORBIT_EMBEDDER_BROWSER_ORBIT_EXTENSION_WEB_CONTENTS_OBSERVER_H_
@@ -13,6 +14,7 @@
 #include <memory>
 
 #include "content/public/browser/web_contents_user_data.h"
+#include "extensions/browser/extension_frame_host.h"
 #include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/browser/script_executor.h"
 
@@ -36,6 +38,10 @@ class OrbitExtensionWebContentsObserver
   extensions::ScriptExecutor* script_executor() {
     return script_executor_.get();
   }
+
+  // extensions::ExtensionWebContentsObserver:
+  std::unique_ptr<extensions::ExtensionFrameHost> CreateExtensionFrameHost(
+      content::WebContents* web_contents) override;
 
  private:
   friend class content::WebContentsUserData<OrbitExtensionWebContentsObserver>;

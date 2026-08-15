@@ -274,6 +274,10 @@ final class AppEnvironment {
     // environment (a split, or a Little Orbit window), so this names which one's popover is open.
     var siteControlPresentedTabID: TabID?
 
+    // Set by _execute_action, which must open the extension's own popup rather
+    // than merely the Site Control popover that hosts it; cleared once opened.
+    var pendingExtensionActionID: String?
+
     // MARK: - Settings / About / Onboarding windows
 
     var settingsWindowController: NSWindowController?
@@ -514,6 +518,7 @@ final class AppEnvironment {
         isCommandBarPresented = false
         isFindBarPresented = false
         siteControlPresentedTabID = nil
+        pendingExtensionActionID = nil
         findQuery = ""
         currentFindResult = .none
         windowActiveSpaceID = nil
@@ -1563,16 +1568,31 @@ final class AppEnvironment {
 
     // MARK: - History
 
+    var chromiumHistoryStore: HistoryStore? { historyStore }
+
     func recordVisit(url: URL, title: String, profileID: ProfileID, spaceID: SpaceID? = nil, wasTyped: Bool = false) {
-        guard let historyStore else { return }
+        Task {
+            await recordVisitReportingItem(
+                url: url, title: title, profileID: profileID, spaceID: spaceID, wasTyped: wasTyped
+            )
+        }
+    }
+
+    // The same funnel, awaitable, so chrome.history.addUrl answers only once the visit is committed.
+    @discardableResult
+    func recordVisitReportingItem(
+        url: URL, title: String, profileID: ProfileID, spaceID: SpaceID? = nil, wasTyped: Bool = false
+    ) async -> HistoryStore.HistoryURLRow? {
+        guard let historyStore else { return nil }
         // Incognito leaves no history — checked here, the single funnel
         // every recorded visit passes through, so a future caller cannot forget the rule.
-        guard !isPrivateBrowsingContext(spaceID: spaceID, profileID: profileID) else { return }
+        guard !isPrivateBrowsingContext(spaceID: spaceID, profileID: profileID) else { return nil }
         let visit = HistoryVisit(url: url, title: title, profileID: profileID, spaceID: spaceID, wasTyped: wasTyped)
-        Task {
-            _ = try? await historyStore.record(visit: visit)
-            await refreshHistoryCache()
-        }
+        let recorded = (try? await historyStore.record(visit: visit)) != nil
+        await refreshHistoryCache()
+        guard recorded, let row = try? await historyStore.urlRow(forURL: url) else { return nil }
+        OrbitChromiumHistoryBridge.shared.notifyVisited(row)
+        return row
     }
 
     private func refreshHistoryCache(query: String = "") async {

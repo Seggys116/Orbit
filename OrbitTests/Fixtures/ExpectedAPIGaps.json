@@ -69,10 +69,6 @@
       "status": "absent",
       "reason": "chromeInternal"
     },
-    "bookmarks": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
     "brailleDisplayPrivate": {
       "status": "absent",
       "reason": "chromeInternal"
@@ -105,15 +101,7 @@
       "status": "absent",
       "reason": "chromeInternal"
     },
-    "commands": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
     "contentSettings": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "contextMenus": {
       "status": "absent",
       "reason": "notPorted"
     },
@@ -168,10 +156,6 @@
     "documentScan": {
       "status": "absent",
       "reason": "outOfScope"
-    },
-    "downloads": {
-      "status": "absent",
-      "reason": "notPorted"
     },
     "downloadsInternal": {
       "status": "absent",
@@ -264,10 +248,6 @@
     "glicPrivate": {
       "status": "absent",
       "reason": "chromeInternal"
-    },
-    "history": {
-      "status": "absent",
-      "reason": "notPorted"
     },
     "identity": {
       "status": "absent",
@@ -397,14 +377,6 @@
       "status": "absent",
       "reason": "chromeInternal"
     },
-    "search": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "sessions": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
     "settingsPrivate": {
       "status": "absent",
       "reason": "chromeInternal"
@@ -501,6 +473,27 @@
       ],
       "note": "onClicked is declared and never fired; see neverDispatchedEvents. The missing members here are the separate, schema-level half of the same section 1.3 row."
     },
+    "app": {
+      "status": "complete"
+    },
+    "bookmarks": {
+      "status": "partial",
+      "missingEvents": [
+        "onChildrenReordered",
+        "onImportBegan",
+        "onImportEnded"
+      ],
+      "missingTypes": [
+        "BookmarkTreeNodeUnmodifiable",
+        "FolderType"
+      ]
+    },
+    "commands": {
+      "status": "complete"
+    },
+    "contextMenus": {
+      "status": "complete"
+    },
     "cookies": {
       "status": "partial",
       "missingFunctions": [
@@ -511,6 +504,26 @@
         "FrameDetails"
       ],
       "note": "No CHIPS/partitioned-cookie support."
+    },
+    "downloads": {
+      "status": "partial",
+      "missingFunctions": [
+        "acceptDanger",
+        "getFileIcon",
+        "setShelfEnabled",
+        "setUiOptions"
+      ],
+      "missingEvents": [
+        "onDeterminingFilename"
+      ],
+      "missingTypes": [
+        "FilenameSuggestion",
+        "GetFileIconOptions",
+        "UiOptions"
+      ]
+    },
+    "history": {
+      "status": "complete"
     },
     "permissions": {
       "status": "partial",
@@ -553,6 +566,18 @@
         "websites.topicsEnabled"
       ],
       "note": "The two absent GROUPS (network, websites) are the dangerous half: chrome.privacy.websites.thirdPartyCookiesAllowed throws TypeError on the group, and a top-level throw during service worker evaluation is the 'Status code: 15' registration failure (section 1.3)."
+    },
+    "search": {
+      "status": "complete"
+    },
+    "sessions": {
+      "status": "partial",
+      "missingFunctions": [
+        "getDevices"
+      ],
+      "missingTypes": [
+        "Device"
+      ]
     },
     "tabs": {
       "status": "partial",
@@ -654,7 +679,6 @@
     "autofillPrivate",
     "autotestPrivate",
     "background",
-    "bookmarks",
     "brailleDisplayPrivate",
     "browsingData",
     "certificateProvider",
@@ -665,7 +689,6 @@
     "commandLinePrivate",
     "commands.accessibility",
     "contentSettings",
-    "contextMenus",
     "contextualTasksPrivate",
     "crashReportPrivate",
     "debugger",
@@ -674,8 +697,6 @@
     "developerPrivate",
     "dictationPrivate",
     "documentScan",
-    "downloads",
-    "downloads.open",
     "downloads.shelf",
     "downloads.ui",
     "echoPrivate",
@@ -700,7 +721,6 @@
     "geolocation",
     "glicPrivate",
     "glicPrivate.invoke",
-    "history",
     "identity",
     "identity.email",
     "imageLoaderPrivate",
@@ -729,8 +749,6 @@
     "readingList",
     "resourcesPrivate",
     "safeBrowsingPrivate",
-    "search",
-    "sessions",
     "settingsPrivate",
     "sidePanel",
     "smartCardProviderPrivate",

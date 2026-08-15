@@ -42,9 +42,11 @@ extension AppEnvironment {
     func buildContextMenuEntries(
         for contents: WebContents,
         context: ContextMenuContext,
-        capabilities: EngineCapabilities? = nil
+        capabilities: EngineCapabilities? = nil,
+        extensionGroups: [ExtensionContextMenuGroup]? = nil
     ) -> [OrbitContextMenuEntry] {
         let capabilities = capabilities ?? engineCapabilities
+        let extensionGroups = extensionGroups ?? contents.extensionContextMenuGroups()
         var entries: [OrbitContextMenuEntry] = []
 
         if let linkURL = context.linkURL {
@@ -121,9 +123,78 @@ extension AppEnvironment {
             LittleOrbitWindowController.open(url: tab.url)
         }))
 
+        let extensionEntries = extensionMenuEntries(for: contents, groups: extensionGroups)
+        if !extensionEntries.isEmpty {
+            entries.append(.divider())
+            entries.append(contentsOf: extensionEntries)
+        }
+
         entries.append(.divider())
         entries.append(.item(inspectElementItem(for: contents, context: context, capabilities: capabilities)))
 
+        return entries
+    }
+
+    // One plain top-level item is shown directly under its own title; anything
+    // else is grouped under the extension's name -- ContextMenuMatcher::
+    // AppendExtensionItems' own rule.
+    private func extensionMenuEntries(
+        for contents: WebContents,
+        groups: [ExtensionContextMenuGroup]
+    ) -> [OrbitContextMenuEntry] {
+        groups.compactMap { group -> OrbitContextMenuEntry? in
+            let entries = extensionItemEntries(for: contents, items: group.items)
+            guard !entries.isEmpty else { return nil }
+            if group.items.count == 1, group.items[0].type == .normal {
+                return entries[0]
+            }
+            return .item(OrbitContextMenuItem(title: group.extensionName, submenu: entries))
+        }
+    }
+
+    private func extensionItemEntries(
+        for contents: WebContents,
+        items: [ExtensionContextMenuItem]
+    ) -> [OrbitContextMenuEntry] {
+        var entries: [OrbitContextMenuEntry] = []
+        var lastEntryIsDivider = true
+        var previousWasRadio = false
+
+        func appendDivider() {
+            guard !lastEntryIsDivider else { return }
+            entries.append(.divider())
+            lastEntryIsDivider = true
+        }
+
+        for item in items {
+            // A radio "group" is a run of adjacent radio items, and upstream
+            // fences each run with separators.
+            let isRadio = item.type == .radio
+            if isRadio != previousWasRadio { appendDivider() }
+            previousWasRadio = isRadio
+
+            if item.type == .separator {
+                appendDivider()
+                continue
+            }
+
+            let children = extensionItemEntries(for: contents, items: item.children)
+            let id = item.id
+            entries.append(.item(OrbitContextMenuItem(
+                title: item.title,
+                isEnabled: item.isEnabled,
+                isChecked: item.isChecked,
+                submenu: children.isEmpty ? nil : children,
+                action: children.isEmpty
+                    ? { [weak contents] in contents?.performExtensionContextMenuItem(id) }
+                    : nil
+            )))
+            lastEntryIsDivider = false
+        }
+
+        while let last = entries.last, case .divider = last {
+            entries.removeLast()
+        }
         return entries
     }
 

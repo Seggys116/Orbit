@@ -44,6 +44,7 @@ ORBIT_TESTS_REUSED_SOURCES = [
     "Orbit/Engine/ContentBlocking/RedirectResourceData.swift",
     "Orbit/Engine/EngineTypes.swift",
     "Orbit/Engine/Extensions/ExtensionActionState.swift",
+    "Orbit/Engine/Extensions/ExtensionContextMenuItem.swift",
     "Orbit/Features/Peek/PeekState.swift",
     "Orbit/Models/BrowserStore+Favorites.swift",
     "Orbit/Models/BrowserStore+Folders.swift",
@@ -157,6 +158,9 @@ FILE_TYPES = {
     ".template": "text.xml",
     ".xcconfig": "text.xcconfig",
     ".json": "text.json",
+    # Vendored upstream API schemas: reference data for the conformance test, never compiled.
+    ".webidl": "text",
+    ".idl": "text",
     ".md": "net.daringfireball.markdown",
     ".txt": "text",
     ".sh": "text.script.sh",

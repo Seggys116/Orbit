@@ -42,7 +42,8 @@ struct OnboardingView: View {
             OnboardingStageArt(step: step)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 880, height: 560)
+        // Fills its window rather than pinning 880x560: a hard frame centres and clips the control column when the window is narrower.
+        .frame(minWidth: 420, idealWidth: 880, maxWidth: .infinity, minHeight: 400, idealHeight: 560, maxHeight: .infinity)
         .task {
             let reader = BrowserDataReader()
             availableImportSources = await Task.detached(priority: .userInitiated) {
@@ -312,9 +313,7 @@ struct OnboardingView: View {
 
     private var isImportComplete: Bool { Self.isImportComplete(importState) }
 
-    // Never advances the step itself — the caller decides when to move on,
-    // so a summary or caveat this returns always has a chance to be read
-    // rather than being replaced by the next step the instant it lands.
+    // Never advances the step itself: the caller decides when to move on.
     private func runImport(_ browser: ImportableBrowser) {
         guard let spaceID = env.activeSpace?.id ?? env.spaces.first?.id else {
             importState = .failed("Orbit has no Space to import into yet.")

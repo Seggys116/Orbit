@@ -2,11 +2,13 @@ import Foundation
 
 extension Notification.Name {
     static let orbitTabDidPin = Notification.Name("OrbitTabDidPin")
+    static let orbitRecentlyClosedDidChange = Notification.Name("OrbitRecentlyClosedDidChange")
 }
 
 struct ClosedTabRecord: Sendable, Hashable {
     var tabID: TabID
     var previousSection: TabSection
+    var closedAt: Date
     var pinnedURL: URL?
     var pinnedTitle: String?
 }
@@ -103,7 +105,7 @@ public extension BrowserStore {
         switch tab.section {
         case .today, .favorite:
             archiveTab(id)
-            pushRecentlyClosed(ClosedTabRecord(tabID: id, previousSection: .today))
+            pushRecentlyClosed(ClosedTabRecord(tabID: id, previousSection: .today, closedAt: Date()))
         case .pinned:
             // The unpin leaves the closed tab in the Space, so without this it also stays active — and its caller has already released the renderer, which is a blank pane.
             let previousState = state
@@ -117,6 +119,7 @@ public extension BrowserStore {
                 ClosedTabRecord(
                     tabID: id,
                     previousSection: .pinned,
+                    closedAt: Date(),
                     pinnedURL: tab.pinnedURL,
                     pinnedTitle: tab.pinnedTitle
                 )
@@ -146,6 +149,7 @@ public extension BrowserStore {
             ClosedTabRecord(
                 tabID: id,
                 previousSection: .pinned,
+                closedAt: Date(),
                 pinnedURL: tab.pinnedURL,
                 pinnedTitle: tab.pinnedTitle
             )
@@ -177,6 +181,22 @@ public extension BrowserStore {
 
     func reopenLastClosedTab() {
         guard let record = recentlyClosedRecords.popLast(), state.tabs[record.tabID] != nil else { return }
+        restoreClosedTab(record)
+        selectTab(record.tabID)
+    }
+
+    /// chrome.sessions.restore(sessionId) needs one specific entry back, not just the newest.
+    /// Selection is the caller's, so a window-scoped AppEnvironment can do it through its own scoping.
+    @discardableResult
+    func reopenClosedTab(_ tabID: TabID) -> Bool {
+        guard let index = recentlyClosedRecords.lastIndex(where: { $0.tabID == tabID }) else { return false }
+        let record = recentlyClosedRecords.remove(at: index)
+        guard state.tabs[record.tabID] != nil else { return false }
+        restoreClosedTab(record)
+        return true
+    }
+
+    private func restoreClosedTab(_ record: ClosedTabRecord) {
         switch record.previousSection {
         case .pinned:
             pin(record.tabID)
@@ -187,7 +207,6 @@ public extension BrowserStore {
         case .today, .favorite, .archived:
             restoreFromArchive(record.tabID, to: .today)
         }
-        selectTab(record.tabID)
     }
 
     // MARK: - Pin / unpin

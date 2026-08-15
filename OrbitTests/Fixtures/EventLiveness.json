@@ -36,10 +36,68 @@
       "cause": "none",
       "why": "Declared in Chromium/Embedder/common/api/action.json and fired by nothing in Orbit. The Swift side knows and refuses to draw a toolbar icon for a popup-less action at all, so every extension whose button is a click handler rather than a popup is invisible and inert."
     },
+    "bookmarks.onCreated": {
+      "status": "observed",
+      "cause": "createPinnedBookmark",
+      "payload": "args.length >= 2 && typeof args[0] === 'string' && typeof args[1] === 'object' && args[1] !== null && typeof args[1].id === 'string' && args[1].id === args[0] && typeof args[1].title === 'string' && typeof args[1].parentId === 'string' && typeof args[1].index === 'number'",
+      "why": "Nothing in Orbit calls this directly: orbit_bookmark_registry.cc diffs one pushed tree against the last, so the cause is a real sidebar mutation, not an API call."
+    },
+    "bookmarks.onChanged": {
+      "status": "observed",
+      "cause": "renamePinnedBookmark",
+      "payload": "args.length >= 2 && typeof args[0] === 'string' && typeof args[1] === 'object' && args[1] !== null && typeof args[1].title === 'string' && args[1].title.length > 0"
+    },
+    "bookmarks.onMoved": {
+      "status": "observed",
+      "cause": "movePinnedBookmarkIntoFolder",
+      "payload": "args.length >= 2 && typeof args[0] === 'string' && typeof args[1] === 'object' && args[1] !== null && typeof args[1].parentId === 'string' && typeof args[1].index === 'number' && typeof args[1].oldParentId === 'string' && typeof args[1].oldIndex === 'number' && args[1].parentId !== args[1].oldParentId"
+    },
+    "bookmarks.onRemoved": {
+      "status": "observed",
+      "cause": "removePinnedBookmark",
+      "payload": "args.length >= 2 && typeof args[0] === 'string' && typeof args[1] === 'object' && args[1] !== null && typeof args[1].parentId === 'string' && typeof args[1].index === 'number' && typeof args[1].node === 'object' && args[1].node !== null && typeof args[1].node.id === 'string' && args[1].node.parentId === undefined"
+    },
+    "commands.onCommand": {
+      "status": "observed",
+      "cause": "pressExtensionShortcut",
+      "payload": "args.length >= 1 && typeof args[0] === 'string' && args[0] === 'orbit-liveness-command' && (args[1] === undefined || (typeof args[1] === 'object' && args[1] !== null && typeof args[1].id === 'number'))"
+    },
+    "contextMenus.onClicked": {
+      "status": "observed",
+      "cause": "clickExtensionContextMenuItem",
+      "payload": "args.length >= 2 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].menuItemId === 'string' && args[0].menuItemId === 'orbit-liveness-menu-item' && typeof args[0].pageUrl === 'string' && typeof args[0].editable === 'boolean' && typeof args[1] === 'object' && args[1] !== null && typeof args[1].id === 'number'"
+    },
     "cookies.onChanged": {
       "status": "observed",
       "cause": "setCookie",
       "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].removed === 'boolean' && typeof args[0].cause === 'string' && typeof args[0].cookie === 'object' && typeof args[0].cookie.name === 'string' && typeof args[0].cookie.domain === 'string'"
+    },
+    "downloads.onCreated": {
+      "status": "observed",
+      "cause": "beginDownload",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].id === 'number' && typeof args[0].url === 'string' && typeof args[0].filename === 'string' && typeof args[0].state === 'string' && typeof args[0].startTime === 'string'"
+    },
+    "downloads.onChanged": {
+      "status": "observed",
+      "cause": "completeDownload",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].id === 'number' && typeof args[0].state === 'object' && args[0].state !== null && typeof args[0].state.current === 'string' && args[0].bytesReceived === undefined",
+      "why": "The delta must carry no bytesReceived: including it would fire this event on every packet, which is why the shape assertion names its absence."
+    },
+    "downloads.onErased": {
+      "status": "observed",
+      "cause": "eraseDownloadRecord",
+      "payload": "args.length >= 1 && typeof args[0] === 'number' && args[0] > 0"
+    },
+    "history.onVisited": {
+      "status": "observed",
+      "cause": "recordVisit",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].id === 'string' && typeof args[0].url === 'string' && typeof args[0].title === 'string' && typeof args[0].lastVisitTime === 'number' && typeof args[0].visitCount === 'number' && typeof args[0].typedCount === 'number'",
+      "why": "Caused through AppEnvironment.recordVisit, the funnel every Orbit navigation passes through. An addUrl-only onVisited would tell an extension nothing about the browsing it exists to watch."
+    },
+    "history.onVisitRemoved": {
+      "status": "observed",
+      "cause": "deleteHistoryURL",
+      "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && typeof args[0].allHistory === 'boolean' && args[0].allHistory === false && Array.isArray(args[0].urls) && args[0].urls.length > 0 && typeof args[0].urls[0] === 'string'"
     },
     "permissions.onAdded": {
       "status": "observed",
@@ -50,6 +108,12 @@
       "status": "observed",
       "cause": "removeOptionalPermission",
       "payload": "args.length >= 1 && typeof args[0] === 'object' && args[0] !== null && Array.isArray(args[0].permissions) && args[0].permissions.indexOf('privacy') !== -1"
+    },
+    "sessions.onChanged": {
+      "status": "observed",
+      "cause": "closeTab",
+      "payload": "Array.isArray(args) && args.length === 0",
+      "why": "The schema declares no parameters, so the shape assertion is that the argument list really is empty: a listener handed anything here would be reading a value orbit_session_service.cc never sends."
     },
     "tabs.onCreated": {
       "status": "observed",

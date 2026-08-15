@@ -1,19 +1,6 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// The security boundary: chrome.webstorePrivate is reachable from an
-// ordinary (non-extension) web page context and ONLY from the real Chrome
-// Web Store origin -- matches chrome/common/extensions/api/
-// _api_features.json's own "webstorePrivate" entry (minus its second,
-// testing-only <all_urls> stanza, which exists for chrome/'s own
-// webstore_override.cc and has no Orbit equivalent). Enforced twice: the
-// renderer never installs the chrome.webstorePrivate binding into a context
-// that doesn't match, and independently, ExtensionFunction::HasPermission()
-// re-checks this same feature against the browser-verified committed URL of
-// the calling RenderFrameHost before Run() ever executes -- so a compromised
-// renderer cannot forge access by skipping the JS binding.
-
 {
   "webstorePrivate": {
     "channel": "stable",

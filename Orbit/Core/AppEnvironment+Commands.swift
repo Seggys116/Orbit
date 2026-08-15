@@ -251,6 +251,24 @@ extension AppEnvironment {
         activeWebContents?.focus()
     }
 
+    /// _execute_action's landing point. Opens the Site Control popover that hosts
+    /// the extension's icon and names which extension's own popup it must then
+    /// open, which is the whole difference from the plain .siteControls command.
+    @discardableResult
+    func activateExtensionAction(_ extensionID: String) -> Bool {
+        // Same routing as .siteControls: a frontmost Little Orbit window's tab is
+        // never any Space's activeTabID.
+        if let littleOrbitTabID = LittleOrbitWindowController.frontmostController?.tabID {
+            siteControlPresentedTabID = littleOrbitTabID
+        } else if let activeTabID {
+            siteControlPresentedTabID = activeTabID
+        } else {
+            return false
+        }
+        pendingExtensionActionID = extensionID
+        return true
+    }
+
     // Must clear isCommandBarPresented before handing focus back here, since CommandBarView.activate(_:) navigates before dismissing and activateTab(_:) refuses to focus the page while the flag is still set.
     func dismissCommandBar() {
         withAnimation(OrbitMotion.standard) { isCommandBarPresented = false }

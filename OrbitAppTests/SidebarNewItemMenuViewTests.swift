@@ -1,6 +1,3 @@
-//  Covers the Orbit-styled "+" menu presentation layer: never drops, duplicates, or mis-gates
-//  an option, renders in both appearances, and contextMenuEntries(in:) is itself correct.
-
 import AppKit
 import SwiftUI
 import XCTest
@@ -73,8 +70,7 @@ final class SidebarNewItemMenuViewTests: XCTestCase {
 
     // MARK: - Availability matches whether perform(in:) is a real no-op — the "no dead end" contract
 
-    // store.activeSpace falls back to spaces.first when activeSpaceID is nil, so the real
-    // unavailable state needs no Space at all, not merely a cleared activeSpaceID.
+    // store.activeSpace falls back to spaces.first, so the unavailable state needs no Space at all.
     func test_newFolder_isAvailable_iffThereIsAnActiveSpace() {
         XCTAssertNotNil(env.activeSpace, "test precondition: demo environment must start with an active Space.")
         XCTAssertTrue(SidebarNewItemOption.newFolder.isAvailable(in: env))
@@ -167,13 +163,32 @@ final class SidebarNewItemMenuViewTests: XCTestCase {
     // MARK: - Renders real, non-empty content in both appearances
 
     func test_view_rendersNonEmptyContent_inBothAppearances() {
+        let expectedShortcuts = SidebarNewItemOption.allCases.filter { $0.shortcutDisplayString() != nil }.count
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
             let rendered = render(
-                SidebarNewItemMenuView(dismiss: {}).environment(env),
+                SidebarNewItemMenuView(dismiss: {}).environment(env)
+                    .environment(\.orbitScreenshotModeDragDisabled, true),
                 size: CGSize(width: SidebarNewItemMenuMetrics.width, height: 400),
                 appearance: appearance
             )
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+
+            let dividers = Self.dividerBands(rendered)
+            XCTAssertEqual(
+                dividers.count, SidebarNewItemOption.menuSections.count - 1,
+                "\(appearance.rawValue): \(dividers.count) divider(s) painted for \(SidebarNewItemOption.menuSections.count) sections."
+            )
+
+            let leading = Self.rowBands(rendered, xRange: 14..<32)
+            XCTAssertEqual(
+                leading.count, SidebarNewItemOption.menuSections.count + SidebarNewItemOption.allCases.count,
+                "\(appearance.rawValue): \(leading.count) band(s) of ink in the icon column for \(SidebarNewItemOption.menuSections.count) section headers plus \(SidebarNewItemOption.allCases.count) rows -- a header or a row painted nothing."
+            )
+
+            let hints = Self.rowBands(rendered, xRange: 195..<219)
+            XCTAssertEqual(
+                hints.count, expectedShortcuts,
+                "\(appearance.rawValue): \(hints.count) shortcut hint(s) painted for \(expectedShortcuts) bound option(s)."
+            )
         }
     }
 
@@ -200,8 +215,28 @@ final class SidebarNewItemMenuViewTests: XCTestCase {
             ) {
                 dismissed = true
             }
-            let rendered = render(row.environment(env), size: CGSize(width: SidebarNewItemMenuMetrics.width, height: 60), appearance: .darkAqua)
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "\(option) row did not render.")
+            let rendered = render(
+                row.environment(env).environment(\.orbitScreenshotModeDragDisabled, true),
+                size: CGSize(width: SidebarNewItemMenuMetrics.width, height: 60),
+                appearance: .darkAqua
+            )
+            XCTAssertTrue(
+                Self.hasInk(rendered, in: CGRect(x: 8, y: 0, width: 20, height: 60)),
+                "\(option) row painted no icon."
+            )
+            XCTAssertFalse(
+                Self.hasInk(rendered, in: CGRect(x: 28, y: 0, width: 8, height: 60)),
+                "\(option) row painted into the gutter between its icon and its title -- the title has slid left into the icon's place."
+            )
+            XCTAssertTrue(
+                Self.hasInk(rendered, in: CGRect(x: 37, y: 0, width: 25, height: 60)),
+                "\(option) row painted no title beside its icon."
+            )
+            XCTAssertEqual(
+                Self.hasInk(rendered, in: CGRect(x: 180, y: 0, width: 46, height: 60)),
+                option.shortcutDisplayString() != nil,
+                "\(option) row's trailing shortcut hint does not match its binding (\(option.shortcutDisplayString() ?? "unbound"))."
+            )
 
             row.action()
             XCTAssertTrue(dismissed, "\(option) row's action must fire when invoked.")
@@ -215,8 +250,7 @@ final class SidebarNewItemMenuViewTests: XCTestCase {
         XCTAssertEqual(entries.flattenedItems.map(\.title), SidebarNewItemOption.allCases.map(\.title))
     }
 
-    // The "+" menu separates its groups with a divider alone -- an uppercase
-    // section label is not part of this menu's design.
+    // The "+" menu separates its groups with a divider alone, never a section label.
     func test_contextMenuEntries_groupWithDividersAndNoSectionHeaders() {
         let entries = SidebarNewItemOption.contextMenuEntries(in: env)
 
@@ -269,5 +303,47 @@ final class SidebarNewItemMenuViewTests: XCTestCase {
         let item = SidebarNewItemOption.contextMenuEntries(in: env).first(titled: SidebarNewItemOption.newTab.title)
         item?.action?()
         XCTAssertTrue(env.isCommandBarPresented)
+    }
+
+    // MARK: - Ink measurement
+
+    private static func hasInk(_ image: RenderedImage, in rect: CGRect) -> Bool {
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) where image.color(atX: x, y: y).a > 0.04 {
+                return true
+            }
+        }
+        return false
+    }
+
+    // A divider is the only thing that paints at the menu's own leading edge.
+    private static func isDividerRow(_ image: RenderedImage, y: Int) -> Bool {
+        image.color(atX: Int(SidebarNewItemMenuMetrics.containerPadding), y: y).a > 0.04
+    }
+
+    private static func dividerBands(_ image: RenderedImage) -> [Range<Int>] {
+        bands(image) { isDividerRow(image, y: $0) }
+    }
+
+    private static func rowBands(_ image: RenderedImage, xRange: Range<Int>) -> [Range<Int>] {
+        bands(image) { y in
+            guard !isDividerRow(image, y: y) else { return false }
+            for x in xRange where image.color(atX: x, y: y).a > 0.04 { return true }
+            return false
+        }
+    }
+
+    private static func bands(_ image: RenderedImage, matching predicate: (Int) -> Bool) -> [Range<Int>] {
+        var result: [Range<Int>] = []
+        var start: Int?
+        for y in 0..<Int(image.pointSize.height) {
+            if predicate(y), start == nil { start = y }
+            if !predicate(y), let began = start {
+                result.append(began..<y)
+                start = nil
+            }
+        }
+        if let began = start { result.append(began..<Int(image.pointSize.height)) }
+        return result
     }
 }

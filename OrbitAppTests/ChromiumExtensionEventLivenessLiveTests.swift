@@ -11,9 +11,18 @@ final class ChromiumExtensionEventLivenessLiveTests: LiveEnvironmentTestCase {
     private typealias Schema = ExtensionAPISchemaSurface
 
     private var temporaryDirectories: [URL] = []
+    private var previousProcessRoot: AppEnvironment?
 
     override func tearDown() {
         WebStoreInstallVerifyProbe.autoAnswerExtensionPermissionsConsent = nil
+        if let previousProcessRoot {
+            AppEnvironment.processRoot = previousProcessRoot
+            // Re-arm, or both bridges keep observing this suite's scratch stores and
+            // push its bookmarks and downloads into every later suite's engine.
+            OrbitChromiumBookmarksBridge.shared.install()
+            OrbitChromiumDownloadsBridge.shared.install()
+        }
+        previousProcessRoot = nil
         for url in temporaryDirectories {
             try? FileManager.default.removeItem(at: url)
         }
@@ -52,6 +61,12 @@ final class ChromiumExtensionEventLivenessLiveTests: LiveEnvironmentTestCase {
         "navigateToFragment", "pushState", "navigateToUnresolvableHost", "setCookie",
         "windowCreated", "windowFocusChanged", "windowRemoved",
         "requestOptionalPermission", "removeOptionalPermission",
+        "pressExtensionShortcut",
+        "clickExtensionContextMenuItem",
+        "createPinnedBookmark", "renamePinnedBookmark", "movePinnedBookmarkIntoFolder",
+        "removePinnedBookmark",
+        "beginDownload", "completeDownload", "eraseDownloadRecord",
+        "recordVisit", "deleteHistoryURL",
     ]
 
     // MARK: - Fixture
@@ -75,10 +90,16 @@ final class ChromiumExtensionEventLivenessLiveTests: LiveEnvironmentTestCase {
           "manifest_version": 3,
           "name": "\(name)",
           "version": "1.0",
-          "permissions": ["tabs", "cookies", "webNavigation", "storage"],
+          "permissions": ["tabs", "cookies", "webNavigation", "storage", "contextMenus", "bookmarks", "downloads", "history", "sessions"],
           "optional_permissions": ["privacy"],
           "host_permissions": ["<all_urls>"],
           "action": { "default_title": "\(name)" },
+          "commands": {
+            "orbit-liveness-command": {
+              "suggested_key": { "default": "Ctrl+Shift+Y" },
+              "description": "Orbit event liveness"
+            }
+          },
           "background": { "service_worker": "background.js" }
         }
         """
@@ -114,6 +135,13 @@ final class ChromiumExtensionEventLivenessLiveTests: LiveEnvironmentTestCase {
           });
         }
         \(registrations)
+        // removeAll first: a lazy context's items are persisted and restored on
+        // the next load, so a bare create() fails with a duplicate id.
+        chrome.contextMenus.removeAll(function () {
+          chrome.contextMenus.create({
+            id: 'orbit-liveness-menu-item', title: 'Orbit Liveness Item', contexts: ['all']
+          });
+        });
         chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
           if (message === 'orbit-liveness-report') {
             sendResponse(JSON.stringify(orbitLog));
@@ -220,6 +248,13 @@ final class ChromiumExtensionEventLivenessLiveTests: LiveEnvironmentTestCase {
         let env = self.env
         env._test_engineOverride = engine
 
+        // Both bridges resolve processRoot per call; without this they would push the
+        // real user's bookmarks and downloads instead of this environment's.
+        previousProcessRoot = AppEnvironment.processRoot
+        AppEnvironment.processRoot = env
+        OrbitChromiumBookmarksBridge.shared.install()
+        OrbitChromiumDownloadsBridge.shared.install()
+
         let bridge = OrbitChromiumTabsBridge.shared
         if !bridge.isWindowRegistered(env) {
             bridge.windowCreated(owner: env, focused: false)
@@ -251,6 +286,11 @@ final class ChromiumExtensionEventLivenessLiveTests: LiveEnvironmentTestCase {
         try await causeCookieEvent()
         try await causeWindowEvents()
         try await causePermissionEvents()
+        try await causeExtensionShortcut()
+        try await causeContextMenuClick()
+        try await causeBookmarkEvents()
+        try await causeDownloadEvents()
+        try await causeHistoryEvents()
 
         // Events cross a process boundary; give the last of them a moment to
         // land rather than racing the report.
@@ -298,9 +338,111 @@ final class ChromiumExtensionEventLivenessLiveTests: LiveEnvironmentTestCase {
         try? await LiveChromiumEngineHost.waitUntilStoppedLoading(first)
         try await Task.sleep(for: .milliseconds(500))
 
-        // closeTab -> tabs.onRemoved
+        // closeTab -> tabs.onRemoved, and sessions.onChanged: the closed tab joins
+        // the recently-closed list, which is the list chrome.sessions reports.
         env.closeTab(secondTabID)
         try await Task.sleep(for: .milliseconds(300))
+    }
+
+    /// Real sidebar mutations, not chrome.bookmarks calls: the registry diffs one
+    /// pushed tree against the last, so only a store change can produce an event.
+    private func causeBookmarkEvents() async throws {
+        let harness = try XCTUnwrap(self.harness)
+        let store = env.store
+
+        let folderID = store.createFolder(name: "Orbit Liveness Folder", in: harness.spaceID)
+        try await Task.sleep(for: .milliseconds(500))
+
+        // createPinnedBookmark -> bookmarks.onCreated
+        let bookmarkID = store.openTab(
+            url: URL(string: "https://orbit-browser.app/liveness")!,
+            in: harness.spaceID, section: .pinned, activate: false)
+        try await Task.sleep(for: .milliseconds(500))
+        try await waitForEvent("bookmarks.onCreated")
+
+        // renamePinnedBookmark -> bookmarks.onChanged
+        store.renameTab(bookmarkID, to: "Orbit Liveness Bookmark")
+        try await Task.sleep(for: .milliseconds(500))
+        try await waitForEvent("bookmarks.onChanged")
+
+        // movePinnedBookmarkIntoFolder -> bookmarks.onMoved
+        store.moveNode(bookmarkID, toParent: folderID, atIndex: 0, in: harness.spaceID)
+        try await Task.sleep(for: .milliseconds(500))
+        try await waitForEvent("bookmarks.onMoved")
+
+        // removePinnedBookmark -> bookmarks.onRemoved
+        store.removeBookmark(bookmarkID)
+        try await Task.sleep(for: .milliseconds(500))
+        try await waitForEvent("bookmarks.onRemoved")
+
+        store.deleteFolder(folderID, in: harness.spaceID)
+        try await Task.sleep(for: .milliseconds(500))
+    }
+
+    private func causeDownloadEvents() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrbitAppTests-EventLiveness-Downloads-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        temporaryDirectories.append(directory)
+        let destination = directory.appendingPathComponent("orbit-liveness.bin")
+        try Data(repeating: 0x4F, count: 1024).write(to: destination)
+
+        let store = env.downloadStore
+        // beginDownload -> downloads.onCreated
+        let item = store.beginDownload(
+            sourceURL: URL(string: "https://orbit-browser.app/files/orbit-liveness.bin")!,
+            destinationURL: destination,
+            suggestedFileName: "orbit-liveness.bin",
+            mimeType: "application/octet-stream",
+            totalBytes: 1024)
+        try await Task.sleep(for: .milliseconds(500))
+        try await waitForEvent("downloads.onCreated")
+
+        // completeDownload -> downloads.onChanged
+        store.updateProgress(
+            id: item.id,
+            progress: DownloadProgress(receivedBytes: 1024, totalBytes: 1024, state: .completed))
+        try await Task.sleep(for: .milliseconds(500))
+        try await waitForEvent("downloads.onChanged")
+
+        // eraseDownloadRecord -> downloads.onErased. What the Downloads panel's own
+        // remove does: the record goes, the file on disk stays.
+        store.remove(item.id)
+        try await Task.sleep(for: .milliseconds(500))
+        try await waitForEvent("downloads.onErased")
+    }
+
+    private func causeHistoryEvents() async throws {
+        let harness = try XCTUnwrap(self.harness)
+        let space = try XCTUnwrap(env.activeSpace)
+        let urlString = "https://orbit-liveness-\(UUID().uuidString.lowercased()).example/visited"
+        let url = try XCTUnwrap(URL(string: urlString))
+
+        // recordVisit -> history.onVisited, through the funnel every Orbit
+        // navigation passes through rather than through chrome.history.addUrl.
+        let row = await env.recordVisitReportingItem(
+            url: url, title: "Orbit Liveness Visit", profileID: space.profileID,
+            spaceID: space.id, wasTyped: true)
+        XCTAssertNotNil(row, "Orbit recorded no visit, so history.onVisited could not have anything to report")
+        try await waitForEvent("history.onVisited")
+
+        // deleteHistoryURL -> history.onVisitRemoved
+        _ = try await harness.probe.evaluateJavaScript(
+            "chrome.history.deleteUrl({ url: '\(urlString)' }); 'asked'"
+        )
+        try await waitForEvent("history.onVisitRemoved", upTo: .seconds(15))
+    }
+
+    /// Gives up quietly: a miss has to fail as that event's own "registered and
+    /// never fired" assertion, which names the cause, not as a timeout here.
+    private func waitForEvent(_ event: String, upTo timeout: Duration = .seconds(10)) async throws {
+        guard let probe = harness?.probe else { return }
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            let log = try await fetchLog(probe)
+            if (log.counts[event] ?? 0) > 0 { return }
+            try await Task.sleep(for: .milliseconds(250))
+        }
     }
 
     private func causeCookieEvent() async throws {
@@ -328,6 +470,44 @@ final class ChromiumExtensionEventLivenessLiveTests: LiveEnvironmentTestCase {
         bridge.windowRemoved(owner: secondWindowOwner)
         try await Task.sleep(for: .milliseconds(300))
         bridge.windowFocusChanged(owner: env)
+    }
+
+    /// Drives GlobalKeyEventMonitor.handle, which is the exact entry point
+    /// NSEvent's local monitor calls, so nothing about the dispatch is stubbed.
+    private func causeExtensionShortcut() async throws {
+        let env = self.env
+        ExtensionCommandRegistry.shared.publishOrbitReservedShortcuts()
+        let event = ExtensionCommandKeyEvents.commandShiftY()
+        XCTAssertNil(
+            GlobalKeyEventMonitor.handle(event, in: env),
+            "the extension declared Ctrl+Shift+Y and nothing in Orbit owns ⇧⌘Y, so the monitor had to swallow it"
+        )
+        try await Task.sleep(for: .milliseconds(700))
+    }
+
+    // A real right-click is the only way a contextMenus item can exist to be
+    // clicked: an untrusted `contextmenu` event never leaves the renderer.
+    private func causeContextMenuClick() async throws {
+        let harness = try XCTUnwrap(self.harness)
+        let env = self.env
+        let tabID = env.openTab(url: harness.server.baseURL, in: harness.spaceID)
+        let contents = try XCTUnwrap(env.webContents[tabID] as? ChromiumWebContents)
+        try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+
+        let window = LiveContextMenuGesture.host(contents)
+        defer {
+            window.contentView?.subviews.forEach { $0.removeFromSuperview() }
+            window.orderOut(nil)
+            env.closeTab(tabID)
+        }
+
+        let groups = try await LiveContextMenuGesture.rightClickUntilExtensionItemsAppear(contents, in: window)
+        let item = try XCTUnwrap(
+            groups.first?.items.first,
+            "the fixture's own menu item never matched a real right-click"
+        )
+        contents.performExtensionContextMenuItem(item.id)
+        try await Task.sleep(for: .seconds(1))
     }
 
     private func causePermissionEvents() async throws {

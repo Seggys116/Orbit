@@ -1,15 +1,6 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// chrome.action, implemented by //orbit/browser/api/action/orbit_action_api.cc
-// against extensions::ExtensionActionManager. Upstream this schema lives in
-// chrome/common/extensions/api/action.json, which Orbit cannot reach; this is
-// that file minus the three members Orbit has nothing real behind:
-// getUserSettings and onUserSettingsChanged (there is no pinning model to
-// report on -- Orbit's toolbar shows every enabled action) and openPopup
-// (Orbit's popup is presented by Swift, not by an ExtensionsContainer the
-// browser process can drive). They are absent rather than present-and-failing.
 [
   {
     "namespace": "action",

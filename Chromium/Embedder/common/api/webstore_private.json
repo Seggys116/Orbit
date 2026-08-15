@@ -1,17 +1,6 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// chrome.webstorePrivate, trimmed to the functions the real Chrome Web Store
-// page actually calls against Orbit's own install pipeline -- not chrome/
-// common/extensions/api/webstore_private.json's full surface (install,
-// enableAppLauncher, getBrowserLogin, getIsLauncherEnabled,
-// isInIncognitoMode, getMV2DeprecationStatus, the enterprise-promotion
-// functions, supervised-user child-account plumbing), none of which Orbit
-// backs with a real implementation. Compiled by json_schema_compiler -- see
-// BUILD.gn. Types/enums otherwise match the real schema field-for-field so
-// the store's own client JS parses responses identically.
-
 [
   {
     "namespace": "webstorePrivate",

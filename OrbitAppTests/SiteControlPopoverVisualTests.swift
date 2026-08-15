@@ -1,6 +1,3 @@
-//  SiteControlWiringTests.swift covers the popover's pure logic; this is the pixel layer: declared
-//  width, that it paints, and that rows gated on real state actually appear/disappear with it.
-
 import AppKit
 import SwiftUI
 import XCTest
@@ -95,8 +92,26 @@ final class SiteControlPopoverVisualTests: XCTestCase {
         guard let (tab, _, _) = seedPopover() else { return }
 
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
-            let rendered = render(SiteControlPopoverView(tab: tab).environment(env), size: Self.canvasSize, appearance: appearance)
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            // Without this the unflattenable representables paint placeholder blocks that satisfy any ink check on their own.
+            let content = SiteControlPopoverView(tab: tab).environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true)
+            let rendered = render(content, size: Self.canvasSize, appearance: appearance)
+            let again = render(content, size: Self.canvasSize, appearance: appearance)
+
+            XCTAssertFalse(
+                Self.rendersDiffer(rendered, again, size: Self.canvasSize),
+                "appearance \(appearance.rawValue): two renders of the same popover differ, so nothing measured here is a reliable signal."
+            )
+
+            var sliceTop = 0
+            while sliceTop < Int(Self.popoverContentHeight) {
+                let slice = CGRect(x: 0, y: sliceTop, width: Int(Self.canvasSize.width), height: Self.sliceHeight)
+                XCTAssertGreaterThan(
+                    Self.inkCount(rendered, in: slice), 200,
+                    "appearance \(appearance.rawValue): only \(Self.inkCount(rendered, in: slice)) painted pixels between y=\(sliceTop) and y=\(sliceTop + Self.sliceHeight) -- a whole section of the popover is missing."
+                )
+                sliceTop += Self.sliceHeight
+            }
         }
     }
 
@@ -134,6 +149,19 @@ final class SiteControlPopoverVisualTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private static let sliceHeight = 70
+    private static let popoverContentHeight: CGFloat = 560
+
+    private static func inkCount(_ image: RenderedImage, in rect: CGRect) -> Int {
+        var count = 0
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) where image.color(atX: x, y: y).a > 0.04 {
+                count += 1
+            }
+        }
+        return count
+    }
 
     private static func rendersDiffer(_ a: RenderedImage, _ b: RenderedImage, size: CGSize) -> Bool {
         let step = 6

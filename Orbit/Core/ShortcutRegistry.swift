@@ -282,6 +282,10 @@ final class ShortcutRegistry {
 
     static let defaultsKey = "OrbitShortcutOverrides.v1"
 
+    // ExtensionCommandRegistry republishes Orbit's reserved accelerators from
+    // this; posted rather than called so Core keeps no dependency on Engine.
+    static let bindingsChanged = Notification.Name("OrbitShortcutBindingsChanged")
+
     #if DEBUG
     static var defaults: UserDefaults = OrbitDefaults.standard
     #else
@@ -325,6 +329,7 @@ final class ShortcutRegistry {
             overrides[id] = binding
         }
         persistOverrides()
+        NotificationCenter.default.post(name: ShortcutRegistry.bindingsChanged, object: nil)
     }
 
     // Falls back to the ASCII-capable key if the active layout finds nothing, or shortcuts go dead under non-Latin layouts.
@@ -438,6 +443,7 @@ final class ShortcutRegistry {
     func resetToDefaults() {
         overrides.removeAll()
         persistOverrides()
+        NotificationCenter.default.post(name: ShortcutRegistry.bindingsChanged, object: nil)
     }
 
     // MARK: Persistence

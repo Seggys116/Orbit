@@ -13,6 +13,7 @@
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
+#include "base/strings/strcat.h"
 #include "base/supports_user_data.h"
 #include "components/os_crypt/async/browser/keychain_key_provider.h"
 #include "components/os_crypt/async/browser/os_crypt_async.h"
@@ -29,6 +30,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/child_process_id.h"
 #include "content/public/common/url_constants.h"
+#include "net/http/http_util.h"
 #include "orbit/bridge/orbit_bridge_internal.h"
 #include "orbit/browser/orbit_browser_context.h"
 #include "orbit/browser/orbit_browser_main_parts.h"
@@ -43,6 +45,7 @@
 #include "orbit/common/orbit_user_agent.h"
 #include "orbit/common/orbit_user_data_dir.h"
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
@@ -71,6 +74,16 @@
 namespace orbit {
 
 namespace {
+
+// "en-US,en" for an en-US run -- what Chrome's IDS_ACCEPT_LANGUAGES resolves to.
+std::string AcceptLanguageList() {
+  const std::string locale = l10n_util::GetApplicationLocale(std::string());
+  const std::string_view language = l10n_util::GetLanguage(locale);
+  if (language.empty() || language == locale) {
+    return locale;
+  }
+  return base::StrCat({locale, ",", language});
+}
 
 // Drops a render process's ProcessMap entry when it goes away. Orbit has no
 // ExtensionService, so tracking rides on the host as user data instead.
@@ -211,6 +224,11 @@ bool OrbitContentBrowserClient::ShouldDisableSiteIsolation(
   return false;
 }
 
+std::string OrbitContentBrowserClient::GetAcceptLangs(
+    content::BrowserContext* context) {
+  return AcceptLanguageList();
+}
+
 void OrbitContentBrowserClient::ConfigureNetworkContextParams(
     content::BrowserContext* context,
     bool in_memory,
@@ -226,6 +244,10 @@ void OrbitContentBrowserClient::ConfigureNetworkContextParams(
   // Base class default leaves this empty; network-service-originated
   // requests must carry the same identity every navigation does.
   network_context_params->user_agent = GetUserAgent();
+  // //content's defaults are "en-us,en" and no zstd; Chrome sends neither.
+  network_context_params->accept_language =
+      net::HttpUtil::GenerateAcceptLanguageHeader(AcceptLanguageList());
+  network_context_params->enable_zstd = true;
 
   // `in_memory` tracks only genuinely-ephemeral partitions (none exist yet);
   // leaving `file_paths` unset forces in-memory-only regardless of http_cache_enabled.

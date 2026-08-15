@@ -11,10 +11,9 @@ enum OrbitMetrics {
 
     static let sidebarFolderToggleSize: CGFloat = iconFavicon
 
-    static let spaceIconEmojiScaleFraction: CGFloat = 0.8
-    // SF Symbols drawn at their own frame size render edge-to-edge with no margin and get
-    // clipped by the hosting layer (see SidebarTopRow's sidebarToggleGlyphScale); this leaves
-    // the same margin so a Space's symbol icon never crops against its container.
+    // Apple Color Emoji draw near edge-to-edge, unlike SF Symbols, so they need a smaller fraction.
+    static let spaceIconEmojiScaleFraction: CGFloat = 0.58
+    // Leaves a margin so a symbol icon never crops against its container.
     static let spaceIconSymbolScaleFraction: CGFloat = 0.78
 
     // MARK: Sidebar
@@ -225,16 +224,12 @@ enum OrbitMetrics {
     static let extensionInstallCaptionFontSize: CGFloat = 11
     static let extensionInstallFailureGlyphSize: CGFloat = 15
 
-    // The progress states are presented in the consent dialog's own sheet, at
-    // its width and padding, so the bar spans the same text column the consent
-    // dialog's description occupies rather than a width of its own.
+    // Spans the consent dialog's own text column rather than a width of its own.
     static let extensionInstallProgressBarHeight: CGFloat = 4
     static let extensionInstallProgressBarWidth: CGFloat =
         extensionInstallSheetWidth - (extensionInstallSheetPadding * 2)
         - extensionInstallIconSize - extensionInstallHeaderSpacing
-    // A stage that genuinely cannot report a fraction (verifying, installing)
-    // paints the full span dimmed rather than a partial bar: a bar stopped at
-    // some fraction of the way across claims a position nothing measured.
+    // Stages that cannot report a fraction paint the full span dimmed, not a partial bar.
     static let extensionInstallProgressIndeterminateOpacity: Double = 0.45
     static let extensionInstallProgressTrackOpacityDark: Double = 0.16
     static let extensionInstallProgressTrackOpacityLight: Double = 0.12
@@ -242,9 +237,7 @@ enum OrbitMetrics {
     // resizes under the pointer every time the installer moves on.
     static let extensionInstallProgressMinimumBodyHeight: CGFloat = 52
 
-    // MARK: Context menu (OrbitContextMenuView) -- the custom, non-NSMenu
-    // menu used for the web content right-click menu and other Orbit
-    // surfaces that opt into it.
+    // MARK: Context menu (OrbitContextMenuView), the custom non-NSMenu menu
 
     static let contextMenuWidth: CGFloat = 250
     // Deliberately not popoverCornerRadius: the menu panel reads as its own
@@ -281,9 +274,7 @@ enum OrbitMetrics {
     static let contextMenuShadowPadding: CGFloat = 34
     static let contextMenuArrowWidth: CGFloat = 24
     static let contextMenuArrowHeight: CGFloat = 10
-    // The concave fillet that carries the container's straight edge into the
-    // beak's flank, and how blunt the tip is. Without the fillet the beak meets
-    // the edge at a corner and reads as a triangle stuck onto the container.
+    // Without the fillet the beak meets the edge at a corner and reads as a stuck-on triangle.
     static let contextMenuArrowFillet: CGFloat = 4
     static let contextMenuArrowTipRadius: CGFloat = 2.4
     static let contextMenuAnchorGap: CGFloat = 5
@@ -328,9 +319,7 @@ enum OrbitColor {
     static let selectionFillLight = Color.black.opacity(0.09)
     static let selectionFillDark = Color.white.opacity(0.13)
 
-    // The floating menu panel is borderless and transparent, so this is the
-    // only thing behind a menu row — it has to be a real, opaque colour, not a
-    // translucent tint layered over some other Orbit surface.
+    // The panel is borderless and transparent, so this must be a real opaque colour.
     static let menuSurfaceDark = Color(.sRGB, red: 0.129, green: 0.129, blue: 0.141, opacity: 1)
     static let menuSurfaceLight = Color(.sRGB, red: 0.973, green: 0.973, blue: 0.980, opacity: 1)
 
@@ -346,9 +335,7 @@ enum OrbitColor {
     // pull the hue toward a warm rose and strip most of the saturation.
     static let menuHighlightWarmHue: Double = 0.94
     static let menuHighlightWarmth: Double = 0.78
-    // Light needs far more of the tint's own saturation than dark: it is laid
-    // over a near-white surface at low alpha, which washes hue out almost
-    // completely. Dark sits over near-black, where a little goes a long way.
+    // Light washes hue out over near-white at low alpha; dark needs far less.
     static let menuHighlightSaturationScaleDark: Double = 0.40
     static let menuHighlightSaturationScaleLight: Double = 0.95
     static let menuHighlightBrightnessDark: Double = 0.88

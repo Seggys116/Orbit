@@ -197,8 +197,153 @@ enum ExtensionAPISchemaSurface {
         try surfaces(inSchemaAt: orbitSchemaDirectory.appendingPathComponent(file))[namespace] ?? Surface()
     }
 
+    /// Orbit's are all .json; upstream's are .json, .idl or .webidl, so the
+    /// vendored copy keeps its own name and is resolved by basename.
+    static let schemaExtensions = ["json", "idl", "webidl"]
+
+    static func resolveSchema(in directory: URL, file: String) -> URL? {
+        let stem = (file as NSString).deletingPathExtension
+        for suffix in schemaExtensions {
+            let candidate = directory.appendingPathComponent("\(stem).\(suffix)")
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
+
     static func upstreamSurface(namespace: String, file: String) throws -> Surface {
-        try surfaces(inSchemaAt: vendoredUpstreamDirectory.appendingPathComponent(file))[namespace] ?? Surface()
+        guard let url = resolveSchema(in: vendoredUpstreamDirectory, file: file) else {
+            return Surface()
+        }
+        switch url.pathExtension {
+        case "idl": return try idlSurfaces(inSchemaAt: url)[namespace] ?? Surface()
+        case "webidl": return try webidlSurfaces(inSchemaAt: url)[namespace] ?? Surface()
+        default: return try surfaces(inSchemaAt: url)[namespace] ?? Surface()
+        }
+    }
+
+    /// Only dictionaries and enums are types: the per-event `interface FooEvent`
+    /// and its `callback FooListener` are plumbing the compiler never emits.
+    static func webidlSurfaces(inSchemaAt url: URL) throws -> [String: Surface] {
+        let text = try uncommentedIDL(at: url)
+        let nsText = text as NSString
+        let whole = NSRange(location: 0, length: nsText.length)
+
+        var bodies: [String: NSRange] = [:]
+        var surface = Surface()
+        let declaration = try NSRegularExpression(
+            pattern: #"\b(dictionary|enum|interface)\s+([A-Za-z0-9_]+)\s*(?::\s*[A-Za-z0-9_]+\s*)?\{"#
+        )
+        for match in declaration.matches(in: text, range: whole) {
+            let kind = nsText.substring(with: match.range(at: 1))
+            let name = nsText.substring(with: match.range(at: 2))
+            guard kind == "interface" else {
+                surface.types.insert(name)
+                continue
+            }
+            bodies[name] = bracedBody(nsText, from: match.range.location + match.range.length)
+        }
+
+        let attribute = try NSRegularExpression(
+            pattern: #"static\s+attribute\s+([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\s*;"#
+        )
+        guard let browser = bodies["Browser"],
+              let binding = attribute.firstMatch(in: text, range: browser)
+        else { return [:] }
+        let namespace = nsText.substring(with: binding.range(at: 2))
+        guard let body = bodies[nsText.substring(with: binding.range(at: 1))] else {
+            return [namespace: surface]
+        }
+
+        for match in attribute.matches(in: text, range: body) {
+            surface.events.insert(nsText.substring(with: match.range(at: 2)))
+        }
+        let constant = try NSRegularExpression(pattern: #"const\s+[A-Za-z0-9_]+\s+([A-Za-z0-9_]+)\s*="#)
+        for match in constant.matches(in: text, range: body) {
+            surface.properties.insert(nsText.substring(with: match.range(at: 1)))
+        }
+        let operation = try NSRegularExpression(pattern: #"static\s+((?:(?!attribute)[^;{}])*?)\("#)
+        let trailing = try NSRegularExpression(pattern: #"([A-Za-z0-9_]+)\s*$"#)
+        for match in operation.matches(in: text, range: body) {
+            let signature = nsText.substring(with: match.range(at: 1))
+            let signatureRange = NSRange(location: 0, length: (signature as NSString).length)
+            if let name = trailing.firstMatch(in: signature, range: signatureRange) {
+                surface.functions.insert((signature as NSString).substring(with: name.range(at: 1)))
+            }
+        }
+        return [namespace: surface]
+    }
+
+    private static func bracedBody(_ text: NSString, from start: Int) -> NSRange {
+        var depth = 1
+        var cursor = start
+        while cursor < text.length, depth > 0 {
+            let character = text.character(at: cursor)
+            if character == 123 { depth += 1 }
+            if character == 125 { depth -= 1 }
+            cursor += 1
+        }
+        return NSRange(location: start, length: max(0, cursor - 1 - start))
+    }
+
+    private static func uncommentedIDL(at url: URL) throws -> String {
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
+            throw SchemaError.unreadable(url)
+        }
+        return raw
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line -> Substring in
+                guard let comment = line.range(of: "//") else { return line }
+                return line[line.startIndex..<comment.lowerBound]
+            }
+            .joined(separator: "\n")
+    }
+
+    /// `callback` declarations are not types: the compiler folds them into the
+    /// function's returns_async rather than emitting one.
+    static func idlSurfaces(inSchemaAt url: URL) throws -> [String: Surface] {
+        let text = try uncommentedIDL(at: url)
+        guard let namespace = firstMatch(in: text, pattern: #"(?m)^\s*namespace\s+([A-Za-z0-9_.]+)\s*\{"#) else {
+            throw SchemaError.malformed(url, "no namespace declaration")
+        }
+
+        var surface = Surface()
+        let blocks = try NSRegularExpression(pattern: #"(dictionary|enum|interface)\s+([A-Za-z0-9_]+)\s*\{"#)
+        let members = try NSRegularExpression(pattern: #"static\s+[A-Za-z0-9_\[\]?]+\s*\??\s+([A-Za-z0-9_]+)\s*\("#)
+        let nsText = text as NSString
+        for block in blocks.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
+            let kind = nsText.substring(with: block.range(at: 1))
+            let name = nsText.substring(with: block.range(at: 2))
+            if kind != "interface" {
+                surface.types.insert(name)
+                continue
+            }
+            let bodyStart = block.range.location + block.range.length
+            var depth = 1
+            var cursor = bodyStart
+            while cursor < nsText.length, depth > 0 {
+                let character = nsText.character(at: cursor)
+                if character == 123 { depth += 1 }
+                if character == 125 { depth -= 1 }
+                cursor += 1
+            }
+            let body = NSRange(location: bodyStart, length: max(0, cursor - 1 - bodyStart))
+            let names = Set(members.matches(in: text, range: body).map { nsText.substring(with: $0.range(at: 1)) })
+            switch name {
+            case "Functions": surface.functions.formUnion(names)
+            case "Events": surface.events.formUnion(names)
+            case "Properties": surface.properties.formUnion(names)
+            default: break
+            }
+        }
+        return [namespace: surface]
+    }
+
+    private static func firstMatch(in text: String, pattern: String) -> String? {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let nsText = text as NSString
+        guard let match = expression.firstMatch(in: text, range: NSRange(location: 0, length: nsText.length))
+        else { return nil }
+        return nsText.substring(with: match.range(at: 1))
     }
 
     /// Every event Orbit declares, as "namespace.eventName".

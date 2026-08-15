@@ -1,13 +1,6 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// Trimmed from chrome/common/extensions/api/permissions.json. Deliberately
-// omits addHostAccessRequest/removeHostAccessRequest: those drive the
-// chrome://extensions toolbar "this extension wants access" affordance
-// through PermissionsManager::AddHostAccessRequest, and Orbit has no such
-// surface, so they are absent rather than present-and-silently-ineffective.
-
 [
   {
     "namespace": "permissions",

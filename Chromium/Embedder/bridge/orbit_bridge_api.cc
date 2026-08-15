@@ -21,15 +21,21 @@
 #include "base/version_info/version_info.h"
 #include "content/public/browser/native_event_processor_observer_mac.h"
 #include "orbit/bridge/orbit_bridge_internal.h"
+#include "orbit/browser/orbit_bookmark_registry.h"
 #include "orbit/browser/orbit_browser_context.h"
 #include "orbit/browser/orbit_color_scheme.h"
 #include "orbit/browser/orbit_cookie_bridge.h"
 #include "orbit/browser/orbit_devtools_frontend.h"
 #include "orbit/browser/orbit_download_bridge.h"
+#include "orbit/browser/orbit_download_registry.h"
+#include "orbit/browser/orbit_command_service.h"
 #include "orbit/browser/orbit_extension_action_dispatcher.h"
+#include "orbit/browser/orbit_history_service.h"
 #include "orbit/browser/orbit_preference_event_router.h"
 #include "orbit/browser/orbit_extension_loader.h"
 #include "orbit/browser/orbit_permission_store.h"
+#include "orbit/browser/orbit_search_service.h"
+#include "orbit/browser/orbit_session_service.h"
 #include "orbit/browser/orbit_tab_registry.h"
 #include "orbit/browser/orbit_user_script_registry.h"
 #include "orbit/browser/orbit_web_contents_host.h"
@@ -941,6 +947,56 @@ const char* OrbitGetExtensionActionsJSON(void) {
   return json->c_str();
 }
 
+const char* OrbitWebContentsExtensionContextMenuJSON(
+    OrbitWebContentsHandle handle) {
+  return orbit::ToHost(handle)->ExtensionContextMenuJSON();
+}
+
+void OrbitWebContentsExecuteExtensionContextMenuItem(
+    OrbitWebContentsHandle handle,
+    const char* extension_id,
+    int has_uid,
+    int32_t uid,
+    const char* string_uid) {
+  orbit::ToHost(handle)->ExecuteExtensionContextMenuItem(
+      extension_id ? std::string(extension_id) : std::string(), has_uid != 0,
+      uid, string_uid ? std::string(string_uid) : std::string());
+}
+
+void OrbitSetExtensionCommandsCallback(OrbitExtensionCommandsCallback callback,
+                                       void* opaque) {
+  orbit::OrbitCommandService::GetInstance().SetCommandsCallback(callback,
+                                                                opaque);
+}
+
+const char* OrbitGetExtensionCommandsJSON(void) {
+  static base::NoDestructor<std::string> json;
+  *json = orbit::OrbitCommandService::GetInstance().GetAllCommandsJSON();
+  return json->c_str();
+}
+
+void OrbitSetReservedShortcuts(const char* shortcuts_json) {
+  orbit::OrbitCommandService::GetInstance().SetReservedAccelerators(
+      shortcuts_json ? shortcuts_json : "[]");
+}
+
+int OrbitDispatchExtensionCommand(const char* extension_id,
+                                  const char* command_name) {
+  if (!extension_id || !command_name) {
+    return 0;
+  }
+  return orbit::OrbitCommandService::GetInstance().Dispatch(extension_id,
+                                                            command_name)
+             ? 1
+             : 0;
+}
+
+void OrbitSetExtensionActionActivatedCallback(
+    OrbitExtensionActionActivatedCallback callback, void* opaque) {
+  orbit::OrbitCommandService::GetInstance().SetActionActivatedCallback(callback,
+                                                                      opaque);
+}
+
 void OrbitSetSearchSuggestEnabledCallback(
     OrbitSearchSuggestEnabledCallback callback,
     void* opaque) {
@@ -958,4 +1014,61 @@ int OrbitGetSearchSuggestEnabled(void) {
 void OrbitSetSearchSuggestEnabled(int enabled) {
   orbit::OrbitPreferenceEventRouter::GetInstance()
       .SetSearchSuggestEnabledUserValue(enabled != 0);
+}
+
+void OrbitSetHistoryDelegate(const OrbitHistoryDelegate* delegate) {
+  orbit::OrbitHistoryService::GetInstance().SetDelegate(
+      delegate ? *delegate : OrbitHistoryDelegate{});
+}
+
+void OrbitHistoryNotifyVisited(const char* history_item_json) {
+  if (!history_item_json) {
+    return;
+  }
+  orbit::OrbitHistoryService::GetInstance().NotifyVisited(history_item_json);
+}
+
+void OrbitHistoryNotifyVisitRemoved(int all_history, const char* urls_json) {
+  orbit::OrbitHistoryService::GetInstance().NotifyVisitRemoved(
+      all_history != 0, urls_json ? urls_json : "[]");
+}
+
+void OrbitSetSessionsDelegate(const OrbitSessionsDelegate* delegate) {
+  orbit::OrbitSessionService::GetInstance().SetDelegate(
+      delegate ? *delegate : OrbitSessionsDelegate{});
+}
+
+void OrbitSessionsNotifyChanged(void) {
+  orbit::OrbitSessionService::GetInstance().NotifyChanged();
+}
+
+void OrbitSetSearchDelegate(const OrbitSearchDelegate* delegate) {
+  orbit::OrbitSearchService::GetInstance().SetDelegate(
+      delegate ? *delegate : OrbitSearchDelegate{});
+}
+
+void OrbitBookmarksSetTree(const char* tree_json) {
+  if (!tree_json) {
+    return;
+  }
+  orbit::OrbitBookmarkRegistry::GetInstance().SetTree(tree_json);
+}
+
+void OrbitSetBookmarksRequestCallback(OrbitBookmarksRequestCallback callback,
+                                      void* opaque) {
+  orbit::OrbitBookmarkRegistry::GetInstance().SetRequestCallback(callback,
+                                                                 opaque);
+}
+
+void OrbitDownloadsSetItems(const char* items_json) {
+  if (!items_json) {
+    return;
+  }
+  orbit::OrbitDownloadRegistry::GetInstance().SetItems(items_json);
+}
+
+void OrbitSetDownloadsRequestCallback(OrbitDownloadsRequestCallback callback,
+                                      void* opaque) {
+  orbit::OrbitDownloadRegistry::GetInstance().SetRequestCallback(callback,
+                                                                 opaque);
 }

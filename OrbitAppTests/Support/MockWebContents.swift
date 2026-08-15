@@ -90,6 +90,15 @@ final class MockWebContents: NSObject, WebContents {
     func go(offset: Int) {}
     func sessionHistory() -> [SessionHistoryEntry] { [] }
 
+    var extensionContextMenuGroupsOverride: [ExtensionContextMenuGroup] = []
+    private(set) var performedExtensionContextMenuItemIDs: [ExtensionContextMenuItemID] = []
+
+    func extensionContextMenuGroups() -> [ExtensionContextMenuGroup] { extensionContextMenuGroupsOverride }
+
+    func performExtensionContextMenuItem(_ id: ExtensionContextMenuItemID) {
+        performedExtensionContextMenuItemIDs.append(id)
+    }
+
     var certificateOverride: SiteCertificate?
     private(set) var currentCertificateCallCount = 0
 

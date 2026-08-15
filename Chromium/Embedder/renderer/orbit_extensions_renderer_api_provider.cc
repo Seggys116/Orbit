@@ -15,6 +15,7 @@
 #include "extensions/renderer/bindings/api_bindings_system.h"
 #include "extensions/renderer/native_extension_bindings_system.h"
 #include "mojo/public/js/grit/mojo_bindings_resources.h"
+#include "orbit/renderer/orbit_app_hooks_delegate.h"
 #include "orbit/renderer/orbit_tabs_hooks_delegate.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/resource_path.h"
@@ -93,9 +94,17 @@ void OrbitExtensionsRendererAPIProvider::AddBindingsSystemHooks(
   // Mirrors ChromeExtensionsRendererAPIProvider::AddBindingsSystemHooks's
   // own "tabs" registration -- without it tabs.sendMessage/tabs.connect are
   // simply absent from chrome.tabs. See orbit_tabs_hooks_delegate.h.
-  bindings_system->api_system()->RegisterHooksDelegate(
+  extensions::APIBindingsSystem* bindings = bindings_system->api_system();
+  bindings->RegisterHooksDelegate(
       "tabs", std::make_unique<OrbitTabsHooksDelegate>(
                   bindings_system->messaging_service()));
+  // Mirrors ChromeExtensionsRendererAPIProvider's own "app" registration --
+  // without it chrome.app is absent from every page. See
+  // orbit_app_hooks_delegate.h.
+  bindings->RegisterHooksDelegate(
+      "app", std::make_unique<OrbitAppHooksDelegate>(
+                 dispatcher, bindings->request_handler(),
+                 bindings_system->GetIPCMessageSender()));
 }
 
 void OrbitExtensionsRendererAPIProvider::PopulateSourceMap(

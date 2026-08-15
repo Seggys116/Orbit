@@ -1,19 +1,7 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// Availability of Orbit's own action/tabs/webNavigation/windows API surface
-// (see action.json, tabs.json, web_navigation.json, windows.json). Mirrors
-// the shape -- not the full contents -- of chrome/common/extensions/api/
-// _api_features.json's matching entries: privileged extension contexts only,
-// no webui/webui_untrusted carve-outs, since Orbit has no such surfaces these
-// APIs should reach.
 {
-  // Gated on the manifest key rather than a permission, exactly as
-  // chrome/common/extensions/api/_api_features.json gates it: an extension
-  // with no "action" block has no action to control. The manifest:action
-  // feature itself is //extensions-core (extensions/common/api/
-  // _manifest_features.json), so nothing needs adding for it here.
   "action": {
     "dependencies": ["manifest:action"],
     "contexts": ["privileged_extension"]
@@ -27,15 +15,44 @@
   "action.setBadgeTextColor": {
     "channel": "stable"
   },
+  "app": {
+    "channel": "stable",
+    "extension_types": ["hosted_app", "extension", "legacy_packaged_app"],
+    "contexts": [
+      "privileged_extension",
+      "unprivileged_extension",
+      "content_script",
+      "web_page",
+      "privileged_web_page"
+    ],
+    "disallow_for_service_workers": true,
+    "max_manifest_version": 2,
+    "matches": ["<all_urls>"]
+  },
+  "bookmarks": {
+    "dependencies": ["permission:bookmarks"],
+    "contexts": ["privileged_extension"]
+  },
+  "commands": {
+    "dependencies": ["manifest:commands"],
+    "contexts": ["privileged_extension"]
+  },
+  "contextMenus": {
+    "dependencies": ["permission:contextMenus"],
+    "contexts": ["privileged_extension"]
+  },
   "cookies": {
     "dependencies": ["permission:cookies"],
     "contexts": ["privileged_extension"]
   },
-  // No permission dependency, exactly as chrome/common/extensions/api/
-  // _api_features.json gates it: chrome.permissions is how an extension asks
-  // for its own declared optional permissions, so requiring a permission to
-  // reach it would be circular. Every grant is still bounded by the
-  // manifest's own optional_permissions -- see orbit_permissions_api.cc.
+  "downloads": {
+    "dependencies": ["permission:downloads"],
+    "contexts": ["privileged_extension"]
+  },
+  "history": {
+    "dependencies": ["permission:history"],
+    "contexts": ["privileged_extension"]
+  },
   "permissions": {
     "channel": "stable",
     "extension_types": ["extension"],
@@ -43,6 +60,14 @@
   },
   "privacy": {
     "dependencies": ["permission:privacy"],
+    "contexts": ["privileged_extension"]
+  },
+  "search": {
+    "dependencies": ["permission:search"],
+    "contexts": ["privileged_extension"]
+  },
+  "sessions": {
+    "dependencies": ["permission:sessions"],
     "contexts": ["privileged_extension"]
   },
   "tabs": {

@@ -193,7 +193,9 @@ struct NotesEditorView: View {
         guard !data.isEmpty else { return nil }
         let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: data)
         unarchiver?.requiresSecureCoding = true
-        return unarchiver?.decodeObject(of: NSAttributedString.self, forKey: NSKeyedArchiveRootObjectKey)
+        let decoded = unarchiver?.decodeObject(of: NSAttributedString.self, forKey: NSKeyedArchiveRootObjectKey)
+        // Repairs notes already saved with a baked colour, and keeps the binding equal to what the editor produces.
+        return decoded.map(NotesTextColor.normalized)
     }
 }
 

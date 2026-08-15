@@ -1,14 +1,6 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// A deliberately small subset of chrome/common/extensions/api/windows.json:
-// read-only (get/getAll/getCurrent/getLastFocused) plus onCreated/onRemoved/
-// onFocusChanged. windows.create/update/remove are NOT implemented -- Orbit
-// windows are real AppKit NSWindows owned by Swift's window-scoped
-// AppEnvironment/OrbitWindowController, and wiring extension-driven window
-// creation/removal through that is out of scope for this pass. See
-// orbit_windows_api.h for exactly which functions exist.
 [
   {
     "namespace": "windows",

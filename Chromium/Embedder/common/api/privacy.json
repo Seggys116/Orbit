@@ -1,23 +1,6 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// A deliberately small subset of chrome/common/extensions/api/privacy.json:
-// only settings Orbit genuinely honours. searchSuggestEnabled is real --
-// it is the same setting the Profile toggle in Settings writes, and turning
-// it off really does stop Orbit's command bar querying the search engine
-// (see SearchSuggestionsClient.swift / CommandBarView.swift).
-//
-// Everything else upstream declares is absent on purpose. passwordSavingEnabled
-// and the autofill settings would describe a password manager and an autofill
-// engine Orbit does not have; safeBrowsing*, spellingService, translationService,
-// networkPrediction and the Privacy Sandbox settings likewise name features
-// that do not exist here. Accepting a value for any of them would be a lie, so
-// they read as undefined instead -- which is the truth, and which is what lets
-// extensions that feature-detect (chrome.privacy.services.X && ...) degrade
-// cleanly. The privacy.network and privacy.websites groups are omitted for the
-// same reason: Orbit has no honoured setting in either.
-
 [
   {
     "namespace": "privacy",

@@ -23,9 +23,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         return true
     }
 
+    // The isDemo gate belongs to the launch path only: the Demo app must not open onboarding
+    // every launch, but Restart Onboarding is an explicit request and must work in both apps.
     @discardableResult
     static func showIfNeeded(on host: AppEnvironment = .processRoot) -> OnboardingWindowController? {
         guard !host.isDemo else { return nil }
+        return present(on: host)
+    }
+
+    @discardableResult
+    static func present(on host: AppEnvironment = .processRoot) -> OnboardingWindowController? {
         guard !host.hasCompletedOnboarding else { return nil }
         if let shared { return shared }
         let window = makeWindow()
@@ -56,13 +63,23 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             shared = nil
         }
         host.hasCompletedOnboarding = false
-        guard let controller = showIfNeeded(on: host) else {
+        guard let controller = present(on: host) else {
             host.hasCompletedOnboarding = true
             return
         }
         NSApp.activate(ignoringOtherApps: true)
         controller.window?.makeKeyAndOrderFront(nil)
     }
+
+    #if DEBUG
+    static var presentedWindowForTests: NSWindow? { shared?.window }
+
+    static func closeForTests() {
+        shared?.window?.delegate = nil
+        shared?.close()
+        shared = nil
+    }
+    #endif
 
     // MARK: - Window
 

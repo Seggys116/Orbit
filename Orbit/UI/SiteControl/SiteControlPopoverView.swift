@@ -52,6 +52,10 @@ struct SiteControlPopoverView: View {
         .onAppear {
             reloadPermissionRows()
             reloadExtensionActionEntries()
+            openPendingExtensionActionIfRequested()
+        }
+        .onChange(of: env.pendingExtensionActionID) { _, _ in
+            openPendingExtensionActionIfRequested()
         }
         .onDisappear {
             closeExtensionPopup()
@@ -543,6 +547,15 @@ struct SiteControlPopoverView: View {
             activeExtensionPopupModel = model
             openExtensionPopup = target
         }
+    }
+
+    // Cleared whether or not the extension turns out to have an icon here, so a
+    // _execute_action for an extension with no popup does not re-fire later.
+    private func openPendingExtensionActionIfRequested() {
+        guard let requested = env.pendingExtensionActionID else { return }
+        env.pendingExtensionActionID = nil
+        guard let entry = extensionActionEntries.first(where: { $0.id == requested }) else { return }
+        presentExtensionPopup(for: entry, kind: .action, url: entry.popupURL)
     }
 
     private func closeExtensionPopup() {

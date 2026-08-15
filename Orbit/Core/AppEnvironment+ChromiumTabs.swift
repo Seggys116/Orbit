@@ -10,6 +10,11 @@ enum ChromiumTabsSetup {
         OrbitChromiumTabsBridge.shared.handler = ChromiumTabsRouter.shared
         OrbitChromiumManagementBridge.shared.install()
         OrbitChromiumPermissionsBridge.shared.install()
+        OrbitChromiumHistoryBridge.shared.install()
+        OrbitChromiumSessionsBridge.shared.install()
+        OrbitChromiumSearchBridge.shared.install()
+        _ = ChromiumBookmarksSetup.installOnce
+        _ = ChromiumDownloadsSetup.installOnce
     }()
 }
 

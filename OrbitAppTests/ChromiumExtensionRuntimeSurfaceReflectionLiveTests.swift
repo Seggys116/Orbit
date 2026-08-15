@@ -121,6 +121,7 @@ final class ChromiumExtensionRuntimeSurfaceReflectionLiveTests: XCTestCase {
           "permissions": [\(permissionsJSON)],
           "host_permissions": ["http://\(matchHost)/*"],
           "action": { "default_title": "\(name)" },
+          "commands": { "orbit-reflection-command": { "description": "Reflection only" } },
           "background": { "service_worker": "background.js" },
           "content_scripts": [
             { "matches": ["http://\(matchHost)/*"], "js": ["content.js"], "run_at": "document_idle" }
@@ -264,9 +265,9 @@ final class ChromiumExtensionRuntimeSurfaceReflectionLiveTests: XCTestCase {
 
         var absentMembers: [String] = []
         for (namespace, file) in try Schema.orbitPortedNamespaces() {
-            // webstorePrivate is allowlist-restricted and unreachable from an
-            // ordinary extension by design, so its absence here is correct.
-            guard namespace != "webstorePrivate" else { continue }
+            // webstorePrivate is allowlist-restricted and app is
+            // disallow_for_service_workers, so both are correctly absent here.
+            guard namespace != "webstorePrivate", namespace != "app" else { continue }
             guard let reflected = report[namespace] else {
                 absentMembers.append("\(namespace) (whole namespace)")
                 continue

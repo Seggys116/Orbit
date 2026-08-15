@@ -436,14 +436,54 @@ final class OnboardingRestartTests: XCTestCase {
         )
     }
 
-    func testRestartLeavesTheFlagCompleteWhenThereIsNothingToPresent() {
+    // env is AppEnvironment.demo, so the assertion above also holds via the isDemo launch gate.
+    // These three separate the two gates and cover the reported defect.
+
+    func testPresentIsGatedOnTheCompletionFlagAloneNotOnIsDemo() {
         env.hasCompletedOnboarding = true
+        XCTAssertNil(
+            OnboardingWindowController.present(on: env),
+            "present must refuse once onboarding is complete, independently of isDemo."
+        )
+    }
+
+    func testShowIfNeededStillRefusesToAutoOpenInTheDemoApp() {
+        env.hasCompletedOnboarding = false
+        defer { OnboardingWindowController.closeForTests() }
+        XCTAssertTrue(env.isDemo, "test precondition: AppEnvironment.demo must be a demo environment")
+        XCTAssertNil(
+            OnboardingWindowController.showIfNeeded(on: env),
+            "The Demo app must not open onboarding by itself on launch."
+        )
+    }
+
+    func testRestartPresentsOnboardingEvenInTheDemoApp() {
+        env.hasCompletedOnboarding = true
+        defer { OnboardingWindowController.closeForTests() }
 
         OnboardingWindowController.restart(on: env)
 
+        XCTAssertFalse(
+            env.hasCompletedOnboarding,
+            "Restart Onboarding is an explicit request: in the Demo app it silently did nothing, because restart went through showIfNeeded and hit the isDemo launch gate."
+        )
+        XCTAssertNotNil(
+            OnboardingWindowController.presentedWindowForTests,
+            "Restart Onboarding must actually put the flow on screen, in both the real app and Demo."
+        )
+    }
+
+    // Was testRestartLeavesTheFlagCompleteWhenThereIsNothingToPresent, which only passed because
+    // restart could not present in a demo environment — the defect itself. present is the only
+    // thing that can still refuse, and refusing must never clear the flag.
+    func testARefusedPresentNeverClearsTheCompletionFlag() {
+        env.hasCompletedOnboarding = true
+
+        XCTAssertNil(OnboardingWindowController.present(on: env))
+
         XCTAssertTrue(
             env.hasCompletedOnboarding,
-            "A restart that could not present must put the flag back, or every later launch re-offers onboarding with no window."
+            "A refused present must leave the flag complete, or every later launch re-offers onboarding with no window."
         )
     }
 

@@ -18,10 +18,18 @@ final class GlobalKeyEventMonitor {
     }
 
     /// Returns nil to consume the event, or the event itself to pass it on.
+    ///
+    /// Orbit's own shortcuts get first refusal, and a key either the registry or
+    /// the main menu owns is published to the embedder as reserved, so a
+    /// clashing extension command is inactive there too and can never reach the
+    /// lookup below.
     static func handle(_ event: NSEvent, in environment: AppEnvironment) -> NSEvent? {
-        guard let commandID = ShortcutRegistry.shared.command(matching: event) else { return event }
-        guard environment.perform(commandID) else { return event }
-        return nil
+        if let commandID = ShortcutRegistry.shared.command(matching: event),
+           environment.perform(commandID) {
+            return nil
+        }
+        if ExtensionCommandRegistry.shared.handle(event, in: environment) { return nil }
+        return event
     }
 
     func stop() {

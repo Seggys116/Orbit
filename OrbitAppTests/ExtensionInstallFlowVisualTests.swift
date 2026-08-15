@@ -7,8 +7,7 @@ import XCTest
 // Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class ExtensionInstallFlowVisualTests: XCTestCase {
 
-    // One environment per test: AppEnvironment.demo is a factory, so evaluating it twice in a
-    // test compares two environments that cannot see each other's state.
+    // AppEnvironment.demo is a factory: evaluate it once per test.
     private lazy var env: AppEnvironment = AppEnvironment.demo
 
     // MARK: - Fixtures
@@ -39,11 +38,6 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
     private static let optionalWarning = ExtensionPermissionWarning(
         id: "perm:geolocation.optional", text: "Detect your physical location", severity: .high, isGrantedAtInstall: false
     )
-
-    // MARK: - ExtensionInstallLogic / ExtensionConsentBridge pure logic
-    //
-    // Pure logic is covered by OrbitTests/ExtensionsSettingsPaneInstallTests.swift;
-    // this file covers stage/failure presenters, shared view components, and pixel rendering.
 
     // MARK: - ExtensionInstallStagePresenter: single source of truth for progress copy (zero coverage before this file)
 
@@ -217,8 +211,6 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             size: size,
             appearance: .darkAqua
         )
-        // The notice row adds a whole extra row of content above the warnings list; somewhere
-        // across the sheet the two renders must differ, without depending on exact row geometry.
         XCTAssertTrue(
             Self.rendersDiffer(withNotice, withoutNotice, size: size),
             "Adding a chromiumVersionWarning did not visibly change the rendered sheet."
@@ -255,13 +247,36 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_orbitInlineNotice_paintsInBothAppearances
 
     func test_orbitInlineNotice_paintsInBothAppearances() {
+        let size = CGSize(width: 360, height: 60)
+        let glyphRect = CGRect(x: 0, y: 0, width: 16, height: 16)
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
             let rendered = render(
                 OrbitInlineNotice(systemImage: "exclamationmark.triangle.fill", tint: .orange, text: "Something worth flagging."),
-                size: CGSize(width: 360, height: 60),
+                size: size,
                 appearance: appearance
             )
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            let glyphOnly = render(
+                OrbitInlineNotice(systemImage: "exclamationmark.triangle.fill", tint: .orange, text: ""),
+                size: size,
+                appearance: appearance
+            )
+
+            let glyph = rendered.averageColor(in: glyphRect)
+            XCTAssertTrue(
+                glyph.r > glyph.g && glyph.g > glyph.b && glyph.r - glyph.b > 0.15,
+                "The notice's glyph sampled \(glyph) in \(appearance.rawValue) -- it is not painting the tint it was handed."
+            )
+            XCTAssertTrue(
+                Self.hasInk(rendered, in: CGRect(x: 24, y: 0, width: size.width - 24, height: size.height)),
+                "Nothing painted beside the glyph in \(appearance.rawValue) -- the notice's text never rendered."
+            )
+
+            let width = rendered.boundingBoxOfContent()?.width ?? 0
+            let glyphWidth = glyphOnly.boundingBoxOfContent()?.width ?? 0
+            XCTAssertGreaterThan(
+                width, glyphWidth + 100,
+                "The notice is \(width)pt wide with text and \(glyphWidth)pt without it in \(appearance.rawValue); the text is contributing nothing."
+            )
         }
     }
 
@@ -278,11 +293,24 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         var renders: [RenderedImage] = []
         for stage in stages {
             let rendered = render(ExtensionInstallStageRow(stage: stage), size: size, appearance: .darkAqua)
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "stage \(stage) painted nothing.")
+            XCTAssertGreaterThanOrEqual(
+                Self.inkRowCount(rendered, in: CGRect(x: 0, y: 0, width: 40, height: size.height)), 12,
+                "stage \(stage): the icon badge's column is only \(Self.inkRowCount(rendered, in: CGRect(x: 0, y: 0, width: 40, height: size.height)))pt tall -- the badge is missing and the progress bar is all that reaches it."
+            )
+            XCTAssertFalse(
+                Self.hasInk(rendered, in: CGRect(x: 34, y: 0, width: 12, height: size.height)),
+                "stage \(stage): ink in the gutter between the badge and the text column -- the text has slid left into the badge's place."
+            )
+            XCTAssertGreaterThanOrEqual(
+                Self.inkRowCount(rendered, in: CGRect(x: 48, y: 0, width: size.width - 48, height: 18)), 10,
+                "stage \(stage): the row's first line is only \(Self.inkRowCount(rendered, in: CGRect(x: 48, y: 0, width: size.width - 48, height: 18)))pt tall -- the stage's own title never rendered."
+            )
+            XCTAssertGreaterThanOrEqual(
+                Self.longestInkRun(rendered, in: CGRect(origin: .zero, size: size)), 150,
+                "stage \(stage): no run of ink 150pt wide -- OrbitInstallProgressBar is missing from the row."
+            )
             renders.append(rendered)
         }
-        // Each stage's pixels must differ somewhere across the row, without
-        // depending on the exact row geometry a fixed sample band would.
         for i in 0..<(renders.count - 1) {
             XCTAssertTrue(
                 Self.rendersDiffer(renders[i], renders[i + 1], size: size),
@@ -308,17 +336,36 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installFailureRow_paintsInBothAppearances
 
     func test_installFailureRow_paintsInBothAppearances() {
-        let presentation = ExtensionInstallFailurePresentation.present(ExtensionInstallError.webStoreFailure(.network("offline")))
+        let network = ExtensionInstallFailurePresentation.present(ExtensionInstallError.webStoreFailure(.network("offline")))
+        let verification = ExtensionInstallFailurePresentation.present(ExtensionInstallError.verificationFailed(.invalidMagic))
+        let size = CGSize(width: 380, height: 70)
+        let glyphRect = CGRect(x: 0, y: 0, width: 16, height: 16)
+
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
-            let rendered = render(ExtensionInstallFailureRow(presentation: presentation), size: CGSize(width: 380, height: 70), appearance: appearance)
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            let rendered = render(ExtensionInstallFailureRow(presentation: network), size: size, appearance: appearance)
+            let glyph = rendered.averageColor(in: glyphRect)
+            XCTAssertTrue(
+                glyph.r > glyph.g && glyph.g > glyph.b && glyph.r - glyph.b > 0.15,
+                "A network failure's glyph sampled \(glyph) in \(appearance.rawValue), not the orange its category asks for."
+            )
+            XCTAssertTrue(
+                Self.hasInk(rendered, in: CGRect(x: 26, y: 0, width: size.width - 26, height: 16)),
+                "The failure title never painted in \(appearance.rawValue)."
+            )
+            XCTAssertTrue(
+                Self.hasInk(rendered, in: CGRect(x: 26, y: 17, width: size.width - 26, height: 40)),
+                "The failure message never painted in \(appearance.rawValue) -- the row is showing a title with no detail."
+            )
+
+            let otherCategory = render(ExtensionInstallFailureRow(presentation: verification), size: size, appearance: appearance)
+            XCTAssertGreaterThan(
+                Self.colorDistance(glyph, otherCategory.averageColor(in: glyphRect)), 0.08,
+                "A verification failure and a network failure paint the same glyph in \(appearance.rawValue) -- the row is not reflecting the failure's category."
+            )
         }
     }
 
     // MARK: - The install modal: progress presented in the consent dialog's own frame
-    //
-    // Earlier tests rendered ExtensionInstallStageRow alone and never caught
-    // that the container around it used a different presentation/colours than consent's .sheet.
 
     private static func sampleSubject() -> ExtensionInstallSubject {
         ExtensionInstallSubject(name: "Fixture Extension", version: "1.3.0", iconPNGData: nil)
@@ -364,8 +411,6 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         }
     }
 
-    // The defect verbatim: progress was an .overlay(alignment: .top) strip on
-    // the tab, not the sheet the consent dialog uses.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_singleTabContentView_presentsInstallProgressThroughTheSheet_notATopAlignedStrip
     func test_singleTabContentView_presentsInstallProgressThroughTheSheet_notATopAlignedStrip() throws {
         let source = try Self.productionSource(named: "ContentCardView.swift")
@@ -398,7 +443,22 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             var renders: [RenderedImage] = []
             for stage in stages {
                 let rendered = render(Self.progressModal(stage, subject: Self.sampleSubject()), size: size, appearance: appearance)
-                XCTAssertNotNil(rendered.boundingBoxOfContent(), "stage \(stage) painted nothing in \(appearance.rawValue).")
+                XCTAssertGreaterThanOrEqual(
+                    Self.inkRowCount(rendered, in: CGRect(x: 20, y: 15, width: size.width - 40, height: 40)), 20,
+                    "stage \(stage) in \(appearance.rawValue): the modal's header is only \(Self.inkRowCount(rendered, in: CGRect(x: 20, y: 15, width: size.width - 40, height: 40)))pt tall -- its badge and titles are missing."
+                )
+                XCTAssertFalse(
+                    Self.hasInk(rendered, in: CGRect(x: 58, y: 15, width: 8, height: 40)),
+                    "stage \(stage) in \(appearance.rawValue): ink in the gutter between the badge and the text column -- the text has slid left into the badge's place."
+                )
+                XCTAssertGreaterThanOrEqual(
+                    Self.longestInkRun(rendered, in: CGRect(origin: .zero, size: size)), 250,
+                    "stage \(stage) in \(appearance.rawValue): no run of ink 250pt wide -- the modal is not carrying the install progress bar."
+                )
+                XCTAssertGreaterThanOrEqual(
+                    Self.longestInkRun(rendered, in: CGRect(x: 280, y: 70, width: size.width - 280, height: size.height - 70)), 50,
+                    "stage \(stage) in \(appearance.rawValue): no button-sized ink at the modal's trailing bottom -- the Cancel button is gone."
+                )
                 renders.append(rendered)
             }
             for index in 0..<(renders.count - 1) {
@@ -422,8 +482,7 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         )
     }
 
-    // Each state is laid over a plain surface of the appearance's own tone,
-    // since the sheet's own material is host chrome the offscreen renderer never paints.
+    // The sheet's own material is host chrome the offscreen renderer never paints, so each state gets a plain backdrop.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installModal_paintsEveryPhase_inBothAppearances
     func test_installModal_paintsEveryPhase_inBothAppearances() async {
         let size = CGSize(width: OrbitMetrics.extensionInstallSheetWidth, height: 190)
@@ -460,8 +519,6 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         let size = CGSize(width: 200, height: OrbitMetrics.extensionInstallProgressBarHeight)
         let sampleBand = CGRect(x: 0, y: 1, width: 40, height: 2)
 
-        // Sampled back through this same renderer, so the comparison is
-        // against the colour the token actually paints, not the harness's own idea of it.
         let accentReference = render(
             Rectangle().fill(SettingsPalette.accent), size: size, appearance: .darkAqua
         ).averageColor(in: sampleBand)
@@ -489,14 +546,10 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             trackLuminances.append((track.r + track.g + track.b) / 3)
         }
 
-        // The whole reported defect in one assertion: a track that is the same
-        // fixed light tint in both appearances is invisible on a light sheet.
         XCTAssertGreaterThan(trackLuminances[0], 0.9, "The dark-appearance track must be a light tint.")
         XCTAssertLessThan(trackLuminances[1], 0.1, "The light-appearance track must be a dark tint, not the same fixed white one dark uses.")
     }
 
-    // Verifying/installing cannot report a fraction; a bar stopping part-way
-    // would imply progress nothing measured.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_installProgressBar_withNoMeasurableFraction_claimsNoPosition
     func test_installProgressBar_withNoMeasurableFraction_claimsNoPosition() {
         let size = CGSize(width: 200, height: OrbitMetrics.extensionInstallProgressBarHeight)
@@ -682,21 +735,30 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
     }
 
     // MARK: - ExtensionsSettingsPane: the one row-state deterministic without touching ExtensionStore
-    //
-    // Other row states read live ExtensionStore/ExtensionRuntime singletons with no test seam;
-    // "unsupported engine" is the only state that never consults either.
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_extensionsPane_withNoExtensionCapableEngine_rendersTheUnsupportedMessage
 
     func test_extensionsPane_withNoExtensionCapableEngine_rendersTheUnsupportedMessage() {
+        let size = CGSize(width: SettingsMetrics.contentMaxWidth, height: 300)
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
             let env = self.env
-            let rendered = render(
-                ExtensionsSettingsPane().environment(env),
-                size: CGSize(width: SettingsMetrics.contentMaxWidth, height: 300),
-                appearance: appearance
+            XCTAssertFalse(env.capabilitiesSupportExtensions, "test precondition: no engine, so the pane takes its unsupported branch.")
+            let rendered = render(ExtensionsSettingsPane().environment(env), size: size, appearance: appearance)
+
+            let sectionFill = rendered.color(atX: 540, y: 78)
+            let message = Self.nonBackgroundBox(
+                rendered,
+                background: sectionFill,
+                in: CGRect(x: 62, y: 50, width: 438, height: 26)
             )
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            XCTAssertGreaterThan(
+                message?.width ?? 0, 300,
+                "In \(appearance.rawValue) the notice's row is \(String(describing: message)) of text over its section fill \(sectionFill) -- only the section chrome painted, not the message."
+            )
+            XCTAssertFalse(
+                Self.hasInk(rendered, in: CGRect(x: 0, y: 110, width: size.width, height: size.height - 110)),
+                "The pane painted below its engine-starting notice in \(appearance.rawValue) -- it is rendering the extensions-capable branch too."
+            )
         }
     }
 
@@ -709,7 +771,20 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         appearance: NSAppearance.Name = .darkAqua
     ) async {
         let rendered = await renderForScreenshot(view, size: size, appearance: appearance)
-        XCTAssertNotNil(rendered.boundingBoxOfContent(), "\(name) (\(appearance.rawValue)) painted nothing.")
+        guard let box = rendered.boundingBoxOfContent() else {
+            XCTFail("\(name) (\(appearance.rawValue)) painted nothing.")
+            return
+        }
+        XCTAssertGreaterThan(box.width, size.width * 0.5, "\(name) (\(appearance.rawValue)) painted \(box.width)pt of a \(size.width)pt canvas across.")
+        XCTAssertGreaterThan(box.height, size.height * 0.25, "\(name) (\(appearance.rawValue)) painted \(box.height)pt of a \(size.height)pt canvas down.")
+
+        let background = rendered.color(atX: 0, y: 0)
+        let content = Self.nonBackgroundFraction(rendered, background: background, in: box)
+        XCTAssertGreaterThan(
+            content, 0.02,
+            "\(name) (\(appearance.rawValue)) is \(content) content over a flat \(background) -- the screenshot is an empty panel."
+        )
+
         let destination = Self.screenshotOutputDirectory.appendingPathComponent("\(name).png")
         XCTAssertTrue(rendered.writePNG(to: destination), "Expected to write \(name).png to \(destination.path).")
     }
@@ -732,8 +807,7 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         return ""
     }
 
-    /// Blanks `//` and `/* */` runs so a scan for a banned identifier is not
-    /// tripped by a comment explaining why it is banned.
+    /// Blanks comment runs so a scan for a banned identifier is not tripped by a comment about it.
     private static func sourceStrippingComments(_ source: String) -> String {
         var result = ""
         result.reserveCapacity(source.count)
@@ -778,7 +852,69 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         return results
     }
 
-    // MARK: - Colour distance
+    // MARK: - Ink measurement
+
+    private static func hasInk(_ image: RenderedImage, in rect: CGRect) -> Bool {
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) where image.color(atX: x, y: y).a > 0.04 {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func inkRowCount(_ image: RenderedImage, in rect: CGRect) -> Int {
+        var rows = 0
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) where image.color(atX: x, y: y).a > 0.04 {
+                rows += 1
+                break
+            }
+        }
+        return rows
+    }
+
+    private static func longestInkRun(_ image: RenderedImage, in rect: CGRect) -> Int {
+        var longest = 0
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            var run = 0
+            for x in Int(rect.minX)..<Int(rect.maxX) {
+                if image.color(atX: x, y: y).a > 0.04 {
+                    run += 1
+                    longest = max(longest, run)
+                } else {
+                    run = 0
+                }
+            }
+        }
+        return longest
+    }
+
+    private static func nonBackgroundBox(_ image: RenderedImage, background: RGBA, in rect: CGRect) -> CGRect? {
+        var minX = Int.max, minY = Int.max, maxX = Int.min, maxY = Int.min
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) where !image.color(atX: x, y: y).isApproximately(background, tolerance: 0.05) {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x + 1)
+                maxY = max(maxY, y + 1)
+            }
+        }
+        guard minX < maxX, minY < maxY else { return nil }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private static func nonBackgroundFraction(_ image: RenderedImage, background: RGBA, in rect: CGRect) -> Double {
+        var differing = 0
+        var total = 0
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) {
+                total += 1
+                if !image.color(atX: x, y: y).isApproximately(background, tolerance: 0.05) { differing += 1 }
+            }
+        }
+        return total == 0 ? 0 : Double(differing) / Double(total)
+    }
 
     private static func colorDistance(_ a: RGBA, _ b: RGBA) -> Double {
         let dr = a.r - b.r

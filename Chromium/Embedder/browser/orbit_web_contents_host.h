@@ -20,6 +20,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "content/public/browser/certificate_request_result_type.h"
+#include "content/public/browser/context_menu_params.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/media_player_id.h"
 #include "content/public/browser/render_frame_host_receiver_set.h"
 #include "content/public/browser/render_widget_host_observer.h"
@@ -137,6 +139,21 @@ class OrbitWebContentsHost : public content::WebContentsObserver,
   // OrbitWebContentsSessionHistory. Returned pointer is this instance's own
   // buffer, overwritten by the next call.
   const char* SessionHistoryJSON();
+
+  // The chrome.contextMenus items matching the gesture this host last reported
+  // through callbacks_.show_context_menu -- the one Swift is presenting right
+  // now. See OrbitMenuManager::MatchingItemsValue for the shape. "[]" when
+  // there has been no gesture yet or nothing matches. Returned pointer is this
+  // instance's own buffer, overwritten by the next call.
+  const char* ExtensionContextMenuJSON();
+
+  // Fires one of those items' onClicked against the same stored gesture, so
+  // the info payload the extension sees is the click it was offered on. A no-op
+  // for an item that has since been removed.
+  void ExecuteExtensionContextMenuItem(const std::string& extension_id,
+                                       bool has_uid,
+                                       int uid,
+                                       const std::string& string_uid);
 
   void LoadHTML(const std::string& html, const std::string& base_url);
   void SavePage(const std::string& target_path);
@@ -430,6 +447,14 @@ class OrbitWebContentsHost : public content::WebContentsObserver,
       script_channel_receivers_;
 
   std::string session_history_json_;
+  std::string extension_context_menu_json_;
+
+  // The gesture behind the context menu Swift is showing, kept so a click on
+  // an extension item reports the same info payload Chrome would. Cleared by
+  // nothing: the next gesture overwrites it, and a stale one can only be read
+  // by a click Swift no longer has a menu for.
+  std::optional<content::ContextMenuParams> last_context_menu_params_;
+  content::GlobalRenderFrameHostId last_context_menu_frame_id_;
 
   // The icon URL last chosen, so an unchanged refired candidate list doesn't re-download
   // and re-report the same icon. Cleared on every primary main frame navigation.

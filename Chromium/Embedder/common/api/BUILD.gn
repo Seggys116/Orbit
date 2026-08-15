@@ -27,9 +27,17 @@ group("api") {
 generated_json_strings("generated_api_json_strings") {
   sources = [
     "action.json",
+    "app.json",
+    "bookmarks.json",
+    "commands.json",
+    "context_menus.json",
     "cookies.json",
+    "downloads.json",
+    "history.json",
     "permissions.json",
     "privacy.json",
+    "search.json",
+    "sessions.json",
     "tabs.json",
     "web_navigation.json",
     "webstore_private.json",

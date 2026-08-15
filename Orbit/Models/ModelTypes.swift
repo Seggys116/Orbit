@@ -727,6 +727,7 @@ nonisolated public struct DownloadItem: Identifiable, Codable, Hashable, Sendabl
     public var state: DownloadState
     public var startedAt: Date
     public var finishedAt: Date?
+    public var apiID: Int?
 
     public init(
         id: UUID = UUID(),
@@ -738,7 +739,8 @@ nonisolated public struct DownloadItem: Identifiable, Codable, Hashable, Sendabl
         receivedBytes: Int64 = 0,
         state: DownloadState = .pending,
         startedAt: Date = Date(),
-        finishedAt: Date? = nil
+        finishedAt: Date? = nil,
+        apiID: Int? = nil
     ) {
         self.id = id
         self.sourceURL = sourceURL
@@ -750,6 +752,7 @@ nonisolated public struct DownloadItem: Identifiable, Codable, Hashable, Sendabl
         self.state = state
         self.startedAt = startedAt
         self.finishedAt = finishedAt
+        self.apiID = apiID
     }
 }
 

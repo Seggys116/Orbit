@@ -1,25 +1,6 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// A port of chrome/common/extensions/api/cookies.json to an embedder with
-// exactly one BrowserContext and no incognito profile. Implemented by
-// orbit/browser/api/cookies/orbit_cookies_api.cc directly against
-// network::mojom::CookieManager off OrbitBrowserContext's default
-// StoragePartition (mirrors orbit_cookie_bridge.cc's own CookieManagerFor()
-// access pattern). Orbit has exactly one cookie store, always id "0";
-// getAllCookieStores' tabIds is every open Orbit tab
-// (orbit::OrbitTabRegistry::GetAllTabs()), since there is no second store to
-// partition tabs across.
-//
-// Omitted from upstream: CookiePartitionKey/partitionKey and
-// cookies.getPartitionKey. Honouring a partition key needs a real per-frame
-// storage-key resolution path (RenderFrameHost::GetStorageKey() ->
-// ToCookiePartitionKey()) that nothing else in Orbit's embedder exercises;
-// rather than accept a partitionKey argument and silently ignore it (which
-// would make a caller's cookie invisible in exactly the partition it asked
-// for), the field is absent entirely so callers see a normal, unpartitioned
-// cookie store instead of one that quietly does the wrong thing.
 [
   {
     "namespace": "cookies",

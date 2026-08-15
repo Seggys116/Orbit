@@ -108,9 +108,7 @@ struct ManageSpacesColumnsView: View {
 
             columnScroller {
                 VStack(alignment: .leading, spacing: 2) {
-                    // The real pinned tree, not env.pinnedNodes(...).flatMap(\.allTabIDs): flattening
-                    // spilled every tab inside a folder into the same list as the loose ones, losing
-                    // the folder entirely. ManageSpacesNodeRow renders the tree as-is instead.
+                    // The tree as-is: flattening lost the folders entirely.
                     let pinnedNodes = env.pinnedNodes(in: space.id)
                     let today = env.todayTabs(in: space.id).map(\.id)
 
@@ -413,15 +411,8 @@ private struct ManageSpacesColumnFooter: View {
 }
 
 // MARK: - Pinned tree (folders + tabs)
-//
-// Renders env.pinnedNodes(in:) as the tree it actually is, instead of flattening it. Deliberately
-// self-contained, mirroring LibraryArchivedTabsView's ArchivedFolderRow rather than SidebarNodeRow:
-// expand/collapse is local @State here, not env.toggleFolderExpanded(folder.id, in:) — this column
-// is a preview surface, not the sidebar, and must not mutate the real Folder.isExpanded (another
-// agent hit exactly that coupling trap building the Archive view's own tree and had to back it out
-// into local rows). For the same reason there is no folder-level .draggable here: only individual
-// tabs (ManageSpacesTabRow, reused unchanged at every depth) can be dragged to another Space's
-// column, exactly as before this file rendered a tree at all.
+
+// Expand/collapse is local @State: this is a preview surface and must not mutate Folder.isExpanded.
 
 private struct ManageSpacesNodeRow: View {
     var node: SidebarNode
@@ -443,10 +434,7 @@ private struct ManageSpacesNodeRow: View {
     }
 }
 
-// A click here toggles this row's own local expand/collapse only — it neither activates the
-// folder's tabs nor selects the Space (the column's own background .onTapGesture does that; a
-// Button here claims the tap first, which is the deliberate, existing behaviour ArchivedFolderRow
-// already relies on).
+// No chevron: open/closed is carried by FolderToggleGlyph, matching the sidebar's own row.
 private struct ManageSpacesFolderRow: View {
     var folder: Folder
     var originSpaceID: SpaceID
@@ -467,19 +455,13 @@ private struct ManageSpacesFolderRow: View {
                 isExpanded.toggle()
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(LibraryPalette.textTertiary)
-                        .frame(width: 10, height: 10)
                     folderGlyph
                     Text(folder.name)
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(LibraryPalette.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 8)
-                    // Same TabRowView.swift PinnedFolderRowView.trailingControls model: children.count,
-                    // an immediate-child count (tabs and subfolders each count as one), not a recursive
-                    // tab total — so this row reads identically to the folder's own sidebar row.
+                    // Immediate-child count, matching the folder's sidebar row.
                     Text("\(folder.children.count)")
                         .font(.system(size: 11))
                         .foregroundStyle(LibraryPalette.textTertiary)
@@ -506,17 +488,16 @@ private struct ManageSpacesFolderRow: View {
         if let icon = folder.icon, !icon.isEmpty, folder.iconIsEmoji || OrbitSymbolName.isResolvable(icon) {
             if folder.iconIsEmoji {
                 Text(icon).font(.system(size: 12))
+                    .frame(width: OrbitMetrics.sidebarFolderToggleSize, height: OrbitMetrics.sidebarFolderToggleSize)
             } else {
                 Image(systemName: icon)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(LibraryPalette.textSecondary)
-                    .frame(width: OrbitMetrics.iconFavicon, height: OrbitMetrics.iconFavicon)
+                    .frame(width: OrbitMetrics.sidebarFolderToggleSize, height: OrbitMetrics.sidebarFolderToggleSize)
             }
         } else {
-            Image(systemName: "folder")
-                .font(.system(size: 11, weight: .medium))
+            FolderToggleGlyph(isOpen: isExpanded)
                 .foregroundStyle(LibraryPalette.textSecondary)
-                .frame(width: OrbitMetrics.iconFavicon, height: OrbitMetrics.iconFavicon)
         }
     }
 }

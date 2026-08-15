@@ -96,7 +96,10 @@ final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
 
     func test_everyNamespaceOrbitPortsIsRequiredToBeDefinedAtRuntime() throws {
         let mustBeDefined = Set(try stringList("mustBeDefined"))
-        let ported = try Schema.orbitPortedNamespaces().keys.filter { $0 != "webstorePrivate" }
+        // Both are web-page APIs an MV3 service worker is never meant to see:
+        // webstorePrivate is allowlist-restricted, app is disallow_for_service_workers.
+        let ported = try Schema.orbitPortedNamespaces().keys
+            .filter { $0 != "webstorePrivate" && $0 != "app" }
         let unasserted = ported.filter { !mustBeDefined.contains($0) }.sorted()
         XCTAssertEqual(
             unasserted, [],

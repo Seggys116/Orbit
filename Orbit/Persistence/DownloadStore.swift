@@ -2,17 +2,56 @@ import AppKit
 import Foundation
 import Observation
 
+nonisolated public struct DownloadsFile: Codable, Sendable {
+
+    public var nextAPIID: Int
+    public var items: [DownloadItem]
+    /// Not encoded: true only for a file written before the counter existed.
+    public var isLegacyShape: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case nextAPIID
+        case items
+    }
+
+    public init(nextAPIID: Int = 1, items: [DownloadItem] = [], isLegacyShape: Bool = false) {
+        self.nextAPIID = nextAPIID
+        self.items = items
+        self.isLegacyShape = isLegacyShape
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let legacy = try? decoder.singleValueContainer().decode([DownloadItem].self) {
+            self.init(nextAPIID: 1, items: legacy, isLegacyShape: true)
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            nextAPIID: try container.decodeIfPresent(Int.self, forKey: .nextAPIID) ?? 1,
+            items: try container.decodeIfPresent([DownloadItem].self, forKey: .items) ?? []
+        )
+    }
+}
+
 @MainActor
 @Observable
 public final class DownloadStore {
 
     public private(set) var downloads: [DownloadItem] = []
 
-    private let writer: AtomicJSONFileWriter<[DownloadItem]>
+    private let writer: AtomicJSONFileWriter<DownloadsFile>
+
+    private var nextAPIID: Int = 1
 
     public init(fileURL: URL = DownloadStore.defaultFileURL) {
         self.writer = AtomicJSONFileWriter(fileURL: fileURL)
-        self.downloads = writer.loadNow(default: [])
+        let file = writer.loadNow(default: DownloadsFile())
+        self.downloads = file.items
+        // max, not the stored counter alone: a hand-edited or restored-from-backup file must skip ids, never reuse one.
+        self.nextAPIID = max(file.nextAPIID, (file.items.compactMap(\.apiID).max() ?? 0) + 1)
+        if !backfillAPIIDsOnLoad(), file.isLegacyShape {
+            saveNowIgnoringFailure()
+        }
         verifyFilesExistOnLoad()
     }
 
@@ -37,11 +76,34 @@ public final class DownloadStore {
             mimeType: mimeType,
             totalBytes: totalBytes,
             receivedBytes: 0,
-            state: .inProgress
+            state: .inProgress,
+            apiID: allocateAPIID()
         )
         downloads.insert(item, at: 0)
         persist()
         return item
+    }
+
+    private func allocateAPIID() -> Int {
+        let id = nextAPIID
+        nextAPIID += 1
+        return id
+    }
+
+    private func backfillAPIIDsOnLoad() -> Bool {
+        let unassigned = downloads.indices
+            .filter { downloads[$0].apiID == nil }
+            .sorted {
+                let left = downloads[$0], right = downloads[$1]
+                if left.startedAt != right.startedAt { return left.startedAt < right.startedAt }
+                return left.id.uuidString < right.id.uuidString
+            }
+        guard !unassigned.isEmpty else { return false }
+        for index in unassigned {
+            downloads[index].apiID = allocateAPIID()
+        }
+        saveNowIgnoringFailure()
+        return true
     }
 
     public func updateProgress(id: UUID, progress: DownloadProgress) {
@@ -114,6 +176,21 @@ public final class DownloadStore {
         return target
     }
 
+    // MARK: - Deleting the file on disk
+
+    /// Deletes the file only: a completed download whose file is gone stays completed, exactly as it does after a Finder delete.
+    @discardableResult
+    public func removeFile(_ id: UUID) -> Bool {
+        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return false }
+        guard downloads[index].state == .completed else { return false }
+        do {
+            try FileManager.default.removeItem(at: downloads[index].destinationURL)
+        } catch {
+            return false
+        }
+        return true
+    }
+
     // suggestedName is untrusted (page-controlled); must be sanitized before appendingPathComponent to prevent path traversal outside directory.
     static func uniqueDestination(in directory: URL, suggestedName: String) -> URL {
         var candidate = directory.appendingPathComponent(sanitizedFileName(suggestedName))
@@ -173,10 +250,18 @@ public final class DownloadStore {
     }
 
     public func saveNow() throws {
-        try writer.saveNow(downloads)
+        try writer.saveNow(currentFile)
+    }
+
+    private var currentFile: DownloadsFile {
+        DownloadsFile(nextAPIID: nextAPIID, items: downloads)
+    }
+
+    private func saveNowIgnoringFailure() {
+        try? writer.saveNow(currentFile)
     }
 
     private func persist() {
-        writer.scheduleSave(downloads)
+        writer.scheduleSave(currentFile)
     }
 }

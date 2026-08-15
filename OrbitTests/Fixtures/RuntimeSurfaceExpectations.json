@@ -25,15 +25,21 @@
   ],
   "fixturePermissions": [
     "alarms",
+    "bookmarks",
+    "contextMenus",
     "cookies",
     "declarativeNetRequest",
     "declarativeNetRequestFeedback",
+    "downloads",
+    "history",
     "idle",
     "management",
     "offscreen",
     "power",
     "privacy",
     "scripting",
+    "search",
+    "sessions",
     "storage",
     "tabs",
     "unlimitedStorage",
@@ -43,8 +49,13 @@
   "mustBeDefined": [
     "action",
     "alarms",
+    "bookmarks",
+    "commands",
+    "contextMenus",
     "cookies",
     "declarativeNetRequest",
+    "downloads",
+    "history",
     "i18n",
     "idle",
     "management",
@@ -54,6 +65,8 @@
     "privacy",
     "runtime",
     "scripting",
+    "search",
+    "sessions",
     "storage",
     "tabs",
     "webNavigation",
@@ -62,38 +75,81 @@
   ],
   "knownUnavailable": {
     "userScripts": "No delegated availability check, so the feature never resolves for an ordinary extension even though //extensions compiles the whole API (section 0).",
-    "contextMenus": "Chrome-layer and not ported; the second-most-used extension surface after the toolbar button.",
-    "commands": "The manifest key parses and nothing consumes it, so no keyboard shortcut, including _execute_action, ever fires.",
     "notifications": "Chrome-layer and not ported.",
     "identity": "Chrome-layer and not ported; blocks every OAuth-backed extension.",
     "sidePanel": "Chrome-layer and not ported; the modern MV3 primary UI surface.",
     "extension": "The legacy chrome.extension namespace is still called by a large amount of shipped MV3 code.",
-    "bookmarks": "Chrome-layer and not ported.",
-    "history": "Chrome-layer and not ported.",
     "topSites": "Chrome-layer and not ported.",
-    "sessions": "Chrome-layer and not ported.",
     "tabGroups": "Chrome-layer and not ported; pairs with the missing tabs.group/ungroup.",
     "contentSettings": "The implementation is already compiled in extensions/browser/api/content_settings; only the chrome-layer schema and feature entry are missing.",
     "declarativeContent": "Chrome-layer and not ported; the MV3-sanctioned conditional page action.",
-    "downloads": "Orbit has a native download stack and no extension API over it.",
     "browsingData": "Chrome-layer and not ported.",
     "proxy": "Chrome-layer and not ported.",
     "debugger": "Chrome-layer and not ported; with devtools.* this is every DevTools extension.",
     "devtools": "Chrome-layer and not ported: inspectedWindow, network and panels together, so React/Vue/Redux DevTools cannot load."
   },
   "permissionGatedNamespaces": [
-    { "namespace": "cookies", "permission": "cookies" },
-    { "namespace": "privacy", "permission": "privacy" },
-    { "namespace": "webNavigation", "permission": "webNavigation" },
-    { "namespace": "scripting", "permission": "scripting" },
-    { "namespace": "declarativeNetRequest", "permission": "declarativeNetRequest" },
-    { "namespace": "webRequest", "permission": "webRequest" },
-    { "namespace": "offscreen", "permission": "offscreen" }
+    {
+      "namespace": "contextMenus",
+      "permission": "contextMenus"
+    },
+    {
+      "namespace": "cookies",
+      "permission": "cookies"
+    },
+    {
+      "namespace": "privacy",
+      "permission": "privacy"
+    },
+    {
+      "namespace": "webNavigation",
+      "permission": "webNavigation"
+    },
+    {
+      "namespace": "scripting",
+      "permission": "scripting"
+    },
+    {
+      "namespace": "declarativeNetRequest",
+      "permission": "declarativeNetRequest"
+    },
+    {
+      "namespace": "webRequest",
+      "permission": "webRequest"
+    },
+    {
+      "namespace": "offscreen",
+      "permission": "offscreen"
+    },
+    {
+      "namespace": "history",
+      "permission": "history"
+    },
+    {
+      "namespace": "search",
+      "permission": "search"
+    },
+    {
+      "namespace": "sessions",
+      "permission": "sessions"
+    },
+    {
+      "namespace": "bookmarks",
+      "permission": "bookmarks"
+    },
+    {
+      "namespace": "downloads",
+      "permission": "downloads"
+    }
   ],
   "partiallyGatedNamespaces": {
     "management": {
       "permission": "management",
-      "alwaysAvailable": ["getSelf", "uninstallSelf", "getPermissionWarningsByManifest"],
+      "alwaysAvailable": [
+        "getSelf",
+        "uninstallSelf",
+        "getPermissionWarningsByManifest"
+      ],
       "note": "Unlike the fully-gated namespaces, chrome.management is defined without its permission but keeps only its three dependencies:[] members. That partial shape is what made the missing name-to-id registration invisible for so long, so the control asserts the shape rather than absence."
     }
   }

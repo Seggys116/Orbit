@@ -52,15 +52,22 @@ struct SidebarMiniPlayerView: View {
 
     // MARK: Title row
 
+    // ZStack so AppKit's hit test gives the close button its region and the catcher the rest.
     private var titleRow: some View {
-        HStack(spacing: OrbitMetrics.sidebarRowContentSpacing) {
-            favicon
-            Text(env.nowPlayingLabel(for: tab.id))
-                .font(OrbitFont.sidebarRow)
-                .foregroundStyle(theme.readableForeground)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 4)
+        ZStack(alignment: .trailing) {
+            HStack(spacing: OrbitMetrics.sidebarRowContentSpacing) {
+                faviconGlyph
+                Text(env.nowPlayingLabel(for: tab.id))
+                    .font(OrbitFont.sidebarRow)
+                    .foregroundStyle(theme.readableForeground)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 4)
+            }
+            .contentShape(Rectangle())
+            .overlay(titleRowActivationCatcher)
+            .orbitTooltip("Go to Tab")
+
             Button {
                 env.dismissMiniPlayer(for: tab.id)
             } label: {
@@ -74,15 +81,29 @@ struct SidebarMiniPlayerView: View {
         }
     }
 
-    private var favicon: some View {
-        Button {
+    // AppKit catcher, not .onTapGesture: both would fire for one click.
+    private var titleRowActivationCatcher: some View {
+        OrbitNSActionButton(action: {
             env.activateTab(tab.id)
-        } label: {
-            FaviconView(url: tab.faviconURL, host: tab.url.host() ?? tab.url.absoluteString)
-                .frame(width: OrbitMetrics.iconFavicon, height: OrbitMetrics.iconFavicon)
-                .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius))
+        }) {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .buttonStyle(.plain)
+    }
+
+    private var faviconGlyph: some View {
+        FaviconView(url: tab.faviconURL, host: tab.url.host() ?? tab.url.absoluteString)
+            .frame(width: OrbitMetrics.iconFavicon, height: OrbitMetrics.iconFavicon)
+            .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius))
+    }
+
+    // Collapsed control-row favicon: no sibling shares its frame here, so wrapping it directly in
+    // its own catcher (rather than a row-wide overlay) is enough.
+    private var favicon: some View {
+        OrbitNSActionButton(action: {
+            env.activateTab(tab.id)
+        }) {
+            faviconGlyph
+        }
         .orbitTooltip("Go to Tab")
     }
 

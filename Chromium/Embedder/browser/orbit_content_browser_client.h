@@ -77,6 +77,8 @@ class OrbitContentBrowserClient : public content::ContentBrowserClient {
   bool ShouldDisableSiteIsolation(
       content::SiteIsolationMode site_isolation_mode) override;
 
+  std::string GetAcceptLangs(content::BrowserContext* context) override;
+
   // Chains onto the base default, then points each on-disk partition's HTTP
   // cache and persisted state (cookies, HSTS...) at real files under
   // OrbitUserDataDir(); unset `file_paths` means in-memory-only.

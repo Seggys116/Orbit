@@ -181,7 +181,9 @@ public enum ExtensionPermissionWarnings {
         "tabs": ("Read your browsing history", .high),
         "bookmarks": ("Read and change your bookmarks", .high),
         "cookies": ("Read and change your cookies and other site data", .high),
-        "downloads": ("Manage your downloads: start, open, and remove downloaded files", .high),
+        // Opening a downloaded file needs downloads.open on top of downloads.
+        "downloads": ("Manage your downloads", .high),
+        "downloads.open": ("Open downloaded files", .high),
         "clipboardRead": ("Read data you copy and paste", .high),
         "clipboardWrite": ("Modify data you copy and paste", .high),
         "geolocation": ("Detect your physical location", .high),
@@ -208,7 +210,7 @@ public enum ExtensionPermissionWarnings {
         "webNavigation": ("Know when you navigate to a new page and what that page's address is", .moderate),
         "contentSettings": ("Change settings that control which websites can use features like cookies, JavaScript, and plugins", .moderate),
         "topSites": ("Read the list of pages you visit most often", .moderate),
-        "sessions": ("Read your browsing history on other devices signed in to Chrome", .moderate),
+        "sessions": ("Read and reopen your recently closed tabs", .moderate),
         "fontSettings": ("Change the fonts your browser uses", .moderate),
         "printerProvider": ("Interact with attached printers", .moderate),
 
@@ -217,6 +219,7 @@ public enum ExtensionPermissionWarnings {
         "unlimitedStorage": ("Store an unlimited amount of data on your Mac", .low),
         "notifications": ("Display notifications", .low),
         "contextMenus": ("Add items to the right-click menu", .low),
+        "search": ("Run searches with your default search engine", .low),
         "alarms": ("Schedule code to run at a later time", .low),
         "idle": ("Detect when your Mac is idle", .low),
         "power": ("Keep your Mac from sleeping while the extension is active", .low),

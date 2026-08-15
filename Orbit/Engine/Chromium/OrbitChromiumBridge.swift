@@ -175,6 +175,32 @@ final class OrbitChromiumBridge {
     ) -> Void
     private typealias GetExtensionActionsJSONFn = @convention(c) () -> UnsafePointer<CChar>?
 
+    fileprivate typealias ExtensionCommandsCallback = @convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?
+    ) -> Void
+    private typealias SetExtensionCommandsCallbackFn = @convention(c) (
+        ExtensionCommandsCallback, UnsafeMutableRawPointer?
+    ) -> Void
+    private typealias GetExtensionCommandsJSONFn = @convention(c) () -> UnsafePointer<CChar>?
+    private typealias SetReservedShortcutsFn = @convention(c) (UnsafePointer<CChar>?) -> Void
+    private typealias DispatchExtensionCommandFn = @convention(c) (
+        UnsafePointer<CChar>?, UnsafePointer<CChar>?
+    ) -> Int32
+
+    fileprivate typealias ExtensionActionActivatedCallback = @convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?
+    ) -> Void
+    private typealias SetExtensionActionActivatedCallbackFn = @convention(c) (
+        ExtensionActionActivatedCallback, UnsafeMutableRawPointer?
+    ) -> Void
+
+    private typealias ExtensionContextMenuJSONFn = @convention(c) (
+        UnsafeMutableRawPointer?
+    ) -> UnsafePointer<CChar>?
+    private typealias ExecuteExtensionContextMenuItemFn = @convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int32, Int32, UnsafePointer<CChar>?
+    ) -> Void
+
     // chrome.privacy.services.searchSuggestEnabled. `enabled` is the EFFECTIVE
     // value, i.e. after any extension override -- see orbit_bridge_api.h.
     private typealias SearchSuggestEnabledCallback = @convention(c) (
@@ -186,9 +212,27 @@ final class OrbitChromiumBridge {
     private typealias GetSearchSuggestEnabledFn = @convention(c) () -> Int32
     private typealias SetSearchSuggestEnabledFn = @convention(c) (Int32) -> Void
 
+    private typealias SetHistoryDelegateFn = @convention(c) (UnsafeRawPointer?) -> Void
+    private typealias HistoryNotifyVisitedFn = @convention(c) (UnsafePointer<CChar>?) -> Void
+    private typealias HistoryNotifyVisitRemovedFn = @convention(c) (
+        Int32, UnsafePointer<CChar>?
+    ) -> Void
+    private typealias SetSessionsDelegateFn = @convention(c) (UnsafeRawPointer?) -> Void
+    private typealias SessionsNotifyChangedFn = @convention(c) () -> Void
+    private typealias SetSearchDelegateFn = @convention(c) (UnsafeRawPointer?) -> Void
+
     private typealias CancelDownloadFn = @convention(c) (UnsafePointer<CChar>?) -> Void
     private typealias PauseDownloadFn = @convention(c) (UnsafePointer<CChar>?) -> Void
     private typealias ResumeDownloadFn = @convention(c) (UnsafePointer<CChar>?) -> Void
+
+    private typealias BookmarksSetTreeFn = @convention(c) (UnsafePointer<CChar>?) -> Void
+    private typealias SetBookmarksRequestCallbackFn = @convention(c) (
+        BookmarksRequestCallback, UnsafeMutableRawPointer?
+    ) -> Void
+    private typealias DownloadsSetItemsFn = @convention(c) (UnsafePointer<CChar>?) -> Void
+    private typealias SetDownloadsRequestCallbackFn = @convention(c) (
+        DownloadsRequestCallback, UnsafeMutableRawPointer?
+    ) -> Void
 
     private typealias GetContentSettingFn = @convention(c) (
         UnsafePointer<CChar>?, UnsafePointer<CChar>?
@@ -323,9 +367,26 @@ final class OrbitChromiumBridge {
     private var getLoadedExtensionsJSON: GetLoadedExtensionsJSONFn?
     private var setExtensionActionCallbackFn: SetExtensionActionCallbackFn?
     private var getExtensionActionsJSONFn: GetExtensionActionsJSONFn?
+    private var setExtensionCommandsCallbackFn: SetExtensionCommandsCallbackFn?
+    private var getExtensionCommandsJSONFn: GetExtensionCommandsJSONFn?
+    private var setReservedShortcutsFn: SetReservedShortcutsFn?
+    private var dispatchExtensionCommandFn: DispatchExtensionCommandFn?
+    private var setExtensionActionActivatedCallbackFn: SetExtensionActionActivatedCallbackFn?
+    private var extensionContextMenuJSONFn: ExtensionContextMenuJSONFn?
+    private var executeExtensionContextMenuItemFn: ExecuteExtensionContextMenuItemFn?
     private var setSearchSuggestEnabledCallbackFn: SetSearchSuggestEnabledCallbackFn?
     private var getSearchSuggestEnabledFn: GetSearchSuggestEnabledFn?
     private var setSearchSuggestEnabledFn: SetSearchSuggestEnabledFn?
+    private var setHistoryDelegateFn: SetHistoryDelegateFn?
+    private var historyNotifyVisitedFn: HistoryNotifyVisitedFn?
+    private var historyNotifyVisitRemovedFn: HistoryNotifyVisitRemovedFn?
+    private var setSessionsDelegateFn: SetSessionsDelegateFn?
+    private var sessionsNotifyChangedFn: SessionsNotifyChangedFn?
+    private var setSearchDelegateFn: SetSearchDelegateFn?
+    private var bookmarksSetTreeFn: BookmarksSetTreeFn?
+    private var setBookmarksRequestCallbackFn: SetBookmarksRequestCallbackFn?
+    private var downloadsSetItemsFn: DownloadsSetItemsFn?
+    private var setDownloadsRequestCallbackFn: SetDownloadsRequestCallbackFn?
 
     /// Fires whenever the effective value changes, from either side: an
     /// extension's types.ChromeSetting.set, or setSearchSuggestEnabled below.
@@ -434,6 +495,13 @@ final class OrbitChromiumBridge {
         )
         setExtensionActionCallbackFn?(
             OrbitChromiumBridge.extensionActionTrampoline, Unmanaged.passUnretained(self).toOpaque()
+        )
+        setExtensionCommandsCallbackFn?(
+            OrbitChromiumBridge.extensionCommandsTrampoline, Unmanaged.passUnretained(self).toOpaque()
+        )
+        setExtensionActionActivatedCallbackFn?(
+            OrbitChromiumBridge.extensionActionActivatedTrampoline,
+            Unmanaged.passUnretained(self).toOpaque()
         )
         setSearchSuggestEnabledCallbackFn?(
             OrbitChromiumBridge.searchSuggestEnabledTrampoline, Unmanaged.passUnretained(self).toOpaque()
@@ -565,6 +633,29 @@ final class OrbitChromiumBridge {
         getExtensionActionsJSONFn = try symbol(
             "OrbitGetExtensionActionsJSON", as: GetExtensionActionsJSONFn.self
         )
+        setExtensionCommandsCallbackFn = optionalSymbol(
+            "OrbitSetExtensionCommandsCallback", as: SetExtensionCommandsCallbackFn.self
+        )
+        getExtensionCommandsJSONFn = optionalSymbol(
+            "OrbitGetExtensionCommandsJSON", as: GetExtensionCommandsJSONFn.self
+        )
+        setReservedShortcutsFn = optionalSymbol(
+            "OrbitSetReservedShortcuts", as: SetReservedShortcutsFn.self
+        )
+        dispatchExtensionCommandFn = optionalSymbol(
+            "OrbitDispatchExtensionCommand", as: DispatchExtensionCommandFn.self
+        )
+        setExtensionActionActivatedCallbackFn = optionalSymbol(
+            "OrbitSetExtensionActionActivatedCallback",
+            as: SetExtensionActionActivatedCallbackFn.self
+        )
+        extensionContextMenuJSONFn = optionalSymbol(
+            "OrbitWebContentsExtensionContextMenuJSON", as: ExtensionContextMenuJSONFn.self
+        )
+        executeExtensionContextMenuItemFn = optionalSymbol(
+            "OrbitWebContentsExecuteExtensionContextMenuItem",
+            as: ExecuteExtensionContextMenuItemFn.self
+        )
         setSearchSuggestEnabledCallbackFn = optionalSymbol(
             "OrbitSetSearchSuggestEnabledCallback", as: SetSearchSuggestEnabledCallbackFn.self
         )
@@ -573,6 +664,36 @@ final class OrbitChromiumBridge {
         )
         setSearchSuggestEnabledFn = optionalSymbol(
             "OrbitSetSearchSuggestEnabled", as: SetSearchSuggestEnabledFn.self
+        )
+        setHistoryDelegateFn = optionalSymbol(
+            "OrbitSetHistoryDelegate", as: SetHistoryDelegateFn.self
+        )
+        historyNotifyVisitedFn = optionalSymbol(
+            "OrbitHistoryNotifyVisited", as: HistoryNotifyVisitedFn.self
+        )
+        historyNotifyVisitRemovedFn = optionalSymbol(
+            "OrbitHistoryNotifyVisitRemoved", as: HistoryNotifyVisitRemovedFn.self
+        )
+        setSessionsDelegateFn = optionalSymbol(
+            "OrbitSetSessionsDelegate", as: SetSessionsDelegateFn.self
+        )
+        sessionsNotifyChangedFn = optionalSymbol(
+            "OrbitSessionsNotifyChanged", as: SessionsNotifyChangedFn.self
+        )
+        setSearchDelegateFn = optionalSymbol(
+            "OrbitSetSearchDelegate", as: SetSearchDelegateFn.self
+        )
+        bookmarksSetTreeFn = optionalSymbol(
+            "OrbitBookmarksSetTree", as: BookmarksSetTreeFn.self
+        )
+        setBookmarksRequestCallbackFn = optionalSymbol(
+            "OrbitSetBookmarksRequestCallback", as: SetBookmarksRequestCallbackFn.self
+        )
+        downloadsSetItemsFn = optionalSymbol(
+            "OrbitDownloadsSetItems", as: DownloadsSetItemsFn.self
+        )
+        setDownloadsRequestCallbackFn = optionalSymbol(
+            "OrbitSetDownloadsRequestCallback", as: SetDownloadsRequestCallbackFn.self
         )
         cancelDownloadFn = try symbol("OrbitCancelDownload", as: CancelDownloadFn.self)
         pauseDownloadFn = try symbol("OrbitPauseDownload", as: PauseDownloadFn.self)
@@ -898,6 +1019,30 @@ final class OrbitChromiumBridge {
         return String(cString: cString)
     }
 
+    // MARK: - chrome.contextMenus
+
+    func extensionContextMenuJSON(_ handle: UnsafeMutableRawPointer) -> String {
+        guard let extensionContextMenuJSONFn,
+              let cString = extensionContextMenuJSONFn(handle) else { return "[]" }
+        return String(cString: cString)
+    }
+
+    func executeExtensionContextMenuItem(
+        _ handle: UnsafeMutableRawPointer,
+        extensionID: String,
+        uid: Int32?,
+        stringUID: String
+    ) {
+        guard let executeExtensionContextMenuItemFn else { return }
+        extensionID.withCString { cExtensionID in
+            stringUID.withCString { cStringUID in
+                executeExtensionContextMenuItemFn(
+                    handle, cExtensionID, uid == nil ? 0 : 1, uid ?? 0, cStringUID
+                )
+            }
+        }
+    }
+
     func loadHTML(_ handle: UnsafeMutableRawPointer, html: String, baseURL: String) {
         html.withCString { cHTML in
             baseURL.withCString { cBaseURL in
@@ -1170,6 +1315,44 @@ final class OrbitChromiumBridge {
         setSearchSuggestEnabledFn?(enabled ? 1 : 0)
     }
 
+    /// `false` when the loaded framework predates the symbol, leaving nothing
+    /// installed and every chrome.history call failing engine-side.
+    @discardableResult
+    func setHistoryDelegate(_ layout: OrbitHistoryDelegateLayout) -> Bool {
+        guard let setHistoryDelegateFn else { return false }
+        var layout = layout
+        withUnsafePointer(to: &layout) { setHistoryDelegateFn(UnsafeRawPointer($0)) }
+        return true
+    }
+
+    func historyNotifyVisited(json: String) {
+        historyNotifyVisitedFn?(json)
+    }
+
+    func historyNotifyVisitRemoved(allHistory: Bool, urlsJSON: String) {
+        historyNotifyVisitRemovedFn?(allHistory ? 1 : 0, urlsJSON)
+    }
+
+    @discardableResult
+    func setSessionsDelegate(_ layout: OrbitSessionsDelegateLayout) -> Bool {
+        guard let setSessionsDelegateFn else { return false }
+        var layout = layout
+        withUnsafePointer(to: &layout) { setSessionsDelegateFn(UnsafeRawPointer($0)) }
+        return true
+    }
+
+    func sessionsNotifyChanged() {
+        sessionsNotifyChangedFn?()
+    }
+
+    @discardableResult
+    func setSearchDelegate(_ layout: OrbitSearchDelegateLayout) -> Bool {
+        guard let setSearchDelegateFn else { return false }
+        var layout = layout
+        withUnsafePointer(to: &layout) { setSearchDelegateFn(UnsafeRawPointer($0)) }
+        return true
+    }
+
     private static let searchSuggestEnabledTrampoline: SearchSuggestEnabledCallback = { opaque, enabled in
         guard let opaque else { return }
         MainActor.assumeIsolated {
@@ -1189,6 +1372,56 @@ final class OrbitChromiumBridge {
         }
     }
 
+    // MARK: - chrome.commands
+
+    /// Fired on the main thread whenever the registered command table changes.
+    var extensionCommandsHandler: ((String) -> Void)?
+
+    /// Fired when `_execute_action` (or a browser/page action alias) resolved;
+    /// the embedder relays rather than opening anything, since Orbit's toolbar
+    /// and popup are Swift's.
+    var extensionActionActivatedHandler: ((String) -> Void)?
+
+    /// A JSON array of every command every enabled extension declares.
+    func extensionCommandsJSON() -> String {
+        guard let getExtensionCommandsJSONFn, let cString = getExtensionCommandsJSONFn() else { return "[]" }
+        return String(cString: cString)
+    }
+
+    /// A JSON array of the canonical accelerators Orbit itself owns.
+    func setReservedShortcuts(json: String) {
+        json.withCString { setReservedShortcutsFn?($0) }
+    }
+
+    /// True when the embedder dispatched, which is the only case the originating
+    /// NSEvent may be swallowed.
+    func dispatchExtensionCommand(extensionID: String, name: String) -> Bool {
+        guard let dispatchExtensionCommandFn else { return false }
+        return extensionID.withCString { cID in
+            name.withCString { cName in
+                dispatchExtensionCommandFn(cID, cName) != 0
+            }
+        }
+    }
+
+    private static let extensionCommandsTrampoline: ExtensionCommandsCallback = { opaque, jsonPtr in
+        guard let opaque, let jsonPtr else { return }
+        let json = String(cString: jsonPtr)
+        MainActor.assumeIsolated {
+            let bridge = Unmanaged<OrbitChromiumBridge>.fromOpaque(opaque).takeUnretainedValue()
+            bridge.extensionCommandsHandler?(json)
+        }
+    }
+
+    private static let extensionActionActivatedTrampoline: ExtensionActionActivatedCallback = { opaque, idPtr in
+        guard let opaque, let idPtr else { return }
+        let extensionID = String(cString: idPtr)
+        MainActor.assumeIsolated {
+            let bridge = Unmanaged<OrbitChromiumBridge>.fromOpaque(opaque).takeUnretainedValue()
+            bridge.extensionActionActivatedHandler?(extensionID)
+        }
+    }
+
     // MARK: - Downloads
 
     /// `downloadID` is a download's own GUID -- see
@@ -1203,6 +1436,42 @@ final class OrbitChromiumBridge {
 
     func resumeDownload(id downloadID: String) {
         downloadID.withCString { resumeDownloadFn?($0) }
+    }
+
+    // MARK: - chrome.bookmarks / chrome.downloads
+
+    /// orbit_bridge_api.h's OrbitJSONReplyCallback. Must be called exactly once,
+    /// synchronously, before the request trampoline returns.
+    typealias JSONReplyCallback = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void
+
+    typealias BookmarksRequestCallback = @convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?,
+        JSONReplyCallback?, UnsafeMutableRawPointer?
+    ) -> Void
+
+    typealias DownloadsRequestCallback = @convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?,
+        JSONReplyCallback?, UnsafeMutableRawPointer?
+    ) -> Void
+
+    func setBookmarksTree(json: String) {
+        json.withCString { bookmarksSetTreeFn?($0) }
+    }
+
+    func setBookmarksRequestCallback(
+        _ callback: @escaping BookmarksRequestCallback, opaque: UnsafeMutableRawPointer?
+    ) {
+        setBookmarksRequestCallbackFn?(callback, opaque)
+    }
+
+    func setDownloadsItems(json: String) {
+        json.withCString { downloadsSetItemsFn?($0) }
+    }
+
+    func setDownloadsRequestCallback(
+        _ callback: @escaping DownloadsRequestCallback, opaque: UnsafeMutableRawPointer?
+    ) {
+        setDownloadsRequestCallbackFn?(callback, opaque)
     }
 
     // MARK: - Content settings
@@ -1549,4 +1818,54 @@ struct TabsDelegateLayout {
     var activateTab: ActivateTab?
     var removeTab: RemoveTab?
     var setTabPinned: SetTabPinned?
+}
+
+/// Mirrors OrbitHistoryDelegate in orbit_bridge_api.h; times are milliseconds.
+struct OrbitHistoryDelegateLayout {
+    typealias Result = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void
+
+    var opaque: UnsafeMutableRawPointer?
+    var search: (@convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Result?, UnsafeMutableRawPointer?
+    ) -> Void)?
+    var getVisits: (@convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Result?, UnsafeMutableRawPointer?
+    ) -> Void)?
+    var addUrl: (@convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Result?,
+        UnsafeMutableRawPointer?
+    ) -> Void)?
+    var deleteUrl: (@convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Result?, UnsafeMutableRawPointer?
+    ) -> Void)?
+    var deleteRange: (@convention(c) (
+        UnsafeMutableRawPointer?, Double, Double, Result?, UnsafeMutableRawPointer?
+    ) -> Void)?
+    var deleteAll: (@convention(c) (
+        UnsafeMutableRawPointer?, Result?, UnsafeMutableRawPointer?
+    ) -> Void)?
+}
+
+/// Mirrors OrbitSessionsDelegate; lastModified is seconds, unlike history above.
+struct OrbitSessionsDelegateLayout {
+    typealias Result = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void
+
+    var opaque: UnsafeMutableRawPointer?
+    var getRecentlyClosed: (@convention(c) (
+        UnsafeMutableRawPointer?, Int32, Result?, UnsafeMutableRawPointer?
+    ) -> Void)?
+    var restore: (@convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Result?, UnsafeMutableRawPointer?
+    ) -> Void)?
+}
+
+/// Mirrors OrbitSearchDelegate in orbit_bridge_api.h.
+struct OrbitSearchDelegateLayout {
+    typealias QueryResult = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void
+
+    var opaque: UnsafeMutableRawPointer?
+    var query: (@convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int32, Int32, Int32, QueryResult?,
+        UnsafeMutableRawPointer?
+    ) -> Void)?
 }

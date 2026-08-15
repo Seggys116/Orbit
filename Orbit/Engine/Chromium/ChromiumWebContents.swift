@@ -168,6 +168,18 @@ final class ChromiumWebContents: WebContents {
         }
     }
 
+    func extensionContextMenuGroups() -> [ExtensionContextMenuGroup] {
+        guard !isClosed else { return [] }
+        return ExtensionContextMenuGroup.decode(json: bridge.extensionContextMenuJSON(handle))
+    }
+
+    func performExtensionContextMenuItem(_ id: ExtensionContextMenuItemID) {
+        guard !isClosed else { return }
+        bridge.executeExtensionContextMenuItem(
+            handle, extensionID: id.extensionID, uid: id.uid, stringUID: id.stringUID
+        )
+    }
+
     func currentCertificate() -> SiteCertificate? {
         nil
     }

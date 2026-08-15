@@ -31,6 +31,9 @@ struct OrbitContextMenuItem: Identifiable {
     var shortcut: String?
     var isEnabled: Bool
     var isDestructive: Bool
+    /// Draws a trailing checkmark; chrome.contextMenus checkbox/radio items are
+    /// the only source of these.
+    var isChecked: Bool
     var tooltip: String?
     var submenu: [OrbitContextMenuEntry]?
     var action: (() -> Void)?
@@ -41,6 +44,7 @@ struct OrbitContextMenuItem: Identifiable {
         shortcut: String? = nil,
         isEnabled: Bool = true,
         isDestructive: Bool = false,
+        isChecked: Bool = false,
         tooltip: String? = nil,
         submenu: [OrbitContextMenuEntry]? = nil,
         action: (() -> Void)? = nil
@@ -50,6 +54,7 @@ struct OrbitContextMenuItem: Identifiable {
         self.shortcut = shortcut
         self.isEnabled = isEnabled
         self.isDestructive = isDestructive
+        self.isChecked = isChecked
         self.tooltip = tooltip
         self.submenu = submenu
         self.action = action

@@ -1,29 +1,14 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// Feature-availability entries for every manifest permission whose entry lives
-// in chrome/common/extensions/api/_permission_features.json rather than
-// extensions/common/api/_permission_features.json. Two kinds end up here.
-//
-// Permissions Orbit implements itself or that //extensions core implements
-// while only chrome/ registers the name (tabs, cookies, privacy,
-// webNavigation, scripting, management): OrbitExtensionsAPIProvider::
-// RegisterPermissions supplies the name<->id mapping, this file supplies the
-// availability.
-//
-// Permissions CoreExtensionsAPIProvider registers but core states no feature
-// for. extensions/common/manifest_handlers/permissions_parser.cc DCHECKs when
-// a parsed permission has an APIPermissionInfo and no permission feature, so
-// omitting one of these aborts the browser process while parsing an ordinary
-// manifest -- React Developer Tools' "clipboardWrite" did exactly that. Every
-// such entry below is copied verbatim from the pinned Chromium's chrome-layer
-// file and is verified against it by
-// OrbitTests/ExtensionSchemaConformanceTests; the ones Orbit has no
-// implementation of stay unreachable on their own upstream terms (ChromeOS
-// platform, non-stable channel, allowlist, policy location), so they parse to
-// an install warning and a dropped permission instead of a crash.
 {
+  "bookmarks": {
+    "channel": "stable",
+    "extension_types": [
+      "extension",
+      "legacy_packaged_app"
+    ]
+  },
   "clipboardRead": {
     "channel": "stable",
     "extension_types": [
@@ -39,6 +24,14 @@
       "extension",
       "legacy_packaged_app",
       "hosted_app",
+      "platform_app"
+    ]
+  },
+  "contextMenus": {
+    "channel": "stable",
+    "extension_types": [
+      "extension",
+      "legacy_packaged_app",
       "platform_app"
     ]
   },
@@ -62,6 +55,25 @@
       "38C361D4A0726CE45D3572D65071B6BDB3092371",
       "06BE211D5F014BAB34BC22D9DDA09C63A81D828E",
       "1B1388598AC9A5608F43DE38316D6FB5FAD3574A"
+    ]
+  },
+  "downloads": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ]
+  },
+  "downloads.open": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ]
+  },
+  "history": {
+    "channel": "stable",
+    "extension_types": [
+      "extension",
+      "legacy_packaged_app"
     ]
   },
   "lockWindowFullscreenPrivate": {
@@ -300,6 +312,19 @@
       "extension"
     ],
     "min_manifest_version": 3
+  },
+  "search": {
+    "channel": "stable",
+    "extension_types": [
+      "extension"
+    ]
+  },
+  "sessions": {
+    "channel": "stable",
+    "extension_types": [
+      "extension",
+      "legacy_packaged_app"
+    ]
   },
   "speechRecognitionPrivate": {
     "channel": "stable",

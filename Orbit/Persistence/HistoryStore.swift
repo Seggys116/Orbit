@@ -512,6 +512,165 @@ public actor HistoryStore {
         checkpointPassive()
     }
 
+    // MARK: - chrome.history rows
+
+    public struct HistoryURLRow: Sendable, Hashable {
+        public var id: Int64
+        public var url: URL
+        public var title: String
+        public var lastVisit: Date
+        public var visitCount: Int
+        public var typedCount: Int
+    }
+
+    public struct HistoryVisitRow: Sendable, Hashable {
+        public var id: Int64
+        public var urlID: Int64
+        public var visitTime: Date
+        public var wasTyped: Bool
+    }
+
+    public func urlRow(forURL url: URL) throws -> HistoryURLRow? {
+        let stmt = try statement("""
+        SELECT id, url, title, last_visit_time, visit_count, typed_count
+        FROM urls WHERE url = ? LIMIT 1;
+        """)
+        sqlite3_reset(stmt)
+        sqlite3_clear_bindings(stmt)
+        try bindText(stmt, 1, url.absoluteString)
+        return try readURLRows(stmt).first
+    }
+
+    /// URLs with a visit inside the range whose url or title contains every term, most recent first.
+    public func urlRows(
+        matchingText text: String,
+        start: Date?,
+        end: Date?,
+        limit: Int
+    ) throws -> [HistoryURLRow] {
+        let terms = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? []
+            : Self.searchTerms(in: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let matchClause = terms
+            .map { _ in " AND (urls.url LIKE ? ESCAPE '\\' OR urls.title LIKE ? ESCAPE '\\')" }
+            .joined()
+
+        let stmt = try statement("""
+        SELECT urls.id, urls.url, urls.title, urls.last_visit_time, urls.visit_count, urls.typed_count
+        FROM urls
+        WHERE urls.id IN (SELECT url_id FROM visits WHERE visit_time >= ? AND visit_time <= ?)\(matchClause)
+        ORDER BY urls.last_visit_time DESC
+        LIMIT ?;
+        """)
+        sqlite3_reset(stmt)
+        sqlite3_clear_bindings(stmt)
+
+        var index: Int32 = 1
+        try bindDouble(stmt, index, start?.timeIntervalSince1970 ?? 0)
+        index += 1
+        try bindDouble(stmt, index, end?.timeIntervalSince1970 ?? Double.greatestFiniteMagnitude)
+        index += 1
+        for term in terms {
+            let pattern = "%\(Self.escapeLikePattern(term))%"
+            try bindText(stmt, index, pattern)
+            try bindText(stmt, index + 1, pattern)
+            index += 2
+        }
+        try bindInt(stmt, index, Int32(max(limit, 1)))
+
+        return try readURLRows(stmt)
+    }
+
+    /// Every visit to this exact URL, oldest first.
+    public func visitRows(forURL url: URL) throws -> [HistoryVisitRow] {
+        let stmt = try statement("""
+        SELECT visits.id, visits.url_id, visits.visit_time, visits.was_typed
+        FROM visits
+        JOIN urls ON urls.id = visits.url_id
+        WHERE urls.url = ?
+        ORDER BY visits.visit_time ASC, visits.id ASC;
+        """)
+        sqlite3_reset(stmt)
+        sqlite3_clear_bindings(stmt)
+        try bindText(stmt, 1, url.absoluteString)
+
+        var results: [HistoryVisitRow] = []
+        while true {
+            let step = sqlite3_step(stmt)
+            if step == SQLITE_DONE { break }
+            guard step == SQLITE_ROW else { throw HistoryStoreError.sqlFailed(reason: lastErrorMessage()) }
+            results.append(HistoryVisitRow(
+                id: sqlite3_column_int64(stmt, 0),
+                urlID: sqlite3_column_int64(stmt, 1),
+                visitTime: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 2)),
+                wasTyped: sqlite3_column_int(stmt, 3) != 0
+            ))
+        }
+        return results
+    }
+
+    /// Drops every visit in the closed range and returns the URLs thereby left with none.
+    @discardableResult
+    public func deleteVisits(in dateRange: ClosedRange<Date>) throws -> [URL] {
+        var purged: [URL] = []
+        try exec("BEGIN IMMEDIATE;")
+        do {
+            let deleteVisits = try statement("DELETE FROM visits WHERE visit_time >= ? AND visit_time <= ?;")
+            sqlite3_reset(deleteVisits)
+            sqlite3_clear_bindings(deleteVisits)
+            try bindDouble(deleteVisits, 1, dateRange.lowerBound.timeIntervalSince1970)
+            try bindDouble(deleteVisits, 2, dateRange.upperBound.timeIntervalSince1970)
+            guard sqlite3_step(deleteVisits) == SQLITE_DONE else {
+                throw HistoryStoreError.sqlFailed(reason: lastErrorMessage())
+            }
+
+            try exec("""
+            UPDATE urls SET
+                visit_count = (SELECT COUNT(*) FROM visits WHERE visits.url_id = urls.id),
+                typed_count = (SELECT COUNT(*) FROM visits WHERE visits.url_id = urls.id AND visits.was_typed = 1),
+                last_visit_time = COALESCE((SELECT MAX(visit_time) FROM visits WHERE visits.url_id = urls.id), 0);
+            """)
+
+            let orphans = try statement("SELECT url FROM urls WHERE visit_count = 0;")
+            sqlite3_reset(orphans)
+            while true {
+                let step = sqlite3_step(orphans)
+                if step == SQLITE_DONE { break }
+                guard step == SQLITE_ROW else { throw HistoryStoreError.sqlFailed(reason: lastErrorMessage()) }
+                if let urlString = columnText(orphans, 0), let url = URL(string: urlString) {
+                    purged.append(url)
+                }
+            }
+
+            try exec("DELETE FROM urls WHERE visit_count = 0;")
+            try exec("COMMIT;")
+        } catch {
+            try? exec("ROLLBACK;")
+            throw error
+        }
+        checkpointPassive()
+        return purged
+    }
+
+    private func readURLRows(_ stmt: OpaquePointer) throws -> [HistoryURLRow] {
+        var results: [HistoryURLRow] = []
+        while true {
+            let step = sqlite3_step(stmt)
+            if step == SQLITE_DONE { break }
+            guard step == SQLITE_ROW else { throw HistoryStoreError.sqlFailed(reason: lastErrorMessage()) }
+            guard let urlString = columnText(stmt, 1), let url = URL(string: urlString) else { continue }
+            results.append(HistoryURLRow(
+                id: sqlite3_column_int64(stmt, 0),
+                url: url,
+                title: columnText(stmt, 2) ?? "",
+                lastVisit: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3)),
+                visitCount: Int(sqlite3_column_int64(stmt, 4)),
+                typedCount: Int(sqlite3_column_int64(stmt, 5))
+            ))
+        }
+        return results
+    }
+
     // MARK: - Lookup helpers
 
     private func entry(forURL urlString: String) throws -> HistoryEntry? {

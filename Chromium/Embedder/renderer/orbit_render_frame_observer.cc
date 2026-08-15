@@ -87,9 +87,7 @@ void OrbitRenderFrameObserver::DidClearWindowObject() {
   RunDocumentStartScripts();
 }
 
-// Chrome installs these from DidCreateScriptContext, not DidClearWindowObject:
-// the window object is cleared before the context is usable, and touching V8
-// there takes the renderer down.
+// Installed here, not from DidClearWindowObject: touching V8 there takes the renderer down.
 void OrbitRenderFrameObserver::DidCreateScriptContext(
     v8::Local<v8::Context> context,
     int32_t world_id) {

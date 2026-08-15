@@ -132,6 +132,10 @@ private struct OrbitContextMenuRow: View {
                 .font(.system(size: OrbitMetrics.contextMenuFontSize))
                 .lineLimit(1)
             Spacer(minLength: 8)
+            if item.isChecked {
+                Image(systemName: "checkmark")
+                    .font(.system(size: OrbitMetrics.contextMenuIconSize, weight: .semibold))
+            }
             if let shortcut = item.shortcut {
                 Text(shortcut)
                     .font(.system(size: OrbitMetrics.contextMenuShortcutFontSize))

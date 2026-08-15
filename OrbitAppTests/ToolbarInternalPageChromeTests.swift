@@ -24,8 +24,7 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
     private var developerModeSuiteName: String!
     private var developerModeWritingStore: UserDefaults!
 
-    // A real, never-key NSWindow used only by the pane identity test, which needs a live
-    // view hierarchy to carry @State across two env.activateTab(_:) calls.
+    // A real, never-key NSWindow: the pane identity tests need a live view hierarchy across env.activateTab(_:) calls.
     private var window: NSWindow?
 
     override func setUp() {
@@ -137,21 +136,6 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
         )
     }
 
-    private func capturedColor(of host: NSView, at point: NSPoint, viewSize: CGSize) -> NSColor? {
-        guard let rep = captureBitmap(of: host) else { return nil }
-        let scaleX = Double(rep.pixelsWide) / Double(viewSize.width)
-        let scaleY = Double(rep.pixelsHigh) / Double(viewSize.height)
-        guard let raw = rep.colorAt(x: Int(point.x * scaleX), y: Int(point.y * scaleY)) else { return nil }
-        return raw.usingColorSpace(.sRGB)
-    }
-
-    private func colorsApproximatelyEqual(_ a: NSColor?, _ b: NSColor?, tolerance: Double = 0.06) -> Bool {
-        guard let a = a?.usingColorSpace(.sRGB), let b = b?.usingColorSpace(.sRGB) else { return false }
-        return abs(Double(a.redComponent) - Double(b.redComponent)) <= tolerance
-            && abs(Double(a.greenComponent) - Double(b.greenComponent)) <= tolerance
-            && abs(Double(a.blueComponent) - Double(b.blueComponent)) <= tolerance
-    }
-
     // Measures the single darkest/brightest pixel, not an averaged region, to stay insensitive to how many characters the rendered string has.
     private func peakInkDeviation(_ rep: NSBitmapImageRep, viewSize: CGSize, in rect: CGRect, background: RGBA) -> Double {
         let minX = max(0, rect.minX)
@@ -254,9 +238,7 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
 
     // MARK: - 1b. Address text — rendered at real content opacity
 
-    // Both tabs are forced to the same header background, so any difference
-    // measured below is attributable only to the two strings' foreground
-    // opacity, never to the two tabs painting different backgrounds.
+    // Both tabs are forced to the same header background, so only foreground opacity can differ.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noteAndEaselAddressText_rendersAtContentOpacity_notThePlaceholderDim
     func test_noteAndEaselAddressText_rendersAtContentOpacity_notThePlaceholderDim() {
         let forcedBackground = ThemeColor(red: 0.9, green: 0.9, blue: 0.92)
@@ -503,100 +485,186 @@ final class ToolbarInternalPageChromeTests: XCTestCase {
 
     // MARK: - 3. Pane identity — the regression guard for "completely erased"
 
-    // A stateless Rectangle().fill(color(for: id)) would prove nothing, since SwiftUI re-evaluates body regardless of remount; only @State captured in .onAppear can tell genuine remount from in-place update.
-    private struct PaneIdentityProbeView: View {
-        let id: UUID
-        @State private var capturedColor: NSColor = .clear
-
-        var body: some View {
-            Rectangle()
-                .fill(Color(nsColor: capturedColor))
-                .onAppear {
-                    capturedColor = Self.color(for: id)
-                }
+    private func firstDescendant<T: NSView>(of view: NSView, ofType type: T.Type) -> T? {
+        if let match = view as? T { return match }
+        for subview in view.subviews {
+            if let match = firstDescendant(of: subview, ofType: type) { return match }
         }
-
-        static func color(for id: UUID) -> NSColor {
-            let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
-            let combined = bytes.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
-            let hue = Double(combined % 360) / 360.0
-            return NSColor(hue: hue, saturation: 0.85, brightness: 0.85, alpha: 1)
-        }
+        return nil
     }
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_paneIdentity_switchingActiveTabBetweenTwoNoteDocuments_producesAGenuinelyDifferentRenderedPane
+    private func allDescendants<T: NSView>(of view: NSView, ofType type: T.Type, into result: inout [T]) {
+        if let match = view as? T { result.append(match) }
+        for subview in view.subviews { allDescendants(of: subview, ofType: type, into: &result) }
+    }
 
-    func test_paneIdentity_switchingActiveTabBetweenTwoNoteDocuments_producesAGenuinelyDifferentRenderedPane() {
-        let idA = UUID()
-        let idB = UUID()
+    private func makeNote(title: String, body: NSAttributedString) -> UUID {
+        let note = env.noteStore.createNote(title: title)
+        if let encoded = NotesEditorView.encode(body) {
+            env.noteStore.setBody(encoded, forNote: note.id)
+        } else {
+            XCTFail("NotesEditorView.encode returned nil for the fixture body.")
+        }
+        return note.id
+    }
 
-        let previousHook = env.extensionPoints.notesEditor
-        env.extensionPoints.notesEditor = { id in AnyView(PaneIdentityProbeView(id: id)) }
-        defer { env.extensionPoints.notesEditor = previousHook }
+    private func filledBody(_ character: String, color: NSColor) -> NSAttributedString {
+        let line = String(repeating: character, count: 90) + "\n"
+        return NSAttributedString(
+            string: String(repeating: line, count: 40),
+            attributes: [.backgroundColor: color, .font: NSFont.systemFont(ofSize: 14)]
+        )
+    }
 
-        let tabAID = env.openTab(
-            url: URL(string: "orbit://note/\(idA.uuidString)")!,
+    private func openNoteTab(_ noteID: UUID) -> TabID {
+        env.openTab(
+            url: URL(string: "orbit://note/\(noteID.uuidString)")!,
             in: scratchSpaceID,
             section: .pinned,
             activate: false
         )
-        let tabBID = env.openTab(
-            url: URL(string: "orbit://note/\(idB.uuidString)")!,
-            in: scratchSpaceID,
-            section: .pinned,
-            activate: false
-        )
+    }
+
+    private func settleHostedPane(_ host: NSView) {
+        pump(seconds: 0.4)
+        host.layoutSubtreeIfNeeded()
+        host.displayIfNeeded()
+    }
+
+    private func fractionMatching(_ target: NSColor, in rep: NSBitmapImageRep, rect: CGRect, viewSize: CGSize) -> Double {
+        guard let wanted = target.usingColorSpace(.sRGB) else { return 0 }
+        var matched = 0
+        var total = 0
+        var y = rect.minY
+        while y < rect.maxY {
+            var x = rect.minX
+            while x < rect.maxX {
+                total += 1
+                if let sample = rgba(in: rep, atX: x, y: y, viewSize: viewSize),
+                   abs(sample.r - Double(wanted.redComponent)) <= 0.12,
+                   abs(sample.g - Double(wanted.greenComponent)) <= 0.12,
+                   abs(sample.b - Double(wanted.blueComponent)) <= 0.12 {
+                    matched += 1
+                }
+                x += 2
+            }
+            y += 2
+        }
+        guard total > 0 else { return 0 }
+        return Double(matched) / Double(total)
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_paneIdentity_switchingActiveTabBetweenTwoNoteDocuments_remountsTheRealNotesEditorSurface
+
+    func test_paneIdentity_switchingActiveTabBetweenTwoNoteDocuments_remountsTheRealNotesEditorSurface() {
+        FeatureRegistration.installAll(into: env)
+
+        let noteA = makeNote(title: "Note A", body: NSAttributedString(string: "Note A body."))
+        let noteB = makeNote(title: "Note B", body: NSAttributedString(string: "Note B body."))
+        let tabAID = openNoteTab(noteA)
+        let tabBID = openNoteTab(noteB)
         defer { cleanup([tabAID, tabBID]) }
 
         env.activateTab(tabAID)
-
-        let size = CGSize(width: 500, height: 400)
+        let size = CGSize(width: 900, height: 700)
         let host = hostLiveWindow(ContentCardView().environment(env), size: size)
-        pump(seconds: 0.3)
+        settleHostedPane(host)
 
-        let probePoint = NSPoint(x: 150, y: Double(OrbitToolbarMetrics.totalHeight) + 40)
-
-        // Must compare only against other captures from this same cacheDisplay pipeline, never PaneIdentityProbeView's raw NSColor(hue:...) value, since the two can differ past tolerance despite reading identically.
-        func capture(_ label: String) -> NSColor? {
-            guard let color = capturedColor(of: host, at: probePoint, viewSize: size) else {
-                XCTFail("Could not capture the hosted pane's pixels while showing \(label) — the harness itself is broken.")
-                return nil
-            }
-            return color
+        func editorTextViews() -> [NSTextView] {
+            var found: [NSTextView] = []
+            allDescendants(of: host, ofType: NSTextView.self, into: &found)
+            return found
         }
 
-        guard let colorA1 = capture("Note A (first activation)") else { return }
+        guard let firstA = editorTextViews().first else {
+            XCTFail("The real NotesEditorView never mounted an NSTextView for Note A, so nothing below is testing the pane.")
+            return
+        }
+        XCTAssertEqual(firstA.string, "Note A body.", "Note A's real body never loaded: \(firstA.string)")
 
         env.activateTab(tabBID)
-        pump(seconds: 0.3)
-        host.layoutSubtreeIfNeeded()
-        host.displayIfNeeded()
-        guard let colorB = capture("Note B") else { return }
+        settleHostedPane(host)
+        guard let onB = editorTextViews().first else {
+            XCTFail("No NSTextView present after activating Note B's tab.")
+            return
+        }
+        XCTAssertEqual(onB.string, "Note B body.", "Note B's real body never loaded: \(onB.string)")
+        XCTAssertFalse(
+            onB === firstA,
+            "Activating Note B's tab reused Note A's NSTextView instance instead of remounting the surface — SingleTabContentView.paneContent's `.id(OrbitScheme.documentSurfaceIdentity(kind:id:))` is not separating the two documents."
+        )
 
         env.activateTab(tabAID)
-        pump(seconds: 0.3)
-        host.layoutSubtreeIfNeeded()
-        host.displayIfNeeded()
-        guard let colorA2 = capture("Note A (second activation)") else { return }
-
+        settleHostedPane(host)
+        guard let secondA = editorTextViews().first else {
+            XCTFail("No NSTextView present after activating Note A's tab again.")
+            return
+        }
+        XCTAssertEqual(secondA.string, "Note A body.", "Note A's real body never came back: \(secondA.string)")
         XCTAssertFalse(
-            colorsApproximatelyEqual(colorB, colorA1),
-            """
-            Switching the active tab to Note B still rendered Note A's probe colour (A: \(colorA1), B: \(colorB)). \
-            SingleTabContentView.paneContent (Orbit/UI/Content/ContentCardView.swift) treated the switch as an update \
-            to the same view identity rather than a teardown-and-remount — the exact "click off and click back on, the \
-            notes get completely erased" mechanism this file documents. The fix is the \
-            `.id(documentSurfaceIdentity(kind:id:))` on the note/easel branch of that switch's ZStack.
-            """
+            secondA === onB,
+            "Activating Note A's tab again reused Note B's NSTextView instance instead of remounting the surface."
         )
-        XCTAssertTrue(
-            colorsApproximatelyEqual(colorA2, colorA1),
-            """
-            Switching back to Note A's own tab rendered a third, different colour (first visit: \(colorA1), \
-            second visit: \(colorA2)) instead of Note A's own, consistent identity. A colour that merely *changes* \
-            on every switch would already satisfy "genuinely different" without proving *whose* document is showing —
-            this is the check that it is really Note A's own remounted pane both times, not drift or noise.
-            """
+        XCTAssertEqual(editorTextViews().count, 1, "Both documents' editors are mounted at once: \(editorTextViews().count) NSTextViews.")
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_paneIdentity_switchingActiveTabBetweenTwoNoteDocuments_rendersTheOtherDocumentsOwnPixels
+
+    func test_paneIdentity_switchingActiveTabBetweenTwoNoteDocuments_rendersTheOtherDocumentsOwnPixels() {
+        FeatureRegistration.installAll(into: env)
+
+        let inkA = NSColor(srgbRed: 0.90, green: 0.10, blue: 0.10, alpha: 1)
+        let inkB = NSColor(srgbRed: 0.10, green: 0.20, blue: 0.90, alpha: 1)
+        let noteA = makeNote(title: "Note A", body: filledBody("A", color: inkA))
+        let noteB = makeNote(title: "Note B", body: filledBody("B", color: inkB))
+        let tabAID = openNoteTab(noteA)
+        let tabBID = openNoteTab(noteB)
+        defer { cleanup([tabAID, tabBID]) }
+
+        env.activateTab(tabAID)
+        let size = CGSize(width: 900, height: 700)
+        let host = hostLiveWindow(ContentCardView().environment(env), size: size)
+        settleHostedPane(host)
+
+        // Below ToolbarView, the editor toolbar and the title field, inside the body text area.
+        let bodyRect = CGRect(
+            x: 60,
+            y: Double(OrbitToolbarMetrics.totalHeight) + 140,
+            width: 700,
+            height: 300
         )
+
+        func inkFractions(_ label: String) -> (a: Double, b: Double)? {
+            guard let rep = captureBitmap(of: host) else {
+                XCTFail("Could not capture the hosted pane's pixels while showing \(label).")
+                return nil
+            }
+            return (
+                fractionMatching(inkA, in: rep, rect: bodyRect, viewSize: size),
+                fractionMatching(inkB, in: rep, rect: bodyRect, viewSize: size)
+            )
+        }
+
+        guard let first = inkFractions("Note A (first activation)") else { return }
+        XCTAssertGreaterThan(first.a, 0.3, "Note A's own body colour never filled the pane (\(first.a)); the fixture is not rendering.")
+        XCTAssertLessThan(first.b, 0.02, "Note B's colour was already on screen while Note A's tab was active (\(first.b)).")
+
+        env.activateTab(tabBID)
+        settleHostedPane(host)
+        guard let onB = inkFractions("Note B") else { return }
+        XCTAssertGreaterThan(
+            onB.b, 0.3,
+            "Activating Note B's tab did not put Note B's own document on screen — its colour covered only \(onB.b) of the body area, with Note A's still at \(onB.a)."
+        )
+        XCTAssertLessThan(onB.a, 0.02, "Note A's document was still on screen after switching to Note B's tab (\(onB.a)).")
+
+        env.activateTab(tabAID)
+        settleHostedPane(host)
+        guard let second = inkFractions("Note A (second activation)") else { return }
+        XCTAssertGreaterThan(
+            second.a, 0.3,
+            "Switching back to Note A's tab did not bring Note A's own document back — its colour covered only \(second.a) of the body area, with Note B's at \(second.b)."
+        )
+        XCTAssertLessThan(second.b, 0.02, "Note B's document was still on screen after switching back to Note A's tab (\(second.b)).")
     }
 }

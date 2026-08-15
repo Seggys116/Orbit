@@ -123,8 +123,10 @@ final class DeveloperModePersistenceTests: XCTestCase {
             XCTFail("renderPopoverPNG: expected AppEnvironment.demo's env.activeTab to be non-nil.")
             return nil
         }
+        // The flag suppresses tooltip backings ImageRenderer cannot flatten deterministically.
         let rendered = render(
-            SiteControlPopoverView(tab: tab).environment(env),
+            SiteControlPopoverView(tab: tab).environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true),
             size: CGSize(width: 300, height: 520)
         )
         return rendered.bitmap.representation(using: .png, properties: [:])

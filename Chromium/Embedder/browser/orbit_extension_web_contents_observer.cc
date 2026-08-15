@@ -6,6 +6,8 @@
 
 #include <memory>
 
+#include "orbit_extension_frame_host.h"
+
 namespace orbit {
 
 OrbitExtensionWebContentsObserver::OrbitExtensionWebContentsObserver(
@@ -16,6 +18,12 @@ OrbitExtensionWebContentsObserver::OrbitExtensionWebContentsObserver(
           std::make_unique<extensions::ScriptExecutor>(web_contents)) {}
 
 OrbitExtensionWebContentsObserver::~OrbitExtensionWebContentsObserver() = default;
+
+std::unique_ptr<extensions::ExtensionFrameHost>
+OrbitExtensionWebContentsObserver::CreateExtensionFrameHost(
+    content::WebContents* web_contents) {
+  return std::make_unique<OrbitExtensionFrameHost>(web_contents);
+}
 
 // static
 void OrbitExtensionWebContentsObserver::CreateForWebContents(

@@ -1,22 +1,6 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// A deliberately small subset of chrome/common/extensions/api/tabs.json:
-// only the functions and events real installed extensions were observed
-// calling (query, create, update, remove, reload, get, getCurrent,
-// sendMessage, connect; onCreated, onUpdated, onRemoved, onActivated,
-// onMoved, onReplaced). Backed by
-// orbit::OrbitTabRegistry, itself fed by Orbit's own Swift tab store (see
-// Chromium/Embedder/bridge/orbit_bridge_api.h's OrbitTabs* functions) --
-// not by a chrome/browser/ui Browser/TabStripModel, which Orbit has none of.
-// Extending this file (tabGroups, highlight, duplicate, discard, capture,
-// zoom, moving a tab between windows, ...) is explicitly out of scope for
-// this pass; see the RegisterExtensionFunctions() call site for exactly
-// which functions are wired up. sendMessage/connect are the exception: they
-// have no ExtensionFunction at all, they are handled entirely in the
-// renderer by OrbitTabsHooksDelegate (renderer/orbit_tabs_hooks_delegate.h),
-// which is why both carry "nocompile".
 [
   {
     "namespace": "tabs",
@@ -85,6 +69,7 @@
           "discarded": {"type": "boolean", "description": "Whether the tab's content has been unloaded from memory."},
           "autoDiscardable": {"type": "boolean", "description": "Whether the tab may be discarded automatically. Always true -- Orbit has no per-tab opt-out."},
           "frozen": {"type": "boolean", "description": "Whether the tab is frozen. Always false -- Orbit never freezes a tab."},
+          "sessionId": {"type": "string", "optional": true, "description": "The session ID used to uniquely identify a tab obtained from the $(ref:sessions) API."},
           "groupId": {"type": "integer", "minimum": -1, "description": "tabGroups.TAB_GROUP_ID_NONE (-1) always -- Orbit has no tab groups."},
           "incognito": {"type": "boolean", "description": "Always false -- Orbit has no incognito profile yet."}
         }

@@ -1,6 +1,3 @@
-//  Complements ExtensionActionPopupSizingTests.swift's model-level contract:
-//  covers pixels rendered at loading size and after a real-size report.
-
 import AppKit
 import SwiftUI
 import XCTest
@@ -71,16 +68,13 @@ final class ExtensionActionPopupVisualTests: XCTestCase {
         )
     }
 
-    // A popup whose real content is small (icon-plus-toggle scale) must
-    // survive clamping unchanged, not be forced back up toward a larger default.
+    // Toggle-sized popups must survive clamping unchanged.
     func test_clampedPopupSize_passesThroughAGenuinelyToggleSizedPopupUnchanged() {
         let toggleSized = CGSize(width: 180, height: 64)
         XCTAssertEqual(ExtensionActionPopupSupport.clampedPopupSize(toggleSized), toggleSized)
     }
 
     func test_popupLoadingSize_isSmallerThanThePopupDefaultSize() {
-        // Exists so most popups don't flash a tall empty box before their
-        // first preferred-size report -- see ExtensionActionPopupHosting.swift.
         let loading = ExtensionActionPopupSupport.popupLoadingSize
         let policyDefault = ExtensionActionPopupSupport.popupDefaultSize
         XCTAssertLessThan(loading.width, policyDefault.width)
@@ -190,8 +184,6 @@ final class ExtensionActionPopupVisualTests: XCTestCase {
     }
 
     // MARK: - ExtensionActionPopupView: rendered frame tracks model.contentSize exactly
-    // ExtensionActionPopupSizingTests.swift proves model.contentSize is correct;
-    // these prove the *view* renders at that size, not a larger fixed frame.
 
     func test_view_beforeAnyReport_rendersExactlyAtThePopupLoadingSize() {
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
@@ -244,14 +236,43 @@ final class ExtensionActionPopupVisualTests: XCTestCase {
     }
 
     func test_view_rendersTheFailureMessage() {
-        let contents = MockWebContents()
-        let model = makeModel(contents: contents)
-        model.start()
-        contents.delegate?.webContents(contents, didFailLoading: EngineError(code: .engineUnavailable, underlyingDescription: "no route"))
-
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
-            let rendered = render(ExtensionActionPopupView(model: model), size: CGSize(width: 320, height: 220), appearance: appearance)
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            let detailed = renderFailure(detail: "no route", appearance: appearance)
+            let sameAgain = renderFailure(detail: "no route", appearance: appearance)
+            let otherDetail = renderFailure(
+                detail: "the staging directory disappeared while the popup was still opening",
+                appearance: appearance
+            )
+            let canvas = CGRect(origin: .zero, size: Self.failureCanvas)
+
+            XCTAssertFalse(
+                Self.regionsDiffer(detailed, sameAgain, in: canvas),
+                "Two renders of the same failure differ, so nothing below is a reliable signal (appearance \(appearance.rawValue))."
+            )
+
+            let bands = Self.inkBands(detailed)
+            guard let glyphBand = bands.first else {
+                XCTFail("The failure popup painted nothing at all in \(appearance.rawValue).")
+                continue
+            }
+            XCTAssertGreaterThanOrEqual(
+                bands.count, 2,
+                "The failure popup painted one band of ink -- its warning glyph and no message, so model.loadFailure never reached the screen (appearance \(appearance.rawValue))."
+            )
+
+            let glyph = CGRect(x: 0, y: 0, width: Self.failureCanvas.width, height: CGFloat(glyphBand.upperBound))
+            let message = CGRect(
+                x: 0, y: CGFloat(glyphBand.upperBound),
+                width: Self.failureCanvas.width, height: Self.failureCanvas.height - CGFloat(glyphBand.upperBound)
+            )
+            XCTAssertFalse(
+                Self.regionsDiffer(detailed, otherDetail, in: glyph),
+                "The warning glyph itself moved with the failure detail in \(appearance.rawValue); the comparison below no longer isolates the message."
+            )
+            XCTAssertTrue(
+                Self.regionsDiffer(detailed, otherDetail, in: message),
+                "Two different failure details render identical pixels below the glyph in \(appearance.rawValue) -- the popup is not painting model.loadFailure."
+            )
         }
     }
 
@@ -266,18 +287,54 @@ final class ExtensionActionPopupVisualTests: XCTestCase {
         XCTAssertEqual(box?.width ?? -1, ExtensionActionPopupSupport.popupMessageWidth, accuracy: 1)
     }
 
-    // MARK: - ExtensionPendingActivationView (zero coverage before this file)
-    // Shares ExtensionPopupMessageView with the load-failure state above, so
-    // both are asserted against the same width token, keeping popup states visually consistent.
+    // MARK: - ExtensionPendingActivationView
 
     func test_pendingActivationView_paintsSomethingInBothAppearances() {
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
             let rendered = render(
                 ExtensionPendingActivationView(extensionName: "Test Extension"),
-                size: CGSize(width: 300, height: 260),
+                size: Self.pendingCanvas,
                 appearance: appearance
             )
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            let renamed = render(
+                ExtensionPendingActivationView(extensionName: "A Quite Differently Named Extension"),
+                size: Self.pendingCanvas,
+                appearance: appearance
+            )
+
+            let bands = Self.inkBands(rendered)
+            guard let glyphBand = bands.first, let controlBand = bands.last, bands.count >= 3 else {
+                XCTFail("The pending-activation popup painted \(bands.count) band(s) of ink in \(appearance.rawValue); it needs a glyph, a message and the Restart Orbit button.")
+                continue
+            }
+
+            let glyph = Self.bandMetrics(rendered, glyphBand)
+            XCTAssertGreaterThan(
+                glyph.chroma, 0.1,
+                "The pending-activation glyph sampled \(glyph.averageColor) in \(appearance.rawValue) -- it is not painting the .orange tint that marks this state apart from a plain failure."
+            )
+
+            let control = Self.bandMetrics(rendered, controlBand)
+            XCTAssertGreaterThan(
+                control.density, 0.8,
+                "The last band of ink in \(appearance.rawValue) is \(control.density) filled -- that is another line of text, not the filled Restart Orbit button."
+            )
+            XCTAssertGreaterThanOrEqual(control.longestRun, 50, "The Restart Orbit button's fill runs only \(control.longestRun)pt wide in \(appearance.rawValue).")
+            XCTAssertGreaterThan(control.chroma, 0.1, "The Restart Orbit button sampled \(control.averageColor) in \(appearance.rawValue), not a primary accent fill.")
+
+            let glyphRect = CGRect(x: 0, y: 0, width: Self.pendingCanvas.width, height: CGFloat(glyphBand.upperBound))
+            let messageRect = CGRect(
+                x: 0, y: CGFloat(glyphBand.upperBound),
+                width: Self.pendingCanvas.width, height: Self.pendingCanvas.height - CGFloat(glyphBand.upperBound)
+            )
+            XCTAssertFalse(
+                Self.regionsDiffer(rendered, renamed, in: glyphRect),
+                "The glyph moved with the extension name in \(appearance.rawValue); the comparison below no longer isolates the message."
+            )
+            XCTAssertTrue(
+                Self.regionsDiffer(rendered, renamed, in: messageRect),
+                "Renaming the extension changed nothing below the glyph in \(appearance.rawValue) -- the notice never names the extension it is about."
+            )
         }
     }
 
@@ -291,9 +348,7 @@ final class ExtensionActionPopupVisualTests: XCTestCase {
         XCTAssertEqual(box?.width ?? -1, ExtensionActionPopupSupport.popupMessageWidth, accuracy: 1)
     }
 
-    // MARK: - OrbitToggle: guards Orbit's own toggle against the "wildly out of scale" class of defect
-    // The reported toggle was extension web content (fixed at the model/view
-    // layer above), but the same defect class applies to Orbit's own OrbitToggle.
+    // MARK: - OrbitToggle
 
     func test_orbitToggle_onAndOffTracksAreVisuallyDistinct() {
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
@@ -332,7 +387,78 @@ final class ExtensionActionPopupVisualTests: XCTestCase {
         }
     }
 
-    // MARK: - Colour distance
+    // MARK: - Ink measurement
+
+    private static let failureCanvas = CGSize(width: 320, height: 220)
+    private static let pendingCanvas = CGSize(width: 300, height: 260)
+
+    private func renderFailure(detail: String, appearance: NSAppearance.Name) -> RenderedImage {
+        let contents = MockWebContents()
+        let model = makeModel(contents: contents)
+        model.start()
+        contents.delegate?.webContents(contents, didFailLoading: EngineError(code: .engineUnavailable, underlyingDescription: detail))
+        return render(ExtensionActionPopupView(model: model), size: Self.failureCanvas, appearance: appearance)
+    }
+
+    private static func inkBands(_ image: RenderedImage) -> [Range<Int>] {
+        var bands: [Range<Int>] = []
+        var start: Int?
+        for y in 0..<Int(image.pointSize.height) {
+            var hasInk = false
+            for x in 0..<Int(image.pointSize.width) where image.color(atX: x, y: y).a > 0.04 {
+                hasInk = true
+                break
+            }
+            if hasInk, start == nil { start = y }
+            if !hasInk, let began = start {
+                bands.append(began..<y)
+                start = nil
+            }
+        }
+        if let began = start { bands.append(began..<Int(image.pointSize.height)) }
+        return bands
+    }
+
+    private static func bandMetrics(
+        _ image: RenderedImage,
+        _ band: Range<Int>
+    ) -> (density: Double, longestRun: Int, averageColor: RGBA, chroma: Double) {
+        var minX = Int.max
+        var maxX = 0
+        var ink = 0
+        var longestRun = 0
+        for y in band {
+            var run = 0
+            for x in 0..<Int(image.pointSize.width) {
+                if image.color(atX: x, y: y).a > 0.04 {
+                    ink += 1
+                    run += 1
+                    longestRun = max(longestRun, run)
+                    minX = min(minX, x)
+                    maxX = max(maxX, x + 1)
+                } else {
+                    run = 0
+                }
+            }
+        }
+        guard minX < maxX else { return (0, 0, .clear, 0) }
+        let average = image.averageColor(in: CGRect(x: minX, y: band.lowerBound, width: maxX - minX, height: band.count))
+        return (
+            Double(ink) / Double(band.count * (maxX - minX)),
+            longestRun,
+            average,
+            max(average.r, max(average.g, average.b)) - min(average.r, min(average.g, average.b))
+        )
+    }
+
+    private static func regionsDiffer(_ a: RenderedImage, _ b: RenderedImage, in rect: CGRect) -> Bool {
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) where !a.color(atX: x, y: y).isApproximately(b.color(atX: x, y: y), tolerance: 0.02) {
+                return true
+            }
+        }
+        return false
+    }
 
     private static func distance(_ a: RGBA, _ b: RGBA) -> Double {
         let dr = a.r - b.r

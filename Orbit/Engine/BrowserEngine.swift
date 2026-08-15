@@ -268,6 +268,15 @@ public protocol WebContents: AnyObject {
 
     func cancelDownload(id: UUID)
 
+    // MARK: Extension context menus
+
+    /// The chrome.contextMenus items matching the gesture behind the context
+    /// menu about to be shown; call only from `showContextMenu`.
+    func extensionContextMenuGroups() -> [ExtensionContextMenuGroup]
+
+    /// Fires that item's `onClicked`, with the info payload of the same gesture.
+    func performExtensionContextMenuItem(_ id: ExtensionContextMenuItemID)
+
     // MARK: Developer tools
 
     func showDeveloperTools(inspectAt point: CGPoint?)
@@ -284,6 +293,10 @@ public protocol WebContents: AnyObject {
 
 public extension WebContents {
     func enableContentSizing(minimum: CGSize, maximum: CGSize) {}
+
+    // An engine with no extension system contributes no menu items.
+    func extensionContextMenuGroups() -> [ExtensionContextMenuGroup] { [] }
+    func performExtensionContextMenuItem(_ id: ExtensionContextMenuItemID) {}
 
     // An engine whose view is not a compositor surface has nothing to declare:
     // its `view` paints whenever AppKit draws it.

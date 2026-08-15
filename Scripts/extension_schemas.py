@@ -37,6 +37,21 @@ PROVIDER_PATH = os.path.join(REPO_ROOT, "Chromium", "Embedder", "common", "orbit
 MEMBER_KINDS = ("functions", "events", "types", "properties")
 SINGULAR = {"functions": "function", "events": "event", "types": "type", "properties": "property"}
 
+# Orbit writes every ported schema as .json; upstream writes some as .idl and,
+# since 152, some as .webidl. The vendored counterpart keeps its real upstream
+# name, so resolution is by basename across the three extensions.
+SCHEMA_EXTENSIONS = (".json", ".idl", ".webidl")
+
+
+def resolve_schema(directory, filename):
+    """The real path in `directory` for Orbit's `filename`, or None."""
+    stem = os.path.splitext(filename)[0]
+    for extension in SCHEMA_EXTENSIONS:
+        candidate = os.path.join(directory, stem + extension)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
 # Why each absent chrome-layer namespace is absent; anything unnamed here regenerates
 # "unclassified", which ExtensionSchemaConformanceTests rejects, forcing a human to triage it.
 #   notPorted      in scope, Orbit simply has not ported it (section 1.4)
@@ -45,12 +60,12 @@ SINGULAR = {"functions": "function", "events": "event", "types": "type", "proper
 #   chromeInternal allowlist-only; no third-party extension can reach it
 DEFAULT_REASONS = {
     "notPorted": [
-        "accessibilityFeatures", "bookmarks", "browserAction", "browsingData", "commands",
+        "accessibilityFeatures", "bookmarks", "browserAction", "browsingData",
         "contentSettings", "contextMenus", "debugger", "declarativeContent", "desktopCapture",
         "devtools.inspectedWindow", "devtools.network", "devtools.panels", "devtools.performance",
-        "devtools.recorder", "dom", "downloads", "extension", "fontSettings", "gcm", "history",
+        "devtools.recorder", "dom", "downloads", "extension", "fontSettings", "gcm",
         "identity", "instanceID", "mdns", "notifications", "omnibox", "pageAction", "pageCapture",
-        "processes", "proxy", "readingList", "search", "sessions", "sidePanel", "tabCapture",
+        "processes", "proxy", "readingList", "sidePanel", "tabCapture",
         "tabGroups", "topSites", "tts", "ttsEngine", "webAuthenticationProxy",
     ],
     "outOfScope": [
@@ -191,8 +206,99 @@ def property_paths(properties, prefix=""):
     return paths
 
 
+IDL_BLOCK = re.compile(r"(dictionary|enum|interface)\s+([A-Za-z0-9_]+)\s*\{")
+IDL_MEMBER = re.compile(r"static\s+[A-Za-z0-9_\[\]?]+(?:\s*\??)\s+([A-Za-z0-9_]+)\s*\(")
+
+
+def idl_surface_of(path):
+    """surface_of for a Chromium schema .idl.
+
+    `callback` declarations are deliberately not types: json_schema_compiler
+    folds them into the function's returns_async rather than emitting one.
+    """
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        text = re.sub(r"^\s*//.*$", "", handle.read(), flags=re.M)
+    match = IDL_NAMESPACE.search(text)
+    if not match:
+        return {}
+    surface = {kind: set() for kind in MEMBER_KINDS}
+    for block in IDL_BLOCK.finditer(text):
+        kind, name = block.group(1), block.group(2)
+        if kind in ("dictionary", "enum"):
+            surface["types"].add(name)
+            continue
+        body = text[block.end():]
+        depth = 1
+        for index, character in enumerate(body):
+            depth += (character == "{") - (character == "}")
+            if depth == 0:
+                body = body[:index]
+                break
+        target = {"Functions": "functions", "Events": "events", "Properties": "properties"}.get(name)
+        if target:
+            surface[target] |= {m.group(1) for m in IDL_MEMBER.finditer(body)}
+    return {match.group(1): surface}
+
+
+WEBIDL_DECLARATION = re.compile(r"\b(dictionary|enum|interface)\s+([A-Za-z0-9_]+)\s*(?::\s*[A-Za-z0-9_]+\s*)?\{")
+WEBIDL_ATTRIBUTE = re.compile(r"static\s+attribute\s+[A-Za-z0-9_]+\s+([A-Za-z0-9_]+)\s*;")
+WEBIDL_CONSTANT = re.compile(r"const\s+[A-Za-z0-9_]+\s+([A-Za-z0-9_]+)\s*=")
+WEBIDL_OPERATION = re.compile(r"static\s+((?:(?!attribute)[^;{}])*?)\(")
+WEBIDL_TRAILING_NAME = re.compile(r"([A-Za-z0-9_]+)\s*$")
+
+
+def _braced_body(text, start):
+    depth, index = 1, start
+    while index < len(text) and depth:
+        depth += (text[index] == "{") - (text[index] == "}")
+        index += 1
+    return text[start:index - 1]
+
+
+def webidl_surface_of(path):
+    """surface_of for a Chromium schema .webidl.
+
+    The namespace is whatever `partial interface Browser` binds an attribute to,
+    and that attribute's interface type carries the functions and events. Only
+    dictionaries and enums are types: the per-event `interface FooEvent` and its
+    `callback FooListener` are plumbing json_schema_compiler never emits.
+    """
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        text = re.sub(r"^\s*//.*$", "", handle.read(), flags=re.M)
+
+    bodies, surface = {}, {kind: set() for kind in MEMBER_KINDS}
+    for match in WEBIDL_DECLARATION.finditer(text):
+        kind, name = match.group(1), match.group(2)
+        if kind == "interface":
+            bodies[name] = _braced_body(text, match.end())
+        else:
+            surface["types"].add(name)
+
+    namespace = None
+    for parent, members in (("Browser", bodies.get("Browser", "")),):
+        for attribute in re.finditer(r"static\s+attribute\s+([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\s*;", members):
+            namespace, interface = attribute.group(2), attribute.group(1)
+            del parent
+            break
+    if namespace is None:
+        return {}
+
+    body = bodies.get(interface, "")
+    surface["events"] |= {m.group(1) for m in WEBIDL_ATTRIBUTE.finditer(body)}
+    surface["properties"] |= {m.group(1) for m in WEBIDL_CONSTANT.finditer(body)}
+    for operation in WEBIDL_OPERATION.finditer(body):
+        name = WEBIDL_TRAILING_NAME.search(operation.group(1))
+        if name:
+            surface["functions"].add(name.group(1))
+    return {namespace: surface}
+
+
 def surface_of(path):
     """namespace -> {functions, events, types, properties} name sets."""
+    if path.endswith(".idl"):
+        return idl_surface_of(path)
+    if path.endswith(".webidl"):
+        return webidl_surface_of(path)
     result = {}
     for entry in load_schema(path):
         name = entry.get("namespace")
@@ -326,15 +432,18 @@ def cmd_sync(_args):
     for namespace, filename in sorted(ported.items()):
         # Upstream moves schemas between the two layers: webstore_private went
         # from chrome to core in 152.
-        candidates = [os.path.join(d, filename) for d in (CHROME_API_DIR, CORE_API_DIR)]
-        source = next((c for c in candidates if os.path.exists(c)), None)
+        source = next(
+            (p for p in (resolve_schema(d, filename) for d in (CHROME_API_DIR, CORE_API_DIR)) if p),
+            None,
+        )
         if source is None:
             sys.exit(
-                "error: Orbit ports %s from %s but upstream has no such file at %s"
-                % (namespace, filename, " or ".join(candidates))
+                "error: Orbit ports %s from %s but upstream has no %s schema in %s or %s"
+                % (namespace, filename, os.path.splitext(filename)[0], CHROME_API_DIR, CORE_API_DIR)
             )
-        shutil.copyfile(source, os.path.join(VENDOR_DIR, filename))
-        files[filename] = sha256_of(source)
+        vendored_name = os.path.basename(source)
+        shutil.copyfile(source, os.path.join(VENDOR_DIR, vendored_name))
+        files[vendored_name] = sha256_of(source)
 
     for filename, source in sorted(VENDORED_PERMISSION_FEATURES.items()):
         shutil.copyfile(source, os.path.join(VENDOR_DIR, filename))
@@ -419,8 +528,8 @@ def compute_gaps():
         namespaces[name] = {"status": "absent", "reason": REASON_OF.get(name, "unclassified")}
 
     for namespace, filename in sorted(ported.items()):
-        vendored = os.path.join(VENDOR_DIR, filename)
-        if not os.path.exists(vendored):
+        vendored = resolve_schema(VENDOR_DIR, filename)
+        if vendored is None:
             continue
         upstream = surface_of(vendored).get(namespace, {})
         orbit = surface_of(os.path.join(ORBIT_API_DIR, filename)).get(namespace, {})
@@ -505,9 +614,13 @@ def cmd_update_expectations(_args):
 
     old_namespaces = existing.get("namespaces", {})
     for name, entry in gaps["namespaces"].items():
-        for carried in ("reason", "note"):
-            if carried in old_namespaces.get(name, {}):
-                entry[carried] = old_namespaces[name][carried]
+        old = old_namespaces.get(name, {})
+        if "note" in old:
+            entry["note"] = old["note"]
+        # "reason" explains an ABSENCE, so porting a namespace has to drop it
+        # rather than leave it asserting "notPorted" about working code.
+        if "reason" in old and entry["status"] == "absent":
+            entry["reason"] = old["reason"]
 
     merged = {
         "_readme": existing.get("_readme", []),

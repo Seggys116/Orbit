@@ -1,18 +1,6 @@
 // Copyright 2026 The Orbit Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// A subset of chrome/common/extensions/api/web_navigation.json: getFrame,
-// getAllFrames, and every event except onCreatedNavigationTarget (see
-// orbit_web_navigation_event_router.h for why). onTabReplaced is declared
-// but has no dispatch source, for the reason its own description states.
-// Each
-// event declares a "url" filter, purely so addListener(callback, filter)
-// doesn't throw (extensions/renderer/bindings/event_emitter.cc throws
-// unless the event's own schema declares "filters"); the actual per-listener
-// URL matching is done by extensions::EventFilter/url_matcher, generic
-// browser-side machinery neither this schema nor Orbit's own code needs to
-// implement -- see OrbitWebNavigationEventRouter's DispatchEvent.
 [
   {
     "namespace": "webNavigation",

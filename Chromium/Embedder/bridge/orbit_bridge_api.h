@@ -845,6 +845,76 @@ void OrbitSetExtensionActionCallback(OrbitExtensionActionCallback callback,
 __attribute__((visibility("default")))
 const char* OrbitGetExtensionActionsJSON(void);
 
+// The chrome.contextMenus items matching the show_context_menu gesture this
+// handle last reported -- call it from that callback, before presenting.
+// A JSON array of {"extensionId":string,"extensionName":string,"items":[...]},
+// one entry per extension with at least one matching item, where each item is
+// {"id":{"extensionId":string,"uid":int|"stringUid":string},"title":string,
+//  "type":"normal"|"checkbox"|"radio"|"separator","checked":bool,
+//  "enabled":bool,"children":[item,...]}. "children" is absent when empty;
+// titles already have %s replaced by the selection and are truncated. Never
+// null; "[]" when nothing matches. Valid only until the next call on this
+// handle -- copy it out immediately.
+__attribute__((visibility("default")))
+const char* OrbitWebContentsExtensionContextMenuJSON(
+    OrbitWebContentsHandle handle);
+
+// Fires one of those items: its onClicked (and the legacy per-item onclick)
+// with the info payload of the same gesture, plus the checkbox/radio state
+// change that click implies. Pass the id exactly as reported -- nonzero
+// `has_uid` with `uid`, otherwise `string_uid`. An unknown id is a no-op.
+__attribute__((visibility("default")))
+void OrbitWebContentsExecuteExtensionContextMenuItem(
+    OrbitWebContentsHandle handle,
+    const char* extension_id,
+    int has_uid,
+    int32_t uid,
+    const char* string_uid);
+
+// chrome.commands: every command every enabled extension declares, fired on the
+// UI thread whenever an extension loads or unloads or the reserved set changes.
+// [{"extensionId":string,"name":string,"description":string,
+//   "accelerator":string,"shortcut":string,"global":bool,"active":bool,
+//   "isAction":bool}]. "accelerator" is Chromium's canonical spelling
+// ("Command+Shift+Y", modifiers ordered Ctrl, Alt, Command, Shift), empty when
+// the manifest suggested no key for this platform; "shortcut" is the display
+// form ("⇧⌘Y") and is empty unless "active". "active" is false when the key is
+// reserved by Orbit or already claimed by another extension -- such a command
+// exists and is listed by chrome.commands.getAll, but can never fire.
+// "isAction" marks the reserved _execute_action/_execute_browser_action/
+// _execute_page_action names, which trigger the extension's action instead of
+// firing commands.onCommand.
+typedef void (*OrbitExtensionCommandsCallback)(void* opaque,
+                                               const char* commands_json);
+__attribute__((visibility("default")))
+void OrbitSetExtensionCommandsCallback(OrbitExtensionCommandsCallback callback,
+                                       void* opaque);
+
+// The same payload on demand. Never null; "[]" if not ready.
+__attribute__((visibility("default")))
+const char* OrbitGetExtensionCommandsJSON(void);
+
+// The accelerators Orbit's own UI owns, as a JSON array of canonical
+// accelerator strings ("Command+T"). Replaces the whole set. Orbit always wins:
+// an extension command on a reserved accelerator goes inactive and is refused
+// by OrbitDispatchExtensionCommand even if Swift asks.
+__attribute__((visibility("default")))
+void OrbitSetReservedShortcuts(const char* shortcuts_json);
+
+// A real key press Swift resolved to this extension command. 1 when the command
+// was registered, active and dispatched -- Swift must swallow the NSEvent iff 1.
+__attribute__((visibility("default")))
+int OrbitDispatchExtensionCommand(const char* extension_id,
+                                  const char* command_name);
+
+// _execute_action (or its browser/page action aliases) fired. Orbit's toolbar
+// and popup live in Swift, so the embedder relays rather than opening anything.
+typedef void (*OrbitExtensionActionActivatedCallback)(void* opaque,
+                                                      const char* extension_id);
+__attribute__((visibility("default")))
+void OrbitSetExtensionActionActivatedCallback(
+    OrbitExtensionActionActivatedCallback callback, void* opaque);
+
 // One primary-main-frame certificate error (subresource/subframe/prerender/
 // fenced-frame errors are denied outright, never reaching here). Swift must
 // call OrbitWebContentsRespondToCertificateError with the same request_id
@@ -906,6 +976,157 @@ int OrbitGetSearchSuggestEnabled(void);
 // callback above reports what took effect).
 __attribute__((visibility("default")))
 void OrbitSetSearchSuggestEnabled(int enabled);
+
+// chrome.history, answered from Swift's HistoryStore actor. Every callback runs
+// exactly once, on the UI thread, never before the delegate call returns; every
+// time here is MILLISECONDS since 1970, as chrome.history's own fields are.
+typedef void (*OrbitHistoryResultCallback)(void* opaque, const char* result_json);
+
+typedef struct {
+  void* opaque;
+
+  // {"text","startTime","endTime","maxResults"} in, JSON array of HistoryItem out.
+  void (*search)(void* opaque,
+                 const char* query_json,
+                 OrbitHistoryResultCallback callback,
+                 void* callback_opaque);
+
+  // JSON array of VisitItem; referringVisitId is always "0", the API's own "no
+  // referrer" value, because Orbit records no referrer.
+  void (*get_visits)(void* opaque,
+                     const char* url,
+                     OrbitHistoryResultCallback callback,
+                     void* callback_opaque);
+
+  // The four mutations answer {"ok":true} or {"error":string}.
+  void (*add_url)(void* opaque,
+                  const char* url,
+                  const char* title,
+                  OrbitHistoryResultCallback callback,
+                  void* callback_opaque);
+
+  void (*delete_url)(void* opaque,
+                     const char* url,
+                     OrbitHistoryResultCallback callback,
+                     void* callback_opaque);
+
+  void (*delete_range)(void* opaque,
+                       double start_time,
+                       double end_time,
+                       OrbitHistoryResultCallback callback,
+                       void* callback_opaque);
+
+  void (*delete_all)(void* opaque,
+                     OrbitHistoryResultCallback callback,
+                     void* callback_opaque);
+} OrbitHistoryDelegate;
+
+// NULL clears it, after which every chrome.history call fails with an error
+// rather than answering emptily.
+__attribute__((visibility("default")))
+void OrbitSetHistoryDelegate(const OrbitHistoryDelegate* delegate);
+
+// Fires history.onVisited for every visit Swift records, not only addUrl.
+__attribute__((visibility("default")))
+void OrbitHistoryNotifyVisited(const char* history_item_json);
+
+// Nonzero all_history ignores urls_json; otherwise it is the URLs really removed.
+__attribute__((visibility("default")))
+void OrbitHistoryNotifyVisitRemoved(int all_history, const char* urls_json);
+
+// chrome.sessions over Orbit's real closed-tab list. Callback contract as above,
+// but Session.lastModified is SECONDS since 1970, as the API states.
+typedef void (*OrbitSessionsResultCallback)(void* opaque, const char* result_json);
+
+typedef struct {
+  void* opaque;
+
+  // max_results is always a concrete count the function has already defaulted
+  // to MAX_SESSION_RESULTS and validated, so 0 really means none. JSON array of
+  // Session, most recent first; Orbit tracks no closed windows, so no entry
+  // ever carries "window".
+  void (*get_recently_closed)(void* opaque,
+                              int32_t max_results,
+                              OrbitSessionsResultCallback callback,
+                              void* callback_opaque);
+
+  // session_id "" restores the most recently closed. One Session, or {"error"}.
+  void (*restore)(void* opaque,
+                  const char* session_id,
+                  OrbitSessionsResultCallback callback,
+                  void* callback_opaque);
+} OrbitSessionsDelegate;
+
+__attribute__((visibility("default")))
+void OrbitSetSessionsDelegate(const OrbitSessionsDelegate* delegate);
+
+__attribute__((visibility("default")))
+void OrbitSessionsNotifyChanged(void);
+
+// chrome.search.query. `error` is "" on success, else runtime.lastError's text.
+typedef void (*OrbitSearchQueryCallback)(void* opaque, const char* error);
+
+typedef struct {
+  void* opaque;
+
+  // disposition: 0=CURRENT_TAB 1=NEW_TAB 2=NEW_WINDOW; nonzero has_tab_id
+  // selects an explicit tab instead, which the schema refuses to combine.
+  void (*query)(void* opaque,
+                const char* text,
+                int disposition,
+                int has_tab_id,
+                int32_t tab_id,
+                OrbitSearchQueryCallback callback,
+                void* callback_opaque);
+} OrbitSearchDelegate;
+
+__attribute__((visibility("default")))
+void OrbitSetSearchDelegate(const OrbitSearchDelegate* delegate);
+
+// Reply to a bookmarks/downloads request. Called exactly once, synchronously,
+// before the request callback returns.
+typedef void (*OrbitJSONReplyCallback)(void* reply_ctx, const char* json);
+
+// chrome.bookmarks, diffed against the last push to fire onCreated/onRemoved/
+// onChanged/onMoved. tree_json is the root node: {"id":string,"parentId":string,
+// "index":int,"title":string,"url":string,"dateAdded":number ms,
+// "permanent":bool,"children":array}, "url" on leaves only, "parentId"/"index"
+// on everything but the root, "permanent" on nodes the API refuses to modify.
+__attribute__((visibility("default")))
+void OrbitBookmarksSetTree(const char* tree_json);
+
+// `method` is "create"/"move"/"update"/"remove"/"removeTree". Swift pushes the
+// refreshed tree before replying {"id":string} or {"error":string}.
+typedef void (*OrbitBookmarksRequestCallback)(void* opaque,
+                                              const char* method,
+                                              const char* args_json,
+                                              OrbitJSONReplyCallback reply,
+                                              void* reply_ctx);
+__attribute__((visibility("default")))
+void OrbitSetBookmarksRequestCallback(OrbitBookmarksRequestCallback callback,
+                                      void* opaque);
+
+// chrome.downloads, overlaid with live download::DownloadItem state and diffed
+// against the last push to fire onCreated/onChanged/onErased. A JSON array,
+// newest first, of {"id":int,"guid":string,"url":string,"finalUrl":string,
+// "filename":string,"mime":string,"startTime":number seconds,
+// "endTime":number|null,"state":string,"paused":bool,"bytesReceived":number,
+// "totalBytes":number,"exists":bool}. "id" is persisted by Swift and never
+// reused, because chrome.downloads guarantees an id that survives a restart.
+__attribute__((visibility("default")))
+void OrbitDownloadsSetItems(const char* items_json);
+
+// `method` is "erase"/"open"/"show"/"showDefaultFolder"/"removeFile"; the reply
+// is {"ok":true} or {"error":string}. pause/resume/cancel act on the live
+// download instead, which the embedder reaches through orbit_download_bridge.h.
+typedef void (*OrbitDownloadsRequestCallback)(void* opaque,
+                                              const char* method,
+                                              const char* args_json,
+                                              OrbitJSONReplyCallback reply,
+                                              void* reply_ctx);
+__attribute__((visibility("default")))
+void OrbitSetDownloadsRequestCallback(OrbitDownloadsRequestCallback callback,
+                                      void* opaque);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -58,7 +58,9 @@ final class ChromiumEngine: BrowserEngine {
         }
         installPendingSiteData()
         installExtensionActionRelay()
+        installExtensionCommandRelay()
         installSearchSuggestRelay()
+        installBrowserReadyRelay()
         try OrbitChromiumBridge.shared.loadAndStart()
         // The only push that lands before the first document exists — Orbit's
         // launch-time push runs before the framework is dlopen'd and reaches nothing.
@@ -77,9 +79,6 @@ final class ChromiumEngine: BrowserEngine {
     /// chrome.privacy.services.searchSuggestEnabled: pushes Orbit's value down as
     /// the user value; the change handler carries an extension override back up.
     private func installSearchSuggestRelay() {
-        OrbitChromiumBridge.shared.browserReadyHandler = {
-            AppEnvironment.processRoot.pushSearchSuggestPreferenceToEngine()
-        }
         OrbitChromiumBridge.shared.searchSuggestEnabledHandler = { enabled in
             AppEnvironment.processRoot.applyEngineSearchSuggestPreference(enabled)
         }
@@ -97,6 +96,42 @@ final class ChromiumEngine: BrowserEngine {
     private func refreshExtensionActionStates() {
         let json = OrbitChromiumBridge.shared.extensionActionsJSON()
         extensionActionStates.replaceAll(ExtensionActionSnapshot.decodeAll(json: json))
+    }
+
+    /// One slot on the bridge, so everything that needs the first moment the
+    /// browser exists is pushed from here.
+    private func installBrowserReadyRelay() {
+        OrbitChromiumBridge.shared.browserReadyHandler = { [weak self] in
+            AppEnvironment.processRoot.pushSearchSuggestPreferenceToEngine()
+            self?.refreshExtensionCommands()
+        }
+    }
+
+    private func installExtensionCommandRelay() {
+        let registry = ExtensionCommandRegistry.shared
+        registry.dispatch = { extensionID, name in
+            OrbitChromiumBridge.shared.dispatchExtensionCommand(extensionID: extensionID, name: name)
+        }
+        registry.publishReserved = { accelerators in
+            let json = (try? JSONSerialization.data(withJSONObject: accelerators))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            OrbitChromiumBridge.shared.setReservedShortcuts(json: json)
+        }
+        OrbitChromiumBridge.shared.extensionCommandsHandler = { json in
+            ExtensionCommandRegistry.shared.replaceAll(ExtensionCommand.decodeAll(json: json))
+        }
+        OrbitChromiumBridge.shared.extensionActionActivatedHandler = { extensionID in
+            ExtensionCommandRegistry.shared.environmentForActivation
+                .activateExtensionAction(extensionID)
+        }
+    }
+
+    /// Publishing must come first: until the embedder knows what Orbit owns it
+    /// treats nothing as reserved, and an extension could claim a key Orbit uses.
+    private func refreshExtensionCommands() {
+        ExtensionCommandRegistry.shared.publishOrbitReservedShortcuts()
+        let json = OrbitChromiumBridge.shared.extensionCommandsJSON()
+        ExtensionCommandRegistry.shared.replaceAll(ExtensionCommand.decodeAll(json: json))
     }
 
     @discardableResult
@@ -203,6 +238,7 @@ final class ChromiumEngine: BrowserEngine {
             )
         }
         refreshExtensionActionStates()
+        refreshExtensionCommands()
         return loaded
     }
 
