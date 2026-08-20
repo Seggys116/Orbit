@@ -13,7 +13,7 @@ import Foundation
 public enum ChromiumBuild {
 
     /// Full Chromium version, e.g. `151.0.7922.109`.
-    public static let version = "152.0.7977.42"
+    public static let version = "152.0.7977.54"
 
     /// Chromium major version, e.g. `151`. This is what sites see.
     public static let majorVersion = 152
@@ -22,7 +22,7 @@ public enum ChromiumBuild {
     public static let channel = "stable"
 
     /// Date the version pin was last moved (ISO-8601).
-    public static let pinnedAt = "2026-08-13"
+    public static let pinnedAt = "2026-08-20"
 
     /// The user agent Orbit presents to websites, matching stock Chrome for this
     /// Chromium major so that sites serve Orbit their Chrome experience.
