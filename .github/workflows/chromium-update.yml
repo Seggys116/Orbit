@@ -117,7 +117,7 @@ jobs:
 
             This PR pins the version only -- there is no fallback source, so `Scripts/chromium fetch` on this branch has nothing to install until the self-hosted `build-and-publish` job (triggered by this same run) finishes building Orbit's own engine from source and publishes it; a second commit lands here once that happens.
 
-            Verification is reported as the `chromium-update / verify` commit status on this branch's head, not necessarily as an entry in the checks tab: the `verify` job of [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) builds and tests this branch once the prebuilt is attached, and posts the result there. It is pending until then. Do not merge on a pending or red status.
+            Verification is reported as the `chromium-update / verify` commit status on this branch's head, not necessarily as an entry in the checks tab: the `verify` job of [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) dispatches `build-test.yml` against this branch once the prebuilt is attached, waits for it, and posts the result there, linked to that run. It is pending until then. Do not merge on a pending or red status.
 
             The checks tab is empty when the pull request was opened with `GITHUB_TOKEN`, which GitHub refuses to let start other workflows. Setting the `CHROMIUM_UPDATE_PR_TOKEN` secret makes ci.yml run here as it does on any other pull request; the commit status above is posted either way.
 
@@ -251,7 +251,9 @@ jobs:
             assets+=("$asset" "$asset.sha256")
           done
 
+          # --latest=false: an engine tarball must never displace the Orbit app release.
           gh release create "chromium-$version" --repo "$GITHUB_REPOSITORY" --title "chromium-$version" \
+            --latest=false \
             --notes "Prebuilt Chromium engines for Orbit (shipping and dcheck), built from source by this workflow." \
             "${assets[@]}" || \
           gh release upload "chromium-$version" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
@@ -277,18 +279,83 @@ jobs:
           fi
           git push origin HEAD:chore/chromium-update
 
-  # The same verification ci.yml runs, aimed at the pin branch. It waits for
-  # build-and-publish because `Scripts/chromium fetch` has nothing to install
-  # until the prebuilt for the new version exists.
+  # The same verification ci.yml runs, dispatched at the pin branch rather than
+  # called so that it never carries the default branch's cache scope. It waits
+  # for build-and-publish because `Scripts/chromium fetch` has nothing to
+  # install until the prebuilt for the new version exists.
   verify:
     name: Verify
     needs: [check, build-and-publish]
     if: needs.check.outputs.pr_number != ''
-    uses: ./.github/workflows/build-test.yml
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
     permissions:
+      actions: write
       contents: read
-    with:
-      ref: chore/chromium-update
+    outputs:
+      run_url: ${{ steps.dispatch.outputs.run_url }}
+      conclusion: ${{ steps.dispatch.outputs.conclusion }}
+    steps:
+      # The marker becomes the dispatched run's run-name, which is how this job
+      # identifies the one run it started even if the branch moves underneath it.
+      - name: Dispatch build-test.yml at the pin branch and wait for it
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: chore/chromium-update
+          ACQUIRE_SECONDS: "300"
+          POLL_SECONDS: "30"
+          DEADLINE_SECONDS: "10800"
+        run: |
+          set -euo pipefail
+          marker="chromium-update verify $GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+          gh workflow run build-test.yml --repo "$GITHUB_REPOSITORY" \
+            --ref "$BRANCH" -f run_marker="$marker"
+          echo "Dispatched build-test.yml on $BRANCH as \"$marker\""
+
+          run_id=""
+          acquire_by=$((SECONDS + ACQUIRE_SECONDS))
+          while [ "$SECONDS" -lt "$acquire_by" ]; do
+            run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-test.yml \
+              --limit 50 --json databaseId,name,displayTitle \
+              | jq -r --arg m "$marker" \
+                  '[.[] | select(.name == $m or .displayTitle == $m)] | .[0].databaseId // empty')
+            if [ -n "$run_id" ]; then break; fi
+            sleep 10
+          done
+
+          if [ -z "$run_id" ]; then
+            echo "::error::No build-test.yml run named \"$marker\" appeared within ${ACQUIRE_SECONDS}s of the dispatch."
+            exit 1
+          fi
+
+          run_url=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json url --jq .url)
+          echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
+          echo "Verifying $BRANCH in $run_url"
+
+          status=""
+          conclusion=""
+          finish_by=$((SECONDS + DEADLINE_SECONDS))
+          while [ "$SECONDS" -lt "$finish_by" ]; do
+            line=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" \
+              --json status,conclusion --jq '.status + " " + (.conclusion // "")')
+            status=${line%% *}
+            conclusion=${line#* }
+            if [ "$status" = "completed" ]; then break; fi
+            sleep "$POLL_SECONDS"
+          done
+          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
+
+          if [ "$status" != "completed" ]; then
+            echo "::error::$run_url was still $status after $((DEADLINE_SECONDS / 60)) minutes."
+            exit 1
+          fi
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::$run_url concluded $conclusion."
+            exit 1
+          fi
+          echo "$run_url passed."
 
   # Turns the pending status from the check job into the verdict. Runs on any
   # outcome, including verify never starting, so a bump can never end up with a
@@ -307,17 +374,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.check.outputs.pr_number }}
           VERIFY_RESULT: ${{ needs.verify.result }}
+          BUILD_CONCLUSION: ${{ needs.verify.outputs.conclusion }}
+          BUILD_RUN_URL: ${{ needs.verify.outputs.run_url }}
           BUILDER_CONFIGURED: ${{ needs.runner-check.outputs.configured }}
         run: |
-          if [ "$VERIFY_RESULT" = "success" ]; then
+          if [ "$VERIFY_RESULT" = "success" ] && [ "$BUILD_CONCLUSION" = "success" ]; then
             state=success
             description="Built and tested on the pin branch"
           elif [ "$BUILDER_CONFIGURED" != "true" ] && [ "$VERIFY_RESULT" = "skipped" ]; then
             state=pending
             description="Waiting for an engine built and published out of band"
+          elif [ -n "$BUILD_CONCLUSION" ]; then
+            state=failure
+            description="Verification $BUILD_CONCLUSION"
+          elif [ -n "$BUILD_RUN_URL" ]; then
+            state=failure
+            description="Verification did not finish ($VERIFY_RESULT)"
           else
             state=failure
-            description="Verification $VERIFY_RESULT"
+            description="Verification did not start ($VERIFY_RESULT)"
+          fi
+
+          # The evidence is in the dispatched run, not this one, whenever it started.
+          target="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$BUILD_RUN_URL" ]; then
+            target="$BUILD_RUN_URL"
           fi
 
           sha=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
@@ -325,7 +406,7 @@ jobs:
             -f state="$state" \
             -f context='chromium-update / verify' \
             -f description="$description" \
-            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+            -f target_url="$target" > /dev/null
 
           if [ "$state" = "pending" ]; then
             echo "::notice::Chromium bump #$PR_NUMBER is unverified until its engine is published and the record-prebuilt commit is pushed to chore/chromium-update. Do not merge it before then."
@@ -333,7 +414,7 @@ jobs:
           fi
 
           if [ "$state" != "success" ]; then
-            echo "::error::Chromium bump #$PR_NUMBER is unverified (verify job: $VERIFY_RESULT). Do not merge it."
+            echo "::error::Chromium bump #$PR_NUMBER is unverified ($description). Do not merge it. $target"
             exit 1
           fi
           echo "Marked #$PR_NUMBER verified on $sha"

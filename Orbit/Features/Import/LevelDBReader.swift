@@ -80,7 +80,7 @@ enum LevelDBReader {
             throw LevelDBReadError.unreadable("CURRENT", reason: "missing")
         }
         let name = current.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { throw LevelDBReadError.malformed("CURRENT") }
+        guard !name.isEmpty, isValidManifestName(name) else { throw LevelDBReadError.malformed("CURRENT") }
 
         var manifest = Manifest()
         let data = try mapped(directory.appendingPathComponent(name, isDirectory: false))
@@ -90,6 +90,12 @@ enum LevelDBReader {
             }
         }
         return manifest
+    }
+
+    private static func isValidManifestName(_ name: String) -> Bool {
+        guard !name.contains("/"), !name.contains("\\") else { return false }
+        guard name != ".", name != ".." else { return false }
+        return !name.hasPrefix("~")
     }
 
     private static func applyVersionEdit(_ payload: UnsafeRawBufferPointer, to manifest: inout Manifest) {

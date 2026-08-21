@@ -333,6 +333,7 @@ nonisolated enum FilterListParser {
 
         if patternText.count > 2, patternText.hasPrefix("/"), patternText.hasSuffix("/") {
             let source = String(patternText.dropFirst().dropLast())
+            guard FilterRegexBounds.isSafe(source) else { return .invalidRegex }
             var options: NSRegularExpression.Options = []
             if !matchCase { options.insert(.caseInsensitive) }
             guard let regex = try? NSRegularExpression(pattern: source, options: options) else {
