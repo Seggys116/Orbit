@@ -30,7 +30,7 @@
     "OrbitTests/Fixtures/EventLiveness.json plus ChromiumExtensionEventLivenessLiveTests",
     "exist to catch. An event listed here must also be listed as notDispatched there."
   ],
-  "chromium_version": "152.0.7977.42",
+  "chromium_version": "152.0.7977.54",
   "neverDispatchedEvents": [
     "action.onClicked",
     "tabs.onReplaced",
