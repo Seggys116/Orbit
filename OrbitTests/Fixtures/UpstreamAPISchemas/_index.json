@@ -29,7 +29,7 @@
     "  for them, and can work out which permissions an ordinary extension can",
     "  really end up holding."
   ],
-  "chromium_version": "152.0.7977.42",
+  "chromium_version": "152.0.7977.54",
   "chrome_namespaces": [
     "accessibilityFeatures",
     "accessibilityPrivate",
