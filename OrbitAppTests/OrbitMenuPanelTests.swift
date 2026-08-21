@@ -335,6 +335,9 @@ final class OrbitMenuPanelTests: XCTestCase {
         window.isReleasedWhenClosed = false
         window.contentView = NSView(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
         defer { window.close() }
+        for other in NSApp.windows where other !== window && other.isVisible {
+            other.orderOut(nil)
+        }
         window.makeKeyAndOrderFront(nil)
         pump(seconds: 0.2)
         let callsBeforeDismiss = window.makeKeyAndOrderFrontCallCount
