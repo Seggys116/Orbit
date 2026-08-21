@@ -174,6 +174,7 @@ nonisolated enum CompiledFilterListCache {
             body = .segments(segments)
         case 1:
             let pattern = try reader.readString()
+            guard FilterRegexBounds.isSafe(pattern) else { throw BinaryReader.DecodeError.malformed }
             var options: NSRegularExpression.Options = []
             if !matchCase { options.insert(.caseInsensitive) }
             guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {

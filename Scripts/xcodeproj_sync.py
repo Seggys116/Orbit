@@ -38,6 +38,7 @@ ORBIT_TESTS_REUSED_SOURCES = [
     "Orbit/Engine/ContentBlocking/ContentBlockingTypes.swift",
     "Orbit/Engine/ContentBlocking/FilterListCatalog.swift",
     "Orbit/Engine/ContentBlocking/FilterListStore.swift",
+    "Orbit/Engine/ContentBlocking/FilterRegexBounds.swift",
     "Orbit/Engine/ContentBlocking/FilterRule.swift",
     "Orbit/Engine/ContentBlocking/FilterTokenizer.swift",
     "Orbit/Engine/ContentBlocking/RedirectResource.swift",
