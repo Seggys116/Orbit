@@ -1,16 +1,19 @@
 name: Build and test
+run-name: ${{ inputs.run_marker || 'Build and test' }}
 
 # The verification half of CI, factored out so that ci.yml and release.yml run
 # the identical checks. A tag push does not trigger ci.yml, and `needs:` does
 # not reach across workflows, so without this the release path would drift.
 on:
   workflow_call:
+  # Dispatched, not called, for a branch whose content is not trusted yet: the
+  # run's cache scope is then that branch rather than the default branch.
+  workflow_dispatch:
     inputs:
-      ref:
-        description: "Ref to check out. Empty means the caller's own ref."
+      run_marker:
+        description: "Run name, so a dispatching workflow can find this run again"
         required: false
         type: string
-        default: ""
 
 permissions:
   contents: read
@@ -22,8 +25,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Validate the Chromium manifest
         run: |
@@ -123,8 +124,6 @@ jobs:
       NSUnbufferedIO: "YES"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Show toolchain
         run: |
