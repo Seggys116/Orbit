@@ -24,6 +24,7 @@
 #include "orbit/browser/orbit_permission_store.h"
 #include "orbit/browser/orbit_protocol_handler_registry_delegate.h"
 #include "orbit/browser/orbit_ssl_host_state_delegate.h"
+#include "orbit/browser/orbit_web_authentication_delegate.h"
 #include "orbit/common/orbit_user_data_dir.h"
 
 namespace orbit {
@@ -37,6 +38,7 @@ std::unique_ptr<PrefService> BuildPrefService(const base::FilePath& profile_path
   extensions::ExtensionPrefs::RegisterProfilePrefs(registry.get());
   OrbitPermissionStore::RegisterProfilePrefs(registry.get());
   OrbitClientHintsControllerDelegate::RegisterProfilePrefs(registry.get());
+  OrbitWebAuthenticationDelegate::RegisterProfilePrefs(registry.get());
   custom_handlers::ProtocolHandlerRegistry::RegisterProfilePrefs(registry.get());
   // chrome.privacy.services.searchSuggestEnabled, and the Profile toggle in
   // Settings, are the same pref -- see orbit_preference_event_router.h.

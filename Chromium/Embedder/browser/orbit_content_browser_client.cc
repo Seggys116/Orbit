@@ -40,6 +40,7 @@
 #include "orbit/browser/orbit_http_auth_login_delegate.h"
 #include "orbit/browser/orbit_print_manager.h"
 #include "orbit/browser/orbit_video_overlay_window_mac.h"
+#include "orbit/browser/orbit_web_authentication_delegate.h"
 #include "orbit/browser/orbit_web_contents_host.h"
 #include "orbit/common/orbit_extensions_client.h"
 #include "orbit/common/orbit_user_agent.h"
@@ -605,6 +606,15 @@ void OrbitContentBrowserClient::GetAdditionalWebUISchemes(
 std::unique_ptr<content::DevToolsManagerDelegate>
 OrbitContentBrowserClient::CreateDevToolsManagerDelegate() {
   return std::make_unique<OrbitDevToolsManagerDelegate>();
+}
+
+content::WebAuthenticationDelegate*
+OrbitContentBrowserClient::GetWebAuthenticationDelegate() {
+  if (!web_authentication_delegate_) {
+    web_authentication_delegate_ =
+        std::make_unique<OrbitWebAuthenticationDelegate>();
+  }
+  return web_authentication_delegate_.get();
 }
 
 std::unique_ptr<content::VideoOverlayWindow>

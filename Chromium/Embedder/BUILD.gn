@@ -244,6 +244,8 @@ source_set("orbit_lib") {
     "browser/orbit_user_script_registry.h",
     "browser/orbit_video_overlay_window_mac.h",
     "browser/orbit_video_overlay_window_mac.mm",
+    "browser/orbit_web_authentication_delegate.cc",
+    "browser/orbit_web_authentication_delegate.h",
     "browser/orbit_web_contents_host.h",
     "browser/orbit_web_contents_host.mm",
     "browser/orbit_web_navigation_event_router.cc",
@@ -323,6 +325,9 @@ source_set("orbit_lib") {
     "//content/public/browser",
     "//content/public/common",
     "//content/public/renderer",
+    # GenerateCredentialMetadataSecret and AuthenticatorConfig, for
+    # browser/orbit_web_authentication_delegate.cc.
+    "//device/fido",
     "//extensions/browser",
     # chrome.storage.sync and chrome.storage.managed: browser/orbit_sync_value_store_cache.*
     # and browser/orbit_managed_value_store_cache.* subclass ValueStoreCache
