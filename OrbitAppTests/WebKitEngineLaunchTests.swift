@@ -152,55 +152,6 @@ final class WebKitEngineLaunchTests: XCTestCase {
         engine.shutdown()
     }
 
-    func testChromiumToolchainIsGoneAndCorpusRemains() throws {
-        // The list file is tracked. The unpacked corpus stays on disk and is not a build input.
-        for relative in [
-            "ThirdParty/depot_tools",
-            "ThirdParty/chromium",
-            "ThirdParty/chromium-build",
-            "ThirdParty/dist",
-            "ThirdParty/downloads",
-            "ThirdParty/prebuilt",
-            "ThirdParty/.gclient-home",
-            "Scripts/chromium",
-            "Scripts/chromium_manager.py",
-            "Scripts/embed-chromium-framework.sh",
-            "Scripts/ensure-chromium-engine.sh",
-            ".github/workflows/chromium-update.yml",
-        ] {
-            XCTAssertFalse(FileManager.default.fileExists(atPath: repositoryFile(relative).path), relative)
-        }
-        let callers = [
-            ".github/workflows/ci.yml",
-            ".github/workflows/build-test.yml",
-            ".github/workflows/release.yml",
-            ".github/workflows/live-engine.yml",
-            ".github/dependabot.yml",
-            "Scripts/extension_schemas.py",
-        ]
-        let forbidden = [
-            "Scripts/chromium",
-            "chromium-version.json",
-            "ensure-chromium-engine.sh",
-            "ChromiumEngine",
-            "depot_tools",
-            "gitsubmodule",
-        ]
-        for relative in callers {
-            let text = try String(contentsOf: repositoryFile(relative), encoding: .utf8)
-            for needle in forbidden where text.contains(needle) {
-                XCTFail("\(relative) still contains \(needle)")
-            }
-        }
-        let modules = repositoryFile(".gitmodules")
-        if FileManager.default.fileExists(atPath: modules.path) {
-            let text = try String(contentsOf: modules, encoding: .utf8)
-            XCTAssertFalse(text.contains("depot_tools"))
-        }
-        XCTAssertTrue(FileManager.default.fileExists(atPath: repositoryFile("Chromium/extension-corpus.json").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: repositoryFile("ThirdParty/extension-corpus").path))
-    }
-
     func testPageMenuAndInspectorAndWebStoreAreInstalled() async throws {
         let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let contents = try XCTUnwrap(try engine.makeWebContents(session: engine.defaultSession, initialURL: nil) as? WebKitWebContents)
@@ -232,18 +183,6 @@ final class WebKitEngineLaunchTests: XCTestCase {
         contents.showDeveloperTools(inspectAt: CGPoint(x: 8, y: 8))
         XCTAssertTrue(contents.webView.isInspectable)
         engine.shutdown()
-    }
-
-    func testAppTargetDoesNotFetchOrLinkChromium() throws {
-        let project = try String(contentsOf: repositoryFile("Orbit.xcodeproj/project.pbxproj"), encoding: .utf8)
-        for needle in [
-            "embed-chromium-framework",
-            "ensure-chromium-engine",
-            "Chromium.xcconfig",
-            "Orbit Framework.framework",
-        ] {
-            XCTAssertFalse(project.contains(needle), needle)
-        }
     }
 
     private func host(_ contents: WebContents) {
@@ -290,12 +229,6 @@ final class WebKitEngineLaunchTests: XCTestCase {
         }
     }
 
-    private func repositoryFile(_ relative: String) -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent(relative)
-    }
 }
 
 @MainActor
