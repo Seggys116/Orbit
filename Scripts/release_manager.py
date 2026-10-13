@@ -25,8 +25,6 @@ SCHEME = "Orbit"
 APP_NAME = "Orbit.app"
 
 RESOURCES_DIR = os.path.join(REPO_ROOT, "Orbit", "Resources")
-MANIFEST_PATH = os.path.join(REPO_ROOT, "Chromium", "chromium-version.json")
-GENERATED_XCCONFIG = os.path.join(REPO_ROOT, "Chromium", "Generated", "Chromium.xcconfig")
 
 DEFAULT_WORK_DIR = os.path.join(REPO_ROOT, "build", "release")
 
@@ -792,11 +790,6 @@ def project_sparkle_link_status() -> tuple:
             requirement = " ".join(f"{k}={v}" for k, v in sorted(req.items()))
     return True, f"Orbit target; {requirement or 'no requirement recorded'}"
 
-def load_manifest() -> dict:
-    if not os.path.exists(MANIFEST_PATH):
-        return {}
-    with open(MANIFEST_PATH, "r", encoding="utf-8") as handle:
-        return json.load(handle)
 
 _BUILD_SETTINGS_CACHE: dict = {}
 
@@ -827,7 +820,6 @@ def build_settings(target: str, configuration: str = "Release") -> dict:
 
 def resolve_version(explicit: str | None = None, manifest_only: bool = False) -> dict:
     """manifest_only answers without spawning xcodebuild, which is required inside an `xcodebuild test` (the build system's lock) and on Linux CI."""
-    manifest = load_manifest()
     settings = {} if manifest_only else build_settings("Orbit")
     marketing = explicit or settings.get("MARKETING_VERSION", "")
     return {
@@ -835,8 +827,8 @@ def resolve_version(explicit: str | None = None, manifest_only: bool = False) ->
         "build_version": settings.get("CURRENT_PROJECT_VERSION", ""),
         "bundle_identifier": settings.get("PRODUCT_BUNDLE_IDENTIFIER", ""),
         "deployment_target": settings.get("MACOSX_DEPLOYMENT_TARGET", ""),
-        "chromium_version": manifest.get("chromium_version", ""),
-        "chromium_channel": manifest.get("channel", ""),
+        "chromium_version": "",
+        "chromium_channel": "",
         "dmg_name": f"Orbit-{marketing}-{host_arch()}.dmg" if marketing else "",
     }
 
@@ -1414,7 +1406,7 @@ def cmd_archive(args) -> int:
 
     info(
         f"Archiving Orbit {resolved['marketing_version'] or '(version unset)'} "
-        f"for {' '.join(archs)} with Chromium {resolved['chromium_version']}"
+        f"for {' '.join(archs)} on system WebKit"
     )
     step(f"archive path: {archive_path}")
     run(command)
@@ -2073,7 +2065,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_version.add_argument("--json", action="store_true", help="machine-readable output")
     p_version.add_argument("--set", help="resolve as if MARKETING_VERSION were this")
     p_version.add_argument("--manifest-only", action="store_true",
-                           help="answer from Chromium/chromium-version.json alone; do not run xcodebuild")
+                           help="answer without running xcodebuild")
     p_version.set_defaults(func=cmd_version)
 
     p_ent = sub.add_parser("entitlements", help="show, regenerate or drift-check the per-role plists")

@@ -578,8 +578,7 @@ def guard_dcheck(_args) -> int:
     return report(
         "engine DCHECK configuration",
         scan_dcheck(),
-        "Scripts/chromium verify-engine --config shipping --bundle <Orbit.app>, which reads the "
-        "marker out of the framework a built bundle actually embeds",
+        "Scripts/release verify fails when Orbit Framework.framework is inside the built app",
         [
             "A DCHECK is a development assertion. Compiled in, it aborts the process",
             "that trips it; compiled out, it is not there at all. Which one a build",
