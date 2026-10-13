@@ -221,7 +221,23 @@ final class WebKitEngineLaunchTests: XCTestCase {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         XCTAssertTrue(inspectorOpen)
+        XCTAssertTrue(NSApp.windows.contains { $0.isVisible && $0.title.hasPrefix("Web Inspector") })
         XCTAssertTrue(contents.webView.isInspectable)
+        engine.shutdown()
+    }
+
+    func testDeveloperToolsWindowOpensOnRequest() async throws {
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
+        let contents = try XCTUnwrap(try engine.makeWebContents(session: engine.defaultSession, initialURL: nil) as? WebKitWebContents)
+        host(contents)
+        contents.loadHTML("<!doctype html><html><head><title>probe</title></head><body><p>page</p></body></html>", baseURL: URL(string: "https://example.com/probe"))
+        _ = try await waitForText(contents, script: "document.title", equals: "probe")
+        contents.showDeveloperTools(inspectAt: nil)
+        let open = try await waitForText(contents, script: "document.title", equals: "probe") { _ in
+            NSApp.windows.contains { $0.isVisible && $0.title.hasPrefix("Web Inspector") }
+        }
+        XCTAssertEqual(open, "probe")
+        XCTAssertTrue(NSApp.windows.contains { $0.isVisible && $0.title.hasPrefix("Web Inspector") })
         engine.shutdown()
     }
 
@@ -261,22 +277,12 @@ final class WebKitEngineLaunchTests: XCTestCase {
     }
 
     func testPictureInPicturePresentsThePlayingVideo() async throws {
-        let ffmpeg = URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg")
-        guard FileManager.default.isExecutableFile(atPath: ffmpeg.path) else {
-            throw XCTSkip("ffmpeg is not installed")
-        }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-pip-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let video = root.appendingPathComponent("clip.mp4")
-        let encode = Process()
-        encode.executableURL = ffmpeg
-        encode.arguments = ["-y", "-f", "lavfi", "-i", "color=c=black:s=160x90:d=1", "-pix_fmt", "yuv420p", video.path]
-        encode.standardOutput = FileHandle.nullDevice
-        encode.standardError = FileHandle.nullDevice
-        try encode.run()
-        encode.waitUntilExit()
-        XCTAssertEqual(encode.terminationStatus, 0)
+        let clip = Data(base64Encoded: Self.pictureInPictureClipBase64, options: .ignoreUnknownCharacters)
+        try XCTUnwrap(clip).write(to: video)
         let html = "<!doctype html><html><body><video id=\"v\" src=\"clip.mp4\" autoplay muted playsinline loop></video></body></html>"
         try html.write(to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
         let port = 18_981
@@ -306,8 +312,20 @@ final class WebKitEngineLaunchTests: XCTestCase {
             equals: "floating"
         )
         XCTAssertEqual(mode, "floating")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        contents.togglePictureInPicture()
+        let left = try await waitForText(
+            contents,
+            script: "(function(){var v=document.getElementById('v'); return (document.pictureInPictureElement || (v && v.webkitPresentationMode === 'picture-in-picture')) ? 'floating' : 'inline';})()",
+            equals: "inline"
+        )
+        XCTAssertEqual(left, "inline")
         engine.shutdown()
     }
+
+    private static let pictureInPictureClipBase64 = """
+    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
+    """
 
     func testClearingCacheReloadsTheDocument() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-cache-\(UUID().uuidString)", isDirectory: true)

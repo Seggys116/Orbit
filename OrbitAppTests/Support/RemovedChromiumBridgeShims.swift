@@ -40,7 +40,11 @@ final class OrbitChromiumBridge {
     var isReady = false
     var hasNewContentRequestCallback = false
     var supportsColorScheme = false
-    func togglePictureInPicture(_ handle: UnsafeMutableRawPointer) -> Bool { false }
+    func togglePictureInPicture(_ handle: UnsafeMutableRawPointer) -> Bool {
+        let contents = Unmanaged<WebKitWebContents>.fromOpaque(handle).takeUnretainedValue()
+        contents.togglePictureInPicture()
+        return true
+    }
 }
 
 @MainActor

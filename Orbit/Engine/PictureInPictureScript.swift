@@ -18,19 +18,20 @@ public enum PictureInPictureScript {
         return String(error);
       }
       try {
-        if (document.pictureInPictureElement) {
-          var exiting = document.exitPictureInPicture();
-          if (exiting && exiting.catch) {
-            exiting.catch(function(e) { report('exit rejected — ' + describe(e)); });
-          }
-          return true;
-        }
         var all = Array.prototype.slice.call(document.querySelectorAll('video'));
         var presented = all.filter(function(v) {
           return v.webkitPresentationMode === 'picture-in-picture';
         });
-        if (presented.length > 0) {
-          presented.forEach(function(v) { v.webkitSetPresentationMode('inline'); });
+        if (document.pictureInPictureElement || presented.length > 0) {
+          all.forEach(function(v) {
+            if (v.webkitSetPresentationMode) { v.webkitSetPresentationMode('inline'); }
+          });
+          if (document.pictureInPictureElement) {
+            var exiting = document.exitPictureInPicture();
+            if (exiting && exiting.catch) {
+              exiting.catch(function(e) { report('exit rejected — ' + describe(e)); });
+            }
+          }
           return true;
         }
 

@@ -1,5 +1,4 @@
-//  Live Chromium suites cannot start the deleted embedder. isEnabled stays false
-//  so ORBIT_LIVE_ENGINE cannot wait on OrbitChromiumBridge.
+//  Live suites run on the WebKit engine. They must not skip.
 
 import Foundation
 @testable import Orbit
@@ -7,8 +6,9 @@ import Foundation
 @MainActor
 enum LiveChromiumEngineHost {
 
-    /// Always false. The Chromium embedder is gone, and OrbitChromiumBridge.isReady never flips.
-    static var isEnabled: Bool { false }
+    /// The live suites run on the WebKit engine. Skipping them is how DevTools,
+    /// picture-in-picture, and WebGL never got exercised.
+    static var isEnabled: Bool { true }
 
     private static var engine: ChromiumEngine?
 
