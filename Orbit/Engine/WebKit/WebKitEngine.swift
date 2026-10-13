@@ -237,7 +237,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
     func makeConfiguration(session: WebKitSession, bridge: WKScriptMessageHandler) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
-        WebKitMediaPreferences.allowPictureInPicture(configuration)
+        WebKitMediaPreferences.enable(configuration)
         configuration.websiteDataStore = session.dataStore
         configuration.webExtensionController = extensionController
         configuration.setURLSchemeHandler(schemeHandler, forURLScheme: "orbit")

@@ -1,5 +1,5 @@
-//  Proves WebGL/WebGPU are backed by the Metal GPU, not SwiftShader (which still
-//  renders, just wrongly). Served over LiveHTTPTestServer since navigator.gpu needs a secure context.
+//  Proves WebGL and WebGPU run on the WebKit engine against the real GPU.
+//  Served over http://127.0.0.1 because navigator.gpu needs a secure context.
 
 import AppKit
 import Foundation
@@ -8,6 +8,22 @@ import XCTest
 
 @MainActor
 final class GPUAccelerationLiveTests: XCTestCase {
+    private var windows: [NSWindow] = []
+    private var servers: [LiveHTTPTestServer] = []
+    private var engines: [WebKitEngine] = []
+
+    override func tearDown() {
+        windows.forEach {
+            $0.contentView = nil
+            $0.orderOut(nil)
+        }
+        windows.removeAll()
+        engines.forEach { $0.shutdown() }
+        engines.removeAll()
+        servers.forEach { $0.stop() }
+        servers.removeAll()
+        super.tearDown()
+    }
 
     // Distinct from any UI colour, and distinct from each other, so a capture
     // proves which API painted it.
@@ -16,21 +32,9 @@ final class GPUAccelerationLiveTests: XCTestCase {
 
     // MARK: - WebGL
 
-    func testWebGLAndWebGL2AreBackedByTheRealGPUAndReadBackWhatTheyDrew() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let report = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> [String: Any] in
-            let server = try LiveHTTPTestServer(routes: [
-                "/": LiveHTTPTestServer.Route(contentType: "text/html", body: GPUAccelerationLiveTests.webGLPage),
-            ])
-            defer { server.stop() }
-
-            let contents = try await LiveChromiumEngineHost.makeContents()
-            defer { contents.close() }
-            contents.view.frame = NSRect(x: 0, y: 0, width: 320, height: 240)
-            contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
-            return try await GPUAccelerationLiveTests.pageProbeResult(contents)
-        }
+    func testWebGLAndWebGL2AreBackedByTheRealGPUAndReadBackWhatTheyDrew() async throws {
+        let contents = try await load(Self.webGLPage)
+        let report = try await Self.pageProbeResult(contents)
 
         for version in ["webgl", "webgl2"] {
             let info = try XCTUnwrap(report[version] as? [String: Any], "no report for \(version)")
@@ -45,13 +49,14 @@ final class GPUAccelerationLiveTests: XCTestCase {
             )
             // SwiftShader is Chromium's CPU fallback; a page that lands on it
             // renders, so nothing fails loudly on its own.
+            let lowered = renderer.lowercased()
             XCTAssertFalse(
-                renderer.lowercased().contains("swiftshader"),
-                "\(version) fell back to SwiftShader (software) instead of the GPU: \(renderer)"
+                lowered.contains("swiftshader") || lowered.contains("llvmpipe") || lowered.contains("softpipe"),
+                "\(version) fell back to a software renderer: \(renderer)"
             )
             XCTAssertTrue(
-                renderer.contains("Metal"),
-                "\(version) is not on the Metal backend — hardware acceleration is not actually in use: \(renderer)"
+                lowered.contains("apple") || lowered.contains("metal") || lowered.contains("amd") || lowered.contains("intel") || lowered.contains("nvidia"),
+                "\(version) is not on a hardware GPU: \(renderer)"
             )
             let pixel = try XCTUnwrap(info["pixel"] as? [Int], "\(version) reported no readPixels result")
             XCTAssertEqual(pixel.count, 4)
@@ -61,22 +66,10 @@ final class GPUAccelerationLiveTests: XCTestCase {
         }
     }
 
-    func testWebGLCanvasReachesTheCompositorAsNonBlankPixels() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let sampled = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> (Int, Int, Int)? in
-            let server = try LiveHTTPTestServer(routes: [
-                "/": LiveHTTPTestServer.Route(contentType: "text/html", body: GPUAccelerationLiveTests.webGLPage),
-            ])
-            defer { server.stop() }
-
-            let contents = try await LiveChromiumEngineHost.makeContents()
-            defer { contents.close() }
-            contents.view.frame = NSRect(x: 0, y: 0, width: 320, height: 240)
-            contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
-            _ = try await GPUAccelerationLiveTests.pageProbeResult(contents)
-            return await GPUAccelerationLiveTests.centrePixel(of: contents)
-        }
+    func testWebGLCanvasReachesTheCompositorAsNonBlankPixels() async throws {
+        let contents = try await load(Self.webGLPage)
+        _ = try await Self.pageProbeResult(contents)
+        let sampled = await Self.centrePixel(of: contents)
 
         let pixel = try XCTUnwrap(sampled, "capturePreview returned nothing for a page whose only content is a WebGL canvas")
         // The page's own background is white and the canvas covers it entirely,
@@ -92,21 +85,9 @@ final class GPUAccelerationLiveTests: XCTestCase {
 
     // MARK: - WebGPU
 
-    func testWebGPUExposesAnAdapterAndDeviceOnTheRealGPU() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let report = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> [String: Any] in
-            let server = try LiveHTTPTestServer(routes: [
-                "/": LiveHTTPTestServer.Route(contentType: "text/html", body: GPUAccelerationLiveTests.webGPUPage),
-            ])
-            defer { server.stop() }
-
-            let contents = try await LiveChromiumEngineHost.makeContents()
-            defer { contents.close() }
-            contents.view.frame = NSRect(x: 0, y: 0, width: 320, height: 240)
-            contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
-            return try await GPUAccelerationLiveTests.pageProbeResult(contents)
-        }
+    func testWebGPUExposesAnAdapterAndDeviceOnTheRealGPU() async throws {
+        let contents = try await load(Self.webGPUPage)
+        let report = try await Self.pageProbeResult(contents)
 
         XCTAssertEqual(
             report["hasNavigatorGPU"] as? Bool, true,
@@ -136,22 +117,10 @@ final class GPUAccelerationLiveTests: XCTestCase {
         )
     }
 
-    func testWebGPUCanvasReachesTheCompositorAsNonBlankPixels() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let sampled = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> (Int, Int, Int)? in
-            let server = try LiveHTTPTestServer(routes: [
-                "/": LiveHTTPTestServer.Route(contentType: "text/html", body: GPUAccelerationLiveTests.webGPUPage),
-            ])
-            defer { server.stop() }
-
-            let contents = try await LiveChromiumEngineHost.makeContents()
-            defer { contents.close() }
-            contents.view.frame = NSRect(x: 0, y: 0, width: 320, height: 240)
-            contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
-            _ = try await GPUAccelerationLiveTests.pageProbeResult(contents)
-            return await GPUAccelerationLiveTests.centrePixel(of: contents)
-        }
+    func testWebGPUCanvasReachesTheCompositorAsNonBlankPixels() async throws {
+        let contents = try await load(Self.webGPUPage)
+        _ = try await Self.pageProbeResult(contents)
+        let sampled = await Self.centrePixel(of: contents)
 
         let pixel = try XCTUnwrap(sampled, "capturePreview returned nothing for a page whose only content is a WebGPU canvas")
         GPUAccelerationLiveTests.assertNotBlank(pixel, api: "WebGPU")
@@ -159,6 +128,29 @@ final class GPUAccelerationLiveTests: XCTestCase {
             pixel.0 > pixel.2 && pixel.2 > pixel.1,
             "composited WebGPU pixel \(pixel) is not the magenta clear colour the render pass wrote"
         )
+    }
+
+    private func load(_ html: String) async throws -> WebKitWebContents {
+        let server = try LiveHTTPTestServer(routes: [
+            "/": LiveHTTPTestServer.Route(contentType: "text/html", body: html),
+        ])
+        servers.append(server)
+        let engine = try XCTUnwrap(EngineFactory.makeEngine(storage: .ephemeral) as? WebKitEngine)
+        engines.append(engine)
+        let contents = try XCTUnwrap(try engine.makeWebContents(session: engine.defaultSession, initialURL: nil) as? WebKitWebContents)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isRestorable = false
+        window.contentView = contents.view
+        contents.view.frame = window.contentView?.bounds ?? .zero
+        window.makeKeyAndOrderFront(nil)
+        windows.append(window)
+        contents.load(server.baseURL)
+        return contents
     }
 
     /// The fixture pages paint white until their canvas does anything, so

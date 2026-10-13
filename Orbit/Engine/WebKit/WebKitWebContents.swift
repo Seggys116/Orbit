@@ -2,14 +2,18 @@ import AppKit
 import WebKit
 
 enum WebKitMediaPreferences {
-    // The public flag is iOS-only. Without the private setter, video reports no picture-in-picture support.
-    static func allowPictureInPicture(_ configuration: WKWebViewConfiguration) {
-        let preferences = configuration.preferences
-        let selector = NSSelectorFromString("_setAllowsPictureInPictureMediaPlayback:")
-        guard preferences.responds(to: selector) else { return }
-        let implementation = preferences.method(for: selector)
+    // Picture-in-picture's public flag is iOS-only. WebGL stays explicitly on.
+    static func enable(_ configuration: WKWebViewConfiguration) {
+        setTrue(configuration.preferences, "_setAllowsPictureInPictureMediaPlayback:")
+        setTrue(configuration.preferences, "_setWebGLEnabled:")
+    }
+
+    private static func setTrue(_ object: NSObject, _ name: String) {
+        let selector = NSSelectorFromString(name)
+        guard object.responds(to: selector) else { return }
+        let implementation = object.method(for: selector)
         typealias Function = @convention(c) (AnyObject, Selector, Bool) -> Void
-        unsafeBitCast(implementation, to: Function.self)(preferences, selector, true)
+        unsafeBitCast(implementation, to: Function.self)(object, selector, true)
     }
 }
 
@@ -66,7 +70,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         } else {
             configuration = engine.makeConfiguration(session: session, bridge: bridge)
         }
-        WebKitMediaPreferences.allowPictureInPicture(configuration)
+        WebKitMediaPreferences.enable(configuration)
         let view = OrbitWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         view.isInspectable = true
         configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
@@ -136,7 +140,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     private func replaceWebView(with configuration: WKWebViewConfiguration, extensionHost: String?) {
-        WebKitMediaPreferences.allowPictureInPicture(configuration)
+        WebKitMediaPreferences.enable(configuration)
         let replacement = OrbitWebView(frame: webView.frame, configuration: configuration)
         replacement.menuOwner = self
         replacement.isInspectable = true
