@@ -1,86 +1,13 @@
 # Live engine
 #
-# Disabled on 2026-08-09 on the grounds that the direct-Chromium bridge could
-# not start an engine, and re-enabled on 2026-08-10 because it can: the suites
-# start a real browser today, and while it was disabled GitHub rendered the
-# skipped job as a non-red check, so nothing noticed that every live test the
-# plain `xcodebuild test` job skips on the grounds that this job covers them was
-# running in no job at all. A job that is off is not a check.
-#
-# The only job in this repository that runs Orbit's live-engine suites: a real
-# browser process, real helper subprocesses, a real window, real page loads, and
-# assertions on what Chromium's own compositor produced. Everything the main CI
-# job runs stops at or above the `WebContents` seam, which is why four
-# user-visible defects fixed on 2026-08-06 -- every HTML page rendered in quirks
-# mode, document-start scripts blocked by `strict-dynamic` CSP on the sites the
-# now-playing card exists for, a media card that vanished on pause, and a
-# picture-in-picture request Chromium refused every single time -- were all
-# invisible to a fully green suite.
-#
-# The suites existed before this job did. They had never run in CI, for two
-# compounding reasons, both now fixed: the plain `xcodebuild test` job runs
-# without the live-engine switch, and the switch as documented
-# (`ORBIT_LIVE_ENGINE=1 xcodebuild test`) cannot work at all -- xcodebuild does
-# not hand its own environment to a hosted test target's process, so the run
-# skipped and reported success. `Scripts/live-engine-tests`, which this job is a
-# thin wrapper around, has the full account and the measured evidence.
-#
-# ## Why nightly and on a label, rather than on every push
-#
-# Honest accounting of what this job needs and costs:
-#
-#   * A real window server and a real GPU. The suites put an NSWindow on screen
-#     and read frames back through `Page.captureScreenshot`. A runner that gives
-#     Chromium a software rasteriser still passes -- the colour oracle compares
-#     dominant channels, not exact pixels -- but the timing margins are the
-#     runner's, not ours.
-#   * Five helper processes and a browser's whole start-up, before the first
-#     assertion.
-#   * Wall clock. Measured locally on an M-series laptop, 2026-08-06: the whole
-#     live set (twelve tests at the time) ran in about 45 seconds per
-#     configuration, so roughly a minute and a half for both, on top of a
-#     `build-for-testing`. On a shared runner with a software GPU, expect
-#     several times that.
-#   * Timeouts, not assertions, are how a broken engine shows up here. The
-#     oracles wait up to 25 s for a navigation to settle; a slow runner and a
-#     genuinely stalled load look the same for the first 24 of those seconds.
-#
-# That last point is the deciding one. Putting this on every pull request would
-# put a slow, timing-sensitive job on the critical path of every change,
-# including the many that cannot possibly affect the engine, and the first time
-# it flaked people would start re-running red checks by reflex -- which is how a
-# real live failure gets waved through. A required check nobody believes is
-# worse than no check.
-#
-# So: nightly against main, on demand, and on any pull request labelled
-# `live-engine`. The label is the pre-merge route and it is the one to use for
-# anything touching Orbit/Engine/, the injected page scripts, content blocking
-# or WebContentsHostView. The nightly run is what makes sure the suites still
-# work at all, which is precisely what nobody noticed for as long as they were
-# opt-in and undocumented-in-practice.
-#
-# If this job ever earns its place on every pull request -- consistently green
-# for a long stretch, comfortably inside its timeout -- moving it is a one-line
-# change to the triggers below. Do that on evidence, not on principle.
-#
-# ## What has not been measured
-#
-# Everything above about the script, the environment patching and the counting
-# was verified locally, repeatedly, against a real engine. What could not be
-# verified from a laptop is this job itself: whether a GitHub-hosted `macos-26`
-# runner gives Chromium a window server and a GPU it is happy with. That is what
-# the first scheduled run answers. If it does not -- if the engine cannot start,
-# or paints nothing -- the failure will be loud and specific (`Chromium engine
-# failed to start`, or a capture oracle reporting a blank frame) rather than a
-# silent skip, which is the property this whole change was about.
+# Nightly, on demand, and on pull requests labelled live-engine.
+# Runs the WebKit launch and Chrome-extension tests.
 
 name: Live engine
 
 on:
   schedule:
-    # 04:30 UTC daily: off-peak, and clear of the 23:00 UTC daily Chromium
-    # update check (which only builds Chromium itself on a self-hosted runner
-    # when the version actually changes, not on this runner).
+    # 04:30 UTC daily, off-peak.
     - cron: "30 4 * * *"
   workflow_dispatch:
   pull_request:

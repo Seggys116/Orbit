@@ -152,6 +152,36 @@ final class WebKitEngineLaunchTests: XCTestCase {
         engine.shutdown()
     }
 
+    func testChromiumToolchainIsGoneAndCorpusRemains() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let callers = [
+            ".github/workflows/ci.yml",
+            ".github/workflows/build-test.yml",
+            ".github/workflows/release.yml",
+            ".github/workflows/live-engine.yml",
+            ".github/dependabot.yml",
+            "Scripts/extension_schemas.py",
+        ]
+        let forbidden = [
+            "Scripts/chromium",
+            "chromium-version.json",
+            "ensure-chromium-engine.sh",
+            "ChromiumEngine",
+            "depot_tools",
+            "gitsubmodule",
+            "ThirdParty/chromium",
+        ]
+        for relative in callers {
+            let text = try String(contentsOf: root.appendingPathComponent(relative), encoding: .utf8)
+            for needle in forbidden where text.contains(needle) {
+                XCTFail("\(relative) still contains \(needle)")
+            }
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Chromium/extension-corpus.json").path))
+    }
+
     func testPageMenuAndInspectorAndWebStoreAreInstalled() async throws {
         let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let contents = try XCTUnwrap(try engine.makeWebContents(session: engine.defaultSession, initialURL: nil) as? WebKitWebContents)

@@ -6,25 +6,12 @@ checkout and no version pin. This script diffs Orbit against that snapshot.
 """
 
 import argparse
-import hashlib
 import json
 import os
 import re
-import shutil
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UPSTREAM_SRC = os.path.join(REPO_ROOT, "ThirdParty", "chromium", "src")
-CHROME_API_DIR = os.path.join(UPSTREAM_SRC, "chrome", "common", "extensions", "api")
-CORE_API_DIR = os.path.join(UPSTREAM_SRC, "extensions", "common", "api")
-CORE_PERMISSIONS_CC = os.path.join(
-    UPSTREAM_SRC, "extensions", "common", "permissions", "extensions_api_permissions.cc"
-)
-DNR_CONSTANTS_CC = os.path.join(CORE_API_DIR, "declarative_net_request", "constants.cc")
-VENDORED_PERMISSION_FEATURES = {
-    "_chrome_permission_features.json": os.path.join(CHROME_API_DIR, "_permission_features.json"),
-    "_core_permission_features.json": os.path.join(CORE_API_DIR, "_permission_features.json"),
-}
 WRAPPER_PATH = os.path.join(REPO_ROOT, "Orbit", "Engine", "WebKit", "ChromeAPIWrapperScript.swift")
 VENDOR_DIR = os.path.join(REPO_ROOT, "OrbitTests", "Fixtures", "UpstreamAPISchemas")
 EXPECTATIONS_PATH = os.path.join(REPO_ROOT, "OrbitTests", "Fixtures", "ExpectedAPIGaps.json")
@@ -132,64 +119,9 @@ def load_schema(path):
     return parsed if isinstance(parsed, list) else [parsed]
 
 
-# MARK: - Namespace discovery
-
-PARTIAL_INTERFACE = re.compile(r"partial\s+interface\s+([A-Za-z0-9_]+)\s*\{(.*?)\n\};", re.S)
-STATIC_ATTRIBUTE = re.compile(r"static\s+attribute\s+([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\s*;")
-IDL_NAMESPACE = re.compile(r"^\s*namespace\s+([A-Za-z0-9_.]+)\s*\{", re.M)
-
-
-def schema_files(root):
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
-        for name in sorted(filenames):
-            if name.startswith("_"):
-                continue
-            if name.endswith((".json", ".idl", ".webidl")):
-                yield os.path.join(dirpath, name)
-
-
-def namespaces_in(root):
-    """Every API namespace a schema directory declares.
-
-    .json states its own `namespace`; .webidl states it structurally -- a nested
-    `partial interface System { attribute CPU cpu; }` names `system.cpu`.
-    """
-    names = set()
-    edges = {}
-    for path in schema_files(root):
-        base = os.path.basename(path)
-        if base.endswith(".json"):
-            try:
-                entries = load_schema(path)
-            except ValueError:
-                continue
-            for entry in entries:
-                if isinstance(entry, dict) and entry.get("namespace"):
-                    names.add(entry["namespace"])
-            continue
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            text = re.sub(r"^\s*//.*$", "", handle.read(), flags=re.M)
-        for match in IDL_NAMESPACE.finditer(text):
-            names.add(match.group(1))
-        for match in PARTIAL_INTERFACE.finditer(text):
-            parent = match.group(1)
-            for attribute in STATIC_ATTRIBUTE.finditer(match.group(2)):
-                edges.setdefault(parent, []).append((attribute.group(1), attribute.group(2)))
-
-    def walk(interface, prefix, depth, seen):
-        if depth > 4 or interface in seen:
-            return
-        for type_name, attribute_name in edges.get(interface, []):
-            full = prefix + attribute_name
-            names.add(full)
-            walk(type_name, full + ".", depth + 1, seen | {interface})
-
-    walk("Browser", "", 0, frozenset())
-    return names
-
-
 # MARK: - Member surface
+
+IDL_NAMESPACE = re.compile(r"^\s*namespace\s+([A-Za-z0-9_.]+)\s*\{", re.M)
 
 
 def property_paths(properties, prefix=""):
@@ -366,72 +298,7 @@ def permission_feature_names(path):
     return names
 
 
-def string_constants(path):
-    """`const char kFoo[] = "bar";` -> {"kFoo": "bar"}."""
-    with open(path, encoding="utf-8") as handle:
-        source = handle.read()
-    return dict(re.findall(r'const\s+char\s+(\w+)\[\]\s*=\s*"([^"]*)"\s*;', source))
-
-
-def core_registered_permissions():
-    """//extensions' own `permissions_to_register` table, as (all, internal).
-
-    Every non-internal name reaches PermissionsInfo via CoreExtensionsAPIProvider;
-    permissions_parser.cc DCHECKs on any that has no permission feature.
-    """
-    with open(CORE_PERMISSIONS_CC, encoding="utf-8") as handle:
-        source = handle.read()
-    start = source.find("permissions_to_register[] = {")
-    end = source.find("\n};", start)
-    if start < 0 or end < 0:
-        sys.exit("error: no permissions_to_register array literal in %s" % CORE_PERMISSIONS_CC)
-    body = strip_comments(source[start:end])
-    constants = string_constants(DNR_CONSTANTS_CC)
-
-    names, internal = set(), set()
-    for entry in re.split(r"\{APIPermissionID::", body)[1:]:
-        match = re.match(r"\w+,\s*([^,}]+)", entry, re.S)
-        if not match:
-            sys.exit("error: unparsable permission entry in %s: %r" % (CORE_PERMISSIONS_CC, entry[:80]))
-        token = match.group(1).strip()
-        if token.startswith('"'):
-            name = token.strip('"')
-        else:
-            name = constants.get(token.rsplit("::", 1)[-1])
-            if name is None:
-                sys.exit(
-                    "error: %s names a permission by the constant %s, which this script cannot "
-                    "resolve. Add its defining file to string_constants() -- leaving it unresolved "
-                    "would silently drop the permission from the feature-coverage guard."
-                    % (CORE_PERMISSIONS_CC, token)
-                )
-        names.add(name)
-        if "kFlagInternal" in entry:
-            internal.add(name)
-    return names, internal
-
-
 # MARK: - Vendoring
-
-
-def chromium_version():
-    return load_index().get("chromium_version", "vendored")
-
-
-def sha256_of(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 16), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def require_upstream():
-    if not os.path.isdir(CHROME_API_DIR):
-        sys.exit(
-            "error: schemas are vendored in OrbitTests/Fixtures/UpstreamAPISchemas. "
-            "There is no Chromium checkout to sync from."
-        )
 
 
 def cmd_sync(_args):
@@ -516,7 +383,7 @@ def cmd_status(_args):
 def main(argv):
     parser = argparse.ArgumentParser(prog="extension-schemas", description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("sync", help="vendor upstream schemas for the pinned Chromium").set_defaults(func=cmd_sync)
+    subparsers.add_parser("sync", help="refuses: the schema snapshot is already vendored").set_defaults(func=cmd_sync)
     diff = subparsers.add_parser("diff", help="print Orbit's gaps against the vendored snapshot")
     diff.add_argument("--json", action="store_true")
     diff.set_defaults(func=cmd_diff)
