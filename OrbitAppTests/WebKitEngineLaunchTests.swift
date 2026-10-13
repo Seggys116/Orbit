@@ -153,6 +153,7 @@ final class WebKitEngineLaunchTests: XCTestCase {
     }
 
     func testChromiumToolchainIsGoneAndCorpusRemains() throws {
+        // The list file is tracked. The unpacked corpus stays on disk and is not a build input.
         for relative in [
             "ThirdParty/depot_tools",
             "ThirdParty/chromium",
