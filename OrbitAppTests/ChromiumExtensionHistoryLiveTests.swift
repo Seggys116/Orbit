@@ -166,7 +166,7 @@ final class ChromiumExtensionHistoryLiveTests: LiveEnvironmentTestCase {
         bridge.windowFocusChanged(owner: env)
 
         let store = try XCTUnwrap(
-            env.chromiumHistoryStore,
+            env.browserHistory,
             "the demo environment opened no HistoryStore, so nothing below could be verified against a real one"
         )
         let space = try XCTUnwrap(env.activeSpace)

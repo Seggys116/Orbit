@@ -25,8 +25,6 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
 
     private var adoptedSession: WindowSession?
 
-    private var lastPushedWindowState: OrbitWindowState?
-
     // Must be called before configure()/installContentView(window:); the hosting
     // view captures session.environment at construction time.
     func adopt(_ session: WindowSession) {
@@ -157,31 +155,6 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
         // shared/standard environment, which can back multiple windows, needs registering here.
         session.environment.startEngineIfNeeded()
         installContentView(window: window)
-        // After the engine start above: the bridge cannot push to C until its
-        // symbols are resolved.
-        if !OrbitChromiumTabsBridge.shared.isWindowRegistered(session.environment) {
-            OrbitChromiumTabsBridge.shared.windowCreated(owner: session.environment, focused: false)
-        }
-        pushChromiumWindowState()
-    }
-
-    // chrome.windows' Window.state must read the real NSWindow: before this, a minimized,
-    // zoomed or fullscreen window all reported as "normal".
-    private func pushChromiumWindowState() {
-        guard let window else { return }
-        let state: OrbitWindowState
-        if window.isMiniaturized {
-            state = .minimized
-        } else if window.styleMask.contains(.fullScreen) {
-            state = .fullscreen
-        } else if window.isZoomed {
-            state = .maximized
-        } else {
-            state = .normal
-        }
-        guard state != lastPushedWindowState else { return }
-        lastPushedWindowState = state
-        OrbitChromiumTabsBridge.shared.windowStateChanged(owner: session.environment, state: state)
     }
 
     // Hidden, not removed: Cmd+W and Mission Control's window menu still need the real
@@ -225,28 +198,6 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
         // WindowSession.dispose() handles incognito/torn-off's own windowRemoved push; the shared
         // environment is never unregistered here, or its still-registered tabs would be orphaned.
         session.dispose()
-    }
-
-    func windowDidBecomeKey(_ notification: Notification) {
-        OrbitChromiumTabsBridge.shared.windowFocusChanged(owner: session.environment)
-    }
-
-    func windowDidMiniaturize(_ notification: Notification) { pushChromiumWindowState() }
-
-    func windowDidDeminiaturize(_ notification: Notification) { pushChromiumWindowState() }
-
-    func windowDidEnterFullScreen(_ notification: Notification) { pushChromiumWindowState() }
-
-    func windowDidExitFullScreen(_ notification: Notification) { pushChromiumWindowState() }
-
-    // Zoom (green button) is implemented as a resize, so this hook also catches it; the
-    // cached-state comparison in pushChromiumWindowState dedupes the live-resize storm.
-    func windowDidResize(_ notification: Notification) { pushChromiumWindowState() }
-
-    func windowDidResignKey(_ notification: Notification) {
-        let orbitWindows = OrbitWindowController.openControllers.compactMap(\.window)
-        guard !OrbitWindowController.isAttached(NSApp.keyWindow, toOneOf: orbitWindows) else { return }
-        OrbitChromiumTabsBridge.shared.windowFocusChanged(owner: nil)
     }
 
     // A popover/sheet child window taking key status is not Orbit losing focus. Extension

@@ -66,7 +66,7 @@ enum DemoEngineProbe {
         checkRealProfileUntouched()
 
         if failures.isEmpty {
-            emit("VERDICT: PASS — OrbitDemo is running Orbit's embedded Chromium \(ChromiumBuild.version), on a persistent non-ephemeral session, and left the real profile alone.")
+            emit("VERDICT: PASS — OrbitDemo is running system WebKit, on a persistent non-ephemeral session, and left the real profile alone.")
             NSApp.terminate(nil)
             exit(0)
         } else {
@@ -84,20 +84,18 @@ enum DemoEngineProbe {
             return
         }
         let typeName = String(describing: type(of: engine))
-        guard let chromium = engine as? ChromiumEngine else {
-            fail("engine is \(typeName), not ChromiumEngine.")
+        guard engine is WebKitEngine else {
+            fail("engine is \(typeName), not WebKitEngine.")
             return
         }
         emit("OK   engine type: \(typeName)")
         emit("OK   engine kind: \(type(of: engine).kind.rawValue)")
 
-        // versionDescription comes back through the dlsym'd OrbitChromiumVersionNumber, so it is
-        // the loaded engine binary talking, not a Swift constant describing what should be there.
-        let version = chromium.versionDescription
-        if version.contains(ChromiumBuild.version) {
-            emit("OK   engine version: \(version) (matches the pinned \(ChromiumBuild.version))")
+        let version = engine.versionDescription
+        if version.contains("WebKit") {
+            emit("OK   engine version: \(version)")
         } else {
-            fail("the running engine reports \(version), but this build is pinned to Chromium \(ChromiumBuild.version) — the app is not running the Chromium it was built against.")
+            fail("the running engine reports \(version), which does not name WebKit.")
         }
 
         let capabilities = engine.capabilities
@@ -107,7 +105,7 @@ enum DemoEngineProbe {
             (.backgroundSnapshots, "backgroundSnapshots"),
             (.developerTools, "developerTools"),
         ] where !capabilities.contains(required.0) {
-            fail("the engine does not advertise .\(required.1), which ChromiumEngine declares — this is not a full Chromium embed.")
+            fail("the engine does not advertise .\(required.1).")
         }
         emit("OK   engine capabilities: extensions, contentBlocking, backgroundSnapshots, developerTools")
     }
@@ -119,50 +117,15 @@ enum DemoEngineProbe {
             .appendingPathComponent("Contents/Frameworks", isDirectory: true)
         let framework = frameworks
             .appendingPathComponent("Orbit Framework.framework", isDirectory: true)
-        let versioned = framework.appendingPathComponent("Versions/A", isDirectory: true)
-
-        let binary = versioned.appendingPathComponent("Orbit Framework", isDirectory: false)
-        if FileManager.default.isExecutableFile(atPath: binary.path) {
-            emit("OK   embedded framework binary: \(binary.path)")
+        if FileManager.default.fileExists(atPath: framework.path) {
+            fail("Orbit Framework.framework is still in the app bundle at \(framework.path)")
         } else {
-            fail("no executable Orbit Framework binary at \(binary.path)")
+            emit("OK   no Chromium framework in the app bundle")
         }
-
-        // Named individually, not counted: three correct helpers and one missing one looks like a
-        // near-right count. The names come from Chromium/Embedder/BUILD.gn's helper bundles, which
-        // are nested inside the framework rather than beside it.
-        for suffix in ["", " (GPU)", " (Renderer)"] {
-            let name = "Orbit Helper\(suffix)"
-            let executable = versioned
-                .appendingPathComponent("Helpers/\(name).app/Contents/MacOS/\(name)")
-            if FileManager.default.isExecutableFile(atPath: executable.path) {
-                emit("OK   helper: \(name).app")
-            } else {
-                fail("missing or non-executable helper at \(executable.path)")
-            }
-        }
-
-        for resource in ["orbit_resources.pak", "icudtl.dat", "v8_context_snapshot.arm64.bin"] {
-            let url = versioned.appendingPathComponent("Resources/\(resource)", isDirectory: false)
-            if FileManager.default.fileExists(atPath: url.path) {
-                emit("OK   engine resource: \(resource)")
-            } else {
-                fail("missing engine resource \(resource) at \(url.path)")
-            }
-        }
-
-        // On disk is not the same claim as loaded: this walks dyld's own image list, so it can only
-        // be satisfied by the framework this process really dlopen'd.
-        let loadedPath = loadedFrameworkPath()
-        if let loadedPath {
-            emit("OK   dyld has the engine framework loaded: \(loadedPath)")
-            if loadedPath.hasPrefix(framework.path) {
-                emit("OK   the loaded framework is this bundle's own copy, not one from elsewhere on disk")
-            } else {
-                fail("the loaded Orbit Framework is at \(loadedPath), which is outside this app bundle (\(framework.path)) — the demo is running someone else's engine.")
-            }
+        if let loadedPath = loadedFrameworkPath() {
+            fail("Orbit Framework is loaded from \(loadedPath)")
         } else {
-            fail("no image named \"Orbit Framework\" is loaded in this process — nothing dlopen'd the engine, so whatever answered above is not Chromium.")
+            emit("OK   no Orbit Framework image is loaded")
         }
     }
 
@@ -272,10 +235,10 @@ enum DemoEngineProbe {
         emit("OK   document reached readyState complete after \(String(format: "%.1f", documentWaited))s: href=\(report["href"] ?? "") title=\(report["title"] ?? "") anchors=\(report["anchors"] ?? "") bodyLength=\(report["bodyLength"] ?? "")")
 
         let agentString = report["ua"] as? String ?? ""
-        if agentString.contains("Chrome/\(ChromiumBuild.majorVersion).") {
+        if agentString.contains("AppleWebKit") {
             emit("OK   navigator.userAgent: \(agentString)")
         } else {
-            fail("navigator.userAgent does not name Chrome \(ChromiumBuild.majorVersion): \(agentString)")
+            fail("navigator.userAgent does not name AppleWebKit: \(agentString)")
         }
 
         let arithmeticString = "\(report["math"] as? String ?? "")-\(report["chrome"] as? String ?? "")"

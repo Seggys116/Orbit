@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Native half of the Chrome extension wrapper. WebKit runs the extension;
@@ -49,13 +50,15 @@ enum ChromeExtensionAPI {
             return searchNodes(query, in: BookmarkTreeProjection.treeObject(for: store.state))
         case "create", "move", "update", "remove", "removeTree":
             let object = args.first as? [String: Any] ?? [:]
-            let json = jsonString(object)
-            let result = OrbitChromiumBookmarksBridge.shared.perform(method: method, argsJSON: json)
-            if let error = result["error"] { throw ChromeExtensionAPIError(error) }
-            if let id = result["id"], let node = findNode(id, in: BookmarkTreeProjection.treeObject(for: store.state)) {
-                return node
+            do {
+                let id = try BookmarkMutationRouter.apply(method: method, args: object, store: store)
+                if let node = findNode(id.rawValue, in: BookmarkTreeProjection.treeObject(for: store.state)) {
+                    return node
+                }
+                return ["id": id.rawValue]
+            } catch let error as BookmarkMutationError {
+                throw ChromeExtensionAPIError(error.message)
             }
-            return result
         default:
             throw ChromeExtensionAPIError("Unknown bookmarks.\(method)")
         }
@@ -69,9 +72,8 @@ enum ChromeExtensionAPI {
         case "search":
             return DownloadItemProjection.itemsObject(for: store.downloads)
         case "erase", "open", "show", "removeFile", "showDefaultFolder", "pause", "resume", "cancel":
-            let json = jsonString(args.first as? [String: Any] ?? [:])
-            if let error = OrbitChromiumDownloadsBridge.shared.perform(method: method, argsJSON: json) {
-                throw ChromeExtensionAPIError(error.rawValue)
+            if let error = downloadAction(method, args.first as? [String: Any] ?? [:], store: store) {
+                throw ChromeExtensionAPIError(error)
             }
             return [:]
         case "download":
@@ -84,32 +86,59 @@ enum ChromeExtensionAPI {
     // MARK: - history
 
     private static func history(_ method: String, _ args: [Any]) async throws -> Any {
-        let bridge = OrbitChromiumHistoryBridge.shared
-        let json: String
+        let environment = AppEnvironment.processRoot
+        guard let store = environment.browserHistory else {
+            throw ChromeExtensionAPIError("History is not available.")
+        }
         switch method {
         case "search":
-            json = await bridge.search(jsonString(args.first as? [String: Any] ?? [:]))
+            let query = args.first as? [String: Any] ?? [:]
+            let text = query["text"] as? String ?? ""
+            let start = millisecondsDate(query["startTime"])
+            let end = millisecondsDate(query["endTime"])
+            let maxResults = (query["maxResults"] as? NSNumber).map { max($0.intValue, 0) } ?? 100
+            guard maxResults > 0 else { return [] }
+            let rows = try await store.urlRows(matchingText: text, start: start, end: end, limit: maxResults)
+            return rows.map(historyItem)
         case "getVisits":
-            let url = (args.first as? String) ?? (args.first as? [String: Any])?["url"] as? String ?? ""
-            json = await bridge.getVisits(url)
+            let urlString = (args.first as? String) ?? (args.first as? [String: Any])?["url"] as? String ?? ""
+            guard let url = URL(string: urlString) else { throw ChromeExtensionAPIError("Url is invalid.") }
+            let visits = try await store.visitRows(forURL: url)
+            return visits.map(visitItem)
         case "addUrl":
             let object = args.first as? [String: Any] ?? [:]
-            json = await bridge.addUrl(object["url"] as? String ?? "", title: object["title"] as? String ?? "")
+            let urlString = object["url"] as? String ?? ""
+            guard let url = URL(string: urlString) else { throw ChromeExtensionAPIError("Url is invalid.") }
+            guard let space = environment.activeSpace else {
+                throw ChromeExtensionAPIError("No active Space to record the visit in.")
+            }
+            let row = await environment.recordVisitReportingItem(
+                url: url, title: object["title"] as? String ?? "", profileID: space.profileID, spaceID: space.id
+            )
+            guard row != nil else { throw ChromeExtensionAPIError("Orbit did not record the visit; this Space keeps no history.") }
+            return [:]
         case "deleteUrl":
-            let url = (args.first as? String) ?? (args.first as? [String: Any])?["url"] as? String ?? ""
-            json = await bridge.deleteURL(url)
+            let urlString = (args.first as? String) ?? (args.first as? [String: Any])?["url"] as? String ?? ""
+            guard let url = URL(string: urlString) else { throw ChromeExtensionAPIError("Url is invalid.") }
+            _ = try await store.deleteEntries(matching: url)
+            await environment.reloadHistoryCacheAfterBulkImport()
+            return [:]
         case "deleteRange":
             let object = args.first as? [String: Any] ?? [:]
-            let start = (object["startTime"] as? NSNumber)?.doubleValue ?? 0
-            let end = (object["endTime"] as? NSNumber)?.doubleValue ?? 0
-            json = await bridge.deleteRange(startMilliseconds: start, endMilliseconds: end)
+            let start = millisecondsDate(object["startTime"]) ?? .distantPast
+            let end = millisecondsDate(object["endTime"]) ?? Date()
+            guard start <= end else { return [:] }
+            _ = try await store.deleteVisits(in: start...end)
+            await environment.reloadHistoryCacheAfterBulkImport()
+            return [:]
         case "deleteAll":
-            json = await bridge.deleteAll()
+            guard await environment.clearAllHistory() else {
+                throw ChromeExtensionAPIError("Orbit could not clear its history.")
+            }
+            return [:]
         default:
             throw ChromeExtensionAPIError("Unknown history.\(method)")
         }
-        if json.isEmpty { return [] }
-        return decodeJSON(json)
     }
 
     // MARK: - sessions, search, management
@@ -118,10 +147,10 @@ enum ChromeExtensionAPI {
         switch method {
         case "getRecentlyClosed":
             let max = (args.first as? [String: Any])?["maxResults"] as? Int ?? 25
-            return decodeJSON(OrbitChromiumSessionsBridge.shared.recentlyClosedJSON(maxResults: Int32(max)))
+            return recentlyClosed(maxResults: max, in: AppEnvironment.processRoot.store)
         case "restore":
             let id = (args.first as? String) ?? ""
-            return decodeJSON(OrbitChromiumSessionsBridge.shared.restoreJSON(sessionID: id))
+            return try restoreSession(id, in: AppEnvironment.processRoot)
         default:
             throw ChromeExtensionAPIError("Unknown sessions.\(method)")
         }
@@ -132,14 +161,7 @@ enum ChromeExtensionAPI {
         let object = args.first as? [String: Any] ?? [:]
         let text = object["text"] as? String ?? ""
         let disposition = object["disposition"] as? String ?? ""
-        let target: OrbitChromiumSearchBridge.Target
-        switch disposition {
-        case "NEW_TAB": target = .newTab
-        case "NEW_WINDOW": target = .newWindow
-        default: target = .currentTab
-        }
-        let error = OrbitChromiumSearchBridge.shared.perform(text: text, target: target)
-        if !error.isEmpty { throw ChromeExtensionAPIError(error) }
+        try openSearch(text, disposition: disposition)
         return [:]
     }
 
@@ -195,6 +217,145 @@ enum ChromeExtensionAPI {
               let object = try? JSONSerialization.jsonObject(with: data)
         else { return [] }
         return object
+    }
+
+    private static func downloadAction(_ method: String, _ arguments: [String: Any], store: DownloadStore) -> String? {
+        switch method {
+        case "showDefaultFolder":
+            let directory = (try? FileManager.default.url(for: .downloadsDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+                ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+            _ = NSWorkspace.shared.open(directory)
+            return nil
+        case "erase":
+            guard let guids = arguments["guids"] as? [String] else { return "Invalid downloadId" }
+            for guid in guids {
+                guard let item = downloadItem(guid, store: store) else { continue }
+                store.remove(item.id)
+            }
+            return nil
+        case "open":
+            guard let item = downloadItem(arguments["guid"] as? String ?? "", store: store) else { return "Invalid downloadId" }
+            guard FileManager.default.fileExists(atPath: item.destinationURL.path) else { return "Download file already deleted" }
+            _ = NSWorkspace.shared.open(item.destinationURL)
+            return nil
+        case "show":
+            guard let item = downloadItem(arguments["guid"] as? String ?? "", store: store) else { return "Invalid downloadId" }
+            store.revealInFinder(item.id)
+            return nil
+        case "removeFile":
+            guard let item = downloadItem(arguments["guid"] as? String ?? "", store: store) else { return "Invalid downloadId" }
+            guard FileManager.default.fileExists(atPath: item.destinationURL.path) else { return "Download file already deleted" }
+            guard store.removeFile(item.id) else { return "Unable to remove file" }
+            return nil
+        default:
+            return "Invalid downloadId"
+        }
+    }
+
+    private static func downloadItem(_ guid: String, store: DownloadStore) -> DownloadItem? {
+        guard let uuid = UUID(uuidString: guid) else { return nil }
+        return store.downloads.first { $0.id == uuid }
+    }
+
+    private static func millisecondsDate(_ value: Any?) -> Date? {
+        guard let number = value as? NSNumber else { return nil }
+        return Date(timeIntervalSince1970: number.doubleValue / 1000)
+    }
+
+    private static func historyItem(_ row: HistoryStore.HistoryURLRow) -> [String: Any] {
+        [
+            "id": String(row.id),
+            "url": row.url.absoluteString,
+            "title": row.title,
+            "lastVisitTime": row.lastVisit.timeIntervalSince1970 * 1000,
+            "visitCount": row.visitCount,
+            "typedCount": row.typedCount,
+        ]
+    }
+
+    private static func visitItem(_ visit: HistoryStore.HistoryVisitRow) -> [String: Any] {
+        [
+            "id": String(visit.urlID),
+            "visitId": String(visit.id),
+            "visitTime": visit.visitTime.timeIntervalSince1970 * 1000,
+            "referringVisitId": "0",
+            "transition": visit.wasTyped ? "typed" : "link",
+            "isLocal": true,
+        ]
+    }
+
+    private static func openSearch(_ text: String, disposition: String) throws {
+        let environment = AppEnvironment.frontmost
+        guard let spaceID = environment.activeSpace?.id else {
+            throw ChromeExtensionAPIError("No active browser window.")
+        }
+        guard let url = environment.searchEngine(forSpace: spaceID).searchURL(for: text) else {
+            throw ChromeExtensionAPIError("No search provider is configured.")
+        }
+        switch disposition {
+        case "NEW_WINDOW":
+            let opened = OrbitWindowController.openNewWindow(on: environment).session.environment
+            guard let openedSpace = opened.activeSpace?.id else {
+                throw ChromeExtensionAPIError("No active browser window.")
+            }
+            _ = opened.openTab(url: url, in: openedSpace, section: .today, activate: true)
+        case "NEW_TAB":
+            _ = environment.openTab(url: url, in: spaceID, section: .today, activate: true)
+        default:
+            guard let tabID = environment.activeTabID else {
+                throw ChromeExtensionAPIError("No active browser window.")
+            }
+            environment.loadInTab(tabID, url: url)
+        }
+    }
+
+    static func recentlyClosed(maxResults: Int, in store: BrowserStore) -> [[String: Any]] {
+        let limit = min(max(maxResults, 0), store.recentlyClosedCapacity)
+        var sessions: [[String: Any]] = []
+        for record in store.recentlyClosedRecords.reversed() {
+            guard sessions.count < limit else { break }
+            guard let tab = store.tab(record.tabID) else { continue }
+            sessions.append([
+                "sessionId": record.tabID.uuidString,
+                "lastModified": Int(record.closedAt.timeIntervalSince1970),
+                "tab": [
+                    "sessionId": record.tabID.uuidString,
+                    "url": tab.url.absoluteString,
+                    "title": tab.displayTitle,
+                    "id": -1,
+                    "windowId": -1,
+                ],
+            ])
+        }
+        return sessions
+    }
+
+    private static func restoreSession(_ sessionID: String, in environment: AppEnvironment) throws -> [String: Any] {
+        let store = environment.store
+        let record: ClosedTabRecord?
+        if sessionID.isEmpty {
+            record = store.recentlyClosedRecords.last
+        } else if let tabID = UUID(uuidString: sessionID) {
+            record = store.recentlyClosedRecords.last { $0.tabID == tabID }
+        } else {
+            record = nil
+        }
+        guard let record else { throw ChromeExtensionAPIError("Invalid session id: \(sessionID).") }
+        guard store.reopenClosedTab(record.tabID), let tab = store.tab(record.tabID) else {
+            throw ChromeExtensionAPIError("Invalid session id: \(record.tabID.uuidString).")
+        }
+        environment.activateTab(record.tabID)
+        let numericID = (environment.engine as? WebKitEngine)?.numericID(for: tab.id)
+        return [
+            "sessionId": record.tabID.uuidString,
+            "lastModified": Int(Date().timeIntervalSince1970),
+            "tab": [
+                "id": numericID.map { Int($0) } ?? -1,
+                "url": tab.url.absoluteString,
+                "title": tab.displayTitle,
+                "active": true,
+            ],
+        ]
     }
 
     private static func string(_ args: [Any], _ index: Int) -> String? {

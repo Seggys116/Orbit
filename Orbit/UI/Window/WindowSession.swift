@@ -84,9 +84,6 @@ final class WindowSession {
         )
 
         let environment = AppEnvironment.makeWindowScoped(sharing: root, activeSpaceID: spaceID)
-        // Pushed here, not from OrbitWindowController.configure(): a window-scoped environment
-        // is 1:1 with this window for its whole life, with no construction-order dependency on it.
-        OrbitChromiumTabsBridge.shared.windowCreated(owner: environment, focused: false)
         // extensionPoints is per-environment; without this an Incognito window would
         // silently lose Peek, Capture, Boosts, Easels, Notes, Library and Media.
         FeatureRegistration.installAll(into: environment)
@@ -141,14 +138,10 @@ final class WindowSession {
             // Must leave the pinned row in place, not moveTab it, or the bookmark is permanently removed from the origin Space's Pinned tree.
             host.closeTabKeepingBookmark(tabID)
             environment = AppEnvironment.makeWindowScoped(sharing: root, activeSpaceID: spaceID, isTornOff: true)
-            // See incognito(on:)'s own comment -- pushed before the tab open
-            // below, whose materialization otherwise needs a window already registered.
-            OrbitChromiumTabsBridge.shared.windowCreated(owner: environment, focused: false)
             FeatureRegistration.installAll(into: environment)
             environment.openTab(url: tab.pinnedURL ?? tab.url, in: spaceID)
         } else {
             environment = AppEnvironment.makeWindowScoped(sharing: root, activeSpaceID: spaceID, isTornOff: true)
-            OrbitChromiumTabsBridge.shared.windowCreated(owner: environment, focused: false)
             FeatureRegistration.installAll(into: environment)
 
             root.store.moveTab(tabID, toSpace: spaceID, section: .today)
@@ -180,7 +173,6 @@ final class WindowSession {
         // Tabs first (disposeWindowSession releases every WebContents), window second: mirrors
         // real teardown order, so OrbitTabRegistry never sees a tab referencing a dead window id.
         environment.disposeWindowSession()
-        OrbitChromiumTabsBridge.shared.windowRemoved(owner: environment)
 
         guard let ownedSpaceID else { return }
         root.store.deleteSpace(ownedSpaceID)

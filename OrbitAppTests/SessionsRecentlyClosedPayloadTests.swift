@@ -41,9 +41,7 @@ final class SessionsRecentlyClosedPayloadTests: XCTestCase {
     }
 
     private func sessionIDs(maxResults: Int32) throws -> [String] {
-        let json = OrbitChromiumSessionsBridge.shared.recentlyClosedJSON(maxResults: maxResults, in: store)
-        let data = try XCTUnwrap(json.data(using: .utf8))
-        let sessions = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let sessions = ChromeExtensionAPI.recentlyClosed(maxResults: Int(maxResults), in: store)
         return sessions.compactMap { $0["sessionId"] as? String }
     }
 

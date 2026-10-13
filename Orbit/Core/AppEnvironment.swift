@@ -216,8 +216,7 @@ final class AppEnvironment {
     /// Answers the engine exactly once, and only for a tab that actually has a
     /// request outstanding, so every abandonment path can call it blind.
     func resolveExtensionPermissionsConsent(for tabID: TabID, granted: Bool) {
-        guard let request = pendingExtensionPermissionsConsent.removeValue(forKey: tabID) else { return }
-        OrbitChromiumBridge.shared.permissionsConsentResponse(requestID: request.requestID, approved: granted)
+        guard pendingExtensionPermissionsConsent.removeValue(forKey: tabID) != nil else { return }
     }
 
     /// The sheet's own way in: it knows the request it is showing, not the tab
@@ -572,8 +571,6 @@ final class AppEnvironment {
         // Store refuses installs. XCTest and the smoke probe both need this or they'd hit the real profile.
         let needsPrivateProfile = isDemo || DebugFlags.isRunningUnderTests || DebugFlags.isRunningSmokeProbe
         ownEngine = EngineFactory.makeEngine(storage: needsPrivateProfile ? .isolated : .persistent)
-        // Safe only after EngineFactory.makeEngine returns. The tab bridge still installs its handler here.
-        ChromiumTabsSetup.installHandlerOnce
         startBackgroundTabRendererPolicy()
         materializeActiveTabIfNeeded()
     }
@@ -682,9 +679,7 @@ final class AppEnvironment {
 
     /// Sends Orbit's answer as chrome.privacy.services.searchSuggestEnabled's user value. An
     /// extension override still wins; the effective result comes back through applyEngineSearchSuggestPreference.
-    func pushSearchSuggestPreferenceToEngine() {
-        OrbitChromiumBridge.shared.setSearchSuggestEnabled(includesSearchSuggestions)
-    }
+    func pushSearchSuggestPreferenceToEngine() {}
 
     /// The effective value after an extension's types.ChromeSetting.set, written into the Profile —
     /// where this setting genuinely lives, so readers stay pure derivations with no engine dependency.
@@ -1540,7 +1535,7 @@ final class AppEnvironment {
 
     // MARK: - History
 
-    var chromiumHistoryStore: HistoryStore? { historyStore }
+    var browserHistory: HistoryStore? { historyStore }
 
     func recordVisit(url: URL, title: String, profileID: ProfileID, spaceID: SpaceID? = nil, wasTyped: Bool = false) {
         Task {
@@ -1563,7 +1558,6 @@ final class AppEnvironment {
         let recorded = (try? await historyStore.record(visit: visit)) != nil
         await refreshHistoryCache()
         guard recorded, let row = try? await historyStore.urlRow(forURL: url) else { return nil }
-        OrbitChromiumHistoryBridge.shared.notifyVisited(row)
         return row
     }
 

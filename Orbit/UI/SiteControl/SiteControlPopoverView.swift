@@ -381,7 +381,7 @@ struct SiteControlPopoverView: View {
         extensionActionEntries = Self.extensionActionEntries(
             engine: env.engine,
             session: env.webContents[tab.id]?.session,
-            tabID: OrbitChromiumTabsBridge.shared.existingTabID(for: tab.id)
+            tabID: (env.engine as? WebKitEngine)?.numericID(for: tab.id)
         )
     }
 

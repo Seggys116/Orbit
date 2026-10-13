@@ -11,7 +11,6 @@ import XCTest
 final class ContentBlockingChromiumWiringTests: XCTestCase {
 
     override func tearDown() {
-        OrbitChromiumBridge.shared.contentBlockingDecisionHandler = nil
         super.tearDown()
     }
 
@@ -25,97 +24,107 @@ final class ContentBlockingChromiumWiringTests: XCTestCase {
     }
 
     func testApplyContentBlockerAdvertisesTheCapability() {
-        let engine = ChromiumEngine(storage: .ephemeral)
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
         XCTAssertTrue(engine.capabilities.contains(.contentBlocking))
         XCTAssertTrue(engine.capabilities.contains(.blockedRequestCounts))
     }
 
     func testApplyContentBlockerInstallsAHandlerThatBlocksAMatchingRequest() async throws {
-        let engine = ChromiumEngine(storage: .ephemeral)
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let blocker = makeBlocker("||ads.example.com^\n")
 
         await engine.applyContentBlocker(blocker, session: engine.defaultSession)
 
-        let handler = try XCTUnwrap(OrbitChromiumBridge.shared.contentBlockingDecisionHandler)
-        // 3 == ContentBlockingResourceType.script.rawValue, mirrored in
-        // orbit_content_blocking_url_loader_factory.cc's OrbitResourceType.
-        XCTAssertEqual(handler("https://ads.example.com/tracker.js", "https://example.com/", 3), .block)
-        XCTAssertEqual(handler("https://example.com/app.js", "https://example.com/", 3), .allow)
+        let webKit = try XCTUnwrap(engine as? WebKitEngine)
+        XCTAssertTrue(webKit.blockerDecision(url: "https://ads.example.com/tracker.js", documentURL: "https://example.com/", resourceType: .script))
+        XCTAssertFalse(webKit.blockerDecision(url: "https://example.com/app.js", documentURL: "https://example.com/", resourceType: .script))
     }
 
     func testApplyContentBlockerNilBlockerAllowsEveryRequest() async throws {
-        let engine = ChromiumEngine(storage: .ephemeral)
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
         await engine.applyContentBlocker(nil, session: engine.defaultSession)
 
-        let handler = try XCTUnwrap(OrbitChromiumBridge.shared.contentBlockingDecisionHandler)
-        XCTAssertEqual(handler("https://ads.example.com/tracker.js", "https://example.com/", 3), .allow)
+        let webKit = try XCTUnwrap(engine as? WebKitEngine)
+        XCTAssertFalse(webKit.blockerDecision(url: "https://ads.example.com/tracker.js", documentURL: "https://example.com/", resourceType: .script))
     }
 
     func testApplyContentBlockerDisabledBlockerAllowsEveryRequest() async throws {
-        let engine = ChromiumEngine(storage: .ephemeral)
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let blocker = makeBlocker("||ads.example.com^\n")
         blocker.isEnabled = false
 
         await engine.applyContentBlocker(blocker, session: engine.defaultSession)
 
-        let handler = try XCTUnwrap(OrbitChromiumBridge.shared.contentBlockingDecisionHandler)
-        XCTAssertEqual(handler("https://ads.example.com/tracker.js", "https://example.com/", 3), .allow)
+        let webKit = try XCTUnwrap(engine as? WebKitEngine)
+        XCTAssertFalse(webKit.blockerDecision(url: "https://ads.example.com/tracker.js", documentURL: "https://example.com/", resourceType: .script))
     }
 
     func testApplyContentBlockerRespectsAllowlist() async throws {
-        let engine = ChromiumEngine(storage: .ephemeral)
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let blocker = makeBlocker("||ads.example.com^\n")
         blocker.setAllowlist(["example.com"])
 
         await engine.applyContentBlocker(blocker, session: engine.defaultSession)
 
-        let handler = try XCTUnwrap(OrbitChromiumBridge.shared.contentBlockingDecisionHandler)
-        XCTAssertEqual(
-            handler("https://ads.example.com/tracker.js", "https://example.com/", 3),
-            .allow,
+        let webKit = try XCTUnwrap(engine as? WebKitEngine)
+        XCTAssertFalse(
+            webKit.blockerDecision(url: "https://ads.example.com/tracker.js", documentURL: "https://example.com/", resourceType: .script),
             "the document's own host is allowlisted, so nothing on its page should be blocked"
         )
     }
 
     func testApplyContentBlockerServesAnEmptyRedirectSubstitutionRatherThanBlocking() async throws {
-        let engine = ChromiumEngine(storage: .ephemeral)
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let blocker = makeBlocker("||ads.example.com/ga.js$redirect=empty\n")
 
         await engine.applyContentBlocker(blocker, session: engine.defaultSession)
 
-        let handler = try XCTUnwrap(OrbitChromiumBridge.shared.contentBlockingDecisionHandler)
-        XCTAssertEqual(
-            handler("https://ads.example.com/ga.js", "https://example.com/", 3),
-            .substitute(mimeType: "text/javascript", body: []),
-            "$redirect=empty on a script request must serve a zero-byte script, not ERR_BLOCKED_BY_CLIENT"
-        )
+        guard case .redirect(_, _, let substitution) = blocker.decision(
+            forURL: "https://ads.example.com/ga.js",
+            documentURL: "https://example.com/",
+            resourceType: .script
+        ) else {
+            return XCTFail("an empty redirect must substitute, not block")
+        }
+        let payload = blocker.stubPayload(for: substitution, resourceType: .script)
+        XCTAssertEqual(payload.mimeType, "text/javascript")
+        XCTAssertTrue(payload.content.isEmpty)
     }
 
     func testApplyContentBlockerServesANamedRedirectResourceWithItsOwnBytes() async throws {
-        let engine = ChromiumEngine(storage: .ephemeral)
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let blocker = makeBlocker("||ads.example.com/ga.js$redirect=noopjs\n")
 
         await engine.applyContentBlocker(blocker, session: engine.defaultSession)
 
         let expected = try XCTUnwrap(RedirectResourceLibrary.resource(named: "noopjs"))
-        let handler = try XCTUnwrap(OrbitChromiumBridge.shared.contentBlockingDecisionHandler)
-        XCTAssertEqual(
-            handler("https://ads.example.com/ga.js", "https://example.com/", 3),
-            .substitute(mimeType: expected.mimeType, body: expected.content)
-        )
+        guard case .redirect(_, _, let substitution) = blocker.decision(
+            forURL: "https://ads.example.com/ga.js",
+            documentURL: "https://example.com/",
+            resourceType: .script
+        ) else {
+            return XCTFail("a named redirect must substitute")
+        }
+        let payload = blocker.stubPayload(for: substitution, resourceType: .script)
+        XCTAssertEqual(payload.mimeType, expected.mimeType)
+        XCTAssertEqual(payload.content, expected.content)
     }
 
     func testApplyContentBlockerSubstitutionMimeTypeFollowsTheRequestedResourceType() async throws {
-        let engine = ChromiumEngine(storage: .ephemeral)
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let blocker = makeBlocker("||ads.example.com/pixel$redirect=empty\n")
 
         await engine.applyContentBlocker(blocker, session: engine.defaultSession)
 
-        let handler = try XCTUnwrap(OrbitChromiumBridge.shared.contentBlockingDecisionHandler)
-        // 4 == ContentBlockingResourceType.image.rawValue.
-        XCTAssertEqual(
-            handler("https://ads.example.com/pixel", "https://example.com/", 4),
-            .substitute(mimeType: "image/gif", body: [])
-        )
+        guard case .redirect(_, _, let substitution) = blocker.decision(
+            forURL: "https://ads.example.com/pixel",
+            documentURL: "https://example.com/",
+            resourceType: .image
+        ) else {
+            return XCTFail("an empty image redirect must substitute")
+        }
+        let payload = blocker.stubPayload(for: substitution, resourceType: .image)
+        XCTAssertEqual(payload.mimeType, "image/gif")
+        XCTAssertTrue(payload.content.isEmpty)
     }
 }
