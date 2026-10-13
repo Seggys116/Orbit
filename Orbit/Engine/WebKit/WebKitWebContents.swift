@@ -376,7 +376,10 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     func title(for context: WKWebExtensionContext) -> String? { navigationState.title }
     func url(for context: WKWebExtensionContext) -> URL? { navigationState.url ?? webView.url }
     func isPinned(for context: WKWebExtensionContext) -> Bool { false }
-    func shouldBypassPermissions(for context: WKWebExtensionContext) -> Bool { true }
+    func shouldBypassPermissions(for context: WKWebExtensionContext) -> Bool {
+        guard let url = navigationState.url ?? webView.url else { return false }
+        return context.grantedPermissionMatchPatterns.keys.contains { $0.matches(url) }
+    }
     func shouldGrantPermissionsOnUserGesture(for context: WKWebExtensionContext) -> Bool { true }
 
     private func publishNavigation() {

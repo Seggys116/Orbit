@@ -91,6 +91,55 @@ final class WebKitChromeExtensionTests: XCTestCase {
         engine.shutdown()
     }
 
+    func testUndeclaredSearchQueryIsRejected() async throws {
+        let engine = try XCTUnwrap(EngineFactory.makeEngine(storage: .ephemeral) as? WebKitEngine)
+        let bare = try makeBareExtension(permissions: [])
+        let loaded = try await engine.loadExtension(at: bare, session: engine.defaultSession)
+        let denied = await engine.performChromeAPI(
+            extensionID: loaded.id, namespace: "search", method: "query", args: [["text": "orbit"]]
+        )
+        guard case .failure(let error) = denied else {
+            return XCTFail("search.query ran without the search permission")
+        }
+        XCTAssertTrue(String(describing: error).contains("search"))
+
+        let declared = try makeBareExtension(permissions: ["search"])
+        let allowed = try await engine.loadExtension(at: declared, session: engine.defaultSession)
+        let accepted = await engine.performChromeAPI(
+            extensionID: allowed.id, namespace: "search", method: "query", args: [["text": "orbit"]]
+        )
+        if case .failure(let error) = accepted {
+            XCTAssertFalse(String(describing: error).contains("Missing search permission"), String(describing: error))
+        }
+        engine.shutdown()
+    }
+
+    func testHostPermissionBypassFollowsGrantedPatterns() async throws {
+        let engine = try XCTUnwrap(EngineFactory.makeEngine(storage: .ephemeral) as? WebKitEngine)
+        let page = URL(string: "https://example.com/page")!
+        let other = URL(string: "https://other.test/page")!
+        let contents = try XCTUnwrap(try engine.makeWebContents(session: engine.defaultSession, initialURL: nil) as? WebKitWebContents)
+        contents.load(page)
+
+        let bare = try await engine.loadExtension(at: try makeBareExtension(permissions: []), session: engine.defaultSession)
+        let bareContext = try context(bare.id, on: engine)
+        XCTAssertFalse(contents.shouldBypassPermissions(for: bareContext))
+
+        let granted = try await engine.loadExtension(
+            at: try makeBareExtension(permissions: [], hosts: ["https://example.com/*"]),
+            session: engine.defaultSession
+        )
+        let grantedContext = try context(granted.id, on: engine)
+        XCTAssertTrue(contents.shouldBypassPermissions(for: grantedContext))
+        contents.load(other)
+        XCTAssertFalse(contents.shouldBypassPermissions(for: grantedContext))
+        engine.shutdown()
+    }
+
+    private func context(_ id: String, on engine: WebKitEngine) throws -> WKWebExtensionContext {
+        try XCTUnwrap(engine.extensionController.extensionContexts.first { $0.uniqueIdentifier == id })
+    }
+
     private func assertExtensionWorks(_ loaded: LoadedExtension, on engine: any BrowserEngine, marker: String) async throws {
         let page = try servedPage(marker: marker)
         let contents = try engine.makeWebContents(session: engine.defaultSession, initialURL: nil)
@@ -174,13 +223,14 @@ final class WebKitChromeExtensionTests: XCTestCase {
         return root
     }
 
-    private func makeBareExtension(permissions: [String]) throws -> URL {
+    private func makeBareExtension(permissions: [String], hosts: [String] = []) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-bare-\(UUID().uuidString)", isDirectory: true)
         roots.append(root)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let listed = permissions.map { "\"\($0)\"" }.joined(separator: ",")
+        let hostList = hosts.map { "\"\($0)\"" }.joined(separator: ",")
         let manifest = """
-        {"manifest_version":3,"name":"Bare","version":"1.0.0","description":"bare fixture","permissions":[\(listed)],"background":{"service_worker":"background.js"}}
+        {"manifest_version":3,"name":"Bare","version":"1.0.0","description":"bare fixture","permissions":[\(listed)],"host_permissions":[\(hostList)],"background":{"service_worker":"background.js"}}
         """
         try manifest.write(to: root.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
         try "void 0;\n".write(to: root.appendingPathComponent("background.js"), atomically: true, encoding: .utf8)

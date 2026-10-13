@@ -134,7 +134,7 @@ enum ChromeAPIWrapperScript {
             manifest["background"] = background
         }
         var permissions = manifest["permissions"] as? [String] ?? []
-        let wrapped: Set<String> = ["bookmarks", "downloads", "history", "sessions", "management"]
+        let wrapped: Set<String> = ["bookmarks", "downloads", "history", "sessions", "management", "search"]
         if !Set(permissions).isDisjoint(with: wrapped), !permissions.contains("nativeMessaging") {
             permissions.append("nativeMessaging")
         }

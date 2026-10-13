@@ -26,7 +26,7 @@ enum ChromeExtensionAPI {
 
     static func requiredPermission(for namespace: String) -> String? {
         switch namespace {
-        case "bookmarks", "downloads", "history", "sessions", "management":
+        case "bookmarks", "downloads", "history", "sessions", "management", "search":
             return namespace
         default:
             return nil
