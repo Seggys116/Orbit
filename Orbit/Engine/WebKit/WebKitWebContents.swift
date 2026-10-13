@@ -231,6 +231,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     func cancelDownload(id: UUID) {}
     func showDeveloperTools(inspectAt point: CGPoint?) {
+        // isInspectable only allows inspection. _WKInspector.show opens it.
         webView.isInspectable = true
         let inspectorSelector = NSSelectorFromString("_inspector")
         guard webView.responds(to: inspectorSelector),
@@ -244,6 +245,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         }
     }
 
+    // Right-click is Orbit's menu. WebKit's default menu has no Inspect item here.
     func openContextMenu(with event: NSEvent) {
         let local = webView.convert(event.locationInWindow, from: nil)
         let css = CGPoint(x: local.x, y: webView.bounds.height - local.y)

@@ -330,6 +330,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
         )
     }
 
+    // A host-limited script must not run on every page.
     private static func scoped(_ source: String, patterns: [String]) -> String {
         if patterns.contains("<all_urls>") || patterns.contains("*://*/*") { return source }
         let hosts = patterns.compactMap(patternHost)
