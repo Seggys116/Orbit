@@ -112,7 +112,7 @@ struct OrbitSettingsSection<Content: View>: View {
             OrbitToggle(accessibilityLabel: "Confirm before quitting", isOn: .constant(true))
         }
         OrbitSettingsValueRow(title: "Engine") {
-            Text("Chromium 151.0.7922.72").font(.system(size: 12)).foregroundStyle(.secondary)
+            Text("WebKit").font(.system(size: 12)).foregroundStyle(.secondary)
         }
     }
     .padding()

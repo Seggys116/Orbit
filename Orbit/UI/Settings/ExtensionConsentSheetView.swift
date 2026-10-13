@@ -139,7 +139,7 @@ struct ExtensionConsentSheetView: View {
             ],
             isUpdate: false,
             previousVersion: nil,
-            chromiumVersionWarning: "This extension declares that it requires Chrome 200.0 or later. Orbit currently embeds an older Chromium, so some of its features may not work correctly."
+            chromiumVersionWarning: "This extension declares that it requires Chrome 200.0 or later. Orbit runs system WebKit, so some Chrome-only features may not work correctly."
         ),
         onAnswer: { _ in }
     )

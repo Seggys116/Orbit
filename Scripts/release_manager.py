@@ -1183,14 +1183,11 @@ def cmd_doctor(args) -> int:
             absolute if not inside_repo else "a .p8 inside the repo risks being committed",
         )
 
-    checks.section("Chromium engine")
+    checks.section("Engine")
     checks.check(
-        "engine bridge exists",
-        False,
-        "the browser-side bridge in Orbit/Engine/Chromium/ is not release-ready yet. "
-        "Nothing in this pipeline can archive, sign or verify a working browser until it is. "
-        "Chromium toolchain state (fetched, built, published) is Scripts/chromium "
-        "doctor's job, not this one's.",
+        "system WebKit",
+        True,
+        "Orbit renders with system WebKit. No Chromium framework is fetched or embedded.",
     )
 
     checks.section("Entitlements")
@@ -1302,8 +1299,7 @@ def cmd_version(args) -> int:
     print(f"  minimum macOS       {resolved['deployment_target']}")
     print()
     print(bold("Engine"))
-    print(f"  Chromium            {resolved['chromium_version']} ({resolved['chromium_channel']})")
-    print(f"  engine bridge       {dim('does not exist yet')}")
+    print("  WebKit              system")
     print()
     print(bold("Would produce"))
     print(f"  {resolved['dmg_name'] or dim('no marketing version set')}")

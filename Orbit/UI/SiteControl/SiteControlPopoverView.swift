@@ -712,7 +712,7 @@ struct SiteControlPopoverView: View {
             }
             .buttonStyle(.plain)
             .disabled(env.engine == nil || env.webContents[tab.id]?.session == nil || cacheClearState == .clearing)
-            .accessibilityLabel("Clear Cache for the entire browsing session, not only this site — Chromium's cache has no per-site clear")
+            .accessibilityLabel("Clear Cache for the entire browsing session, not only this site")
         }
     }
 

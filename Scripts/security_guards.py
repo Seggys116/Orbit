@@ -25,7 +25,7 @@ XCCONFIG_DEFAULT_ENGINE = re.compile(r"^ORBIT_ENGINE_CONFIG\s*=\s*(\S+)\s*$", re
 
 # Roots that may not all exist during the engine rewrite; MINIMUM_SCANNED_FILES
 # stops this guard quietly scanning nothing and reporting success.
-SOURCE_ROOTS = ("Orbit", "OrbitHelper", "OrbitDemo", "OrbitEngine", "Chromium/Embedder")
+SOURCE_ROOTS = ("Orbit", "OrbitHelper", "OrbitDemo", "OrbitEngine")
 MINIMUM_SCANNED_FILES = 50
 SOURCE_SUFFIXES = (".swift", ".m", ".mm", ".h", ".hpp", ".cpp", ".c")
 SCHEME_DIR = os.path.join("Orbit.xcodeproj", "xcshareddata", "xcschemes")
@@ -196,6 +196,8 @@ DCHECK_WHY = (
 
 
 def scan_dcheck() -> list:
+    if not os.path.exists(engine.MANIFEST_PATH):
+        return []
     findings = []
     manifest = engine.load_manifest()
     build_target = manifest["build_target"]

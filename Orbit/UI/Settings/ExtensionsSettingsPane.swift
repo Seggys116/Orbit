@@ -376,14 +376,14 @@ struct ExtensionsSettingsPane: View {
 
 // MARK: - No engine yet (pure — the only state behind capabilitiesSupportExtensions == false)
 
-// Chromium always reports .extensions; this is reached only before start() has produced an engine, and is replaced by the real pane the moment env.engine exists.
+// Reached only before start() has produced an engine, and replaced by the real pane once env.engine exists.
 
 struct ExtensionsEngineStartingNotice: View {
     var body: some View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text("Chromium isn't running yet. Your extensions appear here as soon as it starts.")
+            Text("WebKit isn't running yet. Your extensions appear here as soon as it starts.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -402,7 +402,7 @@ struct ExtensionPendingChangesBanner: View {
         HStack(spacing: 8) {
             Image(systemName: "arrow.triangle.2.circlepath")
                 .foregroundStyle(.orange)
-            Text(lastError.map { "Chromium refused to load an extension: \($0)" }
+            Text(lastError.map { "WebKit refused to load an extension: \($0)" }
                 ?? "Some extensions are installed but not running yet.")
                 .font(.system(size: 12, weight: .medium))
                 .fixedSize(horizontal: false, vertical: true)
@@ -554,18 +554,6 @@ struct ExtensionRowView: View {
                 if let optionsURL = detail.optionsURL {
                     OrbitButton(title: "Extension Options…", kind: .secondary, isCompact: true, accentColor: SettingsPalette.accent) {
                         onOpenOptionsPage(optionsURL)
-                    }
-                }
-
-                if detail.requestsTabs {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                        Text("This extension asks to read your open tabs. Orbit's Chromium engine currently reports no open tabs to any extension, so tab-related features of this extension won't work.")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 

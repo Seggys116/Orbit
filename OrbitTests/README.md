@@ -318,29 +318,15 @@ consecutive (differently padded) renders.
 **Do not work around this in an individual test** by inventing a unique size —
 that shifts every point-space assertion in the test. It is already handled.
 
-## The Chromium backend in tests
+## The WebKit engine in tests
 
-Nothing links the engine at compile time. `OrbitChromiumBridge` `dlopen`s
-"Orbit Framework.framework" out of the host app bundle at runtime, so a test
-target needs no engine build settings of its own — `Chromium/ChromiumTests.xcconfig`
-is just an include of `Chromium/Chromium.xcconfig`.
+The shipped engine is system WebKit. Nothing downloads or links a Chromium framework.
 
-**`OrbitAppTests` is where Chromium coverage belongs.** It is hosted by the
-real `Orbit.app`, which carries the framework and its helper apps in its own
-bundle, and it reaches every engine type through `@testable import Orbit`.
+**`OrbitAppTests` is where engine coverage belongs.** It is hosted by the real `Orbit.app` and reaches the engine through `@testable import Orbit`. `WebKitEngineLaunchTests` and `WebKitChromeExtensionTests` start that engine.
 
-**`OrbitTests` must stay host-less.** It compiles a *curated* set of real
-sources (see the two tables above); `Orbit/Engine/Chromium/` is not in it and
-should not be added. A host-less `xctest` process has no app-bundle layout
-with the helper apps beside it to `dlopen` against, so making it work would
-mean rebuilding an app inside a logic-test bundle. This target has already
-produced a `SIGSEGV` when given real windows — see
-`../OrbitAppTests/WindowControllerResizeRegressionTests.swift`'s header.
+**`OrbitTests` must stay host-less.** It compiles a curated set of real sources (see the two tables above). A host-less `xctest` process has already produced a `SIGSEGV` when given real windows — see `../OrbitAppTests/WindowControllerResizeRegressionTests.swift`'s header.
 
-**No test in the ordinary run starts a browser.** `OrbitAppDelegate` bails out
-under `XCTestConfigurationFilePath` precisely so no engine is brought up during
-`xcodebuild test`. Navigation, rendering, cookies, caches and
-`ChromiumWebContents` are covered only by the live-engine suites above.
+**No ordinary `OrbitTests` run starts a browser.** `OrbitAppDelegate` bails out under `XCTestConfigurationFilePath` so `xcodebuild test` does not open a window. Navigation through the shipped engine is covered by `OrbitAppTests`.
 
 ## Reused Orbit sources (PBXFileReference mechanism)
 
