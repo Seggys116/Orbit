@@ -46,7 +46,7 @@ final class OrbitChromiumSessionsBridge {
 
     // MARK: - getRecentlyClosed
 
-    private func recentlyClosedJSON(maxResults: Int32) -> String {
+    func recentlyClosedJSON(maxResults: Int32) -> String {
         recentlyClosedJSON(maxResults: maxResults, in: environment.store)
     }
 
@@ -72,7 +72,7 @@ final class OrbitChromiumSessionsBridge {
 
     // MARK: - restore
 
-    private func restoreJSON(sessionID: String) -> String {
+    func restoreJSON(sessionID: String) -> String {
         let environment = self.environment
         let store = environment.store
 

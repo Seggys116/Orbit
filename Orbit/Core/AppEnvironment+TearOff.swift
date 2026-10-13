@@ -11,8 +11,8 @@ extension AppEnvironment {
         if let contents = source.detachWebContents(for: id) {
             // No cross-window "move" primitive exists, so this is remove-then-recreate. Must run
             // before installTransferredWebContents, while `source` can still resolve this tab as its own.
-            if contents is ChromiumWebContents {
-                OrbitChromiumTabsBridge.shared.tabRemoved(tabUUID: id, windowClosing: false)
+            if contents is WebKitWebContents {
+                (source.engine as? WebKitEngine)?.noteTabClosed(contents as! WebKitWebContents)
             }
             installTransferredWebContents(contents, for: id)
         }

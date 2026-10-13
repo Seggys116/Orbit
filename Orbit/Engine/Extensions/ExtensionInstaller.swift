@@ -255,9 +255,8 @@ nonisolated public final class ExtensionInstaller {
 
     private static func chromiumVersionWarning(for minimumChromeVersion: String?) -> String? {
         guard let minimumChromeVersion, !minimumChromeVersion.isEmpty else { return nil }
-        guard isVersion(minimumChromeVersion, newerThan: ChromiumBuild.version) else { return nil }
         return "This extension declares that it requires Chrome \(minimumChromeVersion) or later. "
-            + "Orbit currently embeds Chromium \(ChromiumBuild.version), which is older, so some of its features may not work correctly."
+            + "Orbit runs \(WebKitProduct.versionDescription), so some Chrome-only features may not work correctly."
     }
 
     private static func isVersion(_ lhs: String, newerThan rhs: String) -> Bool {

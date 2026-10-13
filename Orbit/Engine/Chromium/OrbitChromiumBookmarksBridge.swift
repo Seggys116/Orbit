@@ -79,7 +79,7 @@ final class OrbitChromiumBookmarksBridge {
         }
     }
 
-    private func perform(method: String, argsJSON: String) -> [String: String] {
+    func perform(method: String, argsJSON: String) -> [String: String] {
         let args = (try? JSONSerialization.jsonObject(with: Data(argsJSON.utf8))) as? [String: Any] ?? [:]
         do {
             let id = try BookmarkMutationRouter.apply(method: method, args: args, store: store)

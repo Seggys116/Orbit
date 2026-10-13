@@ -68,7 +68,7 @@ public final class WebStorePrivateBridge {
             // Constant used by NeverDecaf/chromium-web-store, proven in production.
             response = .success("EgIIAA==")
         case ("webstorePrivate", "getFullChromeVersion"):
-            response = .success(["version_number": ChromiumBuild.version])
+            response = .success(["version_number": WebKitProduct.webStoreProductVersion])
         case ("webstorePrivate", "getMV2DeprecationStatus"):
             response = .success("inactive")
         case ("management", "getAll"):

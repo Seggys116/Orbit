@@ -36,10 +36,9 @@ final class ChromiumTabsRouter: OrbitChromiumTabsBridgeHandler {
         if pinned {
             environment.pinTab(tabID)
         }
-        guard let contents = environment.webContents[tabID] as? ChromiumWebContents,
-              let registryTabID = OrbitChromiumTabsBridge.shared.existingTabID(for: tabID)
-        else { return nil }
-        return (contents.chromiumHandle, registryTabID)
+        guard let contents = environment.webContents[tabID] as? WebKitWebContents else { return nil }
+        let registryTabID = (environment.engine as? WebKitEngine)?.numericID(for: contents) ?? 0
+        return (Unmanaged.passUnretained(contents).toOpaque(), registryTabID)
     }
 
     func chromiumUpdateTabURL(tabID: Int32, url: String) -> Bool {

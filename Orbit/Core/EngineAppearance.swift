@@ -27,7 +27,7 @@ enum EngineAppearance {
     /// the engine ignores a value it already holds -- so callers do not have
     /// to track whether anything changed.
     static func apply() {
-        OrbitChromiumBridge.shared.setColorScheme(isDark: isDark)
+        AppEnvironment.applyContentAppearanceEverywhere()
     }
 
     /// One process-wide observer, deliberately not one per surface: the value

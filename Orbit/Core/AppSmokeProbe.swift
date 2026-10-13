@@ -163,9 +163,9 @@ enum AppSmokeProbe {
             return
         }
         let typeName = String(describing: type(of: engine))
-        guard let chromium = engine as? ChromiumEngine else {
-            record(.chromiumEngine, false, "engine is \(typeName), not ChromiumEngine")
-            record(.engineVersion, false, "engine is \(typeName), not ChromiumEngine")
+        guard engine is WebKitEngine, type(of: engine).kind == .webkit else {
+            record(.chromiumEngine, false, "engine is \(typeName), not WebKitEngine")
+            record(.engineVersion, false, "engine is \(typeName), not WebKitEngine")
             return
         }
 
@@ -182,11 +182,11 @@ enum AppSmokeProbe {
             record(.chromiumEngine, false, "\(typeName) does not advertise \(missing.joined(separator: ", "))")
         }
 
-        let version = chromium.versionDescription
-        if version.contains(ChromiumBuild.version) {
-            record(.engineVersion, true, "\(version) matches the pinned \(ChromiumBuild.version)")
+        let version = engine.versionDescription
+        if version.contains("WebKit") {
+            record(.engineVersion, true, version)
         } else {
-            record(.engineVersion, false, "the running engine reports \(version), but this build is pinned to \(ChromiumBuild.version)")
+            record(.engineVersion, false, "the running engine reports \(version)")
         }
     }
 
@@ -374,10 +374,10 @@ enum AppSmokeProbe {
         }
 
         let agent = report["ua"] as? String ?? ""
-        if agent.contains("Chrome/\(ChromiumBuild.majorVersion).") {
+        if agent.contains("AppleWebKit") {
             record(.userAgent, true, agent)
         } else {
-            record(.userAgent, false, "navigator.userAgent does not name Chrome \(ChromiumBuild.majorVersion): \(agent)")
+            record(.userAgent, false, "navigator.userAgent does not name AppleWebKit: \(agent)")
         }
         return tabID
     }

@@ -4,13 +4,38 @@ import Foundation
 // MARK: - Engine identity
 
 nonisolated public enum EngineKind: String, Codable, Sendable, CaseIterable {
+    case webkit
+    /// Compatibility name for call sites and tests written against the previous engine. The running engine is WebKit.
     case chromium
 
     public var displayName: String {
         switch self {
-        case .chromium: return "Chromium"
+        case .webkit, .chromium: return "WebKit"
         }
     }
+}
+
+/// Identity of the system WebKit Orbit renders with. Not a downloaded engine pin.
+enum WebKitProduct {
+    static let displayName = "WebKit"
+
+    static var version: String {
+        let bundle = Bundle(path: "/System/Library/Frameworks/WebKit.framework")
+        let short = bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = bundle?.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        if let short, !short.isEmpty { return short }
+        if let build, !build.isEmpty { return build }
+        return "WebKit"
+    }
+
+    static var versionDescription: String { "WebKit \(version)" }
+
+    static var userAgent: String {
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version) Safari/605.1.15"
+    }
+
+    /// Chrome Web Store's update protocol asks for a product version. This is that token, not the rendering engine.
+    static let webStoreProductVersion = "120.0.0.0"
 }
 
 nonisolated public struct EngineCapabilities: OptionSet, Sendable {

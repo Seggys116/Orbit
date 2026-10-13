@@ -1092,7 +1092,7 @@ final class AppEnvironment {
             if profile.isPersistent, let space = state.spaces.first(where: { $0.id == spaceID }), !space.isEphemeral {
                 // Assigned here, not at the store's declaration: OrbitTests
                 // compiles the store through a symlink and doesn't build ChromiumVersion.swift.
-                GitHubLiveFolderStore.browserUserAgent = ChromiumBuild.userAgent
+                GitHubLiveFolderStore.browserUserAgent = WebKitProduct.userAgent
                 GitHubLiveFolderStore.shared.activate(space: space, session: session)
                 let spaceID = space.id
                 GitHubLiveFolderStore.shared.onAutoActivate = { [weak self] in
@@ -1192,17 +1192,10 @@ final class AppEnvironment {
     // No-op for a non-Chromium WebContents or an extension popup/options page, neither of which
     // is adopted through this funnel. Module-internal: AppEnvironment+TearOff.swift reuses it too.
     func registerChromiumTab(_ tabID: TabID) {
-        guard let contents = webContents[tabID] as? ChromiumWebContents else { return }
-        guard let tab = state.tabs[tabID] else { return }
-        let isActive = activeTabID == tabID
-        OrbitChromiumTabsBridge.shared.tabCreated(
-            tabUUID: tabID, handle: contents.chromiumHandle, windowOwner: self,
-            index: chromiumTabIndex(for: tab), active: isActive, pinned: tab.section == .pinned
-        )
-        // Not short-circuited for isActive: OnTabCreated fires no chrome.tabs.onActivated, which a
-        // foreground new tab owes its listeners. syncChromiumActiveTab is the one authority for that state.
+        guard let contents = webContents[tabID] as? WebKitWebContents else { return }
+        (engine as? WebKitEngine)?.noteTabOpened(contents)
+        if activeTabID == tabID { (engine as? WebKitEngine)?.noteActive(contents) }
         syncChromiumActiveTab()
-        // The insert shifted every later sibling's position too.
         pushChromiumTabIndexes()
     }
 
@@ -1216,7 +1209,7 @@ final class AppEnvironment {
         var index = 0
         for candidate in chromiumWindowTabOrder() {
             if candidate == tabID { return index }
-            if webContents[candidate] is ChromiumWebContents { index += 1 }
+            if webContents[candidate] is WebKitWebContents { index += 1 }
         }
         return index
     }
@@ -1230,8 +1223,7 @@ final class AppEnvironment {
     func pushChromiumTabIndexes() {
         var index = 0
         for tabID in chromiumWindowTabOrder() {
-            guard webContents[tabID] is ChromiumWebContents else { continue }
-            OrbitChromiumTabsBridge.shared.tabIndexChanged(tabUUID: tabID, index: index)
+            guard webContents[tabID] is WebKitWebContents else { continue }
             index += 1
         }
     }
@@ -1244,20 +1236,17 @@ final class AppEnvironment {
         // A tab with no live renderer is not in OrbitTabRegistry, so it cannot
         // be named as active; nil deactivates instead, and it stays unrecorded
         // so registerChromiumTab pushes it properly once it has one.
-        let live = current.flatMap { webContents[$0] is ChromiumWebContents ? $0 : nil }
+        let liveContents = current.flatMap { webContents[$0] as? WebKitWebContents }
         let previous = lastPushedActiveTabID
-        guard live != nil || previous != nil else { return }
-        lastPushedActiveTabID = live
-        OrbitChromiumTabsBridge.shared.activeTabChanged(
-            tabUUID: live, windowOwner: self, previousTabUUID: previous
-        )
+        guard liveContents != nil || previous != nil else { return }
+        lastPushedActiveTabID = liveContents == nil ? nil : current
+        if let liveContents { (engine as? WebKitEngine)?.noteActive(liveContents) }
     }
 
     // Module-internal, not private: AppEnvironment+SidebarTree.swift's own
     // pin/unpin(_:toParent:...) also need to push this.
     func pushChromiumTabPinnedChanged(_ id: TabID) {
-        guard webContents[id] is ChromiumWebContents, let tab = state.tabs[id] else { return }
-        OrbitChromiumTabsBridge.shared.tabPinnedChanged(tabUUID: id, pinned: tab.section == .pinned)
+        guard webContents[id] is WebKitWebContents else { return }
         // Pinning moves the tab between the two halves of the strip, so both
         // it and everything it stepped over has a new index.
         pushChromiumTabIndexes()
@@ -1267,10 +1256,7 @@ final class AppEnvironment {
     // new index rather than trusting a caller-supplied one, since
     // store.reorderTab is free to clamp/adjust it.
     func pushChromiumTabMoved(_ id: TabID, fromIndex: Int) {
-        guard webContents[id] is ChromiumWebContents, let tab = state.tabs[id] else { return }
-        let toIndex = chromiumTabIndex(for: tab)
-        guard toIndex != fromIndex else { return }
-        OrbitChromiumTabsBridge.shared.tabMoved(tabUUID: id, windowOwner: self, fromIndex: fromIndex, toIndex: toIndex)
+        guard webContents[id] is WebKitWebContents else { return }
         pushChromiumTabIndexes()
     }
 
@@ -1280,19 +1266,9 @@ final class AppEnvironment {
     // Wraps it through the same funnel as any tab; nil means declined, and the caller must destroy handle.
     @discardableResult
     func adoptExtensionTab(handle: UnsafeMutableRawPointer, url: URL, active: Bool) -> TabID? {
-        guard let spaceID = activeSpace?.id, let engine else { return nil }
-        guard let contents = try? ChromiumWebContents(adopting: handle, session: engine.defaultSession) else {
-            return nil
-        }
-        let tabID = scopingActiveSpaceToThisWindow {
-            store.openTab(url: url, in: spaceID, section: .today, activate: active)
-        }
-        adoptWebContents(contents, for: tabID, url: url)
-        if active {
-            webContents[tabID]?.focus()
-        }
-        recordVisit(url: url, title: "", profileID: profileID(for: spaceID), spaceID: spaceID)
-        return tabID
+        guard let spaceID = activeSpace?.id else { return nil }
+        _ = handle
+        return openTab(url: url, in: spaceID, section: .today, activate: active)
     }
 
     // MARK: - Page-created windows
@@ -1361,10 +1337,7 @@ final class AppEnvironment {
         resolveExtensionPermissionsConsent(for: tabID, granted: false)
         // Must run before .close() destroys the native WebContents: OrbitTabRegistry's contract
         // (orbit_tab_registry.h's OrbitTabInfo) requires OrbitTabsRemoved first, or its raw_ptr dangles.
-        let wasRegistered = webContents[tabID] is ChromiumWebContents
-        if wasRegistered {
-            OrbitChromiumTabsBridge.shared.tabRemoved(tabUUID: tabID, windowClosing: windowClosing)
-        }
+        let wasRegistered = webContents[tabID] is WebKitWebContents
         webContents[tabID]?.close()
         webContents.removeValue(forKey: tabID)
         // After the removal, so the closing tab no longer takes an index off

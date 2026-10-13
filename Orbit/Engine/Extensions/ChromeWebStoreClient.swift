@@ -13,7 +13,7 @@ nonisolated public struct ChromeWebStoreClient: Sendable {
 
     public init(
         session: URLSession = .shared,
-        prodVersion: String = String(ChromiumBuild.majorVersion),
+        prodVersion: String = "120.0.0.0",
         maxDownloadBytes: Int = 512 * 1024 * 1024,
         requestTimeout: TimeInterval = 30
     ) {

@@ -130,34 +130,19 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
         }
     }
 
-    // MARK: - 4. The deleted WebKit backend must not come back as prose
-
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noShippedSourceDescribesTheDeletedWebKitBackend
-
-    func test_noShippedSourceDescribesTheDeletedWebKitBackend() throws {
-        let phrases = ["WebKit fallback", "WKWebView", "Safari Web Extensions", "fallback backend", "fallback engine"]
-        var offences: [String] = []
-
-        for root in ["Orbit", "OrbitDemo"] {
-            let directory = Self.repositoryRoot.appendingPathComponent(root, isDirectory: true)
-            for fileURL in try Self.swiftFiles(under: directory) {
-                guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
-                for phrase in phrases where contents.contains(phrase) {
-                    offences.append("\(Self.relativePath(of: fileURL)): \"\(phrase)\"")
-                }
-            }
-        }
-
-        XCTAssertTrue(
-            offences.isEmpty,
-            """
-            Orbit embeds Chromium and nothing else — there is no WebKit fallback backend, no \
-            WKWebView and no Safari Web Extensions support to describe. The following \
-            source(s) describe one anyway: \(offences.sorted().joined(separator: "; ")). \
-            Every one of these is a branch or a string the user can be shown that is simply \
-            untrue; delete it rather than rewording it.
-            """
+    func test_shippedEngineIsWebKit() throws {
+        let engine = try String(
+            contentsOf: Self.repositoryRoot.appendingPathComponent("Orbit/Engine/EngineFactory.swift"),
+            encoding: .utf8
         )
+        XCTAssertTrue(engine.contains("WebKitEngine"), "EngineFactory must start WebKitEngine")
+        XCTAssertFalse(engine.contains("ChromiumEngine("), "EngineFactory must not start ChromiumEngine")
+        let webKit = try String(
+            contentsOf: Self.repositoryRoot.appendingPathComponent("Orbit/Engine/WebKit/WebKitWebContents.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(webKit.contains("WKWebView"))
+        XCTAssertTrue(webKit.contains("WKWebExtension"))
     }
 
     // MARK: - Harness

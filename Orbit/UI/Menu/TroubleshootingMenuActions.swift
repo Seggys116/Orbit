@@ -23,7 +23,7 @@ enum TroubleshootingMenuActions {
         let engineState = env.engine == nil ? "not running" : "running"
         return """
         Orbit \(version) (\(build))
-        Engine: \(ChromiumBuild.engineDescription), \(engineState)
+        Engine: \(WebKitProduct.versionDescription), \(engineState)
         System: \(ProcessInfo.processInfo.operatingSystemVersionString), \(architecture)
         Data: \(orbitDataDirectory(env: env).path)
         """

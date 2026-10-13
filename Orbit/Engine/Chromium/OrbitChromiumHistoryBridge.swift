@@ -61,7 +61,7 @@ final class OrbitChromiumHistoryBridge {
 
     private var environment: AppEnvironment { AppEnvironment.processRoot }
 
-    private func search(_ queryJSON: String) async -> String {
+    func search(_ queryJSON: String) async -> String {
         guard let store = environment.chromiumHistoryStore else { return "" }
         guard let query = Self.decode(queryJSON) else { return "" }
 
@@ -80,7 +80,7 @@ final class OrbitChromiumHistoryBridge {
         }
     }
 
-    private func getVisits(_ urlString: String) async -> String {
+    func getVisits(_ urlString: String) async -> String {
         guard let store = environment.chromiumHistoryStore else { return "" }
         guard let url = URL(string: urlString) else { return "" }
         do {
@@ -92,7 +92,7 @@ final class OrbitChromiumHistoryBridge {
         }
     }
 
-    private func addUrl(_ urlString: String, title: String) async -> String {
+    func addUrl(_ urlString: String, title: String) async -> String {
         guard let url = URL(string: urlString) else { return Self.failure("Url is invalid.") }
         let environment = self.environment
         guard environment.chromiumHistoryStore != nil else { return Self.failure("History is not available.") }
@@ -108,7 +108,7 @@ final class OrbitChromiumHistoryBridge {
         return Self.ok
     }
 
-    private func deleteURL(_ urlString: String) async -> String {
+    func deleteURL(_ urlString: String) async -> String {
         guard let url = URL(string: urlString) else { return Self.failure("Url is invalid.") }
         let environment = self.environment
         guard let store = environment.chromiumHistoryStore else { return Self.failure("History is not available.") }
@@ -124,7 +124,7 @@ final class OrbitChromiumHistoryBridge {
         }
     }
 
-    private func deleteRange(startMilliseconds: Double, endMilliseconds: Double) async -> String {
+    func deleteRange(startMilliseconds: Double, endMilliseconds: Double) async -> String {
         let environment = self.environment
         guard let store = environment.chromiumHistoryStore else { return Self.failure("History is not available.") }
         let start = Date(timeIntervalSince1970: startMilliseconds / 1000)
@@ -140,7 +140,7 @@ final class OrbitChromiumHistoryBridge {
         }
     }
 
-    private func deleteAll() async -> String {
+    func deleteAll() async -> String {
         guard await environment.clearAllHistory() else {
             return Self.failure("Orbit could not clear its history.")
         }

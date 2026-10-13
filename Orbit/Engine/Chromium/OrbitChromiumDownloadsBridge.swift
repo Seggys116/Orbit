@@ -10,7 +10,7 @@ final class OrbitChromiumDownloadsBridge {
 
     private static let logger = Logger(subsystem: "com.orbit.browser", category: "DownloadsBridge")
 
-    private enum RequestError: String {
+    enum RequestError: String {
         case invalidID = "Invalid downloadId"
         case fileAlreadyDeleted = "Download file already deleted"
         case fileNotRemoved = "Unable to remove file"
@@ -89,7 +89,7 @@ final class OrbitChromiumDownloadsBridge {
         return json
     }
 
-    private func perform(method: String, argsJSON: String) -> RequestError? {
+    func perform(method: String, argsJSON: String) -> RequestError? {
         let arguments = (try? JSONSerialization.jsonObject(with: Data(argsJSON.utf8))) as? [String: Any]
 
         switch method {
