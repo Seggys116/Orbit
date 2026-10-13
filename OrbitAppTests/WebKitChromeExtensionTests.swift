@@ -154,12 +154,14 @@ final class WebKitChromeExtensionTests: XCTestCase {
         )
         let diagnostics = (engine as? WebKitEngine)?.extensionDiagnostics(id: loaded.id) ?? ""
         XCTAssertEqual(mutated, "content-script-ran", diagnostics)
+        print("extension-proof marker=\(mutated)")
         let reply = try await waitFor(
             contents,
             script: "document.getElementById('reply') ? document.getElementById('reply').textContent : ''",
             equals: "pong-from-background"
         )
         XCTAssertEqual(reply, "pong-from-background")
+        print("extension-proof reply=\(reply)")
         let deadline = Date().addingTimeInterval(10)
         var badge = ""
         while Date() < deadline {
@@ -168,6 +170,7 @@ final class WebKitChromeExtensionTests: XCTestCase {
             try await Task.sleep(nanoseconds: 100_000_000)
         }
         XCTAssertEqual(badge, "OK")
+        print("extension-proof badge=\(badge)")
     }
 
     private func store() -> ExtensionStore {
