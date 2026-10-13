@@ -22,13 +22,27 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     var view: NSView { webView }
 
-    init(engine: WebKitEngine, session: WebKitSession, initialURL: URL?) {
+    init(
+        engine: WebKitEngine,
+        session: WebKitSession,
+        initialURL: URL?,
+        configuration supplied: WKWebViewConfiguration? = nil,
+        installBridge: Bool = true
+    ) {
         self.engine = engine
         self.webKitSession = session
         self.session = session
         let bridge = WebKitScriptBridge()
         self.scriptBridge = bridge
-        let configuration = engine.makeConfiguration(session: session, bridge: bridge)
+        let configuration: WKWebViewConfiguration
+        if let supplied {
+            configuration = supplied
+            if installBridge {
+                supplied.userContentController.add(bridge, name: "orbit")
+            }
+        } else {
+            configuration = engine.makeConfiguration(session: session, bridge: bridge)
+        }
         let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         view.isInspectable = true
         if let agent = session.userAgent { view.customUserAgent = agent }
@@ -290,9 +304,9 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             delegate?.webContents(self, didFinishLoading: url, statusCode: lastStatusCode == 0 ? 200 : lastStatusCode)
             let css = engine.cosmeticStyleSheet(for: url.absoluteString)
             if !css.isEmpty {
-                let literal = css.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "`", with: "\\`")
+                let literal = JavaScriptLiteral.string(css)
                 webView.evaluateJavaScript(
-                    "(function(){var s=document.createElement('style');s.textContent=`\(literal)`;(document.head||document.documentElement).appendChild(s);})()",
+                    "(function(){var s=document.createElement('style');s.textContent=\(literal);(document.head||document.documentElement).appendChild(s);})()",
                     completionHandler: nil
                 )
             }
@@ -342,7 +356,14 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             disposition: .newForegroundTab,
             isUserGesture: navigationAction.navigationType == .linkActivated
         )
-        let contents = WebKitWebContents(engine: engine, session: webKitSession, initialURL: request.url)
+        let sharesController = configuration.userContentController === webView.configuration.userContentController
+        let contents = WebKitWebContents(
+            engine: engine,
+            session: webKitSession,
+            initialURL: request.url,
+            configuration: configuration,
+            installBridge: !sharesController
+        )
         let pending = PendingWebContents(request: request) { contents }
         let accepted = delegate?.webContents(self, requestsAdoptionOf: pending) ?? false
         if accepted, pending.isAdopted { return contents.webView }

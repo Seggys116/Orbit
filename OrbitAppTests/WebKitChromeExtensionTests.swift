@@ -26,10 +26,19 @@ final class WebKitChromeExtensionTests: XCTestCase {
         let engine = EngineFactory.makeEngine(storage: .ephemeral)
         XCTAssertEqual(type(of: engine).kind, .webkit)
 
+        let unpackedStore = store()
         let unpacked = try makeExtension(name: "Unpacked Fixture")
-        let unpackedInstalled = try store().install(unpackedAt: unpacked, publicKey: nil)
-        let unpackedLoaded = try await engine.loadExtension(at: unpackedInstalled.directory, session: engine.defaultSession)
+        let unpackedInstalled = try unpackedStore.install(unpackedAt: unpacked, publicKey: nil)
+        let runtime = ExtensionRuntime(store: unpackedStore)
+        runtime.bind(to: engine)
+        let appeared = await waitLoaded(unpackedInstalled.id, on: engine)
+        XCTAssertTrue(appeared, engine.loadedExtensions(session: engine.defaultSession).map(\.id).joined(separator: ","))
+        let unpackedLoaded = try XCTUnwrap(engine.loadedExtensions(session: engine.defaultSession).first { $0.id == unpackedInstalled.id })
+        XCTAssertEqual(unpackedInstalled.id, unpackedLoaded.id)
         try await assertExtensionWorks(unpackedLoaded, on: engine, marker: "unpacked-marker")
+        try unpackedStore.setEnabled(false, id: unpackedInstalled.id)
+        XCTAssertFalse(engine.loadedExtensions(session: engine.defaultSession).contains { $0.id == unpackedInstalled.id })
+        runtime.unbind()
 
         let crxSource = try makeExtension(name: "CRX Fixture")
         let zip = try zipDirectory(crxSource)
@@ -42,7 +51,43 @@ final class WebKitChromeExtensionTests: XCTestCase {
             return XCTFail("CRX install did not install")
         }
         let crxLoaded = try await engine.loadExtension(at: installed.directory, session: engine.defaultSession)
+        XCTAssertEqual(installed.id, crxLoaded.id)
         try await assertExtensionWorks(crxLoaded, on: engine, marker: "crx-marker")
+        engine.shutdown()
+    }
+
+    func testModuleBackgroundRepliesOnWebKit() async throws {
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
+        let source = try makeExtension(name: "Module Fixture", module: true)
+        let installed = try store().install(unpackedAt: source, publicKey: nil)
+        let loaded = try await engine.loadExtension(at: installed.directory, session: engine.defaultSession)
+        let entry = try String(contentsOf: installed.directory.appendingPathComponent("orbit-background-entry.js"), encoding: .utf8)
+        XCTAssertTrue(entry.contains("import "))
+        XCTAssertFalse(entry.contains("importScripts"))
+        let manifest = try String(contentsOf: installed.directory.appendingPathComponent("manifest.json"), encoding: .utf8)
+        XCTAssertTrue(manifest.contains("module"))
+        try await assertExtensionWorks(loaded, on: engine, marker: "module-marker")
+        engine.shutdown()
+    }
+
+    func testUndeclaredHistoryDeleteAllIsRejected() async throws {
+        let engine = try XCTUnwrap(EngineFactory.makeEngine(storage: .ephemeral) as? WebKitEngine)
+        let bare = try makeBareExtension(permissions: [])
+        let loaded = try await engine.loadExtension(at: bare, session: engine.defaultSession)
+        let denied = await engine.performChromeAPI(extensionID: loaded.id, namespace: "history", method: "deleteAll", args: [])
+        guard case .failure(let error) = denied else {
+            return XCTFail("history.deleteAll ran without the history permission")
+        }
+        XCTAssertTrue(String(describing: error).contains("history"))
+
+        let declared = try makeBareExtension(permissions: ["history"])
+        let allowed = try await engine.loadExtension(at: declared, session: engine.defaultSession)
+        let accepted = await engine.performChromeAPI(
+            extensionID: allowed.id, namespace: "history", method: "search", args: [["text": ""]]
+        )
+        if case .failure(let error) = accepted {
+            XCTAssertFalse(String(describing: error).contains("Missing history permission"), String(describing: error))
+        }
         engine.shutdown()
     }
 
@@ -82,12 +127,24 @@ final class WebKitChromeExtensionTests: XCTestCase {
         return ExtensionStore(root: root)
     }
 
-    private func makeExtension(name: String) throws -> URL {
+    private func waitLoaded(_ id: String, on engine: any BrowserEngine) async -> Bool {
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline {
+            if engine.loadedExtensions(session: engine.defaultSession).contains(where: { $0.id == id }) { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return false
+    }
+
+    private func makeExtension(name: String, module: Bool = false) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-src-\(UUID().uuidString)", isDirectory: true)
         roots.append(root)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let background = module
+            ? "\"background\":{\"service_worker\":\"background.js\",\"type\":\"module\"}"
+            : "\"background\":{\"service_worker\":\"background.js\"}"
         let manifest = """
-        {"manifest_version":3,"name":"\(name)","version":"1.0.0","description":"\(name) fixture","action":{"default_title":"\(name)"},"permissions":["nativeMessaging"],"host_permissions":["<all_urls>"],"background":{"service_worker":"background.js"},"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"],"run_at":"document_idle"}]}
+        {"manifest_version":3,"name":"\(name)","version":"1.0.0","description":"\(name) fixture","action":{"default_title":"\(name)"},"permissions":["nativeMessaging"],"host_permissions":["<all_urls>"],\(background),"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"],"run_at":"document_idle"}]}
         """
         try manifest.write(to: root.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
         try """
@@ -114,6 +171,19 @@ final class WebKitChromeExtensionTests: XCTestCase {
           orbitFixtureRun();
         }
         """.write(to: root.appendingPathComponent("content.js"), atomically: true, encoding: .utf8)
+        return root
+    }
+
+    private func makeBareExtension(permissions: [String]) throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-bare-\(UUID().uuidString)", isDirectory: true)
+        roots.append(root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let listed = permissions.map { "\"\($0)\"" }.joined(separator: ",")
+        let manifest = """
+        {"manifest_version":3,"name":"Bare","version":"1.0.0","description":"bare fixture","permissions":[\(listed)],"background":{"service_worker":"background.js"}}
+        """
+        try manifest.write(to: root.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
+        try "void 0;\n".write(to: root.appendingPathComponent("background.js"), atomically: true, encoding: .utf8)
         return root
     }
 

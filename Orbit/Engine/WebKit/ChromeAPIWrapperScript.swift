@@ -123,16 +123,36 @@ enum ChromeAPIWrapperScript {
                 background["scripts"] = files
             }
             if let worker = background["service_worker"] as? String, worker != backgroundEntryName {
-                let entry = "importScripts('\(fileName)');\nimportScripts('\(worker)');\n"
+                let module = (background["type"] as? String) == "module"
+                let entry = module
+                    ? "import \(JavaScriptLiteral.string(moduleSpecifier(fileName)));\nimport \(JavaScriptLiteral.string(moduleSpecifier(worker)));\n"
+                    : "importScripts(\(JavaScriptLiteral.string(fileName)));\nimportScripts(\(JavaScriptLiteral.string(worker)));\n"
+                if !module { background.removeValue(forKey: "type") }
                 try entry.write(to: directory.appendingPathComponent(backgroundEntryName), atomically: true, encoding: .utf8)
                 background["service_worker"] = backgroundEntryName
             }
             manifest["background"] = background
         }
         var permissions = manifest["permissions"] as? [String] ?? []
-        if !permissions.contains("nativeMessaging") { permissions.append("nativeMessaging") }
+        let wrapped: Set<String> = ["bookmarks", "downloads", "history", "sessions", "management"]
+        if !Set(permissions).isDisjoint(with: wrapped), !permissions.contains("nativeMessaging") {
+            permissions.append("nativeMessaging")
+        }
         manifest["permissions"] = permissions
         let rewritten = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted])
         try rewritten.write(to: manifestURL, options: .atomic)
+    }
+
+    private static func moduleSpecifier(_ path: String) -> String {
+        if path.hasPrefix("./") || path.hasPrefix("../") || path.hasPrefix("/") { return path }
+        return "./" + path
+    }
+}
+
+enum JavaScriptLiteral {
+    static func string(_ value: String) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let text = String(data: data, encoding: .utf8) else { return "\"\"" }
+        return text
     }
 }

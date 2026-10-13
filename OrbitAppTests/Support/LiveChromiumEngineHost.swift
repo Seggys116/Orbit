@@ -1,5 +1,5 @@
-//  Starts one real ChromiumEngine per test process, shared by every live suite.
-//  Gated on ORBIT_LIVE_ENGINE so an ordinary `xcodebuild test` skips these.
+//  Live Chromium suites cannot start the deleted embedder. isEnabled stays false
+//  so ORBIT_LIVE_ENGINE cannot wait on OrbitChromiumBridge.
 
 import Foundation
 @testable import Orbit
@@ -7,11 +7,8 @@ import Foundation
 @MainActor
 enum LiveChromiumEngineHost {
 
-    /// False for every ordinary test run -- see the file comment. Read this
-    /// (or a `try XCTSkipUnless` wrapping it) at the top of every live test.
-    static var isEnabled: Bool {
-        ProcessInfo.processInfo.environment["ORBIT_LIVE_ENGINE"] != nil
-    }
+    /// Always false. The Chromium embedder is gone, and OrbitChromiumBridge.isReady never flips.
+    static var isEnabled: Bool { false }
 
     private static var engine: ChromiumEngine?
 
@@ -35,23 +32,10 @@ enum LiveChromiumEngineHost {
         do {
             try created.start()
         } catch {
-            fatalError("LiveChromiumEngineHost: ChromiumEngine.start() failed: \(error)")
+            fatalError("LiveChromiumEngineHost: engine start failed: \(error)")
         }
-        await waitUntilReady()
         engine = created
         return created
-    }
-
-    /// engine.start() only schedules OrbitMain on the next run-loop turn; the
-    /// browser isn't ready until PreMainMessageLoopRun runs asynchronously. Times out rather than hanging forever.
-    private static func waitUntilReady(timeout: Duration = .seconds(30)) async {
-        let deadline = ContinuousClock.now + timeout
-        while !OrbitChromiumBridge.shared.isReady {
-            if ContinuousClock.now >= deadline {
-                fatalError("LiveChromiumEngineHost: engine did not become ready within \(timeout)")
-            }
-            try? await Task.sleep(for: .milliseconds(20))
-        }
     }
 
     // MARK: - Shared helpers for every live suite

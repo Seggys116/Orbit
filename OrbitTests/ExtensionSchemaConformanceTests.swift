@@ -103,7 +103,9 @@ final class ExtensionSchemaConformanceTests: XCTestCase {
     func test_theUnregisteredChromePermissionSetIsExactlyTheCheckedInExpectation() throws {
         let engine = try String(contentsOf: Schema.repositoryFile("Orbit/Engine/WebKit/WebKitEngine.swift"), encoding: .utf8)
         XCTAssertTrue(engine.contains("setPermissionStatus(.grantedExplicitly, for: permission)"))
-        XCTAssertTrue(engine.contains("WKWebExtension.Permission(\"nativeMessaging\")"))
+        XCTAssertTrue(engine.contains("for permission in webExtension.requestedPermissions"))
+        XCTAssertFalse(engine.contains("WKWebExtension.Permission(\"nativeMessaging\")"))
+        XCTAssertFalse(engine.contains("<all_urls>"))
         let wrapper = try Self.wrapperNamespaces()
         XCTAssertTrue(wrapper.keys.contains("management"))
     }

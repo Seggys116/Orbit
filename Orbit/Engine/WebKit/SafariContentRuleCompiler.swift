@@ -15,7 +15,7 @@ enum SafariContentRuleCompiler {
             guard let text = await store.cachedText(for: listID) else { continue }
             for line in text.split(whereSeparator: \.isNewline) {
                 guard rules.count < 50_000 else { break }
-                if let rule = rule(from: String(line)) { rules.append(rule) }
+                if let rule = compiledRule(from: String(line)) { rules.append(rule) }
             }
         }
         guard let data = try? JSONSerialization.data(withJSONObject: rules),
@@ -35,7 +35,7 @@ enum SafariContentRuleCompiler {
         }
     }
 
-    private static func rule(from rawLine: String) -> [String: Any]? {
+    static func compiledRule(from rawLine: String) -> [String: Any]? {
         var line = rawLine.trimmingCharacters(in: .whitespaces)
         guard !line.isEmpty, !line.hasPrefix("!"), !line.hasPrefix("[") else { return nil }
         let exception = line.hasPrefix("@@")
@@ -44,9 +44,29 @@ enum SafariContentRuleCompiler {
         let pattern = String(pieces[0])
         if let selectorRange = pattern.range(of: "##") {
             let selector = String(pattern[selectorRange.upperBound...])
+            let domainPart = String(pattern[..<selectorRange.lowerBound])
             guard !selector.isEmpty else { return nil }
+            var trigger: [String: Any] = ["url-filter": ".*"]
+            var ifDomain: [String] = []
+            var unlessDomain: [String] = []
+            for entry in domainPart.split(separator: ",") {
+                let name = entry.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { continue }
+                if name.hasPrefix("~") {
+                    let host = String(name.dropFirst())
+                    guard !host.isEmpty else { continue }
+                    unlessDomain.append("*" + host)
+                } else {
+                    ifDomain.append("*" + name)
+                }
+            }
+            if !domainPart.trimmingCharacters(in: .whitespaces).isEmpty && ifDomain.isEmpty && unlessDomain.isEmpty {
+                return nil
+            }
+            if !ifDomain.isEmpty { trigger["if-domain"] = ifDomain }
+            if !unlessDomain.isEmpty { trigger["unless-domain"] = unlessDomain }
             return [
-                "trigger": ["url-filter": ".*"],
+                "trigger": trigger,
                 "action": ["type": "css-display-none", "selector": selector],
             ]
         }
@@ -79,7 +99,7 @@ enum SafariContentRuleCompiler {
         guard !text.isEmpty else { return nil }
         var regex = NSRegularExpression.escapedPattern(for: text)
         regex = regex.replacingOccurrences(of: "\\*", with: ".*")
-        if anchoredLeft { regex = "^[^:]+://+([^/]+\\\\.)?" + regex }
+        if anchoredLeft { regex = "^[^:]+://+([^/]+\\.)?" + regex }
         if anchoredRight { regex += "[^\\w\\-.%]?" }
         return regex
     }

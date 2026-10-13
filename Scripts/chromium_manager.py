@@ -1716,12 +1716,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 def main(argv: list[str]) -> int:
-    args = build_parser().parse_args(argv)
-    try:
-        return args.func(args)
-    except KeyboardInterrupt:
-        print()
-        die("Interrupted.", code=130)
+    print("Orbit uses system WebKit. chromium_manager is not a Chromium build input.")
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

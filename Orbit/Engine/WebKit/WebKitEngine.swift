@@ -147,14 +147,15 @@ final class WebKitEngine: NSObject, BrowserEngine {
     }
 
     func loadExtension(at directory: URL, session: EngineSession, reason: ExtensionLoadReason) async throws -> LoadedExtension {
+        let manifest = try? ChromeExtensionManifest.read(fromDirectory: directory)
+        let declaredPermissions = Set(manifest?.permissions ?? [])
+        let id = extensionID(for: directory, manifest: manifest)
         try ChromeAPIWrapperScript.install(in: directory)
         let webExtension = try await WKWebExtension(resourceBaseURL: directory)
         if let error = webExtension.errors.first {
             throw EngineError(code: .unknown, underlyingDescription: error.localizedDescription)
         }
         let context = WKWebExtensionContext(for: webExtension)
-        let manifest = try? ChromeExtensionManifest.read(fromDirectory: directory)
-        let id = directory.lastPathComponent
         context.uniqueIdentifier = id
         // Non-persistent stores are private tabs. Scripts inject only with this set.
         context.hasAccessToPrivateData = true
@@ -174,7 +175,9 @@ final class WebKitEngine: NSObject, BrowserEngine {
             isActivated: true,
             idIsEngineAssigned: true
         )
-        loaded[loadedExtension.id] = LoadedExtensionRecord(extension: loadedExtension, context: context)
+        loaded[loadedExtension.id] = LoadedExtensionRecord(
+            extension: loadedExtension, context: context, declaredPermissions: declaredPermissions
+        )
         publishAction(for: context, tab: nil)
         return loadedExtension
     }
@@ -254,18 +257,26 @@ final class WebKitEngine: NSObject, BrowserEngine {
         for permission in webExtension.requestedPermissions {
             context.setPermissionStatus(.grantedExplicitly, for: permission)
         }
-        context.setPermissionStatus(.grantedExplicitly, for: WKWebExtension.Permission("nativeMessaging"))
         for pattern in webExtension.requestedPermissionMatchPatterns {
             context.setPermissionStatus(.grantedExplicitly, for: pattern)
         }
         for pattern in webExtension.allRequestedMatchPatterns {
             context.setPermissionStatus(.grantedExplicitly, for: pattern)
         }
-        for raw in ["<all_urls>", "*://*/*", "http://127.0.0.1/*", "http://*/*"] {
-            if let pattern = try? WKWebExtension.MatchPattern(string: raw) {
-                context.setPermissionStatus(.grantedExplicitly, for: pattern)
-            }
+    }
+
+    private func extensionID(for directory: URL, manifest: ChromeExtensionManifest?) -> String {
+        if let key = manifest?.key, let derived = ChromeExtensionID.id(fromPublicKeyBase64: key) {
+            return derived
         }
+        return ChromeExtensionID.id(forUnpackedPath: directory)
+    }
+
+    func performChromeAPI(extensionID: String, namespace: String, method: String, args: [Any]) async -> Result<Any, Error> {
+        let declared = loaded[extensionID]?.declaredPermissions ?? []
+        return await ChromeExtensionAPI.invoke(
+            namespace: namespace, method: method, args: args, declaredPermissions: declared
+        )
     }
 
     private func publishAction(for context: WKWebExtensionContext, tab: (any WKWebExtensionTab)?) {
@@ -307,10 +318,8 @@ final class WebKitEngine: NSObject, BrowserEngine {
     private static func userScript(_ script: UserScript) -> WKUserScript {
         let source: String
         if script.kind == .stylesheet {
-            let encoded = script.source
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "`", with: "\\`")
-            source = "(function(){var style=document.createElement('style');style.textContent=`\(encoded)`;(document.head||document.documentElement).appendChild(style);})();"
+            let encoded = JavaScriptLiteral.string(script.source)
+            source = "(function(){var style=document.createElement('style');style.textContent=\(encoded);(document.head||document.documentElement).appendChild(style);})();"
         } else {
             source = script.source
         }
@@ -330,6 +339,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
     private struct LoadedExtensionRecord {
         var `extension`: LoadedExtension
         var context: WKWebExtensionContext
+        var declaredPermissions: Set<String>
     }
 }
 
@@ -374,8 +384,9 @@ extension WebKitEngine: WKWebExtensionControllerDelegate {
         let namespace = object["namespace"] as? String ?? ""
         let method = object["method"] as? String ?? ""
         let args = object["args"] as? [Any] ?? []
+        let extensionID = extensionContext.uniqueIdentifier
         Task { @MainActor in
-            let result = await ChromeExtensionAPI.invoke(namespace: namespace, method: method, args: args)
+            let result = await performChromeAPI(extensionID: extensionID, namespace: namespace, method: method, args: args)
             switch result {
             case .success(let value): replyHandler(value, nil)
             case .failure(let error): replyHandler(nil, error)

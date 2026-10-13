@@ -7,12 +7,29 @@ import Foundation
 enum ChromeExtensionAPI {
     static let applicationIdentifier = "com.orbit.chrome"
 
-    static func invoke(namespace: String, method: String, args: [Any]) async -> Result<Any, Error> {
+    static func invoke(
+        namespace: String,
+        method: String,
+        args: [Any],
+        declaredPermissions: Set<String>
+    ) async -> Result<Any, Error> {
+        if let required = requiredPermission(for: namespace), !declaredPermissions.contains(required) {
+            return .failure(ChromeExtensionAPIError("Missing \(required) permission."))
+        }
         do {
             let value = try await perform(namespace: namespace, method: method, args: args)
             return .success(value)
         } catch {
             return .failure(error)
+        }
+    }
+
+    static func requiredPermission(for namespace: String) -> String? {
+        switch namespace {
+        case "bookmarks", "downloads", "history", "sessions", "management":
+            return namespace
+        default:
+            return nil
         }
     }
 
