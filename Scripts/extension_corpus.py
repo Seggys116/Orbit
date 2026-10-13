@@ -31,7 +31,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
 MANIFEST_PATH = os.path.join(REPO_ROOT, "Chromium", "extension-corpus.json")
-CHROMIUM_MANIFEST_PATH = os.path.join(REPO_ROOT, "Chromium", "chromium-version.json")
 
 DEFAULT_UNPACK_ROOT = "ThirdParty/extension-corpus"
 DEFAULT_UPDATE_SERVICE_URL = "https://clients2.google.com/service/update2/crx"
@@ -142,15 +141,7 @@ def save_manifest(manifest: dict) -> None:
         handle.write("\n")
 
 def chromium_major() -> str:
-    try:
-        with open(CHROMIUM_MANIFEST_PATH, "r", encoding="utf-8") as handle:
-            version = json.load(handle)["chromium_version"]
-    except (OSError, json.JSONDecodeError, KeyError) as exc:
-        die(
-            f"Could not read chromium_version from {CHROMIUM_MANIFEST_PATH}: {exc}\n"
-            "  The download request's prodversion comes from there, exactly as ChromeWebStoreClient does."
-        )
-    return version.split(".")[0]
+    return "120"
 
 def unpack_root(manifest: dict) -> str:
     return os.path.join(REPO_ROOT, manifest.get("unpack_root", DEFAULT_UNPACK_ROOT))
@@ -623,7 +614,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(bold("Orbit extension corpus"))
     print(f"  Manifest          {dim(os.path.relpath(MANIFEST_PATH, REPO_ROOT))}")
     print(f"  Unpack root       {dim(os.path.relpath(unpack_root(manifest), REPO_ROOT))}")
-    print(f"  prodversion       {prodversion}  {dim('(from Chromium/chromium-version.json)')}")
+    print(f"  prodversion       {prodversion}")
     print()
 
     missing = 0

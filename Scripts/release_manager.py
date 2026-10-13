@@ -20,9 +20,6 @@ import xml.etree.ElementTree as ElementTree
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
-sys.path.insert(0, SCRIPT_DIR)
-import chromium_manager  # noqa: E402
-
 XCODEPROJ = os.path.join(REPO_ROOT, "Orbit.xcodeproj")
 SCHEME = "Orbit"
 APP_NAME = "Orbit.app"
@@ -1713,16 +1710,11 @@ def verify_structure(app: str, checks: Checklist) -> None:
 
 def verify_engine_configuration(app: str, checks: Checklist) -> None:
     frameworks = os.path.join(app, "Contents", "Frameworks")
-    if not os.path.isdir(os.path.join(frameworks, "Orbit Framework.framework")):
-        checks.note("embedded Chromium engine", False, "no Orbit Framework.framework in this bundle")
-        return
-    compiled = chromium_manager.compiled_engine_config(frameworks, "orbit")
+    present = os.path.isdir(os.path.join(frameworks, "Orbit Framework.framework"))
     checks.check(
-        "embedded engine has DCHECKs compiled out",
-        compiled == "shipping",
-        "shipping" if compiled == "shipping"
-        else f"binary reports '{compiled or 'no marker'}'; a distributable build must embed "
-             "the shipping engine, in which a development assertion is not there to abort on",
+        "no embedded Chromium engine",
+        not present,
+        "absent" if not present else "Orbit Framework.framework is still in the bundle",
     )
 
 def verify_signature(app: str, checks: Checklist, require_timestamp: bool, require_notarised: bool) -> None:

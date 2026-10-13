@@ -152,6 +152,32 @@ final class WebKitEngineLaunchTests: XCTestCase {
         engine.shutdown()
     }
 
+    func testChromiumToolchainIsGoneAndCorpusRemains() throws {
+        for relative in [
+            "ThirdParty/depot_tools",
+            "ThirdParty/chromium",
+            "ThirdParty/chromium-build",
+            "ThirdParty/dist",
+            "ThirdParty/downloads",
+            "ThirdParty/prebuilt",
+            "ThirdParty/.gclient-home",
+            "Scripts/chromium",
+            "Scripts/chromium_manager.py",
+            "Scripts/embed-chromium-framework.sh",
+            "Scripts/ensure-chromium-engine.sh",
+            ".github/workflows/chromium-update.yml",
+        ] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: repositoryFile(relative).path), relative)
+        }
+        let modules = repositoryFile(".gitmodules")
+        if FileManager.default.fileExists(atPath: modules.path) {
+            let text = try String(contentsOf: modules, encoding: .utf8)
+            XCTAssertFalse(text.contains("depot_tools"))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repositoryFile("Chromium/extension-corpus.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repositoryFile("ThirdParty/extension-corpus").path))
+    }
+
     func testAppTargetDoesNotFetchOrLinkChromium() throws {
         let project = try String(contentsOf: repositoryFile("Orbit.xcodeproj/project.pbxproj"), encoding: .utf8)
         for needle in [

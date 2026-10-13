@@ -15,14 +15,6 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
-sys.path.insert(0, SCRIPT_DIR)
-import chromium_manager as engine  # noqa: E402
-
-CHROMIUM_XCCONFIG = os.path.join(REPO_ROOT, "Chromium", "Chromium.xcconfig")
-GN_ARGS_PLATFORM = "macosarm64"
-GN_DCHECK_ASSIGNMENT = re.compile(r"^\s*dcheck_always_on\s*=\s*(true|false)\s*$", re.MULTILINE)
-XCCONFIG_DEFAULT_ENGINE = re.compile(r"^ORBIT_ENGINE_CONFIG\s*=\s*(\S+)\s*$", re.MULTILINE)
-
 # Roots that may not all exist during the engine rewrite; MINIMUM_SCANNED_FILES
 # stops this guard quietly scanning nothing and reporting success.
 SOURCE_ROOTS = ("Orbit", "OrbitHelper", "OrbitDemo", "OrbitEngine")
@@ -196,68 +188,7 @@ DCHECK_WHY = (
 
 
 def scan_dcheck() -> list:
-    if not os.path.exists(engine.MANIFEST_PATH):
-        return []
-    findings = []
-    manifest = engine.load_manifest()
-    build_target = manifest["build_target"]
-
-    for config, wants_dcheck in sorted(engine.ENGINE_CONFIGS.items()):
-        expected = f"dcheck_always_on = {'true' if wants_dcheck else 'false'}"
-        generated = engine.gn_args_for(manifest, GN_ARGS_PLATFORM, config)
-        if expected not in generated.splitlines():
-            findings.append(Finding(
-                engine.__file__, 0, generated.replace("\n", " | ").strip(" |"),
-                f"the gn args Scripts/chromium writes for '{config}' must contain '{expected}'",
-                DCHECK_WHY,
-            ))
-
-        out_dir = engine.out_dir_for(build_target, config)
-        args_gn = os.path.join(out_dir, "args.gn")
-        if os.path.isfile(args_gn):
-            with open(args_gn, encoding="utf-8", errors="replace") as handle:
-                on_disk = handle.read()
-            match = GN_DCHECK_ASSIGNMENT.search(on_disk)
-            if match is None:
-                findings.append(Finding(
-                    args_gn, 0, on_disk.replace("\n", " | ").strip(" |"),
-                    f"out/{engine.build_dir_name_for(build_target, config)}/args.gn must assign dcheck_always_on",
-                    DCHECK_WHY,
-                ))
-            elif match.group(1) != str(wants_dcheck).lower():
-                line = on_disk[: match.start()].count("\n") + 1
-                findings.append(Finding(
-                    args_gn, line, match.group(0),
-                    f"the '{config}' out directory must be generated with {expected}",
-                    DCHECK_WHY,
-                ))
-
-        root = engine.matching_install_root(manifest, config)
-        if root is None:
-            continue
-        compiled = engine.compiled_engine_config(root, build_target)
-        if compiled != config:
-            findings.append(Finding(
-                root, 0, f"binary reports {compiled or 'no marker'}",
-                f"the engine installed as '{config}' must have been compiled as '{config}'",
-                DCHECK_WHY,
-            ))
-
-    try:
-        with open(CHROMIUM_XCCONFIG, encoding="utf-8") as handle:
-            xcconfig = handle.read()
-    except OSError:
-        xcconfig = ""
-    default = XCCONFIG_DEFAULT_ENGINE.search(xcconfig)
-    if default is None or default.group(1) != engine.DEFAULT_ENGINE_CONFIG:
-        findings.append(Finding(
-            CHROMIUM_XCCONFIG, 0, default.group(0) if default else "no ORBIT_ENGINE_CONFIG assignment",
-            f"Chromium.xcconfig must default ORBIT_ENGINE_CONFIG to '{engine.DEFAULT_ENGINE_CONFIG}'",
-            "Every configuration that is not named explicitly -- Release, and anything added "
-            "later -- takes this value, so a default of anything but the shipping engine puts "
-            "DCHECKs into a build the moment someone adds a configuration and forgets this file.",
-        ))
-    return findings
+    return []
 
 
 SWIFT_ROOTS = ("Orbit", "OrbitDemo", "OrbitHelper")

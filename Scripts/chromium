@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# Orbit renders with system WebKit. Fetching or building a Chromium engine is not part of this tree.
-
-echo "Orbit uses system WebKit. Scripts/chromium does not fetch or build a Chromium engine."
-exit 0
