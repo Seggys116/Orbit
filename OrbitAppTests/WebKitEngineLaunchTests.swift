@@ -170,6 +170,28 @@ final class WebKitEngineLaunchTests: XCTestCase {
         ] {
             XCTAssertFalse(FileManager.default.fileExists(atPath: repositoryFile(relative).path), relative)
         }
+        let callers = [
+            ".github/workflows/ci.yml",
+            ".github/workflows/build-test.yml",
+            ".github/workflows/release.yml",
+            ".github/workflows/live-engine.yml",
+            ".github/dependabot.yml",
+            "Scripts/extension_schemas.py",
+        ]
+        let forbidden = [
+            "Scripts/chromium",
+            "chromium-version.json",
+            "ensure-chromium-engine.sh",
+            "ChromiumEngine",
+            "depot_tools",
+            "gitsubmodule",
+        ]
+        for relative in callers {
+            let text = try String(contentsOf: repositoryFile(relative), encoding: .utf8)
+            for needle in forbidden where text.contains(needle) {
+                XCTFail("\(relative) still contains \(needle)")
+            }
+        }
         let modules = repositoryFile(".gitmodules")
         if FileManager.default.fileExists(atPath: modules.path) {
             let text = try String(contentsOf: modules, encoding: .utf8)
@@ -177,6 +199,39 @@ final class WebKitEngineLaunchTests: XCTestCase {
         }
         XCTAssertTrue(FileManager.default.fileExists(atPath: repositoryFile("Chromium/extension-corpus.json").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: repositoryFile("ThirdParty/extension-corpus").path))
+    }
+
+    func testPageMenuAndInspectorAndWebStoreAreInstalled() async throws {
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
+        let contents = try XCTUnwrap(try engine.makeWebContents(session: engine.defaultSession, initialURL: nil) as? WebKitWebContents)
+        host(contents)
+        contents.loadHTML("<!doctype html><html><body><a id=\"link\" href=\"https://example.com/dest\">go</a></body></html>", baseURL: URL(string: "https://example.com/page"))
+        let ready = try await waitForText(
+            contents,
+            script: "document.getElementById('link') ? document.getElementById('link').textContent : ''",
+            equals: "go"
+        )
+        XCTAssertEqual(ready, "go")
+        let agent = try await waitForText(contents, script: "navigator.userAgent", equals: "pending") { text in
+            text.contains("Chrome/") && text.contains("AppleWebKit")
+        }
+        XCTAssertTrue(agent.contains("Chrome/"))
+        XCTAssertTrue(agent.contains("AppleWebKit"))
+        let sources = contents.webView.configuration.userContentController.userScripts.map(\.source).joined(separator: "\n")
+        XCTAssertTrue(sources.contains("__orbitWebStorePrivate"))
+        XCTAssertTrue(sources.contains("__orbitOwnsAddToChromeButton"))
+        let recorder = PageMenuRecorder()
+        contents.delegate = recorder
+        contents.openContextMenu(atCSS: CGPoint(x: 8, y: 8))
+        let deadline = Date().addingTimeInterval(5)
+        while recorder.context == nil && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let context = try XCTUnwrap(recorder.context)
+        XCTAssertEqual(context.linkURL?.absoluteString, "https://example.com/dest")
+        contents.showDeveloperTools(inspectAt: CGPoint(x: 8, y: 8))
+        XCTAssertTrue(contents.webView.isInspectable)
+        engine.shutdown()
     }
 
     func testAppTargetDoesNotFetchOrLinkChromium() throws {
@@ -240,6 +295,16 @@ final class WebKitEngineLaunchTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent(relative)
+    }
+}
+
+@MainActor
+final class PageMenuRecorder: NSObject, WebContentsDelegate {
+    var context: ContextMenuContext?
+
+    func webContents(_ contents: WebContents, showContextMenu context: ContextMenuContext) -> Bool {
+        self.context = context
+        return true
     }
 }
 

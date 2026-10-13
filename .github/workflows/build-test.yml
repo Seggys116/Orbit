@@ -26,33 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Validate the Chromium manifest
-        run: |
-          python3 - <<'PY'
-          import json
-          m = json.load(open("Chromium/chromium-version.json"))
-          required = ["chromium_repo_url", "channel", "chromium_version",
-                      "chromium_checkout", "build_target", "prebuilt"]
-          missing = [k for k in required if k not in m]
-          assert not missing, f"chromium-version.json is missing {missing}"
-          assert m["chromium_checkout"] == f"refs/tags/{m['chromium_version']}", \
-              "chromium_checkout does not match chromium_version"
-          configs = m["prebuilt"].get("configs")
-          assert configs is not None, "prebuilt.configs is missing"
-          assert set(configs) == {"shipping", "dcheck"}, \
-              f"prebuilt.configs must hold exactly shipping and dcheck, found {sorted(configs)}"
-          for name, entry in configs.items():
-              assert "platforms" in entry, f"prebuilt.configs.{name}.platforms is missing"
-          print(f"manifest ok: Chromium {m['chromium_version']} ({m['channel']}), target {m['build_target']}")
-          PY
-
       - name: Byte-compile the Python scripts
         run: |
           python3 -m compileall -q \
-            Scripts/chromium_manager.py \
             Scripts/xcodeproj_sync.py \
             Scripts/test_verdict.py \
-            Scripts/app_launch_smoke.py
+            Scripts/app_launch_smoke.py \
+            Scripts/extension_schemas.py
 
       # The guard that decides whether the test job really ran anything is
       # itself derived from the sources, so a parse it cannot handle has to
@@ -73,48 +53,15 @@ jobs:
       - name: Shellcheck
         run: |
           shellcheck \
-            Scripts/chromium \
             Scripts/xcodeproj-sync \
             Scripts/screenshots \
             Scripts/live-engine-tests \
             Scripts/test-verdict \
             Scripts/app-launch-smoke \
-            Scripts/ensure-chromium-engine.sh \
             Scripts/sign-app.sh \
             Scripts/package-dmg.sh \
             Scripts/notarize.sh \
             Scripts/security-guards
-
-      - name: Generated sources are in sync with the manifest
-        run: |
-          Scripts/chromium sync
-          git diff --exit-code -- Orbit/Generated
-
-      # A clone has no Chromium/Generated/, so Chromium/Chromium.xcconfig alone
-      # decides what a first build points at.
-      - name: A fresh clone is configured for Chromium
-        run: |
-          grep -q '^ORBIT_CHROMIUM_ROOT = \$(SRCROOT)/ThirdParty/prebuilt/\$(ORBIT_ENGINE_CONFIG)$' Chromium/Chromium.xcconfig
-          grep -q '^ORBIT_ENGINE_CONFIG = shipping$' Chromium/Chromium.xcconfig
-          grep -q '^ORBIT_ENGINE_CONFIG\[config=Debug\] = dcheck$' Chromium/Chromium.xcconfig
-          grep -q '^ORBIT_CHROMIUM_BUILD_TARGET = ' Chromium/Chromium.xcconfig
-          # ThirdParty/*, not ThirdParty/: the submodule is re-included below it.
-          grep -q '^ThirdParty/\*$' .gitignore
-          grep -q '^!ThirdParty/depot_tools$' .gitignore
-          grep -q '^Chromium/Generated/$' .gitignore
-
-      # Chromium is the only engine `Scripts/chromium` knows how to fetch or
-      # build; there is no --engine flag to select anything else. This proves
-      # `sync` still writes real values rather than the flag having quietly
-      # started accepting -- and ignoring -- an engine argument again.
-      - name: Sync regenerates real values, and takes no engine argument
-        run: |
-          if Scripts/chromium sync --engine webkit >/dev/null 2>&1; then
-            echo "Scripts/chromium sync accepts --engine again. Chromium is the only backend it knows." >&2
-            exit 1
-          fi
-          Scripts/chromium sync
-          grep -q '^ORBIT_CHROMIUM_VERSION = ' Chromium/Generated/Chromium.xcconfig
 
   test:
     name: Build and test
@@ -137,78 +84,12 @@ jobs:
       - name: Project file lists match the working tree
         run: Scripts/xcodeproj-sync --check
 
-      # Here, not in the manifest job: plutil is macOS-only.
-      - name: Every target depends on ChromiumEngine
-        run: |
-          python3 - <<'PY'
-          import json, subprocess
-          raw = subprocess.run(
-              ["plutil", "-convert", "json", "-o", "-", "Orbit.xcodeproj/project.pbxproj"],
-              capture_output=True, check=True).stdout
-          objects = json.loads(raw)["objects"]
-          targets = {o["name"]: o for o in objects.values()
-                     if o.get("isa") in ("PBXNativeTarget", "PBXAggregateTarget")}
-          assert "ChromiumEngine" in targets, "the ChromiumEngine aggregate target is gone"
-          phases = [objects[p] for p in targets["ChromiumEngine"]["buildPhases"]]
-          assert any("ensure-chromium-engine.sh" in p.get("shellScript", "") for p in phases), \
-              "ChromiumEngine no longer runs Scripts/ensure-chromium-engine.sh"
-
-          def reaches(name, seen=()):
-              if name == "ChromiumEngine":
-                  return True
-              if name in seen:
-                  return False
-              return any(reaches(objects[objects[d]["target"]]["name"], seen + (name,))
-                         for d in targets[name].get("dependencies", []))
-
-          missing = [n for n in ("Orbit", "OrbitDemo", "OrbitTests", "OrbitAppTests")
-                     if not reaches(n)]
-          assert not missing, f"these targets do not depend on ChromiumEngine: {missing}"
-          print("every target reaches ChromiumEngine")
-          PY
-
-      # Saved as soon as it installs, so a later test failure cannot lose it;
-      # skipped on a hit, because a cache entry is immutable. No restore-keys.
-      - name: Restore the Chromium engine
-        id: engine
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ThirdParty/prebuilt
-          key: chromium-dcheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Chromium/chromium-version.json') }}
-
-      # Not required (the ChromiumEngine phase would), but it keeps the download
-      # out of the xcodebuild log and lets the cache work. dcheck, because Debug.
-      - name: Install the Chromium engine
-        run: Scripts/chromium fetch --config dcheck
-
-      - name: Save the Chromium engine
-        if: steps.engine.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ThirdParty/prebuilt
-          key: ${{ steps.engine.outputs.cache-primary-key }}
-
-      - name: Chromium doctor
-        run: Scripts/chromium doctor --config dcheck
-
       - name: Restore the Swift package checkouts
         id: swiftpm
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: DerivedData/SourcePackages
           key: swiftpm-${{ runner.os }}-${{ hashFiles('Orbit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
-
-      # Chromium is the only backend, so this is no longer "which one did we
-      # pick" -- it is that the engine really is on disk, is the one a Debug
-      # build embeds, and really is switched on for the compiler, before a
-      # build that would otherwise take ten minutes to say so.
-      - name: Confirm the engine backend
-        run: |
-          Scripts/chromium status --offline
-          grep -q '^ORBIT_CHROMIUM_VERSION = ' Chromium/Generated/Chromium.xcconfig
-          test -d ThirdParty/prebuilt/dcheck
-          test ! -e Chromium/Generated/engine
-          Scripts/chromium verify-engine --config dcheck
 
       # The live-engine suites skip in this job, by design and not by accident:
       # they start a real browser, fork five helper processes and put a window

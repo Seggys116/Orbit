@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Vendors upstream Chromium extension API schemas and diffs Orbit's against them.
 
-`sync` copies schemas into OrbitTests/Fixtures/UpstreamAPISchemas/, stamped with
-chromium_version, since ThirdParty/chromium is gitignored and absent on a fresh clone; the
-conformance test fails when the stamp drifts, forcing a re-sync on every Chromium bump. This
-script regenerates the expectations a human reviews; ExtensionSchemaConformanceTests.swift is
-the separate implementation that enforces them.
+Schemas are vendored in OrbitTests/Fixtures/UpstreamAPISchemas. There is no Chromium
+checkout and no version pin. This script diffs Orbit against that snapshot.
 """
 
 import argparse
@@ -31,7 +28,6 @@ VENDORED_PERMISSION_FEATURES = {
 ORBIT_API_DIR = os.path.join(REPO_ROOT, "Chromium", "Embedder", "common", "api")
 VENDOR_DIR = os.path.join(REPO_ROOT, "OrbitTests", "Fixtures", "UpstreamAPISchemas")
 EXPECTATIONS_PATH = os.path.join(REPO_ROOT, "OrbitTests", "Fixtures", "ExpectedAPIGaps.json")
-VERSION_PATH = os.path.join(REPO_ROOT, "Chromium", "chromium-version.json")
 PROVIDER_PATH = os.path.join(REPO_ROOT, "Chromium", "Embedder", "common", "orbit_extensions_api_provider.cc")
 
 MEMBER_KINDS = ("functions", "events", "types", "properties")
@@ -398,8 +394,7 @@ def core_registered_permissions():
 
 
 def chromium_version():
-    with open(VERSION_PATH, encoding="utf-8") as handle:
-        return json.load(handle)["chromium_version"]
+    return load_index().get("chromium_version", "vendored")
 
 
 def sha256_of(path):
@@ -413,12 +408,8 @@ def sha256_of(path):
 def require_upstream():
     if not os.path.isdir(CHROME_API_DIR):
         sys.exit(
-            "error: no Chromium checkout at %s.\n"
-            "       Scripts/extension-schemas sync needs one: run\n"
-            "         Scripts/chromium build --from-source\n"
-            "       or sync on a machine that already has it. The vendored copy in\n"
-            "       OrbitTests/Fixtures/UpstreamAPISchemas/ is what everyone else uses."
-            % UPSTREAM_SRC
+            "error: schemas are vendored in OrbitTests/Fixtures/UpstreamAPISchemas. "
+            "There is no Chromium checkout to sync from."
         )
 
 

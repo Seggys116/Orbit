@@ -1,6 +1,16 @@
 import AppKit
 import WebKit
 
+final class OrbitWebView: WKWebView {
+    weak var menuOwner: WebKitWebContents?
+
+    override func rightMouseDown(with event: NSEvent) {
+        MainActor.assumeIsolated {
+            menuOwner?.openContextMenu(with: event)
+        }
+    }
+}
+
 @MainActor
 final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKWebExtensionTab {
     let id = UUID()
@@ -13,7 +23,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     private let engine: WebKitEngine
     private let webKitSession: WebKitSession
-    let webView: WKWebView
+    let webView: OrbitWebView
     private let scriptBridge: WebKitScriptBridge
     private var lastStatusCode = 0
     private var preferredScheme: ContentColorScheme?
@@ -43,11 +53,12 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         } else {
             configuration = engine.makeConfiguration(session: session, bridge: bridge)
         }
-        let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
+        let view = OrbitWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         view.isInspectable = true
         if let agent = session.userAgent { view.customUserAgent = agent }
         self.webView = view
         super.init()
+        view.menuOwner = self
         bridge.owner = self
         view.navigationDelegate = self
         view.uiDelegate = self
@@ -219,7 +230,75 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     func cancelDownload(id: UUID) {}
-    func showDeveloperTools(inspectAt point: CGPoint?) { webView.isInspectable = true }
+    func showDeveloperTools(inspectAt point: CGPoint?) {
+        webView.isInspectable = true
+        let inspectorSelector = NSSelectorFromString("_inspector")
+        guard webView.responds(to: inspectorSelector),
+              let inspector = webView.perform(inspectorSelector)?.takeUnretainedValue()
+        else { return }
+        let show = NSSelectorFromString("show")
+        if inspector.responds(to: show) { _ = inspector.perform(show) }
+        if point != nil {
+            let select = NSSelectorFromString("toggleElementSelection")
+            if inspector.responds(to: select) { _ = inspector.perform(select) }
+        }
+    }
+
+    func openContextMenu(with event: NSEvent) {
+        let local = webView.convert(event.locationInWindow, from: nil)
+        let css = CGPoint(x: local.x, y: webView.bounds.height - local.y)
+        openContextMenu(atCSS: css)
+    }
+
+    func openContextMenu(atCSS point: CGPoint) {
+        let script = """
+        (function(){
+          var el = document.elementFromPoint(\(point.x), \(point.y));
+          var link = el && el.closest ? el.closest('a') : null;
+          var img = el && el.closest ? el.closest('img') : null;
+          var editable = false;
+          var node = el;
+          while (node) {
+            var tag = (node.tagName || '').toUpperCase();
+            if (node.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA') { editable = true; break; }
+            node = node.parentElement;
+          }
+          var selection = '';
+          try { selection = String(window.getSelection ? window.getSelection() : ''); } catch (e) {}
+          return JSON.stringify({
+            href: link ? link.href : '',
+            src: img ? (img.currentSrc || img.src || '') : '',
+            selection: selection,
+            editable: editable,
+            page: String(location.href || '')
+          });
+        })()
+        """
+        webView.evaluateJavaScript(script) { [weak self] result, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let context = Self.contextMenuContext(from: result, location: point)
+                _ = self.delegate?.webContents(self, showContextMenu: context)
+            }
+        }
+    }
+
+    private static func contextMenuContext(from result: Any?, location: CGPoint) -> ContextMenuContext {
+        let object = (result as? String).flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        let href = object["href"] as? String ?? ""
+        let src = object["src"] as? String ?? ""
+        let selection = object["selection"] as? String ?? ""
+        return ContextMenuContext(
+            pageURL: URL(string: object["page"] as? String ?? ""),
+            linkURL: href.isEmpty ? nil : URL(string: href),
+            sourceURL: src.isEmpty ? nil : URL(string: src),
+            selectionText: selection.isEmpty ? nil : selection,
+            mediaKind: src.isEmpty ? .none : .image,
+            isEditable: object["editable"] as? Bool ?? false,
+            location: location
+        )
+    }
     func closeDeveloperTools() {}
     func focus() { webView.window?.makeFirstResponder(webView) }
 

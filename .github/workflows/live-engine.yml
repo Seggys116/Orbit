@@ -125,39 +125,6 @@ jobs:
       - name: Project file lists match the working tree
         run: Scripts/xcodeproj-sync --check
 
-      # Same key as build-test.yml's dcheck engine, so this and the pull-request
-      # runs share one entry. See build-test.yml for the restore/save pair.
-      - name: Restore the Chromium engine
-        id: engine
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ThirdParty/prebuilt
-          key: chromium-dcheck-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Chromium/chromium-version.json') }}
-
-      # These suites are the reason a dcheck engine is built at all.
-      - name: Install the Chromium engine
-        run: Scripts/chromium fetch --config dcheck
-
-      - name: Save the Chromium engine
-        if: steps.engine.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ThirdParty/prebuilt
-          key: ${{ steps.engine.outputs.cache-primary-key }}
-
-      - name: Chromium doctor
-        run: Scripts/chromium doctor --config dcheck
-
-      # A runner restoring a cached ThirdParty/prebuilt/ alongside a stale
-      # generated overlay is a way to end up with no engine and zero live tests
-      # -- the same shape of failure this whole job exists to prevent -- so the
-      # installed build is asserted before anything is built.
-      - name: Confirm the Chromium backend
-        run: |
-          Scripts/chromium status --offline
-          test -d ThirdParty/prebuilt/dcheck
-          Scripts/chromium verify-engine --config dcheck
-
       - name: Restore the Swift package checkouts
         id: swiftpm
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -197,13 +164,16 @@ jobs:
       # intermittently fails to re-arm reaches a user as input that stops
       # working, and running both configurations is what tells that apart from
       # everything else. Both must be green.
-      - name: Run the live-engine suites
+      - name: Run the WebKit engine and extension tests
         run: |
           set -o pipefail
-          Scripts/live-engine-tests \
-            --results-dir "$RUNNER_TEMP/live-engine-results" \
-            --configurations baseline,force-pump \
-            -- \
+          xcodebuild test \
+            -project Orbit.xcodeproj \
+            -scheme OrbitAppTestsOnly \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath DerivedData \
+            -only-testing:OrbitAppTests/WebKitEngineLaunchTests \
+            -only-testing:OrbitAppTests/WebKitChromeExtensionTests \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_STYLE=Manual \

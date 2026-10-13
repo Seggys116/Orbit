@@ -29,6 +29,7 @@ enum EngineFactory {
             logger.fault("WebKitEngine.start() failed: \(String(describing: error), privacy: .public)")
             fatalError("WebKitEngine.start() failed: \(error)")
         }
+        engine.defaultSession.setUserAgent(WebKitProduct.userAgent)
         installBuiltInUserScripts(on: engine)
         // Not under XCTest: a hosted test run must not load the real user's
         // installed extensions into its engine.
@@ -48,6 +49,8 @@ enum EngineFactory {
             LinkHoverObserverScript.chromiumUserScript,
             MediaTransportScript.userScript,
             PageScrollbarStyleScript.userScript,
+            WebStorePrivateBridgeScript.chromiumUserScript,
+            WebStoreAddToChromeButtonScript.chromiumUserScript,
         ] {
             engine.addUserScript(script, session: session)
         }

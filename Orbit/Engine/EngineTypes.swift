@@ -31,7 +31,7 @@ enum WebKitProduct {
     static var versionDescription: String { "WebKit \(version)" }
 
     static var userAgent: String {
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version) Safari/605.1.15"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Chrome/\(webStoreProductVersion) Safari/605.1.15"
     }
 
     /// Chrome Web Store's update protocol asks for a product version. This is that token, not the rendering engine.

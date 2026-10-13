@@ -15,9 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  # The verification jobs live in a reusable workflow so that release.yml and
-  # chromium-update.yml gate on the identical checks: a tag push does not
-  # trigger this workflow, and `needs:` does not reach across workflows.
+  # The verification jobs live in a reusable workflow so release.yml gates on
+  # the identical checks: a tag push does not trigger this workflow.
   verify:
     name: Verify
     uses: ./.github/workflows/build-test.yml
@@ -30,24 +29,6 @@ jobs:
       NSUnbufferedIO: "YES"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # See build-test.yml for why this is a restore/save pair.
-      - name: Restore the Chromium engine
-        id: engine
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ThirdParty/prebuilt
-          key: chromium-shipping-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Chromium/chromium-version.json') }}
-
-      - name: Install the Chromium engine
-        run: Scripts/chromium fetch --config shipping
-
-      - name: Save the Chromium engine
-        if: steps.engine.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ThirdParty/prebuilt
-          key: ${{ steps.engine.outputs.cache-primary-key }}
 
       - name: Restore the Swift package checkouts
         id: swiftpm
@@ -80,16 +61,8 @@ jobs:
           path: DerivedData/SourcePackages
           key: ${{ steps.swiftpm.outputs.cache-primary-key }}
 
-      # --deep --strict reaches the embedded Orbit Framework and the three
-      # helper bundles the engine launches, so an archive that ships a broken
-      # one fails here. What it does not assert is that they are present at all.
       - name: Verify the archived bundle is signed
         run: |
           APP="$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
-
-      # Read out of the framework the archive embeds, not out of the manifest.
-      - name: The archived bundle embeds the shipping engine
-        run: |
-          APP="$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app"
-          Scripts/chromium verify-engine --config shipping --bundle "$APP"
+          test ! -d "$APP/Contents/Frameworks/Orbit Framework.framework"

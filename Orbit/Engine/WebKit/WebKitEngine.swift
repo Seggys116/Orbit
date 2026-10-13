@@ -321,13 +321,28 @@ final class WebKitEngine: NSObject, BrowserEngine {
             let encoded = JavaScriptLiteral.string(script.source)
             source = "(function(){var style=document.createElement('style');style.textContent=\(encoded);(document.head||document.documentElement).appendChild(style);})();"
         } else {
-            source = script.source
+            source = Self.scoped(script.source, patterns: script.matchPatterns)
         }
         return WKUserScript(
             source: source,
             injectionTime: script.injectionTime == .documentStart ? .atDocumentStart : .atDocumentEnd,
             forMainFrameOnly: !script.allFrames
         )
+    }
+
+    private static func scoped(_ source: String, patterns: [String]) -> String {
+        if patterns.contains("<all_urls>") || patterns.contains("*://*/*") { return source }
+        let hosts = patterns.compactMap(patternHost)
+        guard !hosts.isEmpty else { return source }
+        let predicate = hosts.map { "location.hostname===\(JavaScriptLiteral.string($0))" }.joined(separator: "||")
+        return "(function(){if(!(\(predicate)))return;\(source)})();"
+    }
+
+    private static func patternHost(_ pattern: String) -> String? {
+        guard let scheme = pattern.range(of: "://") else { return nil }
+        let host = pattern[scheme.upperBound...].prefix { $0 != "/" && $0 != "*" }
+        guard !host.isEmpty, host != "*" else { return nil }
+        return String(host)
     }
 
     private static let bootstrapSource = """
