@@ -43,15 +43,15 @@ public enum PictureInPictureScript {
           report('the page has set disablePictureInPicture on its video.');
           return false;
         }
+        if (target.webkitSupportsPresentationMode && target.webkitSupportsPresentationMode('picture-in-picture')) {
+          target.webkitSetPresentationMode('picture-in-picture');
+          return true;
+        }
         if (target.requestPictureInPicture) {
           var entering = target.requestPictureInPicture();
           if (entering && entering.catch) {
             entering.catch(function(e) { report('request rejected — ' + describe(e)); });
           }
-          return true;
-        }
-        if (target.webkitSetPresentationMode) {
-          target.webkitSetPresentationMode('picture-in-picture');
           return true;
         }
         report('this engine exposes neither requestPictureInPicture nor webkitSetPresentationMode.');

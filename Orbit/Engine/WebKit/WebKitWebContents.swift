@@ -1,6 +1,18 @@
 import AppKit
 import WebKit
 
+enum WebKitMediaPreferences {
+    // The public flag is iOS-only. Without the private setter, video reports no picture-in-picture support.
+    static func allowPictureInPicture(_ configuration: WKWebViewConfiguration) {
+        let preferences = configuration.preferences
+        let selector = NSSelectorFromString("_setAllowsPictureInPictureMediaPlayback:")
+        guard preferences.responds(to: selector) else { return }
+        let implementation = preferences.method(for: selector)
+        typealias Function = @convention(c) (AnyObject, Selector, Bool) -> Void
+        unsafeBitCast(implementation, to: Function.self)(preferences, selector, true)
+    }
+}
+
 final class OrbitWebView: WKWebView {
     weak var menuOwner: WebKitWebContents?
 
@@ -54,6 +66,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         } else {
             configuration = engine.makeConfiguration(session: session, bridge: bridge)
         }
+        WebKitMediaPreferences.allowPictureInPicture(configuration)
         let view = OrbitWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         view.isInspectable = true
         configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
@@ -123,6 +136,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     private func replaceWebView(with configuration: WKWebViewConfiguration, extensionHost: String?) {
+        WebKitMediaPreferences.allowPictureInPicture(configuration)
         let replacement = OrbitWebView(frame: webView.frame, configuration: configuration)
         replacement.menuOwner = self
         replacement.isInspectable = true
@@ -271,10 +285,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     func togglePictureInPicture() {
-        webView.evaluateJavaScript(
-            "(function(){var v=document.querySelector('video');if(!v)return;if(document.pictureInPictureElement){document.exitPictureInPicture();}else{v.requestPictureInPicture();}})()",
-            completionHandler: nil
-        )
+        webView.evaluateJavaScript(PictureInPictureScript.source, completionHandler: nil)
     }
 
     func capturePreview(rect: CGRect?, size: CGSize) async -> NSImage? {

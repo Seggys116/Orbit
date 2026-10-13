@@ -86,13 +86,23 @@ public enum MediaSessionObserverScript {
                 || sessionState === 'paused';
               var inPictureInPicture =
                 !!document.pictureInPictureElement || elements.some(isInPictureInPicture);
+              var canPictureInPicture = elements.some(function(el) {
+                if (el.tagName !== 'VIDEO' || el.disablePictureInPicture) { return false; }
+                try {
+                  if (el.webkitSupportsPresentationMode && el.webkitSupportsPresentationMode('picture-in-picture')) {
+                    return true;
+                  }
+                } catch (e) {}
+                return typeof el.requestPictureInPicture === 'function';
+              });
               post({
                 kind: '\(PayloadKind.playbackState.rawValue)',
                 hasVideo: hasVideo,
                 isPlaying: isPlaying,
                 isAudible: isAudible,
                 hasActiveMediaSession: hasActiveMediaSession,
-                isPictureInPictureActive: inPictureInPicture
+                isPictureInPictureActive: inPictureInPicture,
+                isPictureInPictureAvailable: canPictureInPicture
               });
             } catch (e) {}
           }
@@ -212,6 +222,9 @@ public enum MediaSessionObserverScript {
                 payload["hasActiveMediaSession"] as? Bool ?? updated.hasActiveMediaSession
             updated.isPictureInPictureActive =
                 payload["isPictureInPictureActive"] as? Bool ?? updated.isPictureInPictureActive
+            if let available = payload["isPictureInPictureAvailable"] as? Bool {
+                updated.isPictureInPictureAvailable = available
+            }
         }
         return updated
     }

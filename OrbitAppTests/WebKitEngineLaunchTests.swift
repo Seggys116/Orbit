@@ -260,6 +260,55 @@ final class WebKitEngineLaunchTests: XCTestCase {
         return latest
     }
 
+    func testPictureInPicturePresentsThePlayingVideo() async throws {
+        let ffmpeg = URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg")
+        guard FileManager.default.isExecutableFile(atPath: ffmpeg.path) else {
+            throw XCTSkip("ffmpeg is not installed")
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-pip-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let video = root.appendingPathComponent("clip.mp4")
+        let encode = Process()
+        encode.executableURL = ffmpeg
+        encode.arguments = ["-y", "-f", "lavfi", "-i", "color=c=black:s=160x90:d=1", "-pix_fmt", "yuv420p", video.path]
+        encode.standardOutput = FileHandle.nullDevice
+        encode.standardError = FileHandle.nullDevice
+        try encode.run()
+        encode.waitUntilExit()
+        XCTAssertEqual(encode.terminationStatus, 0)
+        let html = "<!doctype html><html><body><video id=\"v\" src=\"clip.mp4\" autoplay muted playsinline loop></video></body></html>"
+        try html.write(to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+        let port = 18_981
+        let server = Process()
+        server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        server.arguments = ["-m", "http.server", "\(port)", "--bind", "127.0.0.1", "--directory", root.path]
+        server.standardOutput = FileHandle.nullDevice
+        server.standardError = FileHandle.nullDevice
+        try server.run()
+        defer { server.terminate() }
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
+        let contents = try engine.makeWebContents(session: engine.defaultSession, initialURL: nil)
+        host(contents)
+        contents.load(URL(string: "http://127.0.0.1:\(port)/")!)
+        let ready = try await waitForText(
+            contents,
+            script: "(function(){var v=document.getElementById('v'); if(!v) return 'missing'; return v.readyState >= 2 && v.webkitSupportsPresentationMode('picture-in-picture') ? 'ready' : 'wait';})()",
+            equals: "ready"
+        )
+        XCTAssertEqual(ready, "ready")
+        contents.togglePictureInPicture()
+        let mode = try await waitForText(
+            contents,
+            script: "(function(){var v=document.getElementById('v'); return (document.pictureInPictureElement || (v && v.webkitPresentationMode === 'picture-in-picture')) ? 'floating' : 'inline';})()",
+            equals: "floating"
+        )
+        XCTAssertEqual(mode, "floating")
+        engine.shutdown()
+    }
+
     func testClearingCacheReloadsTheDocument() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-cache-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

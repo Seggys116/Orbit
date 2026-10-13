@@ -179,7 +179,7 @@ final class MediaSessionBridgeTests: XCTestCase {
 
     func test_theObserverEmitsTheKeysTheDecoderReads() {
         let source = MediaSessionObserverScript.source(postExpression: "noop()")
-        for key in ["hasVideo", "isPlaying", "isAudible", "hasActiveMediaSession", "isPictureInPictureActive"] {
+        for key in ["hasVideo", "isPlaying", "isAudible", "hasActiveMediaSession", "isPictureInPictureActive", "isPictureInPictureAvailable"] {
             XCTAssertTrue(
                 source.contains("\(key):"),
                 "The observer never emits '\(key)', so the decoder's read of it is dead."
