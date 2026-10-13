@@ -5,7 +5,6 @@ import OSLog
 class OrbitAppDelegate: NSObject, NSApplicationDelegate {
 
     static let quitLog = Logger(subsystem: "com.orbit.browser", category: "Quit")
-    static let engineLog = Logger(subsystem: "com.orbit.browser", category: "Engine")
 
     // Every member below must read this, not AppEnvironment.shared directly —
     // OrbitDemoAppDelegate overrides it, and .shared would build the real environment in the demo process.
@@ -16,26 +15,6 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         // method on purpose: Scripts/app-launch-smoke tells a crash before the
         // delegate ran from one inside it by which stages reached disk.
         AppSmokeProbe.noteStage(.delegateEntered)
-
-        // Must start here, not from a live test's stack: BrowserMainLoop never returns,
-        // so whichever pump it nests inside never returns either. This hung the live suite.
-        if ProcessInfo.processInfo.environment["ORBIT_LIVE_ENGINE"] != nil {
-            // Must set the private profile before loadAndStart, which traps if set after OrbitMain is scheduled.
-            // The .ephemeral choice here is a matching constraint: the engine LiveChromiumEngineHost
-            // builds later asks for this same directory. A trap crash restarts the host and still
-            // reports "Executed 0 tests" as a pass.
-            // Errors are logged, not swallowed, or a live test just times out with no explanation.
-            do {
-                if let directory = EngineStorageDirectory.directory(for: .ephemeral) {
-                    try OrbitChromiumBridge.shared.setUserDataDirectory(directory.path)
-                }
-                try OrbitChromiumBridge.shared.loadAndStart()
-            } catch {
-                Self.engineLog.error(
-                    "ORBIT_LIVE_ENGINE: the engine could not be started: \(String(describing: error), privacy: .public)"
-                )
-            }
-        }
 
         // Before the guard below: the live-engine test host opens real
         // inspectors and needs the same appearance tracking the real app has.

@@ -572,8 +572,7 @@ final class AppEnvironment {
         // Store refuses installs. XCTest and the smoke probe both need this or they'd hit the real profile.
         let needsPrivateProfile = isDemo || DebugFlags.isRunningUnderTests || DebugFlags.isRunningSmokeProbe
         ownEngine = EngineFactory.makeEngine(storage: needsPrivateProfile ? .isolated : .persistent)
-        // Safe only after EngineFactory.makeEngine returns: it runs loadAndStart() through dlsym, and
-        // OrbitChromiumTabsBridge's init installs its delegate through that same table — see ChromiumTabsSetup.
+        // Safe only after EngineFactory.makeEngine returns. The tab bridge still installs its handler here.
         ChromiumTabsSetup.installHandlerOnce
         startBackgroundTabRendererPolicy()
         materializeActiveTabIfNeeded()
