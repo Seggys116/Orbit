@@ -193,40 +193,15 @@ enum AppSmokeProbe {
     private static func checkEngineBundle() {
         let framework = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Frameworks/Orbit Framework.framework", isDirectory: true)
-        let versioned = framework.appendingPathComponent("Versions/A", isDirectory: true)
-
-        var missing: [String] = []
-        let binary = versioned.appendingPathComponent("Orbit Framework", isDirectory: false)
-        if !FileManager.default.isExecutableFile(atPath: binary.path) {
-            missing.append(binary.path)
-        }
-        for suffix in ["", " (GPU)", " (Renderer)"] {
-            let name = "Orbit Helper\(suffix)"
-            let executable = versioned.appendingPathComponent("Helpers/\(name).app/Contents/MacOS/\(name)")
-            if !FileManager.default.isExecutableFile(atPath: executable.path) {
-                missing.append(executable.path)
-            }
-        }
-        for resource in ["orbit_resources.pak", "icudtl.dat", "v8_context_snapshot.arm64.bin"] {
-            let url = versioned.appendingPathComponent("Resources/\(resource)", isDirectory: false)
-            if !FileManager.default.fileExists(atPath: url.path) {
-                missing.append(url.path)
-            }
-        }
-        if missing.isEmpty {
-            record(.engineBundleLayout, true, "framework binary, three helper apps and three engine resources all present")
+        if FileManager.default.fileExists(atPath: framework.path) {
+            record(.engineBundleLayout, false, "Orbit Framework.framework is still in the app bundle")
         } else {
-            record(.engineBundleLayout, false, "missing or non-executable: \(missing.joined(separator: ", "))")
+            record(.engineBundleLayout, true, "no Chromium framework in the app bundle")
         }
-
         if let loaded = loadedFrameworkPath() {
-            if loaded.hasPrefix(framework.path) {
-                record(.loadedEngineFramework, true, loaded)
-            } else {
-                record(.loadedEngineFramework, false, "the loaded Orbit Framework is \(loaded), outside this bundle (\(framework.path))")
-            }
+            record(.loadedEngineFramework, false, "Orbit Framework is loaded from \(loaded)")
         } else {
-            record(.loadedEngineFramework, false, "no image named \"Orbit Framework\" is loaded in this process")
+            record(.loadedEngineFramework, true, "no Orbit Framework image is loaded")
         }
     }
 
