@@ -331,6 +331,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
     }
 
     private static let bootstrapSource = """
+    window.chrome = window.chrome || {};
     window.__orbitPostMessage = function(channel, json) {
       try { window.webkit.messageHandlers.orbit.postMessage({channel: channel, json: json}); } catch (e) {}
     };

@@ -314,6 +314,7 @@ enum AppSmokeProbe {
               href: location.href,
               ua: navigator.userAgent,
               title: document.title,
+              text: document.getElementById('fixture') ? document.getElementById('fixture').textContent : '',
               chrome: typeof window.chrome,
               math: String(6*7),
               bodyLength: document.body ? document.body.innerHTML.length : -1
@@ -339,7 +340,14 @@ enum AppSmokeProbe {
             return tabID
         }
 
-        record(.pageLoad, true, "\(committed.absoluteString) complete after \(String(format: "%.1f", waited + documentWaited))s, title=\(report["title"] ?? ""), bodyLength=\(report["bodyLength"] ?? "")")
+        let documentText = report["text"] as? String ?? ""
+        let expectedText = environment["ORBIT_SMOKE_PROBE_TEXT"] ?? ""
+        let pageDetail = "\(committed.absoluteString) complete after \(String(format: "%.1f", waited + documentWaited))s, title=\(report["title"] ?? ""), text=\(documentText), bodyLength=\(report["bodyLength"] ?? "")"
+        if !expectedText.isEmpty && documentText != expectedText {
+            record(.pageLoad, false, "\(pageDetail); expected text \(expectedText)")
+        } else {
+            record(.pageLoad, true, pageDetail)
+        }
 
         let arithmetic = "\(report["math"] as? String ?? "")-\(report["chrome"] as? String ?? "")"
         if arithmetic == "42-object" {
