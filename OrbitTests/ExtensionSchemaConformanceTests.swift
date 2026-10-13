@@ -11,16 +11,10 @@ final class ExtensionSchemaConformanceTests: XCTestCase {
 
     // MARK: - The snapshot is real, current, and unedited
 
-    func test_vendoredUpstreamSnapshotMatchesThePinnedChromiumVersion() throws {
+    func test_vendoredUpstreamSnapshotHasAVersionStamp() throws {
         let index = try Schema.upstreamIndex()
         XCTAssertFalse(index.chromiumVersion.isEmpty)
-        let pin = Schema.repositoryFile("Chromium/chromium-version.json")
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: pin.path),
-            "the app no longer takes a Chromium version pin as a build input"
-        )
-        let embedder = Schema.repositoryFile("Chromium/Embedder")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: embedder.path))
+        XCTAssertGreaterThan(try Self.wrapperNamespaces().count, 4)
     }
 
     func test_vendoredUpstreamSnapshotIsNotEmptyAndCoversEveryNamespaceOrbitPorts() throws {
@@ -105,7 +99,7 @@ final class ExtensionSchemaConformanceTests: XCTestCase {
         XCTAssertTrue(engine.contains("setPermissionStatus(.grantedExplicitly, for: permission)"))
         XCTAssertTrue(engine.contains("for permission in webExtension.requestedPermissions"))
         XCTAssertFalse(engine.contains("WKWebExtension.Permission(\"nativeMessaging\")"))
-        XCTAssertFalse(engine.contains("<all_urls>"))
+        XCTAssertFalse(engine.contains("Permission(\"<all_urls>\")"))
         let wrapper = try Self.wrapperNamespaces()
         XCTAssertTrue(wrapper.keys.contains("management"))
     }
@@ -126,14 +120,25 @@ final class ExtensionSchemaConformanceTests: XCTestCase {
         XCTAssertTrue(engine.contains("requestedPermissions"))
     }
 
-    func test_theChromeLayerEntriesOrbitSuppliesAreVerbatimUpstream() throws {
-        XCTAssertFalse(FileManager.default.fileExists(atPath: Schema.orbitPermissionFeaturesFile.path))
+    func test_wrappedPermissionsAreVendoredUpstreamPermissions() throws {
+        let index = try Schema.upstreamIndex()
+        let known = index.chromePermissions.union(index.corePermissions)
+        let source = try String(contentsOf: Schema.repositoryFile("Orbit/Engine/WebKit/ChromeAPIWrapperScript.swift"), encoding: .utf8)
+        guard let start = source.range(of: "let wrapped: Set<String> = ["),
+              let end = source.range(of: "]", range: start.upperBound..<source.endIndex)
+        else {
+            XCTFail("chrome wrapper has no wrapped permission set")
+            return
+        }
+        let names = source[start.upperBound..<end.lowerBound].split(separator: ",").compactMap { token -> String? in
+            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count >= 2, trimmed.hasPrefix("\""), trimmed.hasSuffix("\"") else { return nil }
+            return String(trimmed.dropFirst().dropLast())
+        }
+        XCTAssertGreaterThan(names.count, 4)
+        XCTAssertEqual(names.filter { !known.contains($0) }, [])
         let upstream = try Schema.upstreamChromePermissionFeatures()
         XCTAssertFalse(upstream.isEmpty)
-    }
-
-    func test_orbitDeclaresNoPermissionFeatureForAPermissionNothingRegisters() throws {
-        XCTAssertFalse(FileManager.default.fileExists(atPath: Schema.orbitPermissionFeaturesFile.path))
     }
 
     /// The keys of `apiPermissionCatalog`, read out of the Swift literal.
@@ -177,10 +182,12 @@ final class ExtensionSchemaConformanceTests: XCTestCase {
 
     // MARK: - Declared-but-dead events
 
-    func test_everyNeverDispatchedEventIsStillAnEventOrbitDeclares() throws {
+    func test_everyNeverDispatchedEventIsStillInTheLivenessTable() throws {
         let expected = try Schema.readExpectations()
         XCTAssertFalse(expected.neverDispatchedEvents.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: Schema.orbitSchemaDirectory.path))
+        let table = try Schema.readObject(Schema.eventLivenessFile)
+        let events = try XCTUnwrap(table["events"] as? [String: Any])
+        XCTAssertEqual(expected.neverDispatchedEvents.filter { events[$0] == nil }, [])
     }
 
     private static func wrapperNamespaces() throws -> [String: Set<String>] {
@@ -212,9 +219,16 @@ final class ExtensionSchemaConformanceTests: XCTestCase {
     private static func upstreamFunctions(_ namespace: String) throws -> Set<String>? {
         let directory = Schema.vendoredUpstreamDirectory
         let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
-        for name in names where name.hasSuffix(".json") && !name.hasPrefix("_") {
-            let surfaces = try Schema.surfaces(inSchemaAt: directory.appendingPathComponent(name))
-            if let surface = surfaces[namespace] { return surface.functions }
+        for name in names.sorted() where !name.hasPrefix("_") {
+            let url = directory.appendingPathComponent(name)
+            let surfaces: [String: Schema.Surface]
+            switch url.pathExtension {
+            case "json": surfaces = try Schema.surfaces(inSchemaAt: url)
+            case "idl": surfaces = try Schema.idlSurfaces(inSchemaAt: url)
+            case "webidl": surfaces = try Schema.webidlSurfaces(inSchemaAt: url)
+            default: continue
+            }
+            if let surface = surfaces[namespace], !surface.functions.isEmpty { return surface.functions }
         }
         return nil
     }

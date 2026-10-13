@@ -16,50 +16,17 @@ final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
         try XCTUnwrap(expectations()[key] as? [String], "RuntimeSurfaceExpectations.json is missing the \"\(key)\" list")
     }
 
-    /// namespace -> the permission its `dependencies` names, from Orbit's own
-    /// API feature file.
-    private func orbitPermissionGatedNamespaces() throws -> [String: String] {
-        let features = Schema.repositoryFile("Chromium/Embedder/common/api/_api_features.json")
-        if !FileManager.default.fileExists(atPath: features.path) { return [:] }
-        let object = try Schema.readObject(features)
-        var gated: [String: String] = [:]
-        for (name, raw) in object {
-            guard !name.contains("."), let entry = raw as? [String: Any] else { continue }
-            let dependencies = entry["dependencies"] as? [String] ?? []
-            for dependency in dependencies where dependency.hasPrefix("permission:") {
-                gated[name] = String(dependency.dropFirst("permission:".count))
-            }
-        }
-        return gated
-    }
-
     // MARK: - The negative control is a table, not a one-off
 
     func test_everyPermissionGatedNamespaceOrbitDeclaresHasANegativeControlRow() throws {
-        let gated = try orbitPermissionGatedNamespaces()
-        if gated.isEmpty {
-            let rows = try XCTUnwrap(expectations()["permissionGatedNamespaces"] as? [[String: String]])
-            XCTAssertFalse(rows.isEmpty)
-            return
-        }
-
         let rows = try XCTUnwrap(expectations()["permissionGatedNamespaces"] as? [[String: String]])
-        let covered = Dictionary(uniqueKeysWithValues: rows.compactMap { row -> (String, String)? in
-            guard let namespace = row["namespace"], let permission = row["permission"] else { return nil }
-            return (namespace, permission)
-        })
-
-        let uncovered = gated.keys.filter { covered[$0] == nil }.sorted()
-        XCTAssertEqual(
-            uncovered, [],
-            "these namespaces are gated on a permission in Chromium/Embedder/common/api/_api_features.json and nothing asserts they are actually denied without it. A permission check that never denies is not a permission check."
-        )
-
-        for (namespace, permission) in gated where covered[namespace] != nil {
-            XCTAssertEqual(
-                covered[namespace], permission,
-                "the negative control for \(namespace) names permission \"\(covered[namespace] ?? "")\" but _api_features.json gates it on \"\(permission)\""
-            )
+        XCTAssertFalse(rows.isEmpty)
+        let known = try Schema.upstreamIndex().chromePermissions.union(Schema.upstreamIndex().corePermissions)
+        for row in rows {
+            let namespace = try XCTUnwrap(row["namespace"])
+            let permission = try XCTUnwrap(row["permission"])
+            XCTAssertFalse(namespace.isEmpty)
+            XCTAssertTrue(known.contains(permission), permission)
         }
     }
 

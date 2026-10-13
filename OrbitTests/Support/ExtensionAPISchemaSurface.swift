@@ -17,13 +17,9 @@ enum ExtensionAPISchemaSurface {
         repositoryRoot.appendingPathComponent(relativePath)
     }
 
-    static let orbitSchemaDirectory = repositoryFile("Chromium/Embedder/common/api")
     static let vendoredUpstreamDirectory = repositoryFile("OrbitTests/Fixtures/UpstreamAPISchemas")
     static let expectationsFile = repositoryFile("OrbitTests/Fixtures/ExpectedAPIGaps.json")
     static let eventLivenessFile = repositoryFile("OrbitTests/Fixtures/EventLiveness.json")
-    static let chromiumVersionFile = repositoryFile("Chromium/chromium-version.json")
-    static let apiProviderFile = repositoryFile("Chromium/Embedder/common/orbit_extensions_api_provider.cc")
-    static let orbitPermissionFeaturesFile = orbitSchemaDirectory.appendingPathComponent("_permission_features.json")
     static let upstreamChromePermissionFeaturesFile = vendoredUpstreamDirectory
         .appendingPathComponent("_chrome_permission_features.json")
     static let upstreamCorePermissionFeaturesFile = vendoredUpstreamDirectory
@@ -181,24 +177,7 @@ enum ExtensionAPISchemaSurface {
         return result
     }
 
-    /// Every namespace Orbit's embedder declares, with the file it came from.
-    static func orbitPortedNamespaces() throws -> [String: String] {
-        let names = try FileManager.default.contentsOfDirectory(atPath: orbitSchemaDirectory.path)
-        var ported: [String: String] = [:]
-        for name in names.sorted() where name.hasSuffix(".json") && !name.hasPrefix("_") {
-            for namespace in try surfaces(inSchemaAt: orbitSchemaDirectory.appendingPathComponent(name)).keys {
-                ported[namespace] = name
-            }
-        }
-        return ported
-    }
-
-    static func orbitSurface(namespace: String, file: String) throws -> Surface {
-        try surfaces(inSchemaAt: orbitSchemaDirectory.appendingPathComponent(file))[namespace] ?? Surface()
-    }
-
-    /// Orbit's are all .json; upstream's are .json, .idl or .webidl, so the
-    /// vendored copy keeps its own name and is resolved by basename.
+    /// Upstream schemas are .json, .idl or .webidl. The vendored copy keeps its own name.
     static let schemaExtensions = ["json", "idl", "webidl"]
 
     static func resolveSchema(in directory: URL, file: String) -> URL? {
@@ -346,52 +325,12 @@ enum ExtensionAPISchemaSurface {
         return nsText.substring(with: match.range(at: 1))
     }
 
-    /// Every event Orbit declares, as "namespace.eventName".
-    static func orbitDeclaredEvents() throws -> Set<String> {
-        var events: Set<String> = []
-        for (namespace, file) in try orbitPortedNamespaces() {
-            for event in try orbitSurface(namespace: namespace, file: file).events {
-                events.insert("\(namespace).\(event)")
-            }
-        }
-        return events
-    }
-
-    // MARK: - Permissions
-
-    /// The permission names in `kOrbitPermissionsToRegister`, read out of the
-    /// C++ literal itself.
-    static func registeredPermissionNames() throws -> Set<String> {
-        guard let source = try? String(contentsOf: apiProviderFile, encoding: .utf8) else {
-            throw SchemaError.unreadable(apiProviderFile)
-        }
-        guard let start = source.range(of: "kOrbitPermissionsToRegister[] = {"),
-              let end = source.range(of: "};", range: start.upperBound..<source.endIndex)
-        else {
-            throw SchemaError.malformed(apiProviderFile, "no kOrbitPermissionsToRegister array literal")
-        }
-        var names: Set<String> = []
-        for line in source[start.upperBound..<end.lowerBound].split(separator: "\n") {
-            guard line.contains("APIPermissionID::") else { continue }
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("{"), let openQuote = trimmed.firstIndex(of: "\"") else { continue }
-            let afterOpen = trimmed.index(after: openQuote)
-            guard let closeQuote = trimmed[afterOpen...].firstIndex(of: "\"") else { continue }
-            names.insert(String(trimmed[afterOpen..<closeQuote]))
-        }
-        return names
-    }
-
     // MARK: - Permission features
 
     /// `_permission_features.json` as name -> entry, where an entry is either a
     /// JSON object or a list of them (Chromium's ComplexFeature).
     static func permissionFeatures(at url: URL) throws -> [String: Any] {
         try readObject(url)
-    }
-
-    static func orbitPermissionFeatures() throws -> [String: Any] {
-        try permissionFeatures(at: orbitPermissionFeaturesFile)
     }
 
     static func upstreamChromePermissionFeatures() throws -> [String: Any] {
@@ -402,30 +341,7 @@ enum ExtensionAPISchemaSurface {
         try permissionFeatures(at: upstreamCorePermissionFeaturesFile)
     }
 
-    /// Every permission feature an Orbit build answers with, in provider order:
-    /// `CoreExtensionsAPIProvider` first, `OrbitExtensionsAPIProvider` after it.
-    static func effectivePermissionFeatures() throws -> [String: Any] {
-        var features = try upstreamCorePermissionFeatures()
-        for (name, value) in try orbitPermissionFeatures() { features[name] = value }
-        return features
-    }
-
-    /// Permissions Chromium resolves to an `APIPermissionInfo`: `//extensions` core's
-    /// table plus `kOrbitPermissionsToRegister`, minus ones `ParseFromJSON` refuses.
-    static func allRegisteredPermissionNames() throws -> Set<String> {
-        let index = try upstreamIndex()
-        return index.coreRegisteredPermissions
-            .union(try registeredPermissionNames())
-            .subtracting(index.coreInternalPermissions)
-    }
-
-    /// Every name the permission FeatureProvider answers for in an Orbit build.
-    static func declaredPermissionFeatureNames() throws -> Set<String> {
-        try upstreamIndex().corePermissions.union(try orbitPermissionFeatures().keys)
-    }
-
-    /// The chrome-layer entries Orbit has to supply itself: registered by
-    /// `CoreExtensionsAPIProvider`, stated by no core feature.
+    /// Chrome-layer permissions the vendored core table registers without a core feature.
     static func permissionsCoreRegistersWithoutAFeature() throws -> Set<String> {
         let index = try upstreamIndex()
         return index.coreRegisteredPermissions
@@ -487,21 +403,6 @@ enum ExtensionAPISchemaSurface {
         return true
     }
 
-    /// The permissions an extension installed in Orbit can really end up
-    /// holding: registered, and with a feature that grants them to it.
-    static func grantablePermissionNames() throws -> Set<String> {
-        let features = try effectivePermissionFeatures()
-        var granted: Set<String> = []
-        for name in try allRegisteredPermissionNames() {
-            guard let value = features[name] else { continue }
-            let grantable = featureEntries(value).contains {
-                isGrantableToAnOrdinaryExtension(resolvedEntry($0, named: name, in: features))
-            }
-            if grantable { granted.insert(name) }
-        }
-        return granted
-    }
-
     // MARK: - Vendored snapshot
 
     struct UpstreamIndex {
@@ -539,13 +440,6 @@ enum ExtensionAPISchemaSurface {
         )
     }
 
-    static func pinnedChromiumVersion() throws -> String {
-        guard let version = try readObject(chromiumVersionFile)["chromium_version"] as? String else {
-            throw SchemaError.malformed(chromiumVersionFile, "missing \"chromium_version\"")
-        }
-        return version
-    }
-
     // MARK: - The diff
 
     struct NamespaceGap: Equatable {
@@ -558,39 +452,6 @@ enum ExtensionAPISchemaSurface {
     struct Gaps: Equatable {
         var namespaces: [String: NamespaceGap]
         var unregisteredChromePermissions: [String]
-    }
-
-    /// Orbit's surface, diffed against the vendored upstream snapshot. Core
-    /// `//extensions` namespaces cancel out: both Orbit and Chrome compile the
-    /// same ones, so a difference there would not be an Orbit gap.
-    static func computeGaps() throws -> Gaps {
-        let index = try upstreamIndex()
-        let ported = try orbitPortedNamespaces()
-
-        var namespaces: [String: NamespaceGap] = [:]
-        for name in index.chromeNamespaces.subtracting(index.coreNamespaces).subtracting(ported.keys) {
-            namespaces[name] = NamespaceGap(status: "absent")
-        }
-
-        for (namespace, file) in ported {
-            let upstream = try upstreamSurface(namespace: namespace, file: file)
-            let orbit = try orbitSurface(namespace: namespace, file: file)
-            var gap = NamespaceGap(status: "partial")
-            for kind in MemberKind.allCases {
-                let missing = upstream.names(ofKind: kind).subtracting(orbit.names(ofKind: kind)).sorted()
-                let extra = orbit.names(ofKind: kind).subtracting(upstream.names(ofKind: kind)).sorted()
-                if !missing.isEmpty { gap.missing[kind] = missing }
-                if !extra.isEmpty { gap.extra[kind] = extra }
-            }
-            if gap.missing.isEmpty && gap.extra.isEmpty { gap.status = "complete" }
-            namespaces[namespace] = gap
-        }
-
-        let permissions = index.chromePermissions
-            .subtracting(index.corePermissions)
-            .subtracting(try registeredPermissionNames())
-            .sorted()
-        return Gaps(namespaces: namespaces, unregisteredChromePermissions: permissions)
     }
 
     // MARK: - Expectations

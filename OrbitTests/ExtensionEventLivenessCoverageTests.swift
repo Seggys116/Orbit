@@ -37,7 +37,8 @@ final class ExtensionEventLivenessCoverageTests: XCTestCase {
     func test_everyEventOrbitDeclaresHasALivenessEntry() throws {
         let table = try readTable()
         XCTAssertGreaterThan(table.count, 15, "the liveness table is implausibly short")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: Schema.orbitSchemaDirectory.path))
+        let expected = try Schema.readExpectations()
+        XCTAssertEqual(expected.neverDispatchedEvents.filter { table[$0] == nil }, [])
     }
 
     func test_theLivenessTableNamesNoEventOrbitDoesNotDeclare() throws {
