@@ -62,12 +62,36 @@ enum ChromeAPIWrapperScript {
         };
       }
 
+      var GRANTED = [];
+      var EVENTS = {
+        bookmarks: ["onCreated", "onRemoved", "onChanged", "onMoved"],
+        downloads: ["onCreated", "onChanged", "onErased"],
+        history: ["onVisited", "onVisitRemoved"],
+        sessions: ["onChanged"],
+        management: ["onInstalled", "onUninstalled", "onEnabled", "onDisabled"]
+      };
+
+      function event() {
+        var listeners = [];
+        return {
+          addListener: function (listener) { listeners.push(listener); },
+          removeListener: function (listener) {
+            listeners = listeners.filter(function (item) { return item !== listener; });
+          },
+          hasListener: function (listener) { return listeners.indexOf(listener) !== -1; }
+        };
+      }
+
       function install(root) {
         if (!root) { return; }
         Object.keys(NAMESPACES).forEach(function (namespace) {
+          if (GRANTED.indexOf(namespace) === -1) { return; }
           var api = root[namespace] || {};
           NAMESPACES[namespace].forEach(function (method) {
             if (typeof api[method] !== "function") { api[method] = wrap(namespace, method); }
+          });
+          (EVENTS[namespace] || []).forEach(function (name) {
+            if (!api[name] || typeof api[name].addListener !== "function") { api[name] = event(); }
           });
           root[namespace] = api;
         });
@@ -105,7 +129,6 @@ enum ChromeAPIWrapperScript {
     """#
 
     static func install(in directory: URL) throws {
-        try source.write(to: directory.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
         let manifestURL = directory.appendingPathComponent("manifest.json")
         let data = try Data(contentsOf: manifestURL)
         guard var manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -139,8 +162,19 @@ enum ChromeAPIWrapperScript {
             permissions.append("nativeMessaging")
         }
         manifest["permissions"] = permissions
+        // WebKit refuses to load a manifest whose description is missing or blank. Chrome does not.
+        let existingDescription = (manifest["description"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if existingDescription.isEmpty {
+            let name = (manifest["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            manifest["description"] = name.isEmpty ? "Extension" : name
+        }
         let rewritten = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted])
         try rewritten.write(to: manifestURL, options: .atomic)
+        let granted = permissions.filter { wrapped.contains($0) }
+        let grantedLiteral = "[\(granted.map { JavaScriptLiteral.string($0) }.joined(separator: ", "))]"
+        let script = source.replacingOccurrences(of: "var GRANTED = [];", with: "var GRANTED = \(grantedLiteral);")
+        try script.write(to: directory.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
     }
 
     private static func moduleSpecifier(_ path: String) -> String {

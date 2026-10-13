@@ -163,7 +163,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
         grant(webExtension, on: context)
         try extensionController.load(context)
         if webExtension.hasBackgroundContent {
-            try await context.loadBackgroundContent()
+            try await loadBackground(context)
         }
         let loadedExtension = LoadedExtension(
             id: context.uniqueIdentifier,
@@ -181,6 +181,22 @@ final class WebKitEngine: NSObject, BrowserEngine {
         )
         publishAction(for: context, tab: nil)
         return loadedExtension
+    }
+
+    private func loadBackground(_ context: WKWebExtensionContext) async throws {
+        let finished = BackgroundLoad()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            context.loadBackgroundContent { error in
+                let description = error?.localizedDescription
+                    ?? context.errors.map(\.localizedDescription).joined(separator: " | ")
+                finished.finish(description.isEmpty ? nil : description, continuation)
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                let description = context.errors.map(\.localizedDescription).joined(separator: " | ")
+                finished.finish(description.isEmpty ? "extension background did not finish loading" : description, continuation)
+            }
+        }
     }
 
     func unloadExtension(id: String, session: EngineSession) {
@@ -384,6 +400,24 @@ final class WebKitEngine: NSObject, BrowserEngine {
       try { window.webkit.messageHandlers.orbit.postMessage({channel: channel, json: json}); } catch (e) {}
     };
     """
+
+    private final class BackgroundLoad: @unchecked Sendable {
+        private let lock = NSLock()
+        private var resumed = false
+
+        func finish(_ description: String?, _ continuation: CheckedContinuation<Void, Error>) {
+            lock.lock()
+            let already = resumed
+            resumed = true
+            lock.unlock()
+            guard !already else { return }
+            if let description, !description.isEmpty {
+                continuation.resume(throwing: EngineError(code: .unknown, underlyingDescription: description))
+            } else {
+                continuation.resume()
+            }
+        }
+    }
 
     private struct LoadedExtensionRecord {
         var `extension`: LoadedExtension
