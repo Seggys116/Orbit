@@ -67,7 +67,13 @@ final class WebKitSession: EngineSession {
     func clear(_ scope: BrowsingDataScope, since: Date?) async {
         var types = Set<String>()
         if scope.contains(.cookies) { types.insert(WKWebsiteDataTypeCookies) }
-        if scope.contains(.cache) { types.insert(WKWebsiteDataTypeDiskCache) }
+        if scope.contains(.cache) {
+            types.formUnion([
+                WKWebsiteDataTypeDiskCache,
+                WKWebsiteDataTypeMemoryCache,
+                WKWebsiteDataTypeFetchCache,
+            ])
+        }
         guard !types.isEmpty else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             dataStore.removeData(ofTypes: types, modifiedSince: since ?? .distantPast) {

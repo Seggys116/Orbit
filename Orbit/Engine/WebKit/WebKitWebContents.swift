@@ -160,6 +160,16 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     func reload(ignoringCache: Bool) {
+        guard !isClosed else { return }
+        if ignoringCache, let url = webView.url ?? navigationState.url, !url.isFileURL {
+            var request = URLRequest(url: url)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            navigationState.isLoading = true
+            navigationState.url = url
+            publishNavigation()
+            webView.load(request)
+            return
+        }
         if ignoringCache { webView.reloadFromOrigin() } else { webView.reload() }
     }
 

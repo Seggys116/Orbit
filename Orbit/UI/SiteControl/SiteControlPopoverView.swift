@@ -746,10 +746,12 @@ struct SiteControlPopoverView: View {
     }
 
     private func clearCacheForEntireSession() {
-        guard let engine = env.engine, let session = env.webContents[tab.id]?.session else { return }
+        guard let engine = env.engine, let contents = env.webContents[tab.id] else { return }
+        let session = contents.session
         cacheClearState = .clearing
         Task { @MainActor in
             await engine.clearBrowsingData(.cache, session: session, since: nil)
+            contents.reload(ignoringCache: true)
             cacheClearState = .done
             try? await Task.sleep(for: Self.clearActionFeedbackDuration)
             if cacheClearState == .done { cacheClearState = .idle }

@@ -260,6 +260,60 @@ final class WebKitEngineLaunchTests: XCTestCase {
         return latest
     }
 
+    func testClearingCacheReloadsTheDocument() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-cache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let body = root.appendingPathComponent("body.txt")
+        try "cache-first".write(to: body, atomically: true, encoding: .utf8)
+        let port = 18_980
+        let server = Process()
+        server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        server.arguments = ["-c", """
+import http.server
+body = r'''\(body.path)'''
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        data = open(body, encoding='utf-8').read().encode()
+        page = ('<!doctype html><html><body><p id="marker">' + data.decode() + '</p></body></html>').encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html')
+        self.send_header('Cache-Control', 'max-age=600')
+        self.send_header('Content-Length', str(len(page)))
+        self.end_headers()
+        self.wfile.write(page)
+    def log_message(self, *args):
+        pass
+http.server.HTTPServer(('127.0.0.1', \(port)), H).serve_forever()
+"""]
+        server.standardOutput = FileHandle.nullDevice
+        server.standardError = FileHandle.nullDevice
+        try server.run()
+        defer { server.terminate() }
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
+        let contents = try engine.makeWebContents(session: engine.defaultSession, initialURL: nil)
+        host(contents)
+        contents.load(URL(string: "http://127.0.0.1:\(port)/")!)
+        let first = try await waitForText(
+            contents,
+            script: "document.getElementById('marker') ? document.getElementById('marker').textContent : ''",
+            equals: "cache-first"
+        )
+        XCTAssertEqual(first, "cache-first")
+        try "cache-second".write(to: body, atomically: true, encoding: .utf8)
+        await engine.clearBrowsingData(.cache, session: contents.session, since: nil)
+        contents.reload(ignoringCache: true)
+        let second = try await waitForText(
+            contents,
+            script: "document.getElementById('marker') ? document.getElementById('marker').textContent : ''",
+            equals: "cache-second"
+        )
+        XCTAssertEqual(second, "cache-second")
+        engine.shutdown()
+    }
+
     private func assertNoChromiumLinked() {
         for index in 0..<_dyld_image_count() {
             guard let raw = _dyld_get_image_name(index) else { continue }
