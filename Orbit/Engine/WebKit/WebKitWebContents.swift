@@ -23,7 +23,8 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     private let engine: WebKitEngine
     private let webKitSession: WebKitSession
-    let webView: OrbitWebView
+    private(set) var webView: OrbitWebView
+    private var extensionPageHost: String?
     private let scriptBridge: WebKitScriptBridge
     private var lastStatusCode = 0
     private var preferredScheme: ContentColorScheme?
@@ -55,6 +56,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         }
         let view = OrbitWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         view.isInspectable = true
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
         if let agent = session.userAgent { view.customUserAgent = agent }
         self.webView = view
         super.init()
@@ -80,16 +82,74 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     func load(_ url: URL) {
         guard !isClosed else { return }
-        navigationState.url = url
+        let resolved = engine.resolvedExtensionURL(url)
+        adoptWebViewIfNeeded(for: resolved)
+        navigationState.url = resolved
         navigationState.isLoading = true
         navigationState.progress = 0
-        navigationState.security = Self.security(for: url)
+        navigationState.security = Self.security(for: resolved)
         publishNavigation()
-        if url.isFileURL {
-            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        if resolved.isFileURL {
+            webView.loadFileURL(resolved, allowingReadAccessTo: resolved.deletingLastPathComponent())
         } else {
-            webView.load(URLRequest(url: url))
+            webView.load(URLRequest(url: resolved))
         }
+    }
+
+    // An extension URL only loads in the web view WebKit built for that extension.
+    private func adoptWebViewIfNeeded(for url: URL) {
+        let host = Self.extensionHost(of: url)
+        if let host {
+            guard extensionPageHost != host, let configuration = engine.extensionWebViewConfiguration(for: url) else { return }
+            replaceWebView(with: configuration, extensionHost: host)
+        } else if extensionPageHost != nil {
+            replaceWebView(with: engine.makeConfiguration(session: webKitSession, bridge: scriptBridge), extensionHost: nil)
+        }
+    }
+
+    private func needsDifferentWebView(for url: URL) -> Bool {
+        if let host = Self.extensionHost(of: url) {
+            return extensionPageHost != host && engine.extensionWebViewConfiguration(for: url) != nil
+        }
+        return extensionPageHost != nil
+    }
+
+    private static func extensionHost(of url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "chrome-extension" || scheme == "webkit-extension"
+        else { return nil }
+        let host = url.host?.lowercased() ?? ""
+        return host.isEmpty ? nil : host
+    }
+
+    private func replaceWebView(with configuration: WKWebViewConfiguration, extensionHost: String?) {
+        let replacement = OrbitWebView(frame: webView.frame, configuration: configuration)
+        replacement.menuOwner = self
+        replacement.isInspectable = true
+        replacement.navigationDelegate = self
+        replacement.uiDelegate = self
+        if let agent = webKitSession.userAgent { replacement.customUserAgent = agent }
+        let old = webView
+        if let superview = old.superview {
+            replacement.translatesAutoresizingMaskIntoConstraints = old.translatesAutoresizingMaskIntoConstraints
+            let constraints = superview.constraints.filter {
+                ($0.firstItem as AnyObject?) === old || ($0.secondItem as AnyObject?) === old
+            }
+            NSLayoutConstraint.deactivate(constraints)
+            superview.addSubview(replacement)
+            NSLayoutConstraint.activate([
+                replacement.leadingAnchor.constraint(equalTo: superview.leadingAnchor),
+                replacement.trailingAnchor.constraint(equalTo: superview.trailingAnchor),
+                replacement.topAnchor.constraint(equalTo: superview.topAnchor),
+                replacement.bottomAnchor.constraint(equalTo: superview.bottomAnchor),
+            ])
+            old.removeFromSuperview()
+        }
+        old.navigationDelegate = nil
+        old.uiDelegate = nil
+        old.stopLoading()
+        webView = replacement
+        extensionPageHost = extensionHost
     }
 
     func loadHTML(_ html: String, baseURL: URL?) {
@@ -231,18 +291,43 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     func cancelDownload(id: UUID) {}
     func showDeveloperTools(inspectAt point: CGPoint?) {
-        // isInspectable only allows inspection. _WKInspector.show opens it.
+        // perform(_:) does not invoke these void methods. show() connects and leaves the window hidden.
         webView.isInspectable = true
-        let inspectorSelector = NSSelectorFromString("_inspector")
-        guard webView.responds(to: inspectorSelector),
-              let inspector = webView.perform(inspectorSelector)?.takeUnretainedValue()
-        else { return }
-        let show = NSSelectorFromString("show")
-        if inspector.responds(to: show) { _ = inspector.perform(show) }
-        if point != nil {
-            let select = NSSelectorFromString("toggleElementSelection")
-            if inspector.responds(to: select) { _ = inspector.perform(select) }
+        guard let inspector = webInspector() else { return }
+        Self.voidMessage(inspector, "connect")
+        Self.voidMessage(inspector, "show")
+        Self.voidMessage(inspector, point == nil ? "showResources" : "showConsole")
+        if point != nil { Self.voidMessage(inspector, "toggleElementSelection") }
+        DispatchQueue.main.async {
+            NSApp.windows.first { $0.title.hasPrefix("Web Inspector") }?.makeKeyAndOrderFront(nil)
         }
+    }
+
+    func developerToolsAreOpen() -> Bool {
+        if let inspector = webInspector(), Self.boolMessage(inspector, "isVisible") { return true }
+        return NSApp.windows.contains { $0.isVisible && $0.title.hasPrefix("Web Inspector") }
+    }
+
+    private func webInspector() -> AnyObject? {
+        let selector = NSSelectorFromString("_inspector")
+        guard webView.responds(to: selector) else { return nil }
+        return webView.perform(selector)?.takeUnretainedValue()
+    }
+
+    private static func voidMessage(_ object: AnyObject, _ name: String) {
+        let selector = NSSelectorFromString(name)
+        guard object.responds(to: selector) else { return }
+        let implementation = object.method(for: selector)
+        typealias Function = @convention(c) (AnyObject, Selector) -> Void
+        unsafeBitCast(implementation, to: Function.self)(object, selector)
+    }
+
+    private static func boolMessage(_ object: AnyObject, _ name: String) -> Bool {
+        let selector = NSSelectorFromString(name)
+        guard object.responds(to: selector) else { return false }
+        let implementation = object.method(for: selector)
+        typealias Function = @convention(c) (AnyObject, Selector) -> Bool
+        return unsafeBitCast(implementation, to: Function.self)(object, selector)
     }
 
     // Right-click is Orbit's menu. WebKit's default menu has no Inspect item here.
@@ -414,6 +499,12 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else {
             decisionHandler(.allow)
+            return
+        }
+        let mainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        if mainFrame, needsDifferentWebView(for: url) {
+            decisionHandler(.cancel)
+            load(url)
             return
         }
         let kind: NavigationKind

@@ -157,6 +157,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
         }
         let context = WKWebExtensionContext(for: webExtension)
         context.uniqueIdentifier = id
+        context.isInspectable = true
         // Non-persistent stores are private tabs. Scripts inject only with this set.
         context.hasAccessToPrivateData = true
         grant(webExtension, on: context)
@@ -204,8 +205,38 @@ final class WebKitEngine: NSObject, BrowserEngine {
         loaded.values.map(\.extension).sorted { $0.name < $1.name }
     }
 
+    func resolvedExtensionURL(_ url: URL) -> URL {
+        guard let record = extensionRecord(for: url),
+              var components = URLComponents(url: record.context.baseURL, resolvingAgainstBaseURL: false)
+        else { return url }
+        let path = url.path.isEmpty ? "/" : (url.path.hasPrefix("/") ? url.path : "/" + url.path)
+        components.path = path
+        components.query = url.query
+        components.fragment = url.fragment
+        return components.url ?? url
+    }
+
+    func extensionWebViewConfiguration(for url: URL) -> WKWebViewConfiguration? {
+        guard let configuration = extensionRecord(for: url)?.context.webViewConfiguration else { return nil }
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        return configuration
+    }
+
+    private func extensionRecord(for url: URL) -> LoadedExtensionRecord? {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "chrome-extension" || scheme == "webkit-extension",
+              let host = url.host?.lowercased()
+        else { return nil }
+        if let direct = loaded[host] { return direct }
+        return loaded.values.first {
+            $0.context.uniqueIdentifier.lowercased() == host
+                || $0.context.baseURL.host?.lowercased() == host
+        }
+    }
+
     func makeConfiguration(session: WebKitSession, bridge: WKScriptMessageHandler) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
         configuration.websiteDataStore = session.dataStore
         configuration.webExtensionController = extensionController
         configuration.setURLSchemeHandler(schemeHandler, forURLScheme: "orbit")

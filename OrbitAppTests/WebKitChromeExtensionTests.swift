@@ -56,6 +56,24 @@ final class WebKitChromeExtensionTests: XCTestCase {
         engine.shutdown()
     }
 
+    func testExtensionPopupURLLoadsOnWebKit() async throws {
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
+        let root = try makePopupExtension()
+        let installed = try store().install(unpackedAt: root, publicKey: nil)
+        let loaded = try await engine.loadExtension(at: installed.directory, session: engine.defaultSession)
+        let popup = URL(string: "chrome-extension://\(loaded.id)/popup.html")!
+        let contents = try engine.makeWebContents(session: engine.defaultSession, initialURL: nil)
+        host(contents)
+        contents.load(popup)
+        let text = try await waitFor(
+            contents,
+            script: "document.getElementById('popup') ? document.getElementById('popup').textContent : ''",
+            equals: "popup-loaded"
+        )
+        XCTAssertEqual(text, "popup-loaded")
+        engine.shutdown()
+    }
+
     func testModuleBackgroundRepliesOnWebKit() async throws {
         let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let source = try makeExtension(name: "Module Fixture", module: true)
@@ -223,6 +241,21 @@ final class WebKitChromeExtensionTests: XCTestCase {
           orbitFixtureRun();
         }
         """.write(to: root.appendingPathComponent("content.js"), atomically: true, encoding: .utf8)
+        return root
+    }
+
+    private func makePopupExtension() throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-popup-\(UUID().uuidString)", isDirectory: true)
+        roots.append(root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let manifest = """
+        {"manifest_version":3,"name":"Popup","version":"1.0.0","description":"popup fixture","action":{"default_popup":"popup.html"},"background":{"service_worker":"background.js"}}
+        """
+        try manifest.write(to: root.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
+        try "void 0;\n".write(to: root.appendingPathComponent("background.js"), atomically: true, encoding: .utf8)
+        try "<!doctype html><html><body><p id=\"popup\">popup-loaded</p></body></html>".write(
+            to: root.appendingPathComponent("popup.html"), atomically: true, encoding: .utf8
+        )
         return root
     }
 

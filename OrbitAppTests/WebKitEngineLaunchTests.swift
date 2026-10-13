@@ -211,6 +211,16 @@ final class WebKitEngineLaunchTests: XCTestCase {
         let context = try XCTUnwrap(recorder.context)
         XCTAssertEqual(context.linkURL?.absoluteString, "https://example.com/dest")
         contents.showDeveloperTools(inspectAt: CGPoint(x: 8, y: 8))
+        let inspectorDeadline = Date().addingTimeInterval(3)
+        var inspectorOpen = false
+        while Date() < inspectorDeadline {
+            if contents.developerToolsAreOpen() {
+                inspectorOpen = true
+                break
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertTrue(inspectorOpen)
         XCTAssertTrue(contents.webView.isInspectable)
         engine.shutdown()
     }
