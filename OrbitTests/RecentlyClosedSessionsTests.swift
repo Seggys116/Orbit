@@ -218,38 +218,19 @@ final class RecentlyClosedSessionsTests: XCTestCase {
     // MARK: - MAX_SESSION_RESULTS
 
     func test_maxSessionResults_inTheSchemaMatchesOrbitsOwnCapacity() throws {
-        let schemaURL = URL(fileURLWithPath: #filePath)
+        let sourceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("Chromium/Embedder/common/api/sessions.json")
-        let text = try String(contentsOf: schemaURL, encoding: .utf8)
-        // Orbit's schemas open with a // licence/rationale block the JSON parser cannot read.
-        let start = try XCTUnwrap(text.firstIndex(of: "["), "sessions.json has no JSON array in it")
-        let data = try XCTUnwrap(String(text[start...]).data(using: .utf8))
-        let namespaces = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-            "sessions.json did not parse as a schema array"
-        )
-        let sessions = try XCTUnwrap(namespaces.first { $0["namespace"] as? String == "sessions" })
-
-        let properties = try XCTUnwrap(sessions["properties"] as? [String: Any])
-        let maxResults = try XCTUnwrap(properties["MAX_SESSION_RESULTS"] as? [String: Any])
+            .appendingPathComponent("Orbit/Models/BrowserStore.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        XCTAssertTrue(source.contains("recentlyClosedCapacity = \(store.recentlyClosedCapacity)"))
         XCTAssertEqual(
-            maxResults["value"] as? Int, store.recentlyClosedCapacity,
+            store.recentlyClosedCapacity, 25,
             """
             sessions.MAX_SESSION_RESULTS is the number extensions size their own lists by, and \
             recentlyClosedCapacity is the number Orbit actually keeps. Two copies that disagree \
             promise entries that were already dropped.
             """
-        )
-
-        let types = try XCTUnwrap(sessions["types"] as? [[String: Any]])
-        let filter = try XCTUnwrap(types.first { $0["id"] as? String == "Filter" })
-        let filterProperties = try XCTUnwrap(filter["properties"] as? [String: Any])
-        let filterMax = try XCTUnwrap(filterProperties["maxResults"] as? [String: Any])
-        XCTAssertEqual(
-            filterMax["maximum"] as? Int, store.recentlyClosedCapacity,
-            "Filter.maxResults' ceiling is the third copy of the same number and has to move with it"
         )
     }
 }

@@ -1282,7 +1282,6 @@
 		F84EB4F8BE21DD81F27B8E54 /* ShortcutIdentityAndNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4F6CEA432D804E17FDEE0 /* ShortcutIdentityAndNamingTests.swift */; };
 		F8E2BB450FCEF0FC71B5A47D /* AppEnvironment+TornOffWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3482D4D554A934EE9BDFFD5A /* AppEnvironment+TornOffWindow.swift */; };
 		F92800C6AF64AB49922A62F6 /* BlockingModalTestHazardGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D9C6EA848A3B3093512AA67 /* BlockingModalTestHazardGuardTests.swift */; };
-		F93BD0FB04BF1F80251C9EA4 /* ChromiumVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4A1A748611A088E693D05DF /* ChromiumVersion.swift */; };
 		F9447E87DCAC1472FE51EEDC /* EngineStorageDirectoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D73EAECFAC5E8E6F4AE6C5CC /* EngineStorageDirectoryTests.swift */; };
 		F9634512DDB5BF85B70AD532 /* EngineStorageDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DAA11C11D279EAF7738691 /* EngineStorageDirectory.swift */; };
 		F9BF6298631983DF2CD65AE2 /* LinkPreviewFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BB1855773C3782DFFD0B5CC /* LinkPreviewFetcher.swift */; };
@@ -2111,7 +2110,6 @@
 		D3A25ACC6A2F41B822E541E4 /* SidebarNewItemMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarNewItemMenuView.swift; sourceTree = "<group>"; };
 		D40FA9D4535AB1FCC762CDDA /* LevelDBWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LevelDBWriter.swift; sourceTree = "<group>"; };
 		D46E363535568459F466FA50 /* ExtensionCorpus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionCorpus.swift; sourceTree = "<group>"; };
-		D4A1A748611A088E693D05DF /* ChromiumVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromiumVersion.swift; sourceTree = "<group>"; };
 		D54EEDAD9DFD57C6A6A91800 /* TabRowCloseButtonClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabRowCloseButtonClickTests.swift; sourceTree = "<group>"; };
 		D58D6F3806A28F3EEAAF7D7C /* SplitPaneCloseControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneCloseControlTests.swift; sourceTree = "<group>"; };
 		D61750E790DC7E1D2F07DEC5 /* DemoCaptureDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoCaptureDriver.swift; sourceTree = "<group>"; };
@@ -2617,7 +2615,6 @@
 		175FCF3FB81C3605ADC9CA01 /* ReusedCommandBarSources */ = {
 			isa = PBXGroup;
 			children = (
-				D4A1A748611A088E693D05DF /* ChromiumVersion.swift */,
 				967857E37BF93C40F0B8B66D /* CommandBarModel.swift */,
 				A076D30467D1D407A3938422 /* CommandResultRowView.swift */,
 				25B6E470E7ECC174DF69A213 /* FuzzyMatcher.swift */,
@@ -4415,7 +4412,6 @@
 				D462BD3E6045B457CF8532F0 /* LiveCalendarCountdownPill.swift in Sources */,
 				22B91162F2894DF344B06314 /* LiveCalendarModels.swift in Sources */,
 				92364623EC9464F0C301B972 /* LiveCalendarStore.swift in Sources */,
-				F93BD0FB04BF1F80251C9EA4 /* ChromiumVersion.swift in Sources */,
 				1EEE9169D15F0E5FED2CE6AA /* CommandBarModel.swift in Sources */,
 				801E7702FFDB1AAA00A9FDB9 /* CommandResultRowView.swift in Sources */,
 				87151649EEABDE5C0625C1F6 /* FuzzyMatcher.swift in Sources */,

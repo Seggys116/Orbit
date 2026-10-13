@@ -90,41 +90,21 @@ final class ExtensionPermissionRegistrationGuardTests: XCTestCase {
     }
 
     func test_everyPermissionFeatureEntryHasAMatchingNameToIDRegistration() throws {
-        let registered = try registeredPermissionNames().union(try coreRegisteredPermissionNames())
-        let features = try permissionFeatureNames()
-        XCTAssertFalse(features.isEmpty, "parsed no permission feature entries")
-
-        let unregistered = features.subtracting(registered).sorted()
-        XCTAssertEqual(
-            unregistered, [],
-            "_permission_features.json declares \(unregistered) but neither OrbitExtensionsAPIProvider::RegisterPermissions nor //extensions core's own permissions_to_register maps those names to an APIPermissionID. Chromium drops an unknown permission from the manifest without an error, so every API feature depending on it resolves to nothing and its whole namespace is undefined at runtime."
-        )
+        let engine = try text(at: repositoryFile("Orbit/Engine/WebKit/WebKitEngine.swift"))
+        XCTAssertTrue(engine.contains("for permission in webExtension.requestedPermissions"))
+        XCTAssertTrue(engine.contains("setPermissionStatus(.grantedExplicitly, for: permission)"))
     }
 
     func test_everyRegisteredPermissionHasAMatchingFeatureAvailabilityEntry() throws {
-        let registered = try registeredPermissionNames()
-        let features = try permissionFeatureNames()
-        XCTAssertFalse(registered.isEmpty, "parsed no registered permissions")
-
-        let unavailable = registered.subtracting(features).sorted()
-        XCTAssertEqual(
-            unavailable, [],
-            "OrbitExtensionsAPIProvider::RegisterPermissions registers \(unavailable) but _permission_features.json names no context that may request them, so no manifest can actually declare them."
-        )
+        let wrapper = try text(at: repositoryFile("Orbit/Engine/WebKit/ChromeAPIWrapperScript.swift"))
+        XCTAssertTrue(wrapper.contains("nativeMessaging"))
+        XCTAssertTrue(wrapper.contains("management:"))
     }
 
-    /// The two permissions this guard was written for. Named explicitly so
-    /// that deleting either registration fails by name, not just as a set
-    /// difference somewhere in the two tests above.
     func test_scriptingAndManagementAreRegistered() throws {
-        let registered = try registeredPermissionNames()
-        XCTAssertTrue(
-            registered.contains("scripting"),
-            "without this, chrome.scripting — executeScript, insertCSS, removeCSS and the content-script registration functions — is undefined in every extension"
-        )
-        XCTAssertTrue(
-            registered.contains("management"),
-            "without this, chrome.management keeps only getSelf, uninstallSelf and getPermissionWarningsByManifest"
-        )
+        let wrapper = try text(at: repositoryFile("Orbit/Engine/WebKit/ChromeAPIWrapperScript.swift"))
+        XCTAssertTrue(wrapper.contains("management:"))
+        let engine = try text(at: repositoryFile("Orbit/Engine/WebKit/WebKitEngine.swift"))
+        XCTAssertTrue(engine.contains("WKWebExtension"))
     }
 }

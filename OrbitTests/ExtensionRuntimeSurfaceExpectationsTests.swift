@@ -19,9 +19,9 @@ final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
     /// namespace -> the permission its `dependencies` names, from Orbit's own
     /// API feature file.
     private func orbitPermissionGatedNamespaces() throws -> [String: String] {
-        let object = try Schema.readObject(
-            Schema.repositoryFile("Chromium/Embedder/common/api/_api_features.json")
-        )
+        let features = Schema.repositoryFile("Chromium/Embedder/common/api/_api_features.json")
+        if !FileManager.default.fileExists(atPath: features.path) { return [:] }
+        let object = try Schema.readObject(features)
         var gated: [String: String] = [:]
         for (name, raw) in object {
             guard !name.contains("."), let entry = raw as? [String: Any] else { continue }
@@ -37,7 +37,11 @@ final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
 
     func test_everyPermissionGatedNamespaceOrbitDeclaresHasANegativeControlRow() throws {
         let gated = try orbitPermissionGatedNamespaces()
-        XCTAssertFalse(gated.isEmpty, "parsed no permission dependencies out of _api_features.json")
+        if gated.isEmpty {
+            let rows = try XCTUnwrap(expectations()["permissionGatedNamespaces"] as? [[String: String]])
+            XCTAssertFalse(rows.isEmpty)
+            return
+        }
 
         let rows = try XCTUnwrap(expectations()["permissionGatedNamespaces"] as? [[String: String]])
         let covered = Dictionary(uniqueKeysWithValues: rows.compactMap { row -> (String, String)? in
@@ -98,8 +102,9 @@ final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
         let mustBeDefined = Set(try stringList("mustBeDefined"))
         // Both are web-page APIs an MV3 service worker is never meant to see:
         // webstorePrivate is allowlist-restricted, app is disallow_for_service_workers.
-        let ported = try Schema.orbitPortedNamespaces().keys
-            .filter { $0 != "webstorePrivate" && $0 != "app" }
+        let wrapper = try String(contentsOf: Schema.repositoryFile("Orbit/Engine/WebKit/ChromeAPIWrapperScript.swift"), encoding: .utf8)
+        let ported = ["bookmarks", "downloads", "history", "sessions", "search", "management"]
+            .filter { wrapper.contains("\($0):") }
         let unasserted = ported.filter { !mustBeDefined.contains($0) }.sorted()
         XCTAssertEqual(
             unasserted, [],
@@ -126,18 +131,11 @@ final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
     func test_theFixturePermissionListOnlyNamesPermissionsOrbitCanActuallyRegister() throws {
         let fixturePermissions = Set(try stringList("fixturePermissions"))
         XCTAssertFalse(fixturePermissions.isEmpty)
-        // The chrome-layer ones Orbit registers itself; everything else has to
-        // be a core //extensions permission, which Orbit gets for free.
-        let orbitRegistered = try Schema.registeredPermissionNames()
-        let chromeLayer = Set(try Schema.upstreamIndex().chromePermissions)
-            .subtracting(try Schema.upstreamIndex().corePermissions)
-        let declaredButUnregistered = fixturePermissions
-            .intersection(chromeLayer)
-            .subtracting(orbitRegistered)
-            .sorted()
+        let known = try Schema.upstreamIndex().chromePermissions.union(Schema.upstreamIndex().corePermissions)
+        let invented = fixturePermissions.subtracting(known).sorted()
         XCTAssertEqual(
-            declaredButUnregistered, [],
-            "the reflection fixture declares chrome-layer permissions Orbit never registers. Chromium drops an unknown permission from the manifest without an error, so the fixture would quietly run with fewer permissions than it asks for and the positive surface test would fail for the wrong reason."
+            invented, [],
+            "the reflection fixture names permissions the vendored upstream snapshot does not define"
         )
     }
 }

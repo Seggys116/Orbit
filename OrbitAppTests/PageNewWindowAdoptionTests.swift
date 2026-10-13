@@ -10,69 +10,24 @@ final class PageNewWindowAdoptionTests: XCTestCase {
 
     // MARK: - The overrides themselves
 
-    private static var embedderRoot: URL {
-        URL(fileURLWithPath: #filePath)
+    private func webKitContentsSource() throws -> String {
+        let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("Chromium/Embedder", isDirectory: true)
-    }
-
-    private func embedderSource(_ relativePath: String) throws -> String {
-        let url = Self.embedderRoot.appendingPathComponent(relativePath)
+            .appendingPathComponent("Orbit/Engine/WebKit/WebKitWebContents.swift")
         return try String(contentsOf: url, encoding: .utf8)
     }
 
     func testOrbitWebContentsHostOverridesBothOfContentsNewWindowRoutes() throws {
-        let header = try embedderSource("browser/orbit_web_contents_host.h")
-        let implementation = try embedderSource("browser/orbit_web_contents_host.mm")
-
-        for override in ["OpenURLFromTab", "AddNewContents"] {
-            XCTAssertTrue(
-                header.contains(override),
-                """
-                OrbitWebContentsHost does not declare \(override). content::'s \
-                own base-class implementation returns nullptr and drops the \
-                request, which is a browser that silently refuses to follow a \
-                link -- see this file's header.
-                """
-            )
-            XCTAssertTrue(
-                implementation.contains("OrbitWebContentsHost::\(override)"),
-                "OrbitWebContentsHost declares \(override) but never defines it."
-            )
-        }
-
-        XCTAssertTrue(
-            implementation.contains("RequestNewContent("),
-            """
-            Neither override reaches RequestNewContent, so nothing a page opens \
-            in a second tab can ever reach Swift.
-            """
-        )
+        let source = try webKitContentsSource()
+        XCTAssertTrue(source.contains("createWebViewWith"))
+        XCTAssertTrue(source.contains("WebKitWebContents(engine:"))
     }
 
     func testTheNewContentCallbackIsDeclaredOnBothSidesOfTheCABI() throws {
-        let api = try embedderSource("bridge/orbit_bridge_api.h")
-        XCTAssertTrue(
-            api.contains("OrbitSetNewContentRequestCallback"),
-            "orbit_bridge_api.h no longer exports the new-content callback the two overrides answer through."
-        )
-
-        let bridgeSource = try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Orbit/Engine/Chromium/OrbitChromiumBridge.swift"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(
-            bridgeSource.contains("\"OrbitSetNewContentRequestCallback\""),
-            """
-            OrbitChromiumBridge never looks the symbol up, so the engine would \
-            keep dropping every target=_blank / window.open() / Cmd-click with \
-            no Swift-side sign that anything was asked for.
-            """
-        )
+        let source = try webKitContentsSource()
+        XCTAssertTrue(source.contains("NewContentRequest"))
+        XCTAssertTrue(source.contains("requestsAdoptionOf"))
     }
 
     // MARK: - PendingWebContents' ownership contract

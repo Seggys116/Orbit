@@ -797,10 +797,7 @@ def project_sparkle_link_status() -> tuple:
 
 def load_manifest() -> dict:
     if not os.path.exists(MANIFEST_PATH):
-        die(
-            f"{os.path.relpath(MANIFEST_PATH, REPO_ROOT)} is missing. "
-            "This is not an Orbit checkout, or the checkout is incomplete."
-        )
+        return {}
     with open(MANIFEST_PATH, "r", encoding="utf-8") as handle:
         return json.load(handle)
 

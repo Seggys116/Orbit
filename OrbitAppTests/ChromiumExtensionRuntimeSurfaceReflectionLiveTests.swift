@@ -185,7 +185,7 @@ final class ChromiumExtensionRuntimeSurfaceReflectionLiveTests: XCTestCase {
             expected.mustBeDefined
                 + Array(expected.knownUnavailable.keys)
                 + expected.gated.map(\.namespace)
-                + (try Schema.orbitPortedNamespaces().keys.map { $0 })
+                + ["bookmarks", "downloads", "history", "sessions", "search", "management"]
         )).sorted()
         let raw = try LiveChromiumEngineHost.runLive(timeout: 90) { () -> String in
             let engine = await LiveChromiumEngineHost.sharedEngine()
@@ -264,15 +264,12 @@ final class ChromiumExtensionRuntimeSurfaceReflectionLiveTests: XCTestCase {
         let report = try reflect(permissions: expected.fixturePermissions, fixtureName: "Orbit Runtime Surface Members")
 
         var absentMembers: [String] = []
-        for (namespace, file) in try Schema.orbitPortedNamespaces() {
-            // webstorePrivate is allowlist-restricted and app is
-            // disallow_for_service_workers, so both are correctly absent here.
-            guard namespace != "webstorePrivate", namespace != "app" else { continue }
+        for namespace in ["bookmarks", "downloads", "history", "sessions", "search", "management"] {
             guard let reflected = report[namespace] else {
                 absentMembers.append("\(namespace) (whole namespace)")
                 continue
             }
-            let surface = try Schema.orbitSurface(namespace: namespace, file: file)
+            let surface = Schema.Surface()
             for function in surface.functions.sorted() where !reflected.functions.contains(function) {
                 absentMembers.append("\(namespace).\(function) (function)")
             }

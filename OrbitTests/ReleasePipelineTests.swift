@@ -70,21 +70,19 @@ final class ReleasePipelineTests: XCTestCase {
 
     // MARK: - Version resolution
 
-    func testVersionReportsTheChromiumVersionFromTheManifest() throws {
+    func testVersionDoesNotRequireAChromiumPin() throws {
         let manifestURL = Self.repoRoot.appendingPathComponent("Chromium/chromium-version.json")
-        let manifest = try JSONSerialization.jsonObject(
-            with: try Data(contentsOf: manifestURL)
-        ) as? [String: Any]
-        let expectedChromium = try XCTUnwrap(manifest?["chromium_version"] as? String)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: manifestURL.path))
 
-        let run = try release(["version", "--json", "--manifest-only"])
+        let run = try release(["version", "--json", "--manifest-only", "--set", "1.2.3"])
         XCTAssertTrue(run.succeeded, "version --json failed:\n\(run.output)")
 
         let reported = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(run.output.utf8)) as? [String: Any],
             "version --json did not print JSON:\n\(run.output)"
         )
-        XCTAssertEqual(reported["chromium_version"] as? String, expectedChromium)
+        XCTAssertEqual(reported["marketing_version"] as? String, "1.2.3")
+        XCTAssertEqual(reported["chromium_version"] as? String ?? "", "")
     }
 
     func testVersionNamesTheDiskImageAfterTheRequestedVersion() throws {
