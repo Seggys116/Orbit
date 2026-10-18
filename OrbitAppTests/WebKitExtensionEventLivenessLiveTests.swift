@@ -532,13 +532,20 @@ final class WebKitExtensionEventLivenessLiveTests: LiveEnvironmentTestCase {
         _ = try await harness.probe.evaluateJavaScript(
             """
             (function () {
-              chrome.permissions.request({ permissions: ['privacy'] });
+              chrome.permissions.request({ permissions: ['privacy'] }, function () {
+                document.documentElement.setAttribute('data-orbit-privacy',
+                  chrome.runtime.lastError ? 'error' : 'granted');
+              });
               return 'requested';
             })()
             """,
             userGesture: true
         )
-        try await Task.sleep(for: .seconds(2))
+        try await Self.pollUntil("the optional privacy permission to be granted before it is removed") {
+            try await harness.probe.evaluateJavaScript(
+                "document.documentElement.getAttribute('data-orbit-privacy')"
+            ) as? String == "granted"
+        }
 
         _ = try await harness.probe.evaluateJavaScript(
             """

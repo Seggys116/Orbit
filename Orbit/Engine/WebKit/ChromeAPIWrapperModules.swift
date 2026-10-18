@@ -273,8 +273,6 @@ enum ChromeAPIWrapperModules {
         }, function () {});
       }
       // Runs after the extension's own top-level code, so its listeners exist.
-      // The interval covers a worker WebKit kept alive across reload: its script does not run again,
-      // so the one-shot announce below never sees the next install or startup.
       function scheduleBackgroundReady() {
         if (backgroundAnnounced || !isBackgroundContext()) { return; }
         backgroundAnnounced = true;
@@ -282,7 +280,6 @@ enum ChromeAPIWrapperModules {
           sendPortHello("background");
           drainLifecycle();
         };
-        setInterval(drainLifecycle, 1000);
         if (typeof document === "undefined" || document.readyState === "complete") {
           setTimeout(announce, 0);
         } else {
