@@ -471,6 +471,21 @@ enum ChromeAPIWrapperScript {
             else { navEvent.__orbitDispatch(resolved[0]); }
             return;
           }
+          // Listeners stay on the event object the wrapper installed. WebKit can replace
+          // chrome.permissions or chrome.cookies afterwards; the lookup below would miss them.
+          if (message.namespace === "permissions" && permissionEvents[message.event]) {
+            var permissionTarget = permissionEvents[message.event];
+            if (typeof permissionTarget.__orbitDispatch === "function") {
+              if (spread) { permissionTarget.__orbitDispatch.apply(permissionTarget, resolved); }
+              else { permissionTarget.__orbitDispatch(resolved[0]); }
+              return;
+            }
+          }
+          if (message.namespace === "cookies" && message.event === "onChanged" && cookieEvent && typeof cookieEvent.__orbitDispatch === "function") {
+            if (spread) { cookieEvent.__orbitDispatch.apply(cookieEvent, resolved); }
+            else { cookieEvent.__orbitDispatch(resolved[0]); }
+            return;
+          }
           var api = resolveNamespace(globalThis.chrome, message.namespace);
           var ev = api && api[message.event];
           if (!ev || typeof ev.__orbitDispatch !== "function") { return; }
