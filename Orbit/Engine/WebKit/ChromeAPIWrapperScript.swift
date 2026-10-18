@@ -486,6 +486,12 @@ enum ChromeAPIWrapperScript {
             else { cookieEvent.__orbitDispatch(resolved[0]); }
             return;
           }
+          if (message.namespace === "runtime" && runtimeEvents[message.event] && typeof runtimeEvents[message.event].__orbitDispatch === "function") {
+            var runtimeTarget = runtimeEvents[message.event];
+            if (spread) { runtimeTarget.__orbitDispatch.apply(runtimeTarget, resolved); }
+            else { runtimeTarget.__orbitDispatch(resolved[0]); }
+            return;
+          }
           var api = resolveNamespace(globalThis.chrome, message.namespace);
           var ev = api && api[message.event];
           if (!ev || typeof ev.__orbitDispatch !== "function") { return; }
@@ -1787,6 +1793,7 @@ enum ChromeAPIWrapperScript {
           ensureCommands(root);
           ensurePermissions(root);
           ensureCookies(root);
+          ensureLifecycle(root);
           hookAction(root);
           hookWindows(root);
           tolerateWebRequestFilters(root);

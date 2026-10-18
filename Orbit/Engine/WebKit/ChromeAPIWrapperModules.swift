@@ -232,11 +232,17 @@ enum ChromeAPIWrapperModules {
 
       // MARK: runtime lifecycle
 
+      var runtimeEvents = {};
+      function runtimeEvent(name) {
+        if (!runtimeEvents[name]) { runtimeEvents[name] = event(); }
+        return runtimeEvents[name];
+      }
+
       function ensureLifecycle(root) {
         var api = root.runtime;
-        if (!api || api.__orbitLifecycle) { return; }
-        adoptEvent(api, "onInstalled", event());
-        adoptEvent(api, "onStartup", event());
+        if (!api) { return; }
+        adoptEvent(api, "onInstalled", runtimeEvent("onInstalled"));
+        adoptEvent(api, "onStartup", runtimeEvent("onStartup"));
         api.__orbitLifecycle = true;
       }
 
@@ -258,19 +264,25 @@ enum ChromeAPIWrapperModules {
       }
 
       var backgroundAnnounced = false;
+      function drainLifecycle() {
+        invoke("runtime", "takeLifecycleEvents", []).then(function (events) {
+          (events || []).forEach(function (entry) {
+            var ev = runtimeEvents[entry.event];
+            if (ev && typeof ev.__orbitDispatch === "function") { ev.__orbitDispatch.apply(ev, entry.args || []); }
+          });
+        }, function () {});
+      }
       // Runs after the extension's own top-level code, so its listeners exist.
+      // The interval covers a worker WebKit kept alive across reload: its script does not run again,
+      // so the one-shot announce below never sees the next install or startup.
       function scheduleBackgroundReady() {
         if (backgroundAnnounced || !isBackgroundContext()) { return; }
         backgroundAnnounced = true;
         var announce = function () {
           sendPortHello("background");
-          invoke("runtime", "takeLifecycleEvents", []).then(function (events) {
-            (events || []).forEach(function (entry) {
-              var ev = resolveNamespace(globalThis.chrome, "runtime." + entry.event);
-              if (ev && typeof ev.__orbitDispatch === "function") { ev.__orbitDispatch.apply(ev, entry.args || []); }
-            });
-          }, function () {});
+          drainLifecycle();
         };
+        setInterval(drainLifecycle, 1000);
         if (typeof document === "undefined" || document.readyState === "complete") {
           setTimeout(announce, 0);
         } else {

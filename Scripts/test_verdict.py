@@ -38,11 +38,13 @@ CONDITIONAL = re.compile(r"^\s*#(if|elseif|else|endif)\b\s*(.*)$")
 LOG_SKIP = re.compile(r"^.*?:\s*-\[([A-Za-z0-9_.]+)\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]\s*:\s*Test skipped\s*-\s*(.*)$")
 # Same wording as LOG_SKIP's suffix, but as an xcresult "Failure Message" child of a skipped Test Case.
 BUNDLE_SKIP_PREFIX = "Test skipped - "
-LOG_CASE = re.compile(r"^Test Case '-\[([A-Za-z0-9_.]+)\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]' (passed|failed|skipped)\b")
+# Not anchored: a WebKit os_log line can be glued to the front of the result, and a `^` match
+# then drops a real pass so the log count no longer matches the result bundle.
+LOG_CASE = re.compile(r"Test Case '-\[([A-Za-z0-9_.]+)\.([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)\]' (passed|failed|skipped)\b")
 # Parallel-runner reporter (OrbitTests): lower-case "case", no module prefix, no skip reason at all.
 # The module is always this same one target, so it is filled in below rather than left blank -- a
 # blank would risk colliding with a same-named class+method that a *different* target also runs.
-LOG_CASE_PARALLEL = re.compile(r"^Test case '([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\(\)' (passed|failed|skipped)\b")
+LOG_CASE_PARALLEL = re.compile(r"Test case '([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\(\)' (passed|failed|skipped)\b")
 LOG_CASE_PARALLEL_MODULE = "OrbitTests"
 
 
@@ -242,13 +244,13 @@ def log_events(
             module, suite, method, reason = match.groups()
             reasons[(module, suite, method)] = reason.strip()
             continue
-        match = LOG_CASE.match(line)
+        match = LOG_CASE.search(line)
         if match:
             module, suite, method, result = match.groups()
             key = (module, suite, method)
             attempts[key] = (attempts.get(key, (0, ""))[0] + 1, result)
             continue
-        match = LOG_CASE_PARALLEL.match(line)
+        match = LOG_CASE_PARALLEL.search(line)
         if match:
             suite, method, result = match.groups()
             key = (LOG_CASE_PARALLEL_MODULE, suite, method)
