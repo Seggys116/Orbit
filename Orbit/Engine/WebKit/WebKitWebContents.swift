@@ -1598,9 +1598,10 @@ extension WebKitWebContents {
         var path = "/"
         var expires: Date?
         var secure = false
-        for attribute in parts.dropFirst() {
+        for attribute in parts.dropFirst() where !attribute.isEmpty {
             let bits = attribute.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            let key = bits[0].lowercased()
+            guard let rawKey = bits.first else { continue }
+            let key = rawKey.lowercased()
             let field = bits.count > 1 ? bits[1] : ""
             switch key {
             case "domain": domain = field
