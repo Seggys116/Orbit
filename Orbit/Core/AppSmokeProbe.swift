@@ -328,11 +328,12 @@ enum AppSmokeProbe {
             record(.pageLoad, true, pageDetail)
         }
 
+        // 6*7 proves the page ran script. window.chrome stays absent; the default identity is WebKit.
         let arithmetic = "\(report["math"] as? String ?? "")-\(report["chrome"] as? String ?? "")"
-        if arithmetic == "42-object" {
+        if arithmetic == "42-undefined" {
             record(.inPageJavaScript, true, arithmetic)
         } else {
-            record(.inPageJavaScript, false, "in-page JavaScript returned \(arithmetic), expected \"42-object\"")
+            record(.inPageJavaScript, false, "in-page JavaScript returned \(arithmetic), expected \"42-undefined\"")
         }
 
         let agent = report["ua"] as? String ?? ""

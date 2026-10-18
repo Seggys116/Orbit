@@ -1400,39 +1400,6 @@ final class WebKitEngine: NSObject, BrowserEngine {
 
     private static let bootstrapSource = """
     (function () {
-      // Chrome puts window.chrome on every page. Leave an extension's own chrome alone.
-      if (location.protocol !== "chrome-extension:" && (typeof window.chrome !== "object" || window.chrome === null)) {
-        function seconds(ms) { return ms ? ms / 1000 : 0; }
-        window.chrome = {
-          loadTimes: function () {
-            var t = (window.performance && performance.timing) || {};
-            return {
-              requestTime: seconds(t.requestStart),
-              startLoadTime: seconds(t.requestStart),
-              commitLoadTime: seconds(t.responseStart),
-              finishDocumentLoadTime: seconds(t.domContentLoadedEventEnd),
-              finishLoadTime: seconds(t.loadEventEnd),
-              firstPaintTime: 0,
-              firstPaintAfterLoadTime: 0,
-              navigationType: "Other",
-              wasFetchedViaSpdy: false,
-              wasNpnNegotiated: false,
-              npnNegotiatedProtocol: "unknown",
-              wasAlternateProtocolAvailable: false,
-              connectionInfo: "unknown"
-            };
-          },
-          csi: function () {
-            var t = (window.performance && performance.timing) || {};
-            return {
-              startE: t.navigationStart || 0,
-              onloadT: t.loadEventEnd || 0,
-              pageT: (t.loadEventEnd && t.navigationStart) ? (t.loadEventEnd - t.navigationStart) : 0,
-              tran: 15
-            };
-          }
-        };
-      }
       // High 10, High 4:2:2 and High 4:4:4 have no VideoToolbox profile. Advertising them
       // makes a player start a stream that dies at the first frame.
       function unsupported(type) {

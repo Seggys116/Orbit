@@ -209,11 +209,12 @@ enum DemoEngineProbe {
             fail("navigator.userAgent does not name AppleWebKit: \(agentString)")
         }
 
+        // 6*7 proves the page ran script. window.chrome stays absent; the default identity is WebKit.
         let arithmeticString = "\(report["math"] as? String ?? "")-\(report["chrome"] as? String ?? "")"
-        if arithmeticString == "42-object" {
+        if arithmeticString == "42-undefined" {
             emit("OK   evaluated in-page JavaScript: \(arithmeticString)")
         } else {
-            fail("in-page JavaScript returned \(arithmeticString), expected \"42-object\".")
+            fail("in-page JavaScript returned \(arithmeticString), expected \"42-undefined\".")
         }
 
         await checkPagePaintedOnScreen(window: window, baseline: paneBaseline, contents: contents)
