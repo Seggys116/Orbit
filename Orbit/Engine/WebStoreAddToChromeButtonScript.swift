@@ -159,7 +159,7 @@ public enum WebStoreAddToChromeButtonScript {
     })();
     """
 
-    public static var chromiumUserScript: UserScript {
+    public static var userScript: UserScript {
         UserScript(
             id: scriptID,
             kind: .javaScript,

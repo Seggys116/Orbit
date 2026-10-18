@@ -31,7 +31,10 @@ final class PaneHeaderColorResolver {
 
     private var hintByURL: [URL: ThemeColor] = [:]
 
-    @ObservationIgnored private var inFlight: Set<TabID> = []
+    // Latest sample wins. A navigation flips ToolbarView's task id while the
+    // previous read is still awaiting JavaScript; dropping the new call because
+    // the old one is in flight is how a finished page never paints its colour.
+    @ObservationIgnored private var sampleGeneration: [TabID: UInt] = [:]
 
     private var documentByTab: [TabID: ThemeColor?] = [:]
 
@@ -104,14 +107,24 @@ final class PaneHeaderColorResolver {
 
     @discardableResult
     func sample(tab: TabID, url: URL, contents: any WebContents) async -> ThemeColor? {
-        guard !inFlight.contains(tab) else { return nil }
-        inFlight.insert(tab)
-        defer { inFlight.remove(tab) }
+        let generation = (sampleGeneration[tab] ?? 0) &+ 1
+        sampleGeneration[tab] = generation
 
         for attempt in 0..<Self.maximumReadAttempts {
+            if sampleGeneration[tab] != generation || Task.isCancelled { return nil }
             let raw = try? await contents.evaluateJavaScript(PageThemeColorScript.source)
-            guard let reading = PageThemeColorScript.decode(raw) else { return nil }
+            if sampleGeneration[tab] != generation || Task.isCancelled { return nil }
+            // A thrown read is "not yet", not "this page has no colour". Bailing
+            // on the first failure is what left the bar on the neutral gray.
+            guard let reading = PageThemeColorScript.decode(raw) else {
+                if attempt < Self.maximumReadAttempts - 1 {
+                    try? await Task.sleep(for: Self.readRetryDelay)
+                    continue
+                }
+                return nil
+            }
 
+            guard sampleGeneration[tab] == generation, !Task.isCancelled else { return nil }
             documentByTab[tab] = reading.documentColor.map(ThemeColor.init)
 
             if let color = reading.color {
@@ -127,7 +140,6 @@ final class PaneHeaderColorResolver {
 
             if attempt < Self.maximumReadAttempts - 1 {
                 try? await Task.sleep(for: Self.readRetryDelay)
-                if Task.isCancelled { return nil }
             }
         }
         return nil
@@ -142,7 +154,7 @@ final class PaneHeaderColorResolver {
     func forget(tab: TabID) {
         liveByTab.removeValue(forKey: tab)
         documentByTab.removeValue(forKey: tab)
-        inFlight.remove(tab)
+        sampleGeneration.removeValue(forKey: tab)
     }
 
     #if DEBUG
@@ -150,7 +162,7 @@ final class PaneHeaderColorResolver {
         liveByTab.removeAll()
         documentByTab.removeAll()
         hintByURL.removeAll()
-        inFlight.removeAll()
+        sampleGeneration.removeAll()
     }
     #endif
 }

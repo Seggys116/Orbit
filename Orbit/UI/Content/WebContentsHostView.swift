@@ -143,14 +143,17 @@ struct LiveWebContentsHostView: NSViewRepresentable {
     }
 
     private func embedIfEntitled(in container: NSView) {
+        // Element fullscreen: WebKit has moved the page into its own window and puts it back on exit.
+        // Taking it now would end the fullscreen it is showing.
+        guard !contents.mediaState.isFullscreen else { return }
         guard WebContentsPresentation.shared.isOwner(hostID, of: contents) else {
-            if contents.view.superview === container {
-                contents.view.removeFromSuperview()
-                contents.setVisible(false)
-            }
+            releasePage(from: container)
             return
         }
-        if contents.view.superview === container {
+        // The page sits in an InspectorDockHost inside this container, not in the
+        // container itself. Treating that as "not embedded" removed the host and
+        // rebuilt it on every SwiftUI update.
+        if pageIsHosted(in: container) {
             #if DEBUG
             LiveWebContentsHostView.logSelfCheck(webView: contents.view, container: container, label: "update-already-matched")
             #endif
@@ -194,16 +197,38 @@ struct LiveWebContentsHostView: NSViewRepresentable {
         ])
     }
 
+    private func pageIsHosted(in container: NSView) -> Bool {
+        if contents.view.superview === container { return true }
+        if let host = contents.view.superview as? InspectorDockHost, host.superview === container { return true }
+        return false
+    }
+
+    /// Drops this container's hold on the page without touching a page that has already moved to another host.
+    private func releasePage(from container: NSView) {
+        let dockHost = container.subviews.compactMap { $0 as? InspectorDockHost }.first
+        let holdsPage = contents.view.superview === container || contents.view.superview === dockHost
+        dockHost?.removeFromSuperview()
+        if contents.view.superview === container {
+            contents.view.removeFromSuperview()
+        }
+        if holdsPage { contents.setVisible(false) }
+    }
+
     private func embed(_ webView: NSView, in container: NSView) {
-        webView.translatesAutoresizingMaskIntoConstraints = false
         webView.isHidden = false
-        container.addSubview(webView)
-        NSLayoutConstraint.activate([
-            webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: container.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
+        if let dockable = contents as? any InspectorDockableContents {
+            // Laid out by autoresizing so a docked inspector can share the pane with the page.
+            dockable.embedForInspectorDocking(in: container)
+        } else {
+            webView.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(webView)
+            NSLayoutConstraint.activate([
+                webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                webView.topAnchor.constraint(equalTo: container.topAnchor),
+                webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+        }
         container.layoutSubtreeIfNeeded()
         // After addSubview, never before: AppKit delivers the engine view's
         // own viewDidMoveToWindow synchronously inside it, and that is the

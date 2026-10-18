@@ -21,6 +21,24 @@ final class ContentBlockingEngineTests: XCTestCase {
         XCTAssertTrue(controller.engineSupportsContentBlocking)
     }
 
+    func testControllerRepublishesTheEngineReport() async {
+        let defaults = UserDefaults(suiteName: "ContentBlockingEngineTests.\(UUID().uuidString)")!
+        let controller = ContentBlockingController(defaults: defaults)
+        XCTAssertEqual(controller.engineReport, ContentBlockingEngineReport())
+
+        var report = ContentBlockingEngineReport()
+        report.networkRules = 7
+        report.skippedRegexRules = 2
+        report.note("Skipped 2 regex filter(s) outside WebKit's supported regex subset")
+        controller.blocker.setEngineReport(report)
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        while controller.engineReport != report, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(controller.engineReport, report, "a compile failure or skipped rule must reach the UI state, not stay in the engine")
+    }
+
     // MARK: - Controller behaviour
 
     func testControllerPersistsAndRestoresTheAllowlistAndAppliesItToTheBlocker() async {
@@ -218,7 +236,7 @@ final class StubURLProtocol: URLProtocol {
 
 @MainActor
 private final class BlockingWithoutCountingEngine: BrowserEngine {
-    static let kind: EngineKind = .chromium
+    static let kind: EngineKind = .webkit
     let capabilities: EngineCapabilities = [.contentBlocking]
     let manageableContentSettings: Set<PermissionKind> = []
     let extensionActivation: ExtensionActivation = .unsupported

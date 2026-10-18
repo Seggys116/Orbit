@@ -252,12 +252,12 @@ enum OrbitScreenshotFixtures {
 /// to call; every method beyond what that function configures is a trivial, unreachable stub.
 @MainActor
 private final class MockBrowserEngine: BrowserEngine {
-    static let kind: EngineKind = .chromium
+    static let kind: EngineKind = .webkit
 
     var capabilities: EngineCapabilities = []
     var manageableContentSettings: Set<PermissionKind> = Set(PermissionKind.allCases)
     var extensionActivation: ExtensionActivation = .nextLaunch
-    var versionDescription = "Chromium (OrbitScreenshotFixtures stand-in — no real engine is running)"
+    var versionDescription = "WebKit (OrbitScreenshotFixtures stand-in — no real engine is running)"
     var extensionsToReport: [LoadedExtension] = []
 
     // Must be the same MockEngineSession seedSiteControlPopover(_:) gave its MockWebContents, or this engine could claim a kind manageable that the session disagrees about.

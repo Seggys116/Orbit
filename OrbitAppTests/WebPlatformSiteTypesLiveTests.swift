@@ -10,7 +10,7 @@ import XCTest
 final class WebPlatformSiteTypesLiveTests: XCTestCase {
 
     private func waitUntilTrue(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         _ expression: String,
         timeout: Duration = .seconds(15)
     ) async throws {
@@ -28,8 +28,7 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
     // MARK: - Heavy SPA: nested dynamic import() code-splitting
 
     func testHeavySPAWithNestedDynamicImportsBuildsItsDOMFromCodeSplitChunks() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let text = try LiveChromiumEngineHost.runLive { () -> String in
+        let text = try WebKitLiveEngineHost.runLive { () -> String in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(
                     contentType: "text/html",
@@ -57,11 +56,11 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             try await self.waitUntilTrue(contents, "document.getElementById('root').textContent !== 'loading'")
             return (try await contents.evaluateJavaScript("document.getElementById('root').textContent")) as? String ?? ""
         }
@@ -71,8 +70,7 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
     // MARK: - Static content site: several real distinct pages
 
     func testStaticContentSiteNavigatesAcrossSeveralRealDistinctPages() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let titles = try LiveChromiumEngineHost.runLive { () -> [String] in
+        let titles = try WebKitLiveEngineHost.runLive { () -> [String] in
             let server = try LiveHTTPTestServer(routes: [
                 "/page1": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><head><title>Orbit Page One</title></head><body>one</body></html>"),
                 "/page2": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><head><title>Orbit Page Two</title></head><body>two</body></html>"),
@@ -80,14 +78,14 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
 
             var seenTitles: [String] = []
             for page in ["page1", "page2", "page3"] {
                 contents.load(server.baseURL.appendingPathComponent(page))
-                try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+                try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
                 let title = try await contents.evaluateJavaScript("document.title")
                 seenTitles.append((title as? String) ?? "")
             }
@@ -101,9 +99,8 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
     /// Complements ChromiumPageLoadLatencyLiveTests: this proves every subresource actually
     /// loaded, which a latency-only budget could miss if some silently dropped.
     func testPageWithManySubresourcesActuallyLoadsEveryOne() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let subresourceCount = 40
-        let loadedCount = try LiveChromiumEngineHost.runLive { () -> Int in
+        let loadedCount = try WebKitLiveEngineHost.runLive { () -> Int in
             var routes: [String: LiveHTTPTestServer.Route] = [:]
             var scriptTags = ""
             for index in 0..<subresourceCount {
@@ -117,11 +114,11 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
             let server = try LiveHTTPTestServer(routes: routes)
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             let result = try await contents.evaluateJavaScript("window.__orbitSubresourceLoaded || 0")
             return (result as? NSNumber)?.intValue ?? 0
         }
@@ -131,8 +128,7 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
     // MARK: - Iframe-heavy, genuinely cross-origin
 
     func testIframeHeavyPageLoadsCrossOriginFramesThatEachRunIndependently() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let receivedFrom = try LiveChromiumEngineHost.runLive { () -> [String] in
+        let receivedFrom = try WebKitLiveEngineHost.runLive { () -> [String] in
             // Three separate listen sockets on 127.0.0.1, each its own port -- distinct
             // origins by scheme+host+port, no DNS or public internet involved.
             let frameServerB = try LiveHTTPTestServer(routes: [
@@ -176,13 +172,13 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
             ])
             defer { hostServer.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 300, height: 300)
 
             contents.load(hostServer.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             try await self.waitUntilTrue(contents, "!!window.__orbitFrameMessages && window.__orbitFrameMessages.length === 3")
 
             let result = try await contents.evaluateJavaScript("window.__orbitFrameMessages.slice().sort()")
@@ -194,8 +190,7 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
     // MARK: - Service worker: registration, active state, real fetch interception
 
     func testServiceWorkerRegistersReachesActiveStateAndInterceptsAFetch() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (registered, controlled, interceptedBody) = try LiveChromiumEngineHost.runLive { () -> (Bool, Bool, String) in
+        let (registered, controlled, interceptedBody) = try WebKitLiveEngineHost.runLive { () -> (Bool, Bool, String) in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(
                     contentType: "text/html",
@@ -216,11 +211,11 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitSWReady = false;
@@ -257,8 +252,7 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
     // MARK: - PWA manifest
 
     func testPWAManifestIsLinkedAndFetchableWithItsRealFields() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (linkedHref, name, display) = try LiveChromiumEngineHost.runLive { () -> (String, String, String) in
+        let (linkedHref, name, display) = try WebKitLiveEngineHost.runLive { () -> (String, String, String) in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(
                     contentType: "text/html",
@@ -273,11 +267,11 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             let href = try await contents.evaluateJavaScript("document.querySelector('link[rel=manifest]').href")
 
@@ -302,9 +296,8 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
     // MARK: - Large DOM
 
     func testLargeDOMPageFullyParsesAndEveryNodeIsQueryable() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let nodeCount = 5000
-        let (count, lastText) = try LiveChromiumEngineHost.runLive { () -> (Int, String) in
+        let (count, lastText) = try WebKitLiveEngineHost.runLive { () -> (Int, String) in
             var items = ""
             for index in 0..<nodeCount {
                 items += "<li>item-\(index)</li>"
@@ -314,12 +307,12 @@ final class WebPlatformSiteTypesLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 400, height: 400)
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             let countResult = try await contents.evaluateJavaScript("document.querySelectorAll('#list li').length")
             let lastResult = try await contents.evaluateJavaScript("document.querySelectorAll('#list li')[document.querySelectorAll('#list li').length - 1].textContent")

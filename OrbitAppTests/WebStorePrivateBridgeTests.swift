@@ -173,7 +173,7 @@ final class WebStorePrivateBridgeTests: XCTestCase {
     func test_managementSetEnabled_roundTripsAndHasPendingChangesReflectsItHonestly() async throws {
         let store = makeStore()
         let installed = try makeInstalledExtension(in: store)
-        // Models what ChromiumEngine.start() does at boot: freeze the set of ids
+        // Models what WebKitEngine.start() does at boot: freeze the set of ids
         // that were actually handed to --load-extension.
         store.markActivated(ids: store.installed().map(\.id))
         XCTAssertFalse(store.hasPendingChanges, "test precondition: freshly activated, nothing pending")
@@ -320,7 +320,7 @@ final class WebStorePrivateBridgeTests: XCTestCase {
     /// An `ExtensionStore.install` staged on disk does not start running until the next browser start-up re-reads `enabledDirectories()` into `--load-extension`; this models that boot -> install -> (not yet running) sequence and asserts `ExtensionStore` reports it honestly rather than optimistically.
     func test_freshlyInstalledExtension_isNotClaimedToBeRunningUntilTheNextEngineStart() async throws {
         let store = makeStore()
-        // Boot with nothing enabled — the state ChromiumEngine.start() left the running process in.
+        // Boot with nothing enabled — the state WebKitEngine.start() left the running process in.
         store.markActivated(ids: [])
         XCTAssertFalse(store.hasPendingChanges, "test precondition")
 

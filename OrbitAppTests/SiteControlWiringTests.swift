@@ -199,32 +199,24 @@ final class SiteControlWiringTests: XCTestCase {
         )
     }
 
-    // MARK: - Notifications nobody can deliver (§14 N6)
+    // MARK: - Notifications
 
-    func testANotificationPermissionRequestIsRefusedWithoutPrompting() {
+    func testEveryPermissionKindOrbitCanHonourReachesTheUser() {
         let origin = URL(string: "https://example.com/")!
-        XCTAssertEqual(
-            AppEnvironment.refusalWithoutPrompting(for: PermissionRequest(kinds: [.notifications], origin: origin)),
-            .denyAlways,
-            "Orbit has no code that displays a notification — granting one promises the site something that can never arrive."
-        )
-    }
-
-    func testPermissionsOrbitCanHonourStillReachTheUser() {
-        let origin = URL(string: "https://example.com/")!
-        for kind in [PermissionKind.camera, .microphone, .geolocation, .clipboardRead] {
+        for kind in PermissionKind.allCases {
             XCTAssertNil(
                 AppEnvironment.refusalWithoutPrompting(for: PermissionRequest(kinds: [kind], origin: origin)),
-                "\(kind.rawValue) was refused without asking — only kinds Orbit cannot deliver may be."
+                "\(kind.rawValue) was refused without asking."
             )
         }
-        XCTAssertNil(
-            AppEnvironment.refusalWithoutPrompting(for: PermissionRequest(kinds: [.camera, .notifications], origin: origin)),
-            "A request carrying something answerable must still be put to the user."
+        XCTAssertEqual(
+            AppEnvironment.refusalWithoutPrompting(for: PermissionRequest(kinds: [], origin: origin)),
+            .denyAlways,
+            "A request naming nothing has nothing to put to the user."
         )
     }
 
-    func testNothingInOrbitDisplaysANotification() throws {
+    func testOnlyTheNotificationPresenterPostsSystemNotifications() throws {
         let hits = try Self.orbitSourceFiles().filter { url in
             let text = try String(contentsOf: url, encoding: .utf8)
             let code = text
@@ -233,9 +225,9 @@ final class SiteControlWiringTests: XCTestCase {
                 .joined(separator: "\n")
             return code.contains("UNUserNotificationCenter") || code.contains("NSUserNotification")
         }
-        XCTAssertTrue(
-            hits.isEmpty,
-            "Something now posts a system notification (\(hits.map(\.lastPathComponent))) — revisit AppEnvironment's undeliverablePermissionKinds."
+        XCTAssertEqual(
+            hits.map(\.lastPathComponent), ["WebKitNotificationPresenter.swift"],
+            "System notifications are posted from one place, so a page's permission grant has one thing to answer for."
         )
     }
 
@@ -475,7 +467,12 @@ final class SiteControlWiringTests: XCTestCase {
         DefaultBrowser.defaults = scratchDefaults
         scratchDefaults.removeObject(forKey: DefaultBrowser.declinedKey)
 
-        try? XCTSkipIf(DefaultBrowser.isDefault, "Orbit is the default browser on this machine, so the offer is already suppressed for a different reason.")
+        if DefaultBrowser.isDefault {
+            XCTAssertFalse(
+                DefaultBrowser.shouldOfferToBecomeDefault,
+                "Orbit is already the default browser, so the offer stays off before any decline is recorded."
+            )
+        }
 
         DefaultBrowser.recordDeclined()
         XCTAssertFalse(

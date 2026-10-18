@@ -197,7 +197,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
         guard settleFrameUntilStable(window, of: engine) else {
-            throw XCTSkip("The engine view's frame never stabilized within the settle budget.")
+            throw TestStopped("The engine view's frame never stabilized within the settle budget.")
         }
         window.contentView?.displayIfNeeded()
 

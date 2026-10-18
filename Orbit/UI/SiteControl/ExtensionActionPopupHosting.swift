@@ -12,11 +12,16 @@ public final class ExtensionActionPopupModel {
     public private(set) var loadFailure: String?
     public private(set) var contentSize: CGSize = ExtensionActionPopupSupport.popupLoadingSize
     public private(set) var hasReportedContentSize = false
+    /// Each axis scrolls only when the document is larger than the frame on that axis.
+    /// Turning both on for a tall page is what draws the horizontal bar.
+    public private(set) var scrollsHorizontally = false
+    public private(set) var scrollsVertically = false
 
     private let engine: any BrowserEngine
     private let session: any EngineSession
     private let url: URL
     private var observer: Observer?
+    private var sizeCorrectionGeneration = 0
 
     public init(engine: any BrowserEngine, session: any EngineSession, url: URL) {
         self.engine = engine
@@ -27,12 +32,20 @@ public final class ExtensionActionPopupModel {
     public func start() {
         guard contents == nil, loadFailure == nil else { return }
         do {
-            let contents = try engine.makeWebContents(session: session, initialURL: nil)
+            let contents: any WebContents
+            if let engine = engine as? WebKitEngine {
+                contents = try engine.makeWebContents(session: session, initialURL: nil, registersAsTab: false)
+            } else {
+                contents = try engine.makeWebContents(session: session, initialURL: nil)
+            }
             let observer = Observer(model: self)
             contents.delegate = observer
             self.observer = observer
             self.contents = contents
-            // Before load, so the very first layout is already the self-sizing one.
+            // Smaller than the page, on purpose. The web view is born at 800×600; measuring
+            // there reports that viewport as the page height. The loading frame is the same
+            // minimum, so embedding before the first report does not stretch it back.
+            contents.view.frame = NSRect(origin: .zero, size: ExtensionActionPopupSupport.popupLoadingSize)
             contents.enableContentSizing(
                 minimum: ExtensionActionPopupSupport.popupMinimumSize,
                 maximum: ExtensionActionPopupSupport.popupMaximumSize
@@ -45,20 +58,60 @@ public final class ExtensionActionPopupModel {
 
     // Safe to call more than once: SiteControlPopoverView calls this from more than one dismissal path, uncoordinated about which runs first.
     public func teardown() {
-        contents?.close()
+        sizeCorrectionGeneration += 1
+        let held = contents
+        // Drop the model's reference before close. A re-entrant view update must not observe a live popup, and this object must not keep the web view.
         contents = nil
+        held?.delegate = nil
         observer = nil
+        held?.close()
     }
 
     fileprivate func handleFailure(_ error: EngineError) {
         loadFailure = "\(error.headline). \(error.underlyingDescription)"
     }
 
-    // Every report is adopted, not just the first: a popup that grows after load (an async list rendering, a details disclosure opening) grows with it, which is what Chrome does too.
+    // Every distinct report is adopted, not just the first: a popup that grows after load (an async list rendering, a details disclosure opening) grows with it, which is what Chrome does too.
     fileprivate func applyPreferredSize(_ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
-        hasReportedContentSize = true
-        contentSize = ExtensionActionPopupSupport.clampedPopupSize(size)
+        let viewBounds = contents?.view.bounds.size ?? .zero
+        // A report the size of the web view is the viewport, not the page. Adopting it leaves
+        // the frame taller than the page, or shorter by less than a scrollbar.
+        if ExtensionActionPopupSupport.isUnlaidOutViewportSize(size, viewBounds: viewBounds) {
+            correctViewportSize(fallback: size)
+            return
+        }
+        adopt(raw: size)
+    }
+
+    private func adopt(raw: CGSize) {
+        sizeCorrectionGeneration += 1
+        let screen = NSScreen.main?.visibleFrame.size ?? .zero
+        let frame = ExtensionActionPopupSupport.popupFrame(fitting: raw, on: screen)
+        let horizontal = raw.width > frame.width + 0.5
+        let vertical = raw.height > frame.height + 0.5
+        if scrollsHorizontally != horizontal { scrollsHorizontally = horizontal }
+        if scrollsVertically != vertical { scrollsVertically = vertical }
+        if contentSize != frame { contentSize = frame }
+        if !hasReportedContentSize { hasReportedContentSize = true }
+    }
+
+    private func correctViewportSize(fallback: CGSize) {
+        guard let contents else {
+            adopt(raw: fallback)
+            return
+        }
+        sizeCorrectionGeneration += 1
+        let generation = sizeCorrectionGeneration
+        Task { @MainActor [weak self] in
+            let measured = await ExtensionActionPopupSupport.measuredContentSize(in: contents)
+            guard let self, generation == self.sizeCorrectionGeneration, self.contents != nil, !contents.isClosed else { return }
+            // The script's own answer is the document. It is discarded only when both
+            // axes are still the host, which is the viewport echoing itself.
+            if let measured, !ExtensionActionPopupSupport.isEntirelyTheViewport(measured, viewBounds: contents.view.bounds.size) {
+                self.adopt(raw: measured)
+            }
+        }
     }
 
     private final class Observer: WebContentsDelegate {
@@ -93,8 +146,13 @@ public struct ExtensionActionPopupView: View {
                 message: loadFailure
             )
         } else if let contents = model.contents {
-            ExtensionPopupWebContentsHostView(contents: contents)
+            ExtensionPopupWebContentsHostView(
+                contents: contents,
+                scrollsHorizontally: model.scrollsHorizontally,
+                scrollsVertically: model.scrollsVertically
+            )
                 .frame(width: model.contentSize.width, height: model.contentSize.height)
+                .fixedSize()
         } else {
             ProgressView()
                 .controlSize(.small)
@@ -160,18 +218,30 @@ public struct ExtensionPendingActivationView: View {
 // Deliberately not WebContentsHostView: that type arbitrates a tab's view across panes and freezes/unfreezes it with key window status, which would risk this popup silently going inert.
 private struct ExtensionPopupWebContentsHostView: NSViewRepresentable {
     var contents: any WebContents
+    var scrollsHorizontally: Bool
+    var scrollsVertically: Bool
 
     func makeNSView(context: Context) -> NSView {
-        let container = NSView()
-        embed(in: container)
-        return container
+        // Not embedded here: SwiftUI can build this NSView and discard it, and embedding would park the popup web view in a container that is never shown.
+        NSView()
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         embed(in: nsView)
+        configureScrollers(in: contents.view)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: ()) {
+        for subview in nsView.subviews {
+            subview.removeFromSuperview()
+        }
     }
 
     private func embed(in container: NSView) {
+        if contents.isClosed {
+            detachIfPresent(in: container)
+            return
+        }
         guard contents.view.superview !== container else { return }
         for subview in container.subviews {
             subview.removeFromSuperview()
@@ -185,9 +255,31 @@ private struct ExtensionPopupWebContentsHostView: NSViewRepresentable {
             view.topAnchor.constraint(equalTo: container.topAnchor),
             view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
-        // After addSubview: `container` has no window on the makeNSView path,
-        // so AppKit has just told content:: this popup is hidden. See
-        // ChromiumPaneVisibilityLiveTests.
+        // After addSubview: `container` often has no window yet, so AppKit has just told the engine this popup is hidden. See WebKitPaneVisibilityLiveTests.
         contents.setVisible(true)
+        configureScrollers(in: view)
+        // The document often finished loading before this view had a window, so the
+        // size report from document-start never reached a popover that could grow.
+        (contents as? WebKitWebContents)?.contentSizing?.measure()
+    }
+
+    // Scroll indicators stay hidden while the page fits the frame. A page past the maximum
+    // keeps them: that overflow is real, and hiding the bars would clip it.
+    private func configureScrollers(in view: NSView) {
+        func walk(_ candidate: NSView) {
+            if let scrollView = candidate as? NSScrollView {
+                scrollView.autohidesScrollers = true
+                scrollView.hasHorizontalScroller = scrollsHorizontally
+                scrollView.hasVerticalScroller = scrollsVertically
+            }
+            candidate.subviews.forEach(walk)
+        }
+        walk(view)
+    }
+
+    private func detachIfPresent(in container: NSView) {
+        guard contents.view.superview === container else { return }
+        contents.setVisible(false)
+        contents.view.removeFromSuperview()
     }
 }

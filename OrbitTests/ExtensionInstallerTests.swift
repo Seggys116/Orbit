@@ -48,15 +48,22 @@ final class ExtensionInstallerTests: XCTestCase {
                     body: crxBytes ?? Data()
                 )
             }
-            if url.query?.contains("response=redirect") == true {
-                return .redirect(to: Self.downloadBlobURL)
-            }
-            if let updateCheckXML {
-                return .respond(status: 200, headers: ["Content-Type": "text/xml"], body: Data(updateCheckXML.utf8))
+            if url.host == "update.googleapis.com", request.httpMethod == "POST" {
+                let xml = updateCheckXML ?? Self.defaultOmahaUpdateAvailableXML
+                return .respond(status: 200, headers: ["Content-Type": "text/xml"], body: Data(xml.utf8))
             }
             return .respond(status: 404, headers: [:], body: Data())
         }
     }
+
+    // Protocol 3.0 answer pointing at downloadBlobURL (codebase directory plus package name).
+    private static let defaultOmahaUpdateAvailableXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <response protocol="3.0" server="prod"><app appid="fixture" status="ok"><updatecheck status="ok">\
+        <urls><url codebase="https://clients2.googleusercontent.com/crx/blobs/"/></urls>\
+        <manifest version="1.0"><packages><package name="fixture.crx" required="true"/></packages></manifest>\
+        </updatecheck></app></response>
+        """
 
     private func omahaUpdateAvailableXML(appID: String, version: String, codebase: String) -> String {
         """
@@ -195,7 +202,7 @@ final class ExtensionInstallerTests: XCTestCase {
         XCTAssertEqual(pending.id, id)
         XCTAssertFalse(pending.isUpdate)
         XCTAssertNil(pending.previousVersion)
-        XCTAssertNil(pending.chromiumVersionWarning, "no minimum_chrome_version was declared")
+        XCTAssertNil(pending.minimumChromeVersionWarning, "no minimum_chrome_version was declared")
         XCTAssertTrue(
             pending.warnings.contains(where: { $0.text.localizedCaseInsensitiveContains("browsing history") }),
             "the \"tabs\" permission must produce a visible warning — got \(pending.warnings)"
@@ -290,8 +297,8 @@ final class ExtensionInstallerTests: XCTestCase {
             return XCTFail("Expected .installed even though a warning was raised, got \(result)")
         }
         let pending = try XCTUnwrap(seenPending)
-        XCTAssertNotNil(pending.chromiumVersionWarning)
-        XCTAssertTrue(pending.chromiumVersionWarning!.contains("9999.0.0.0"))
+        XCTAssertNotNil(pending.minimumChromeVersionWarning)
+        XCTAssertTrue(pending.minimumChromeVersionWarning!.contains("9999.0.0.0"))
     }
 
     // MARK: - Signature failure aborts and installs nothing

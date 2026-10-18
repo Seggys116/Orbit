@@ -1,6 +1,7 @@
-//  content::WebContentsDelegate's OpenURLFromTab/AddNewContents base implementations drop the
-//  pending WebContents unless overridden; end-to-end proof lives in PageLinkNavigationLiveTests.
+//  How a click or window.open becomes a disposition, and what the delegate does with an adopted or declined
+//  request. End-to-end proof lives in PageLinkNavigationLiveTests.
 
+import AppKit
 import Foundation
 import XCTest
 @testable import Orbit
@@ -8,70 +9,66 @@ import XCTest
 @MainActor
 final class PageNewWindowAdoptionTests: XCTestCase {
 
-    // MARK: - The overrides themselves
+    // MARK: - Click and window.open dispositions
 
-    private static var embedderRoot: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Chromium/Embedder", isDirectory: true)
+    private let noFeatures = NewContentDisposition.WebKitWindowFeatures()
+
+    func testCmdClickOpensABackgroundTabAndCmdShiftClickAForegroundOne() {
+        XCTAssertEqual(NewContentDisposition.forLinkClick(modifiers: [.command], buttonNumber: 1), .newBackgroundTab)
+        XCTAssertEqual(NewContentDisposition.forLinkClick(modifiers: [.command, .shift], buttonNumber: 1), .newForegroundTab)
     }
 
-    private func embedderSource(_ relativePath: String) throws -> String {
-        let url = Self.embedderRoot.appendingPathComponent(relativePath)
-        return try String(contentsOf: url, encoding: .utf8)
+    func testShiftClickOpensAWindow() {
+        XCTAssertEqual(NewContentDisposition.forLinkClick(modifiers: [.shift], buttonNumber: 1), .newWindow)
     }
 
-    func testOrbitWebContentsHostOverridesBothOfContentsNewWindowRoutes() throws {
-        let header = try embedderSource("browser/orbit_web_contents_host.h")
-        let implementation = try embedderSource("browser/orbit_web_contents_host.mm")
-
-        for override in ["OpenURLFromTab", "AddNewContents"] {
-            XCTAssertTrue(
-                header.contains(override),
-                """
-                OrbitWebContentsHost does not declare \(override). content::'s \
-                own base-class implementation returns nullptr and drops the \
-                request, which is a browser that silently refuses to follow a \
-                link -- see this file's header.
-                """
-            )
-            XCTAssertTrue(
-                implementation.contains("OrbitWebContentsHost::\(override)"),
-                "OrbitWebContentsHost declares \(override) but never defines it."
-            )
+    func testMiddleClickOpensABackgroundTabAndShiftMiddleClickAForegroundOne() {
+        for middle in [NewContentDisposition.webKitMiddleButtonNumber, NewContentDisposition.webKitMiddleButtonMask] {
+            XCTAssertEqual(NewContentDisposition.forLinkClick(modifiers: [], buttonNumber: middle), .newBackgroundTab)
+            XCTAssertEqual(NewContentDisposition.forLinkClick(modifiers: [.shift], buttonNumber: middle), .newForegroundTab)
         }
+    }
 
-        XCTAssertTrue(
-            implementation.contains("RequestNewContent("),
-            """
-            Neither override reaches RequestNewContent, so nothing a page opens \
-            in a second tab can ever reach Swift.
-            """
+    func testAPlainLeftClickIsAnOrdinaryNavigation() {
+        XCTAssertNil(NewContentDisposition.forLinkClick(modifiers: [], buttonNumber: 1))
+        XCTAssertNil(NewContentDisposition.forLinkClick(modifiers: [.capsLock], buttonNumber: 1), "caps lock is not a click modifier")
+    }
+
+    func testOptionAndControlClicksAreLeftToTheirOwnGestures() {
+        XCTAssertNil(NewContentDisposition.forLinkClick(modifiers: [.option], buttonNumber: 1))
+        XCTAssertNil(NewContentDisposition.forLinkClick(modifiers: [.command, .option], buttonNumber: 1))
+        XCTAssertNil(NewContentDisposition.forLinkClick(modifiers: [.control], buttonNumber: 1))
+    }
+
+    func testWindowOpenWithNoFeaturesIsAForegroundTab() {
+        XCTAssertEqual(
+            NewContentDisposition.forNewWindow(modifiers: [], buttonNumber: 0, features: noFeatures),
+            .newForegroundTab
         )
     }
 
-    func testTheNewContentCallbackIsDeclaredOnBothSidesOfTheCABI() throws {
-        let api = try embedderSource("bridge/orbit_bridge_api.h")
-        XCTAssertTrue(
-            api.contains("OrbitSetNewContentRequestCallback"),
-            "orbit_bridge_api.h no longer exports the new-content callback the two overrides answer through."
-        )
+    func testWindowOpenWithASizeOrPositionOrBareChromeIsAPopup() {
+        for features in [
+            NewContentDisposition.WebKitWindowFeatures(hasSize: true),
+            NewContentDisposition.WebKitWindowFeatures(hasPosition: true),
+            NewContentDisposition.WebKitWindowFeatures(hidesToolbars: true),
+            NewContentDisposition.WebKitWindowFeatures(hidesMenuBar: true),
+            NewContentDisposition.WebKitWindowFeatures(hidesStatusBar: true),
+        ] {
+            XCTAssertTrue(features.requestsPopup)
+            XCTAssertEqual(NewContentDisposition.forNewWindow(modifiers: [], buttonNumber: 0, features: features), .popup)
+        }
+    }
 
-        let bridgeSource = try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Orbit/Engine/Chromium/OrbitChromiumBridge.swift"),
-            encoding: .utf8
+    func testAClickGestureOutranksWindowFeatures() {
+        let popup = NewContentDisposition.WebKitWindowFeatures(hasSize: true)
+        XCTAssertEqual(
+            NewContentDisposition.forNewWindow(modifiers: [.command], buttonNumber: 1, features: popup),
+            .newBackgroundTab
         )
-        XCTAssertTrue(
-            bridgeSource.contains("\"OrbitSetNewContentRequestCallback\""),
-            """
-            OrbitChromiumBridge never looks the symbol up, so the engine would \
-            keep dropping every target=_blank / window.open() / Cmd-click with \
-            no Swift-side sign that anything was asked for.
-            """
+        XCTAssertEqual(
+            NewContentDisposition.forNewWindow(modifiers: [.shift], buttonNumber: 1, features: noFeatures),
+            .newWindow
         )
     }
 
@@ -228,28 +225,12 @@ final class PageNewWindowAdoptionTests: XCTestCase {
 
         let newTabID = try XCTUnwrap(
             Set(env.state.tabs.keys).subtracting(tabsBefore).first,
-            "A Cmd-click reaches OpenURLFromTab with nothing built, so Swift has to open the tab itself."
+            "A Cmd-click reaches the delegate with nothing built, so Swift has to open the tab itself."
         )
         XCTAssertEqual(env.tab(newTabID)?.url, target)
         XCTAssertEqual(env.tab(newTabID)?.spaceID, openerTab.spaceID)
         XCTAssertEqual(env.activeTabID, openerTabID)
 
         env.closeTab(newTabID)
-    }
-
-    // MARK: - The disposition mapping the C ABI carries
-
-    func testWindowOpenDispositionsMapOntoOrbitsOwn() {
-        XCTAssertEqual(NewContentDisposition(chromiumWindowOpenDisposition: 1), .currentTab)
-        XCTAssertEqual(NewContentDisposition(chromiumWindowOpenDisposition: 3), .newForegroundTab)
-        XCTAssertEqual(NewContentDisposition(chromiumWindowOpenDisposition: 4), .newBackgroundTab)
-        XCTAssertEqual(NewContentDisposition(chromiumWindowOpenDisposition: 5), .popup)
-        XCTAssertEqual(NewContentDisposition(chromiumWindowOpenDisposition: 6), .newWindow)
-        XCTAssertEqual(NewContentDisposition(chromiumWindowOpenDisposition: 7), .download)
-        // Anything with no distinct Orbit surface opens as an ordinary tab
-        // rather than being dropped, which is what the defect did.
-        for raw in [Int32(0), 2, 8, 9, 10, 11, 12, 99] {
-            XCTAssertEqual(NewContentDisposition(chromiumWindowOpenDisposition: raw), .newForegroundTab)
-        }
     }
 }

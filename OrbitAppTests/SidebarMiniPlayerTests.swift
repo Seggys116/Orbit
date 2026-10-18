@@ -572,7 +572,7 @@ final class SidebarMiniPlayerTests: XCTestCase {
     // Regression: a tab with an active Media Session but no PiP candidate (Spotify, a
     // podcast page -- audio only, nothing content:: would ever float) used to draw an
     // enabled PiP button anyway, because the control was gated on webContents existing
-    // and the engine capability alone. Pressing it reached ChromiumWebContents
+    // and the engine capability alone. Pressing it reached WebKitWebContents
     // .togglePictureInPicture, which found no PiP candidate and silently no-op'd -- the
     // button did nothing, with no feedback to the user.
     func test_audioOnlyMediaSession_thePictureInPictureControlIsNotDrawn() throws {

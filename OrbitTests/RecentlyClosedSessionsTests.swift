@@ -218,16 +218,10 @@ final class RecentlyClosedSessionsTests: XCTestCase {
     // MARK: - MAX_SESSION_RESULTS
 
     func test_maxSessionResults_inTheSchemaMatchesOrbitsOwnCapacity() throws {
-        let schemaURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Chromium/Embedder/common/api/sessions.json")
-        let text = try String(contentsOf: schemaURL, encoding: .utf8)
-        // Orbit's schemas open with a // licence/rationale block the JSON parser cannot read.
-        let start = try XCTUnwrap(text.firstIndex(of: "["), "sessions.json has no JSON array in it")
-        let data = try XCTUnwrap(String(text[start...]).data(using: .utf8))
+        typealias Schema = ExtensionAPISchemaSurface
+        let schemaURL = Schema.vendoredUpstreamDirectory.appendingPathComponent("sessions.json")
         let namespaces = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+            Schema.readJSON(schemaURL) as? [[String: Any]],
             "sessions.json did not parse as a schema array"
         )
         let sessions = try XCTUnwrap(namespaces.first { $0["namespace"] as? String == "sessions" })
@@ -250,6 +244,21 @@ final class RecentlyClosedSessionsTests: XCTestCase {
         XCTAssertEqual(
             filterMax["maximum"] as? Int, store.recentlyClosedCapacity,
             "Filter.maxResults' ceiling is the third copy of the same number and has to move with it"
+        )
+    }
+
+    func test_maxSessionResults_theWrapperServesTheStoresCapacityToExtensions() throws {
+        let configured = try ChromeWrapperRuntime.start(
+            manifestPermissions: ["sessions"], maxSessionResults: store.recentlyClosedCapacity
+        )
+        XCTAssertEqual(
+            configured.value(of: "chrome.sessions.MAX_SESSION_RESULTS") as? Int, store.recentlyClosedCapacity,
+            "the number an extension reads from chrome.sessions is not the number the store keeps"
+        )
+        let defaulted = try ChromeWrapperRuntime.start(manifestPermissions: ["sessions"])
+        XCTAssertEqual(
+            defaulted.value(of: "chrome.sessions.MAX_SESSION_RESULTS") as? Int, store.recentlyClosedCapacity,
+            "the wrapper's own default has drifted from the store's capacity; a caller that forgets to configure it would promise the wrong list length"
         )
     }
 }

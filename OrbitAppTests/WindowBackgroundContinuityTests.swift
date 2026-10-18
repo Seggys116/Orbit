@@ -28,7 +28,7 @@ final class WindowBackgroundContinuityTests: XCTestCase {
     private static let sampleY = Int(windowSize.height) - 3
 
     private static var sampleXRange: ClosedRange<Int> {
-        let cardLeadingEdge = Int(sidebarWidth + OrbitMetrics.sidebarResizeHandleWidth + OrbitMetrics.cardInset)
+        let cardLeadingEdge = Int(sidebarWidth + OrbitMetrics.sidebarResizeHandleWidth + OrbitMetrics.contentCardLeadingSeam)
         return 140...(cardLeadingEdge - 2)
     }
 

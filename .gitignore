@@ -1,10 +1,5 @@
-# Chromium source and build output — fetched by Scripts/chromium, never committed (tens of GB).
-# Excludes the contents, not the directory itself, so the submodule below can be re-included.
+# Local checkouts. ThirdParty/extension-corpus stays on disk for tests and is not committed.
 ThirdParty/*
-!ThirdParty/depot_tools
-
-# Generated from Chromium/chromium-version.json by Scripts/chromium sync.
-Chromium/Generated/
 
 # Xcode
 build/

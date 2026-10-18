@@ -628,4 +628,60 @@ final class ContentBlockingTests: XCTestCase {
             forURL: "https://a.example/tracking42/pixel.gif", documentURL: "https://a.example/", resourceType: .image
         ).isBlocked)
     }
+
+    // MARK: - Engine translation inputs
+
+    func testRevisionChangesWheneverRulesAreAdded() {
+        var set = ContentBlockerRuleSet()
+        let empty = set.revision
+        set.add(listText: "||a.example^\n", listID: "A")
+        let afterFirst = set.revision
+        set.add(listText: "||b.example^\n", listID: "B")
+        XCTAssertNotEqual(empty, afterFirst)
+        XCTAssertNotEqual(afterFirst, set.revision)
+    }
+
+    func testTranslationInputsListEveryParsedRuleOnce() {
+        let set = makeRuleSet("""
+        ||block.example^
+        @@||allow.example^
+        ||stub.example/a.js$redirect=noopjs
+        ||only.example/b.js$redirect-rule=noopjs
+        @@||site.example^$generichide
+        ##.ad
+        site.example#@#.ad
+        """)
+        let sources = set.networkRulesForTranslation.map(\.source)
+        XCTAssertEqual(sources.count, 5)
+        XCTAssertEqual(Set(sources).count, 5, "a $redirect rule is indexed twice internally and must be listed once")
+        XCTAssertEqual(set.cosmeticRulesForTranslation.count, 2)
+    }
+
+    func testPlatformReportedBlocksAreCountedPerDocumentHostAndInTotal() {
+        let blocker = ContentBlocker()
+        blocker.recordBlockedRequest(documentHost: "News.Example")
+        blocker.recordBlockedRequest(documentHost: "news.example")
+        blocker.recordBlockedRequest(documentHost: nil)
+        XCTAssertEqual(blocker.blockedRequestCount, 3)
+        XCTAssertEqual(blocker.blockedRequestCount(forDocumentHost: "news.example"), 2)
+        blocker.resetCounters()
+        XCTAssertEqual(blocker.blockedRequestCount, 0)
+    }
+
+    func testEngineReportIsStoredAndAnnounced() {
+        let blocker = ContentBlocker()
+        let announced = expectation(forNotification: .contentBlockingEngineReportDidChange, object: blocker)
+        var report = ContentBlockingEngineReport()
+        report.networkRules = 12
+        report.note("Skipped 1 rule(s): example")
+        blocker.setEngineReport(report)
+        wait(for: [announced], timeout: 2)
+        XCTAssertEqual(blocker.engineReport, report)
+    }
+
+    func testEngineReportKeepsOnlyAFewMessages() {
+        var report = ContentBlockingEngineReport()
+        for index in 0..<(ContentBlockingEngineReport.maximumMessages + 10) { report.note("m\(index)") }
+        XCTAssertEqual(report.messages.count, ContentBlockingEngineReport.maximumMessages)
+    }
 }

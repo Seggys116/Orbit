@@ -208,8 +208,10 @@ final class CollapsedSidebarChromeTests: XCTestCase {
         let span = try XCTUnwrap(middle.range, "The grabber must paint something across the handle's middle while hovered.")
         XCTAssertEqual(
             CGFloat(span.count) / ppp, SidebarResizeHandleNSView.grabberWidth, accuracy: 1,
-            "Thicker than the 2pt line it replaced: \(SidebarResizeHandleNSView.grabberWidth)pt wide, centred in the \(OrbitMetrics.sidebarResizeHandleWidth)pt strip."
+            "The grabber is \(SidebarResizeHandleNSView.grabberWidth)pt wide and fills the \(OrbitMetrics.sidebarResizeHandleWidth)pt hit column."
         )
+        XCTAssertEqual(span.lowerBound, 0, "Empty pixels on the leading side of the pill are the padding this seam exists to remove.")
+        XCTAssertEqual(span.upperBound, bitmap.pixelsWide - 1, "Empty pixels on the trailing side of the pill are the padding this seam exists to remove.")
 
         let centreX = (span.lowerBound + span.upperBound) / 2
         let centre = try XCTUnwrap(bitmap.colorAt(x: centreX, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB))

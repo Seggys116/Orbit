@@ -877,8 +877,15 @@ final class ArcImportCoordinatorTests: XCTestCase {
             if url.host == Self.downloadBlobURL.host {
                 return .respond(status: 200, headers: ["Content-Type": "application/x-chrome-extension"], body: crxBytes)
             }
-            if url.query?.contains("response=redirect") == true {
-                return .redirect(to: Self.downloadBlobURL)
+            if url.host == "update.googleapis.com", request.httpMethod == "POST" {
+                let xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <response protocol="3.0" server="prod"><app appid="fixture" status="ok"><updatecheck status="ok">\
+                <urls><url codebase="https://clients2.googleusercontent.com/crx/blobs/"/></urls>\
+                <manifest version="1.0"><packages><package name="fixture.crx" required="true"/></packages></manifest>\
+                </updatecheck></app></response>
+                """
+                return .respond(status: 200, headers: ["Content-Type": "text/xml"], body: Data(xml.utf8))
             }
             return .respond(status: 404, headers: [:], body: Data())
         }

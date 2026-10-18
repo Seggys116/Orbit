@@ -157,7 +157,7 @@ final class AddExtensionMenuRowTests: XCTestCase {
 /// starting a real engine, so `ExtensionsSettingsPane` draws its install section.
 @MainActor
 private final class StubExtensionsCapableEngine: BrowserEngine {
-    static let kind: EngineKind = .chromium
+    static let kind: EngineKind = .webkit
     let capabilities: EngineCapabilities = [.extensions]
     let manageableContentSettings: Set<PermissionKind> = []
     let extensionActivation: ExtensionActivation = .nextLaunch

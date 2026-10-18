@@ -34,7 +34,8 @@ extension AppEnvironment {
     func presentContextMenu(for contents: WebContents, context: ContextMenuContext) {
         let entries = buildContextMenuEntries(for: contents, context: context)
         let view = contents.view
-        let point = NSPoint(x: context.location.x, y: view.bounds.height - context.location.y)
+        // location is measured from the top; a flipped view (WKWebView) already counts that way.
+        let point = NSPoint(x: context.location.x, y: view.isFlipped ? context.location.y : view.bounds.height - context.location.y)
         OrbitContextMenuPresenter.shared.present(entries: entries, anchorView: view, at: point)
     }
 
@@ -186,7 +187,14 @@ extension AppEnvironment {
                 isChecked: item.isChecked,
                 submenu: children.isEmpty ? nil : children,
                 action: children.isEmpty
-                    ? { [weak contents] in contents?.performExtensionContextMenuItem(id) }
+                    ? { [weak contents] in
+                        guard let contents else { return }
+                        if let webKit = contents as? WebKitWebContents {
+                            webKit.performCapturedExtensionContextMenuItem(id)
+                        } else {
+                            contents.performExtensionContextMenuItem(id)
+                        }
+                    }
                     : nil
             )))
             lastEntryIsDivider = false

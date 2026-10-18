@@ -169,7 +169,8 @@ final class CRX3ArchiveTests: XCTestCase {
         ]
         var generationError: Unmanaged<CFError>?
         guard let privateKey = SecKeyCreateRandomKey(keyAttributes as CFDictionary, &generationError) else {
-            throw XCTSkip("Key generation unavailable in this environment: \(String(describing: generationError))")
+            XCTFail("Key generation unavailable in this environment: \(String(describing: generationError))")
+            return
         }
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
             return XCTFail("SecKeyCopyPublicKey returned nil.")

@@ -5,7 +5,6 @@ import OSLog
 class OrbitAppDelegate: NSObject, NSApplicationDelegate {
 
     static let quitLog = Logger(subsystem: "com.orbit.browser", category: "Quit")
-    static let engineLog = Logger(subsystem: "com.orbit.browser", category: "Engine")
 
     // Every member below must read this, not AppEnvironment.shared directly —
     // OrbitDemoAppDelegate overrides it, and .shared would build the real environment in the demo process.
@@ -17,26 +16,6 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         // delegate ran from one inside it by which stages reached disk.
         AppSmokeProbe.noteStage(.delegateEntered)
 
-        // Must start here, not from a live test's stack: BrowserMainLoop never returns,
-        // so whichever pump it nests inside never returns either. This hung the live suite.
-        if ProcessInfo.processInfo.environment["ORBIT_LIVE_ENGINE"] != nil {
-            // Must set the private profile before loadAndStart, which traps if set after OrbitMain is scheduled.
-            // The .ephemeral choice here is a matching constraint: the engine LiveChromiumEngineHost
-            // builds later asks for this same directory. A trap crash restarts the host and still
-            // reports "Executed 0 tests" as a pass.
-            // Errors are logged, not swallowed, or a live test just times out with no explanation.
-            do {
-                if let directory = EngineStorageDirectory.directory(for: .ephemeral) {
-                    try OrbitChromiumBridge.shared.setUserDataDirectory(directory.path)
-                }
-                try OrbitChromiumBridge.shared.loadAndStart()
-            } catch {
-                Self.engineLog.error(
-                    "ORBIT_LIVE_ENGINE: the engine could not be started: \(String(describing: error), privacy: .public)"
-                )
-            }
-        }
-
         // Before the guard below: the live-engine test host opens real
         // inspectors and needs the same appearance tracking the real app has.
         EngineAppearance.startObserving()
@@ -45,9 +24,25 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         // hosting a test bundle — bail out before opening any window or engine.
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
 
+        // Before the first engine: its profiles resolve their data stores against what WebKit already holds.
+        InstalledDataStores.preload()
+
         // Before anything else can name AppEnvironment.shared by accident.
         AppEnvironment.processRoot = host
 
+        // Before the first window opens, so no surface ever paints a stock 17pt scroller first.
+        OrbitScrollerInstaller.start()
+
+        // orderFront can paint immediately. Notes, easel, and the other surfaces
+        // read these closures during that first layout.
+        FeatureRegistration.installAll(into: host)
+
+        if OnboardingWindowController.showIfNeeded(on: host) == nil {
+            OrbitWindowController.openNewWindow(on: host)
+        }
+
+        // The first window is already ordered front. None of this paints it,
+        // so it runs after that call; each one still runs this launch.
         // ORBIT_SPARKLE, not canImport(Sparkle) — the latter is also true in
         // the host-less OrbitTests target, which cannot resolve UpdaterController.
         #if ORBIT_SPARKLE
@@ -63,16 +58,6 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         SidebarTearOff.frontmostEnvironmentResolver = { OrbitWindowController.frontmostEnvironment }
-
-        // Before the first window opens, so no surface ever paints a stock 17pt scroller first.
-        OrbitScrollerInstaller.start()
-
-        // Must run before the first window opens, or the shell has nothing to present for those surfaces.
-        FeatureRegistration.installAll(into: host)
-
-        if OnboardingWindowController.showIfNeeded(on: host) == nil {
-            OrbitWindowController.openNewWindow(on: host)
-        }
 
         // Inert without ORBIT_WEBSTORE_PROBE=1. Runs on both schemes:
         // OrbitDemoAppDelegate calls through to this via super before its
@@ -90,10 +75,43 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
+        // `flag` counts every ordered-front window, including the off-screen
+        // window WebKit keeps so a background page can still paint. After the
+        // last browser window closes, that helper is the only one left, so a
+        // dock click would do nothing.
+        switch Self.dockReopenAction(windows: sender.windows) {
+        case .revealExisting:
+            return true
+        case .deminiaturize(let window):
+            window.deminiaturize(nil)
+            window.makeKeyAndOrderFront(nil)
+            return false
+        case .openNewWindow:
             OrbitWindowController.openNewWindow(on: host)
+            return false
         }
-        return true
+    }
+
+    enum DockReopenAction {
+        case revealExisting
+        case deminiaturize(NSWindow)
+        case openNewWindow
+    }
+
+    /// A window the user can see. An ordered-front window parked off every
+    /// screen, or one drawn with no opacity, is not one.
+    static func isOnScreenWindow(_ window: NSWindow) -> Bool {
+        window.isVisible && window.alphaValue > 0.01 && window.screen != nil
+    }
+
+    static func dockReopenAction(windows: [NSWindow]) -> DockReopenAction {
+        if windows.contains(where: isOnScreenWindow) {
+            return .revealExisting
+        }
+        if let miniaturized = windows.first(where: { $0.isMiniaturized && $0.alphaValue > 0.01 }) {
+            return .deminiaturize(miniaturized)
+        }
+        return .openNewWindow
     }
 
     // Can fire with the app backgrounded or zero windows open, so every row
@@ -194,7 +212,7 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         try? host.siteSearchStore.saveNow()
 
         // Safe only from this exact call site: applicationShouldTerminate
-        // above guarantees this thread is off Chromium's nested pump stack by now.
+        // above replies from the main run loop, so no main-queue block is on the stack.
         let engineFinished = host.shutdownEngine()
 
         Self.quitLog.info(

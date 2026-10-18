@@ -4,7 +4,15 @@ import Foundation
 
 nonisolated public struct ChromeWebStoreClient: Sendable {
 
-    public static let updateServiceEndpoint = URL(string: "https://clients2.google.com/service/update2/crx")!
+    // Omaha protocol 3.0 over POST. The legacy clients2.google.com/service/update2/crx GET (x=id=...&uc)
+    // answers HTTP 204 for any prodversion older than the extension's minimum_chrome_version, which is
+    // indistinguishable from "unknown extension" and is what broke installs; this endpoint answers
+    // with an explicit <updatecheck status="..."> instead.
+    public static let updateServiceEndpoint = URL(string: "https://update.googleapis.com/service/update2")!
+    // Chrome's UA-reduced version format. Keep this on a current stable milestone: the service withholds
+    // packages whose minimum_chrome_version is newer than the client claims to be.
+    public static let defaultProdVersion = "150.0.0.0"
+    public static let freshInstallVersion = "0.0.0.0"
     public let session: URLSession
     public let prodVersion: String
     public let maxDownloadBytes: Int
@@ -13,7 +21,7 @@ nonisolated public struct ChromeWebStoreClient: Sendable {
 
     public init(
         session: URLSession = .shared,
-        prodVersion: String = String(ChromiumBuild.majorVersion),
+        prodVersion: String = ChromeWebStoreClient.defaultProdVersion,
         maxDownloadBytes: Int = 512 * 1024 * 1024,
         requestTimeout: TimeInterval = 30
     ) {
@@ -25,52 +33,68 @@ nonisolated public struct ChromeWebStoreClient: Sendable {
 
     // MARK: - Request construction
 
-    // Returns the UNENCODED inner string; callers must let URLComponents encode it, not pre-encode it themselves.
-    static func updateServiceQueryValue(id: String, installedVersion: String?) -> String {
-        if let installedVersion, !installedVersion.isEmpty {
-            return "id=\(id)&v=\(installedVersion)&uc"
-        }
-        return "id=\(id)&uc"
+    static var hostArchitecture: String {
+        #if arch(arm64)
+        return "arm64"
+        #else
+        return "x86_64"
+        #endif
     }
 
-    public func downloadRequestURL(forExtensionID id: String) throws -> URL {
+    static func escapeXMLAttribute(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
+    func updateCheckRequestBody(
+        forExtensionID id: String,
+        installedVersion: String?,
+        requestID: UUID = UUID(),
+        sessionID: UUID = UUID()
+    ) -> String {
+        let version = (installedVersion?.isEmpty == false ? installedVersion : nil) ?? Self.freshInstallVersion
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        let osVersion = "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+        let prod = Self.escapeXMLAttribute(prodVersion)
+        return """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <request protocol="3.0" version="chrome-\(prod)" prodversion="\(prod)" acceptformat="crx3" ismachine="0" \
+        updaterversion="\(prod)" lang="en-US" requestid="{\(requestID.uuidString)}" sessionid="{\(sessionID.uuidString)}">
+        <os platform="mac" arch="\(Self.hostArchitecture)" version="\(osVersion)"/>
+        <app appid="\(Self.escapeXMLAttribute(id))" version="\(Self.escapeXMLAttribute(version))" installsource="ondemand">
+        <updatecheck/>
+        </app>
+        </request>
+        """
+    }
+
+    public func updateCheckRequest(forExtensionID id: String, installedVersion: String?) throws -> URLRequest {
         guard ChromeExtensionID.isValid(id) else {
             throw ChromeWebStoreError.invalidExtensionID(id)
         }
-        var components = URLComponents(url: Self.updateServiceEndpoint, resolvingAgainstBaseURL: false)!
-        components.queryItems = [
-            URLQueryItem(name: "response", value: "redirect"),
-            URLQueryItem(name: "acceptformat", value: "crx3"),
-            URLQueryItem(name: "prodversion", value: prodVersion),
-            URLQueryItem(name: "x", value: Self.updateServiceQueryValue(id: id, installedVersion: nil)),
-        ]
-        guard let url = components.url else {
-            throw ChromeWebStoreError.network("Could not construct the extension download request URL.")
-        }
-        return url
-    }
-
-    public func updateCheckRequestURL(forExtensionID id: String, installedVersion: String?) throws -> URL {
-        guard ChromeExtensionID.isValid(id) else {
-            throw ChromeWebStoreError.invalidExtensionID(id)
-        }
-        var components = URLComponents(url: Self.updateServiceEndpoint, resolvingAgainstBaseURL: false)!
-        components.queryItems = [
-            URLQueryItem(name: "acceptformat", value: "crx3"),
-            URLQueryItem(name: "prodversion", value: prodVersion),
-            URLQueryItem(name: "x", value: Self.updateServiceQueryValue(id: id, installedVersion: installedVersion)),
-        ]
-        guard let url = components.url else {
-            throw ChromeWebStoreError.network("Could not construct the update-check request URL.")
-        }
-        return url
+        var request = URLRequest(url: Self.updateServiceEndpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = requestTimeout
+        request.httpBody = Data(updateCheckRequestBody(forExtensionID: id, installedVersion: installedVersion).utf8)
+        request.setValue("text/xml; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/xml, application/xml", forHTTPHeaderField: "Accept")
+        return request
     }
 
     // MARK: - Download
 
     public func download(id: String, onProgress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> Data {
-        let url = try downloadRequestURL(forExtensionID: id)
-        var request = URLRequest(url: url)
+        let result = try await checkForUpdate(id: id, installedVersion: nil)
+        guard case .updateAvailable(let info) = result else {
+            throw ChromeWebStoreError.malformedUpdateResponse(
+                "The update service reported no installable package for \"\(id)\" for Chrome \(prodVersion)."
+            )
+        }
+        var request = URLRequest(url: info.downloadURL)
         request.httpMethod = "GET"
         request.timeoutInterval = requestTimeout
         request.setValue("*/*", forHTTPHeaderField: "Accept")
@@ -86,12 +110,7 @@ nonisolated public struct ChromeWebStoreClient: Sendable {
         id: String,
         installedVersion: String?
     ) async throws -> ChromeWebStoreUpdateCheckResult {
-        let url = try updateCheckRequestURL(forExtensionID: id, installedVersion: installedVersion)
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = requestTimeout
-        request.setValue("text/xml, application/xml", forHTTPHeaderField: "Accept")
-
+        let request = try updateCheckRequest(forExtensionID: id, installedVersion: installedVersion)
         let (data, response) = try await fetch(request, maxBytes: Self.maxUpdateCheckResponseBytes)
         try Self.validate(response: response, id: id)
         return try Self.parseUpdateCheckResponse(data, id: id)
@@ -136,14 +155,14 @@ nonisolated public struct ChromeWebStoreClient: Sendable {
         if let status = delegate.updateCheckStatus {
             switch status {
             case "ok":
-                guard let codebaseString = delegate.codebase, let version = delegate.version else {
+                guard let codebaseString = delegate.resolvedCodebase, let version = delegate.version else {
                     throw ChromeWebStoreError.malformedUpdateResponse(
                         "<updatecheck status=\"ok\"> was missing its codebase or version attribute."
                     )
                 }
-                guard let codebase = URL(string: codebaseString) else {
+                guard let codebase = URL(string: codebaseString), codebase.scheme?.lowercased() == "https" else {
                     throw ChromeWebStoreError.malformedUpdateResponse(
-                        "<updatecheck>'s codebase attribute (\"\(codebaseString)\") is not a valid URL."
+                        "<updatecheck>'s codebase (\"\(codebaseString)\") is not a valid https URL."
                     )
                 }
                 return .updateAvailable(ChromeWebStoreUpdateInfo(version: version, downloadURL: codebase))
@@ -288,9 +307,20 @@ nonisolated private final class BoundedFetchDelegate: NSObject, URLSessionDataDe
 nonisolated private final class OmahaUpdateCheckXMLDelegate: NSObject, XMLParserDelegate {
     private(set) var appStatus: String?
     private(set) var updateCheckStatus: String?
-    private(set) var codebase: String?
     private(set) var version: String?
     private(set) var parseError: Error?
+    // Protocol 3.0 splits the download location: <url codebase=".../"> plus <package name="X.crx">.
+    // The 2.0 shape put a complete URL in <updatecheck codebase="...">; both are accepted.
+    private var legacyCodebase: String?
+    private var urlCodebase: String?
+    private var packageName: String?
+
+    var resolvedCodebase: String? {
+        if let legacyCodebase { return legacyCodebase }
+        guard let urlCodebase else { return nil }
+        guard let packageName, !packageName.isEmpty else { return urlCodebase }
+        return urlCodebase.hasSuffix("/") ? urlCodebase + packageName : urlCodebase + "/" + packageName
+    }
 
     func parser(
         _ parser: XMLParser,
@@ -304,8 +334,14 @@ nonisolated private final class OmahaUpdateCheckXMLDelegate: NSObject, XMLParser
             appStatus = attributeDict["status"]
         case "updatecheck":
             updateCheckStatus = attributeDict["status"]
-            codebase = attributeDict["codebase"]
-            version = attributeDict["version"]
+            legacyCodebase = attributeDict["codebase"]
+            if let legacyVersion = attributeDict["version"] { version = legacyVersion }
+        case "url":
+            if urlCodebase == nil { urlCodebase = attributeDict["codebase"] }
+        case "manifest":
+            if let manifestVersion = attributeDict["version"] { version = manifestVersion }
+        case "package":
+            if packageName == nil { packageName = attributeDict["name"] }
         default:
             break
         }

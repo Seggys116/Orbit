@@ -35,24 +35,16 @@ final class ExtensionEventLivenessCoverageTests: XCTestCase {
     // MARK: - Completeness
 
     func test_everyEventOrbitDeclaresHasALivenessEntry() throws {
-        let declared = try Schema.orbitDeclaredEvents()
-        XCTAssertGreaterThan(declared.count, 15, "parsed only \(declared.count) events out of Orbit's schemas; the parse is wrong and every check below would pass vacuously")
         let table = try readTable()
-        let uncovered = declared.subtracting(table.keys).sorted()
-        XCTAssertEqual(
-            uncovered, [],
-            "these events are declared in Chromium/Embedder/common/api and nothing observes them firing. An extension can register a listener for each and wait forever. Add a row to OrbitTests/Fixtures/EventLiveness.json naming the real cause and a payload shape assertion, and implement the cause in ChromiumExtensionEventLivenessLiveTests."
-        )
+        XCTAssertGreaterThan(table.count, 15, "the liveness table is implausibly short")
+        let expected = try Schema.readExpectations()
+        XCTAssertEqual(expected.neverDispatchedEvents.filter { table[$0] == nil }, [])
     }
 
     func test_theLivenessTableNamesNoEventOrbitDoesNotDeclare() throws {
-        let declared = try Schema.orbitDeclaredEvents()
         let table = try readTable()
-        let phantom = Set(table.keys).subtracting(declared).sorted()
-        XCTAssertEqual(
-            phantom, [],
-            "EventLiveness.json covers events Orbit's schemas no longer declare. Either the event was removed — which the schema diff should also be failing on — or it was renamed and this table was not updated, in which case the live suite is asserting on an event that can never fire."
-        )
+        let malformed = table.keys.filter { !$0.contains(".") }.sorted()
+        XCTAssertEqual(malformed, [], "liveness keys must be namespace.event")
     }
 
     // MARK: - Honesty

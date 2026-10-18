@@ -58,11 +58,152 @@ enum TabRowTrailingAction: Equatable {
     }
 }
 
+// Visible row inputs. lastAccessedAt, zoom, and navigation fields other than the loading
+// bar change on a timer or on every progress tick without moving the title, pin affordance,
+// or favicon. Comparing those here is what lets an unrelated tab's update skip this row.
+struct TabRowPresentation: Equatable {
+    var tab: Tab
+    var depth: Int
+    var theme: SpaceTheme
+    var isActive: Bool
+    var isOpen: Bool
+    var navigationState: NavigationState
+    var isAudible: Bool
+    var isPeeking: Bool
+
+    static func == (lhs: TabRowPresentation, rhs: TabRowPresentation) -> Bool {
+        lhs.depth == rhs.depth
+            && lhs.theme == rhs.theme
+            && lhs.isActive == rhs.isActive
+            && lhs.isOpen == rhs.isOpen
+            && lhs.isAudible == rhs.isAudible
+            && lhs.isPeeking == rhs.isPeeking
+            && loadingMatches(lhs.navigationState, rhs.navigationState)
+            && visibleTabMatches(lhs.tab, rhs.tab)
+    }
+
+    private static func loadingMatches(_ lhs: NavigationState, _ rhs: NavigationState) -> Bool {
+        if lhs.isLoading != rhs.isLoading { return false }
+        guard lhs.isLoading else { return true }
+        return lhs.progress == rhs.progress
+    }
+
+    private static func visibleTabMatches(_ lhs: Tab, _ rhs: Tab) -> Bool {
+        lhs.id == rhs.id
+            && lhs.spaceID == rhs.spaceID
+            && lhs.section == rhs.section
+            && lhs.url == rhs.url
+            && lhs.title == rhs.title
+            && lhs.customTitle == rhs.customTitle
+            && lhs.tidiedTitle == rhs.tidiedTitle
+            && lhs.faviconURL == rhs.faviconURL
+            && lhs.isMuted == rhs.isMuted
+            && lhs.pinnedURL == rhs.pinnedURL
+            && lhs.pinnedTitle == rhs.pinnedTitle
+    }
+}
+
+// The row catcher is only as tall as the text line and only as wide as the content box. The drawn pill is inset from the row by sidebarHorizontalPadding and sidebarRowPillVerticalInset, so it hangs past that box by sidebarRowContentInset (plus indent on the leading side) and past the line above and below. Content is centered in the row and the pill is too, so growing the content box equally up and down lands on the pill. The gap between pills stays outside this rect.
+enum SidebarRowPillHitTarget {
+    static func rect(
+        contentBounds: CGRect,
+        leadingOutset: CGFloat,
+        trailingOutset: CGFloat,
+        rowHeight: CGFloat = OrbitMetrics.sidebarRowHeight,
+        pillVerticalInset: CGFloat = OrbitMetrics.sidebarRowPillVerticalInset
+    ) -> CGRect {
+        let pillHeight = rowHeight - pillVerticalInset * 2
+        let verticalOutset = (pillHeight - contentBounds.height) / 2
+        return CGRect(
+            x: contentBounds.minX - leadingOutset,
+            y: contentBounds.minY - verticalOutset,
+            width: contentBounds.width + leadingOutset + trailingOutset,
+            height: contentBounds.height + verticalOutset * 2
+        )
+    }
+
+    static func contains(_ point: CGPoint, in rect: CGRect, cornerRadius: CGFloat) -> Bool {
+        guard rect.width > 0, rect.height > 0 else { return false }
+        guard point.x >= rect.minX, point.x <= rect.maxX, point.y >= rect.minY, point.y <= rect.maxY else { return false }
+        let radius = min(max(cornerRadius, 0), min(rect.width, rect.height) / 2)
+        guard radius > 0 else { return true }
+        let inLeading = point.x < rect.minX + radius
+        let inTrailing = point.x > rect.maxX - radius
+        let inBottom = point.y < rect.minY + radius
+        let inTop = point.y > rect.maxY - radius
+        if inLeading, inBottom {
+            return hypot(point.x - (rect.minX + radius), point.y - (rect.minY + radius)) <= radius
+        }
+        if inLeading, inTop {
+            return hypot(point.x - (rect.minX + radius), point.y - (rect.maxY - radius)) <= radius
+        }
+        if inTrailing, inBottom {
+            return hypot(point.x - (rect.maxX - radius), point.y - (rect.minY + radius)) <= radius
+        }
+        if inTrailing, inTop {
+            return hypot(point.x - (rect.maxX - radius), point.y - (rect.maxY - radius)) <= radius
+        }
+        return true
+    }
+
+    static func tabRowContains(
+        _ point: CGPoint,
+        contentBounds: CGRect,
+        leadingOutset: CGFloat,
+        trailingOutset: CGFloat
+    ) -> Bool {
+        guard contentBounds.width > 0, contentBounds.height > 0 else { return false }
+        return contains(
+            point,
+            in: rect(
+                contentBounds: contentBounds,
+                leadingOutset: leadingOutset,
+                trailingOutset: trailingOutset
+            ),
+            cornerRadius: OrbitMetrics.sidebarRowCornerRadius
+        )
+    }
+}
+
 struct TabRowView: View {
     @Environment(AppEnvironment.self) private var env
     var tab: Tab
     var depth: Int = 0
     var theme: SpaceTheme
+    private var forcesHoveredAppearanceForTesting: Bool
+
+    // ImageRenderer has no pointer, so a genuinely hovered row (close button visible, title
+    // narrowed) could never be captured otherwise — see SidebarMiniPlayerView's alwaysExpanded.
+    init(tab: Tab, depth: Int = 0, theme: SpaceTheme, forcesHoveredAppearanceForTesting: Bool = false) {
+        self.tab = tab
+        self.depth = depth
+        self.theme = theme
+        self.forcesHoveredAppearanceForTesting = forcesHoveredAppearanceForTesting
+    }
+
+    var body: some View {
+        TabRowChrome(
+            presentation: TabRowPresentation(
+                tab: tab,
+                depth: depth,
+                theme: theme,
+                isActive: env.activeTabID == tab.id,
+                isOpen: env.isTabOpen(tab.id),
+                navigationState: env.navigationStates[tab.id] ?? .empty,
+                isAudible: env.mediaStates[tab.id]?.isAudible ?? false,
+                isPeeking: PeekState.shared.activePreview?.sourceTabID == tab.id
+            ),
+            forcesHoveredAppearanceForTesting: forcesHoveredAppearanceForTesting
+        )
+        .equatable()
+        .id(tab.id)
+    }
+}
+
+private struct TabRowChrome: View, Equatable {
+    @Environment(AppEnvironment.self) private var env
+    var presentation: TabRowPresentation
+    var forcesHoveredAppearanceForTesting: Bool
 
     @State private var isHovering: Bool
     @State private var rename = TabTitleRename()
@@ -71,16 +212,24 @@ struct TabRowView: View {
     @State private var previewImage: NSImage?
     @State private var showPreview = false
 
-    // ImageRenderer has no pointer, so a genuinely hovered row (close button visible, title
-    // narrowed) could never be captured otherwise — see SidebarMiniPlayerView's alwaysExpanded.
-    init(tab: Tab, depth: Int = 0, theme: SpaceTheme, forcesHoveredAppearanceForTesting: Bool = false) {
-        self.tab = tab
-        self.depth = depth
-        self.theme = theme
+    init(presentation: TabRowPresentation, forcesHoveredAppearanceForTesting: Bool) {
+        self.presentation = presentation
+        self.forcesHoveredAppearanceForTesting = forcesHoveredAppearanceForTesting
         _isHovering = State(initialValue: forcesHoveredAppearanceForTesting)
     }
 
-    private var isActive: Bool { env.activeTabID == tab.id }
+    static func == (lhs: TabRowChrome, rhs: TabRowChrome) -> Bool {
+        lhs.presentation == rhs.presentation
+            && lhs.forcesHoveredAppearanceForTesting == rhs.forcesHoveredAppearanceForTesting
+    }
+
+    private var tab: Tab { presentation.tab }
+    private var depth: Int { presentation.depth }
+    private var theme: SpaceTheme { presentation.theme }
+    private var isActive: Bool { presentation.isActive }
+    private var isOpen: Bool { presentation.isOpen }
+    private var isAudible: Bool { presentation.isAudible }
+    private var isPeeking: Bool { presentation.isPeeking }
 
     private var isRenameable: Bool { tab.section == .pinned }
 
@@ -92,8 +241,7 @@ struct TabRowView: View {
     }
 
     private var contents: (any WebContents)? { env.webContents[tab.id] }
-    private var navigationState: NavigationState { env.navigationStates[tab.id] ?? .empty }
-    private var mediaState: MediaState { env.mediaStates[tab.id] ?? .idle }
+    private var navigationState: NavigationState { presentation.navigationState }
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -108,14 +256,14 @@ struct TabRowView: View {
                     titleLabel
                 }
                 Spacer(minLength: 4)
-                if PeekState.shared.activePreview?.sourceTabID == tab.id {
+                if isPeeking {
                     Image(systemName: "eye.fill")
                         .font(.system(size: OrbitMetrics.sidebarRowFontSize - 1))
                         .foregroundStyle(theme.readableSecondaryForeground)
                         .orbitTooltip("Peeking a link")
                         .accessibilityLabel("Peeking a link")
                 }
-                if tab.isMuted || mediaState.isAudible {
+                if tab.isMuted || isAudible {
                     OrbitNSActionButton(action: { env.muteTab(tab.id, muted: !tab.isMuted) }) {
                         Image(systemName: tab.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                             .font(.system(size: OrbitMetrics.sidebarRowFontSize))
@@ -127,11 +275,6 @@ struct TabRowView: View {
             // the close control is actually visible, at which point this makes exactly as much room as it needs.
             .padding(.trailing, isHovering ? trailingCloseControlReservedWidth : 0)
             .animation(OrbitMotion.quick, value: isHovering)
-            // .overlay, not a ZStack sibling: a sibling's flexible frame feeds back into the
-            // ZStack's sizing pass. An AppKit catcher, not .onTapGesture: SwiftUI gestures and
-            // AppKit mouseDown are independent, so both fired and a tab reactivated as its own
-            // "-" closed it.
-            .overlay(rowActivationCatcher)
 
             // Overlay, opacity-only: the control sits at a fixed trailing position and never inserts/removes, so
             // it is exactly as hit-testable the instant it's visible as it is once fully faded in, and a click
@@ -143,6 +286,10 @@ struct TabRowView: View {
         .padding(.leading, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset + CGFloat(depth) * OrbitMetrics.sidebarIndentPerDepth)
         .padding(.trailing, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
         .frame(height: OrbitMetrics.sidebarRowHeight)
+        // Behind the row, filling the whole pitch. A catcher only as tall as the
+        // title let a click on the label hit the text and never activate the tab,
+        // so a short title (lots of empty row) switched and a long one did not.
+        .background(rowActivationCatcher)
         .background(rowBackground)
         .overlay {
             if navigationState.isLoading { loadingProgressBar }
@@ -162,14 +309,23 @@ struct TabRowView: View {
         .sidebarRecentPagesPreview(tab: tab)
     }
 
-    // Behind trailingCloseControl in child order, so AppKit's hit test gives the overlap to it.
+    // Behind the close control and the favicon, which sit later in the tree and
+    // keep their own clicks. The title does not hit-test, so a click on the
+    // words lands here. The whole row pitch is the target: a shrunk pill left
+    // the label itself dead.
     private var rowActivationCatcher: some View {
-        OrbitNSActionButton(action: {
-            guard !rename.isEditing else { return }
-            env.activateTab(tab.id)
-        }) {
+        OrbitNSActionButton(onClickCount: { handleRowClick($0) }) {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private func handleRowClick(_ count: Int) {
+        if count >= 2, isRenameable, !rename.isEditing {
+            beginRename()
+            return
+        }
+        guard !rename.isEditing else { return }
+        env.activateTabDismissingCommandBar(tab.id)
     }
 
     // MARK: - Trailing close control (and what a bookmarked row's one is)
@@ -179,7 +335,7 @@ struct TabRowView: View {
     }
 
     private var trailingCloseControl: some View {
-        let action = TabRowTrailingAction.resolve(section: tab.section, isOpen: env.isTabOpen(tab.id))
+        let action = TabRowTrailingAction.resolve(section: tab.section, isOpen: isOpen)
         return OrbitNSActionButton(action: { perform(action) }) {
             Image(systemName: action.systemImage)
                 .font(.system(size: OrbitMetrics.sidebarUtilityGlyphSize, weight: .bold))
@@ -248,32 +404,30 @@ struct TabRowView: View {
         return pinnedURL.host() ?? pinnedURL.absoluteString
     }
 
-    static func shouldOpenPriorURLInNewTab(modifiers: NSEvent.ModifierFlags) -> Bool {
-        modifiers.contains(.command)
-    }
-
     private var faviconHint: String {
         guard hasNavigatedAwayFromPinnedURL else { return "" }
         return "Reset to \(pinnedOriginName) — hold Command to also open this page in a new tab"
     }
 
     private var favicon: some View {
-        FaviconView(url: tab.faviconURL, host: tab.url.host() ?? tab.url.absoluteString)
-            .frame(width: OrbitMetrics.faviconSize, height: OrbitMetrics.faviconSize)
-            .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius))
-            .contentShape(Rectangle())
-            .onTapGesture {
-                guard !rename.isEditing else { return }
-                guard hasNavigatedAwayFromPinnedURL else {
-                    env.activateTab(tab.id)
-                    return
-                }
-                env.resetPinnedTab(
-                    tab.id,
-                    openingPriorURLInNewTab: Self.shouldOpenPriorURLInNewTab(modifiers: NSEvent.modifierFlags)
-                )
-            }
-            .orbitTooltip(faviconHint)
+        OrbitNSActionButton(action: { performFaviconClick() }) {
+            FaviconView(url: tab.faviconURL, host: tab.url.host() ?? tab.url.absoluteString)
+                .frame(width: OrbitMetrics.faviconSize, height: OrbitMetrics.faviconSize)
+                .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius))
+        }
+        .orbitTooltip(faviconHint)
+    }
+
+    private func performFaviconClick() {
+        guard !rename.isEditing else { return }
+        guard hasNavigatedAwayFromPinnedURL else {
+            env.activateTabDismissingCommandBar(tab.id)
+            return
+        }
+        env.resetPinnedTab(
+            tab.id,
+            openingPriorURLInNewTab: TabRowView.shouldOpenPriorURLInNewTab(modifiers: NSEvent.modifierFlags)
+        )
     }
 
     private var pinnedSlash: some View {
@@ -294,13 +448,13 @@ struct TabRowView: View {
                 .onSubmit { rename.commit(tabID: tab.id, in: env) }
                 .onExitCommand { rename.cancel() }
         } else if showsPinnedResetPreview {
-            pinnedResetPreviewText
+            pinnedResetPreviewText.allowsHitTesting(false)
         } else if isRenameable {
             titleText
-                .onTapGesture(count: 2) { beginRename() }
+                .allowsHitTesting(false)
                 .orbitTooltip(renameHint)
         } else {
-            titleText
+            titleText.allowsHitTesting(false)
         }
     }
 
@@ -334,15 +488,10 @@ struct TabRowView: View {
         DispatchQueue.main.async { titleFieldFocused = true }
     }
 
-    // .backgroundSnapshots is excluded defensively, not because hovering fails; capturePreview itself is the real per-tab gate (returns nil on no frame), so this must never widen into a capability check that switches the feature off entirely.
-    static func shouldAttemptHoverPreview(section: TabSection) -> Bool {
-        section != .archived
-    }
-
     private func handleHoverPreview(_ hovering: Bool) {
         previewTask?.cancel()
         guard hovering,
-              Self.shouldAttemptHoverPreview(section: tab.section),
+              TabRowView.shouldAttemptHoverPreview(section: tab.section),
               SidebarRecentPagesPreviewController.service(for: tab) == nil,
               let contents else {
             showPreview = false
@@ -702,6 +851,15 @@ struct PinnedFolderRowView: View {
     }
 }
 
+extension PinnedFolderRowView: Equatable {
+    static func == (lhs: PinnedFolderRowView, rhs: PinnedFolderRowView) -> Bool {
+        lhs.folder == rhs.folder
+            && lhs.spaceID == rhs.spaceID
+            && lhs.theme == rhs.theme
+            && lhs.depth == rhs.depth
+    }
+}
+
 // MARK: - Pinned folder row: name-label click arbitration
 
 enum PinnedFolderNameLabelClick: Equatable {
@@ -727,6 +885,17 @@ enum OrbitSymbolName {
         let answer = NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
         resolvable[name] = answer
         return answer
+    }
+}
+
+extension TabRowView {
+    static func shouldOpenPriorURLInNewTab(modifiers: NSEvent.ModifierFlags) -> Bool {
+        modifiers.contains(.command)
+    }
+
+    // .backgroundSnapshots is excluded defensively, not because hovering fails; capturePreview itself is the real per-tab gate (returns nil on no frame), so this must never widen into a capability check that switches the feature off entirely.
+    static func shouldAttemptHoverPreview(section: TabSection) -> Bool {
+        section != .archived
     }
 }
 

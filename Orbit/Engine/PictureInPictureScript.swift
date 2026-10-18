@@ -18,19 +18,20 @@ public enum PictureInPictureScript {
         return String(error);
       }
       try {
-        if (document.pictureInPictureElement) {
-          var exiting = document.exitPictureInPicture();
-          if (exiting && exiting.catch) {
-            exiting.catch(function(e) { report('exit rejected — ' + describe(e)); });
-          }
-          return true;
-        }
         var all = Array.prototype.slice.call(document.querySelectorAll('video'));
         var presented = all.filter(function(v) {
           return v.webkitPresentationMode === 'picture-in-picture';
         });
-        if (presented.length > 0) {
-          presented.forEach(function(v) { v.webkitSetPresentationMode('inline'); });
+        if (document.pictureInPictureElement || presented.length > 0) {
+          all.forEach(function(v) {
+            if (v.webkitSetPresentationMode) { v.webkitSetPresentationMode('inline'); }
+          });
+          if (document.pictureInPictureElement) {
+            var exiting = document.exitPictureInPicture();
+            if (exiting && exiting.catch) {
+              exiting.catch(function(e) { report('exit rejected — ' + describe(e)); });
+            }
+          }
           return true;
         }
 
@@ -43,15 +44,15 @@ public enum PictureInPictureScript {
           report('the page has set disablePictureInPicture on its video.');
           return false;
         }
+        if (target.webkitSupportsPresentationMode && target.webkitSupportsPresentationMode('picture-in-picture')) {
+          target.webkitSetPresentationMode('picture-in-picture');
+          return true;
+        }
         if (target.requestPictureInPicture) {
           var entering = target.requestPictureInPicture();
           if (entering && entering.catch) {
             entering.catch(function(e) { report('request rejected — ' + describe(e)); });
           }
-          return true;
-        }
-        if (target.webkitSetPresentationMode) {
-          target.webkitSetPresentationMode('picture-in-picture');
           return true;
         }
         report('this engine exposes neither requestPictureInPicture nor webkitSetPresentationMode.');

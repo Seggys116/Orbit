@@ -204,7 +204,7 @@ final class PiPControllerTests: XCTestCase {
     // VideoPictureInPictureWindowController::CloseAndFocusInitiator(), which
     // reaches WebContentsDelegate::ActivateContents, which OrbitWebContentsHost
     // now forwards through OrbitWebContentsCallbacks.activation_requested to
-    // ChromiumWebContents.handleActivationRequested to
+    // WebKitWebContents.handleActivationRequested to
     // AppEnvironment.webContentsDidRequestActivation(_:).
     func test_backToTabActivationRoutesToTheOriginatingTab() throws {
         let (tabID, spaceID, contents) = try makeAttachedTabForActivation()

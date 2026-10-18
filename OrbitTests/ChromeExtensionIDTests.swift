@@ -22,20 +22,23 @@ final class ChromeExtensionIDTests: XCTestCase {
 
     // MARK: - Verified against a real Arc profile, 2026-08-05
 
-    /// Skips (does not fail) when Arc is not installed.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_derivesTheExactIDArcAssignedForEveryRealSignedExtension
+    // The hosted runner has no Arc profile. The derivation itself is the hardcoded-key test above.
     func test_derivesTheExactIDArcAssignedForEveryRealSignedExtension() throws {
         let securePreferencesURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Arc/User Data/Default/Secure Preferences")
 
         guard let data = try? Data(contentsOf: securePreferencesURL) else {
-            throw XCTSkip("Arc is not installed on this machine (\(securePreferencesURL.path) not found).")
+            XCTFail("Arc is not installed on this machine (\(securePreferencesURL.path) not found).")
+            return
         }
         guard
             let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
             let extensionsDict = root["extensions"] as? [String: Any],
             let settings = extensionsDict["settings"] as? [String: Any]
         else {
-            throw XCTSkip("Arc's Secure Preferences did not have the expected extensions.settings shape.")
+            XCTFail("Arc's Secure Preferences did not have the expected extensions.settings shape.")
+            return
         }
 
         var checkedCount = 0

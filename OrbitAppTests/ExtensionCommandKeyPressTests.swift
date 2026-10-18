@@ -14,19 +14,16 @@ final class ExtensionCommandKeyPressTests: XCTestCase {
     private var window: NSWindow?
     private var savedCommands: [ExtensionCommand] = []
     private var savedDispatch: ((String, String) -> Bool)?
-    private var savedPublish: (([String]) -> Void)?
 
     override func setUp() {
         super.setUp()
         savedCommands = ExtensionCommandRegistry.shared.commands
         savedDispatch = ExtensionCommandRegistry.shared.dispatch
-        savedPublish = ExtensionCommandRegistry.shared.publishReserved
     }
 
     override func tearDown() {
         ExtensionCommandRegistry.shared.replaceAll(savedCommands)
         ExtensionCommandRegistry.shared.dispatch = savedDispatch
-        ExtensionCommandRegistry.shared.publishReserved = savedPublish
         GlobalKeyEventMonitor.shared.stop()
         window?.orderOut(nil)
         window = nil
@@ -178,21 +175,21 @@ final class ExtensionCommandKeyPressTests: XCTestCase {
 
     func test_theCanonicalSpellingMatchesChromiumsOwn() {
         XCTAssertEqual(
-            ChromiumAccelerator.canonical(for: ExtensionCommandKeyEvents.commandShiftY()),
+            ExtensionCommandAccelerator.canonical(for: ExtensionCommandKeyEvents.commandShiftY()),
             "Command+Shift+Y"
         )
         XCTAssertEqual(
-            ChromiumAccelerator.canonical(key: "y", modifiers: [.control, .option, .command, .shift]),
+            ExtensionCommandAccelerator.canonical(key: "y", modifiers: [.control, .option, .command, .shift]),
             "Ctrl+Alt+Command+Shift+Y",
             "modifier order is Chromium's own AcceleratorToString order, not AppKit's"
         )
-        XCTAssertEqual(ChromiumAccelerator.canonical(key: ",", modifiers: .command), "Command+Comma")
-        XCTAssertEqual(ChromiumAccelerator.canonical(key: "left", modifiers: .command), "Command+Left")
+        XCTAssertEqual(ExtensionCommandAccelerator.canonical(key: ",", modifiers: .command), "Command+Comma")
+        XCTAssertEqual(ExtensionCommandAccelerator.canonical(key: "left", modifiers: .command), "Command+Left")
         // Chromium's accelerator grammar has no token for these, so an Orbit
         // binding on one can never collide with an extension command.
-        XCTAssertNil(ChromiumAccelerator.canonical(key: "escape", modifiers: .command))
-        XCTAssertNil(ChromiumAccelerator.canonical(key: "return", modifiers: .command))
-        XCTAssertNil(ChromiumAccelerator.canonical(key: "f12", modifiers: []))
+        XCTAssertNil(ExtensionCommandAccelerator.canonical(key: "escape", modifiers: .command))
+        XCTAssertNil(ExtensionCommandAccelerator.canonical(key: "return", modifiers: .command))
+        XCTAssertNil(ExtensionCommandAccelerator.canonical(key: "f12", modifiers: []))
     }
 
     func test_theCommandTableDecodesTheEmbeddersPayload() {

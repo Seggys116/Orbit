@@ -21,69 +21,73 @@ final class ChromeWebStoreClientTests: XCTestCase {
 
     // MARK: - Request construction (no stub needed — nothing is sent)
 
-    func test_downloadRequestURL_hasTheExpectedHostAndFixedParameters() throws {
-        let client = ChromeWebStoreClient(prodVersion: "151")
-        let url = try client.downloadRequestURL(forExtensionID: ublockOriginLiteID)
-        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
-
-        XCTAssertEqual(components.scheme, "https")
-        XCTAssertEqual(components.host, "clients2.google.com")
-        XCTAssertEqual(components.path, "/service/update2/crx")
-
-        let items = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        XCTAssertEqual(items["response"], "redirect")
-        XCTAssertEqual(items["acceptformat"], "crx3", "CRX2 must never be requested — see the file header for why.")
-        XCTAssertEqual(items["prodversion"], "151")
+    private func bodyString(of request: URLRequest) throws -> String {
+        String(decoding: try XCTUnwrap(request.httpBody), as: UTF8.self)
     }
 
-    func test_downloadRequestURL_percentEncodesTheXParameterExactly() throws {
-        let client = ChromeWebStoreClient(prodVersion: "151")
-        let url = try client.downloadRequestURL(forExtensionID: ublockOriginLiteID)
+    func test_updateCheckRequest_isAnOmahaProtocol3PostToTheUpdateService() throws {
+        let client = ChromeWebStoreClient(prodVersion: "151.0.0.0")
+        let request = try client.updateCheckRequest(forExtensionID: ublockOriginLiteID, installedVersion: nil)
 
-        XCTAssertEqual(
-            url.absoluteString,
-            "https://clients2.google.com/service/update2/crx?response=redirect&acceptformat=crx3&prodversion=151&x=id%3Dddkjiahejlhfcafbddmgiahcphecmpfh%26uc"
-        )
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url, ChromeWebStoreClient.updateServiceEndpoint)
+        XCTAssertEqual(request.url?.host, "update.googleapis.com")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "text/xml; charset=UTF-8")
+        XCTAssertNil(request.url?.query, "The legacy x=id=...&uc query string must not be sent.")
     }
 
-    func test_updateCheckRequestURL_omitsResponseRedirect() throws {
-        let client = ChromeWebStoreClient(prodVersion: "151")
-        let url = try client.updateCheckRequestURL(forExtensionID: ublockOriginLiteID, installedVersion: nil)
-        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
-        let names = Set((components.queryItems ?? []).map(\.name))
-        XCTAssertFalse(names.contains("response"), "response=redirect is what makes the service answer with a 302 instead of the Omaha XML this endpoint needs to return.")
+    func test_updateCheckRequestBody_carriesIDProtocolProdversionPlatformAndCRX3() throws {
+        let client = ChromeWebStoreClient(prodVersion: "151.0.0.0")
+        let body = try bodyString(of: try client.updateCheckRequest(forExtensionID: ublockOriginLiteID, installedVersion: nil))
+
+        XCTAssertTrue(body.contains(#"protocol="3.0""#))
+        XCTAssertTrue(body.contains(#"acceptformat="crx3""#), "CRX2 must never be requested — see the file header for why.")
+        XCTAssertTrue(body.contains(#"prodversion="151.0.0.0""#))
+        XCTAssertTrue(body.contains(#"<os platform="mac" arch="\#(ChromeWebStoreClient.hostArchitecture)""#))
+        XCTAssertTrue(body.contains(#"<app appid="\#(ublockOriginLiteID)" version="0.0.0.0""#))
+        XCTAssertTrue(body.contains("<updatecheck/>"))
+        XCTAssertNotNil(try? XMLDocument(xmlString: body, options: []), "The request body must be well-formed XML.")
     }
 
-    func test_updateCheckRequestURL_withNoInstalledVersion_encodesJustIDAndUC() throws {
-        let client = ChromeWebStoreClient(prodVersion: "151")
-        let url = try client.updateCheckRequestURL(forExtensionID: ublockOriginLiteID, installedVersion: nil)
-        XCTAssertEqual(
-            url.absoluteString,
-            "https://clients2.google.com/service/update2/crx?acceptformat=crx3&prodversion=151&x=id%3Dddkjiahejlhfcafbddmgiahcphecmpfh%26uc"
-        )
+    func test_updateCheckRequestBody_withAnInstalledVersion_sendsItAsTheAppVersion() throws {
+        let client = ChromeWebStoreClient(prodVersion: "151.0.0.0")
+        let body = try bodyString(of: try client.updateCheckRequest(forExtensionID: ublockOriginLiteID, installedVersion: "1.2.3"))
+        XCTAssertTrue(body.contains(#"<app appid="\#(ublockOriginLiteID)" version="1.2.3""#))
     }
 
-    func test_updateCheckRequestURL_withAnInstalledVersion_embedsItInTheXValue() throws {
-        let client = ChromeWebStoreClient(prodVersion: "151")
-        let url = try client.updateCheckRequestURL(forExtensionID: ublockOriginLiteID, installedVersion: "1.2.3")
-        XCTAssertEqual(
-            url.absoluteString,
-            "https://clients2.google.com/service/update2/crx?acceptformat=crx3&prodversion=151&x=id%3Dddkjiahejlhfcafbddmgiahcphecmpfh%26v%3D1.2.3%26uc"
-        )
-    }
-
-    func test_downloadRequestURL_rejectsAnInvalidID() {
+    func test_updateCheckRequestBody_escapesTheInstalledVersion() throws {
         let client = ChromeWebStoreClient()
-        XCTAssertThrowsError(try client.downloadRequestURL(forExtensionID: "not-a-valid-id")) { error in
-            guard case ChromeWebStoreError.invalidExtensionID = error else {
-                return XCTFail("Expected .invalidExtensionID, got \(error)")
-            }
-        }
+        let body = try bodyString(of: try client.updateCheckRequest(forExtensionID: ublockOriginLiteID, installedVersion: #"1"/><x a=""#))
+        XCTAssertNotNil(try? XMLDocument(xmlString: body, options: []))
+        XCTAssertFalse(body.contains("<x a="))
     }
 
-    func test_updateCheckRequestURL_rejectsAnInvalidID() {
+    func test_defaultProdVersion_isACurrentChromeMilestoneNotTheRetiredOne() throws {
         let client = ChromeWebStoreClient()
-        XCTAssertThrowsError(try client.updateCheckRequestURL(forExtensionID: "not-a-valid-id", installedVersion: nil)) { error in
+        XCTAssertNotEqual(client.prodVersion, "120.0.0.0")
+        let major = try XCTUnwrap(Int(client.prodVersion.split(separator: ".").first ?? ""))
+        XCTAssertGreaterThanOrEqual(major, 140)
+    }
+
+    // Google answered the legacy GET with HTTP 204 for gppongmhjkpfnbhagpmjfkannfbllamg at prodversion 120,
+    // which this client reported as "not found". The request Google accepts for that id is pinned here.
+    func test_wappalyzerID_producesARequestGoogleAccepts() throws {
+        let wappalyzerID = "gppongmhjkpfnbhagpmjfkannfbllamg"
+        let client = ChromeWebStoreClient()
+        let request = try client.updateCheckRequest(forExtensionID: wappalyzerID, installedVersion: nil)
+        let body = try bodyString(of: request)
+
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertTrue(body.contains(#"appid="\#(wappalyzerID)""#))
+        XCTAssertTrue(body.contains(#"protocol="3.0""#))
+        XCTAssertTrue(body.contains(#"prodversion="\#(client.prodVersion)""#))
+        XCTAssertFalse(body.contains("120.0.0.0"))
+        XCTAssertTrue(body.contains(#"platform="mac""#))
+    }
+
+    func test_updateCheckRequest_rejectsAnInvalidID() {
+        let client = ChromeWebStoreClient()
+        XCTAssertThrowsError(try client.updateCheckRequest(forExtensionID: "not-a-valid-id", installedVersion: nil)) { error in
             guard case ChromeWebStoreError.invalidExtensionID = error else {
                 return XCTFail("Expected .invalidExtensionID, got \(error)")
             }
@@ -101,13 +105,78 @@ final class ChromeWebStoreClientTests: XCTestCase {
         }
     }
 
+    // MARK: - download(id:): two-step flow (Omaha POST, then GET of the package)
+
+    private static let blobBase = "https://clients2.googleusercontent.com/crx/blobs/AZPV/"
+    private static let blobURL = URL(string: blobBase + "WAPPALYZER_6_12_7_0.crx")!
+
+    // Answers the update-service POST with a protocol 3.0 "ok" response and routes every other request to `blob`.
+    private func downloadHandler(
+        blob: @escaping (URLRequest) -> StubURLProtocol.Script
+    ) -> (URLRequest) -> StubURLProtocol.Script {
+        { request in
+            if request.url?.host == "update.googleapis.com" {
+                return .respond(
+                    status: 200,
+                    headers: ["Content-Type": "text/xml; charset=UTF-8"],
+                    body: Data(Self.omahaV3XML(appID: self.ublockOriginLiteID, codebase: Self.blobBase, packageName: "WAPPALYZER_6_12_7_0.crx", version: "6.12.7").utf8)
+                )
+            }
+            return blob(request)
+        }
+    }
+
+    func test_download_postsTheOmahaRequestThenFetchesTheCodebasePlusPackageName() async throws {
+        let expectedBytes = Data("crx3".utf8)
+        var seen: [(method: String?, url: URL?)] = []
+        StubURLProtocol.handler = { request in
+            seen.append((request.httpMethod, request.url))
+            return self.downloadHandler { _ in
+                .respond(status: 200, headers: ["Content-Type": "application/x-chrome-extension"], body: expectedBytes)
+            }(request)
+        }
+        let client = ChromeWebStoreClient(session: makeStubbedSession())
+        let data = try await client.download(id: ublockOriginLiteID)
+        XCTAssertEqual(data, expectedBytes)
+        XCTAssertEqual(seen.map(\.method), ["POST", "GET"])
+        XCTAssertEqual(seen.first?.url, ChromeWebStoreClient.updateServiceEndpoint)
+        XCTAssertEqual(seen.last?.url, Self.blobURL)
+    }
+
+    func test_download_mapsAFreshInstallNoUpdateToMalformedNotExtensionNotFound() async {
+        StubURLProtocol.handler = { _ in
+            .respond(status: 200, headers: ["Content-Type": "text/xml"], body: Data(Self.omahaV3NoUpdateXML(appID: self.ublockOriginLiteID).utf8))
+        }
+        let client = ChromeWebStoreClient(session: makeStubbedSession())
+        do {
+            _ = try await client.download(id: ublockOriginLiteID)
+            XCTFail("Expected .malformedUpdateResponse")
+        } catch ChromeWebStoreError.malformedUpdateResponse {
+        } catch {
+            XCTFail("Expected .malformedUpdateResponse, got \(error)")
+        }
+    }
+
+    func test_download_mapsHTTP404FromThePackageFetchToExtensionNotFound() async {
+        StubURLProtocol.handler = downloadHandler { _ in .respond(status: 404, headers: [:], body: Data()) }
+        let client = ChromeWebStoreClient(session: makeStubbedSession())
+        do {
+            _ = try await client.download(id: ublockOriginLiteID)
+            XCTFail("Expected .extensionNotFound")
+        } catch ChromeWebStoreError.extensionNotFound(let id) {
+            XCTAssertEqual(id, ublockOriginLiteID)
+        } catch {
+            XCTFail("Expected .extensionNotFound, got \(error)")
+        }
+    }
+
     // MARK: - download(id:): redirect following
 
     func test_download_followsTheRedirectAndReturnsTheFinalBytes() async throws {
         let finalURL = URL(string: "https://clients2.googleusercontent.com/crx/blobs/fake.crx")!
         let expectedBytes = Data("a fake but recognisable CRX3 payload".utf8)
 
-        StubURLProtocol.handler = { request in
+        StubURLProtocol.handler = downloadHandler { request in
             if request.url == finalURL {
                 return .respond(status: 200, headers: ["Content-Type": "application/x-chrome-extension"], body: expectedBytes)
             }
@@ -122,7 +191,7 @@ final class ChromeWebStoreClientTests: XCTestCase {
     // MARK: - download(id:): size cap
 
     func test_download_rejectsAResponseWhoseDeclaredContentLengthExceedsTheCap() async {
-        StubURLProtocol.handler = { _ in
+        StubURLProtocol.handler = downloadHandler { _ in
             .respond(status: 200, headers: ["Content-Length": "5000"], body: Data(repeating: 0x41, count: 5000))
         }
         let client = ChromeWebStoreClient(session: makeStubbedSession(), maxDownloadBytes: 1024)
@@ -136,7 +205,7 @@ final class ChromeWebStoreClientTests: XCTestCase {
     }
 
     func test_download_rejectsAnUndeclaredResponseThatExceedsTheCapAsBytesArrive() async {
-        StubURLProtocol.handler = { _ in
+        StubURLProtocol.handler = downloadHandler { _ in
             .respond(status: 200, headers: [:], body: Data(repeating: 0x42, count: 5000))
         }
         let client = ChromeWebStoreClient(session: makeStubbedSession(), maxDownloadBytes: 1024)
@@ -151,7 +220,7 @@ final class ChromeWebStoreClientTests: XCTestCase {
 
     func test_download_acceptsAResponseAtExactlyTheCap() async throws {
         let bytes = Data(repeating: 0x43, count: 1024)
-        StubURLProtocol.handler = { _ in .respond(status: 200, headers: [:], body: bytes) }
+        StubURLProtocol.handler = downloadHandler { _ in .respond(status: 200, headers: [:], body: bytes) }
         let client = ChromeWebStoreClient(session: makeStubbedSession(), maxDownloadBytes: 1024)
         let data = try await client.download(id: ublockOriginLiteID)
         XCTAssertEqual(data.count, 1024)
@@ -334,7 +403,72 @@ final class ChromeWebStoreClientTests: XCTestCase {
         }
     }
 
+    // MARK: - checkForUpdate: protocol 3.0 responses
+
+    func test_checkForUpdate_parsesAProtocol3UpdateAvailableResponse() async throws {
+        StubURLProtocol.handler = { _ in
+            .respond(status: 200, headers: ["Content-Type": "text/xml"], body: Data(Self.omahaV3XML(appID: self.ublockOriginLiteID, codebase: Self.blobBase, packageName: "P_1_0.crx", version: "1.0").utf8))
+        }
+        let client = ChromeWebStoreClient(session: makeStubbedSession())
+        let result = try await client.checkForUpdate(id: ublockOriginLiteID, installedVersion: nil)
+        XCTAssertEqual(result, .updateAvailable(ChromeWebStoreUpdateInfo(version: "1.0", downloadURL: URL(string: Self.blobBase + "P_1_0.crx")!)))
+    }
+
+    func test_checkForUpdate_rejectsANonHTTPSCodebase() async {
+        StubURLProtocol.handler = { _ in
+            .respond(status: 200, headers: ["Content-Type": "text/xml"], body: Data(Self.omahaV3XML(appID: self.ublockOriginLiteID, codebase: "http://example.com/", packageName: "P.crx", version: "1.0").utf8))
+        }
+        let client = ChromeWebStoreClient(session: makeStubbedSession())
+        do {
+            _ = try await client.checkForUpdate(id: ublockOriginLiteID, installedVersion: nil)
+            XCTFail("Expected .malformedUpdateResponse")
+        } catch ChromeWebStoreError.malformedUpdateResponse {
+        } catch {
+            XCTFail("Expected .malformedUpdateResponse, got \(error)")
+        }
+    }
+
+    func test_checkForUpdate_mapsAProtocol3UnknownApplicationToExtensionNotFound() async {
+        StubURLProtocol.handler = { _ in
+            .respond(status: 200, headers: ["Content-Type": "text/xml"], body: Data(Self.omahaV3UnknownApplicationXML(appID: self.ublockOriginLiteID).utf8))
+        }
+        let client = ChromeWebStoreClient(session: makeStubbedSession())
+        do {
+            _ = try await client.checkForUpdate(id: ublockOriginLiteID, installedVersion: nil)
+            XCTFail("Expected .extensionNotFound")
+        } catch ChromeWebStoreError.extensionNotFound(let id) {
+            XCTAssertEqual(id, ublockOriginLiteID)
+        } catch {
+            XCTFail("Expected .extensionNotFound, got \(error)")
+        }
+    }
+
     // MARK: - Fixtures
+
+    // Shapes captured from update.googleapis.com/service/update2 for gppongmhjkpfnbhagpmjfkannfbllamg.
+    private static func omahaV3XML(appID: String, codebase: String, packageName: String, version: String) -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <response protocol="3.0" server="prod"><daystart elapsed_days="7228" elapsed_seconds="57903"/>\
+        <app appid="\(appID)" cohort="1::" cohortname="" status="ok"><updatecheck status="ok"><urls><url codebase="\(codebase)"/></urls>\
+        <manifest version="\(version)"><packages><package hash_sha256="00" name="\(packageName)" required="true" size="3"/></packages></manifest>\
+        </updatecheck></app></response>
+        """
+    }
+
+    private static func omahaV3NoUpdateXML(appID: String) -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <response protocol="3.0" server="prod"><app appid="\(appID)" status="ok"><updatecheck status="noupdate"/></app></response>
+        """
+    }
+
+    private static func omahaV3UnknownApplicationXML(appID: String) -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <response protocol="3.0" server="prod"><app appid="\(appID)" status="error-unknownApplication"/></response>
+        """
+    }
 
     private static func omahaXML(appID: String, updateCheck attributes: String) -> String {
         """

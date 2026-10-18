@@ -7,7 +7,7 @@
 
 **The open-source Arc we have all been waiting for.**
 
-A native macOS browser built on Chromium.
+A native macOS browser built on WebKit.
 Local-first. No account, no telemetry.
 
 </div>
@@ -34,8 +34,7 @@ Local-first. No account, no telemetry.
 
 ## Building
 
-Requires macOS, Xcode, `cmake` (`brew install cmake`) and a network
-connection for the first build.
+Requires macOS 15.4 or later and Xcode.
 
 ```
 git clone https://github.com/Seggys116/Orbit.git
@@ -45,8 +44,9 @@ open Orbit.xcodeproj
 
 Then press Build. There is no bootstrap step to run first.
 
-The first build of a checkout installs the Chromium engine - a download of
-Orbit's own published build, a few minutes, once.
+The app renders with the system WebKit. Chrome extensions load through WebKit's
+extension controller, with Orbit's chrome API wrapper for the namespaces WebKit
+does not implement itself.
 
 ---
 

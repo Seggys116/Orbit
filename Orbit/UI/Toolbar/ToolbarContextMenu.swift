@@ -22,6 +22,45 @@ struct ToolbarContextMenu: View {
 
         fullURLRow
         Button(settings.visibilityMenuTitle) { settings.toggleVisible() }
+
+        if developerModeSettings.isEnabled {
+            screenSizeMenu
+        }
+    }
+
+    @ViewBuilder
+    private var screenSizeMenu: some View {
+        if let contents = env.webContents[tab.id] as? WebKitWebContents {
+            Divider()
+            Menu("Screen Size") {
+                let mode = InspectorDeviceMode.shared
+                let current = mode.preset(for: contents)
+                ForEach(InspectorDeviceMode.Preset.devices) { preset in
+                    Toggle(preset.title, isOn: Binding(
+                        get: { current == preset },
+                        set: { isOn in
+                            guard isOn else { return }
+                            mode.setPreset(preset, for: contents)
+                        }
+                    ))
+                }
+                Divider()
+                Menu("Width") {
+                    ForEach(InspectorDeviceMode.widths, id: \.self) { width in
+                        Toggle("\(Int(width))", isOn: Binding(
+                            get: {
+                                current == .responsive && mode.responsiveWidth(for: contents) == width
+                            },
+                            set: { isOn in
+                                guard isOn else { return }
+                                mode.setResponsiveWidth(width, for: contents)
+                                mode.setPreset(.responsive, for: contents)
+                            }
+                        ))
+                    }
+                }
+            }
+        }
     }
 
     // Developer Mode forces the full URL on regardless of settings.showsFullURL, so the row must not claim "Hide Full URL" when pressing it would not actually hide anything; it still toggles the real preference (which takes over once Developer Mode is off), just states when it's currently masked.

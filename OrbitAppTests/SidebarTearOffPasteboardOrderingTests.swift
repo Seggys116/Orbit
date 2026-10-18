@@ -50,7 +50,8 @@ final class SidebarTearOffPasteboardOrderingTests: XCTestCase {
         }
 
         let source = InertDraggingSource()
-        _ = view.beginDraggingSession(with: [draggingItem], event: mouseDownEvent, source: source)
+        let session = view.beginDraggingSession(with: [draggingItem], event: mouseDownEvent, source: source)
+        session.animatesToStartingPositionsOnCancelOrFail = false
 
         let afterSessionBegan = pasteboard.changeCount
 
@@ -67,5 +68,26 @@ final class SidebarTearOffPasteboardOrderingTests: XCTestCase {
             afterSessionBegan, capturedInsideOnDragClosureAnalogue + 1,
             "measured delta was not exactly +1 — re-check this test's own header numbers against whatever this run actually produced"
         )
+
+        // beginDraggingSession arms AppKit's drag tracker. The next default-mode
+        // run loop waits for mouse-up forever if this event is not posted first.
+        if let mouseUp = NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: NSPoint(x: 5, y: 5),
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 0
+        ) {
+            NSApp.postEvent(mouseUp, atStart: true)
+        }
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline {
+            CFRunLoopRunInMode(.defaultMode, 0.05, true)
+        }
+        _ = source
     }
 }

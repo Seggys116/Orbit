@@ -41,7 +41,7 @@ nonisolated enum DataResetCategory: String, CaseIterable, Identifiable, Sendable
     var detail: String {
         switch self {
         case .history: return "Every page visit Orbit has recorded on this Mac."
-        case .cookiesAndLogins: return "Cookies, saved passwords, autofill entries and the data sites store on this Mac."
+        case .cookiesAndLogins: return "Cookies, local and session storage, IndexedDB, service workers and the other data sites store on this Mac. Passwords saved to the system keychain are not touched."
         case .cache: return "Cached pages, scripts and site icons."
         case .downloads: return "Orbit's list of downloads. The downloaded files stay on disk."
         case .spacesAndTabs: return "Every Space, tab and Space icon, back to a fresh sidebar."
@@ -56,11 +56,11 @@ nonisolated enum DataResetCategory: String, CaseIterable, Identifiable, Sendable
         }
     }
 
-    // A running browser process holds the profile files open and rewrites
-    // Preferences on exit, so a clear only sticks after a relaunch.
+    // Website data and site settings are cleared live through WebKit; loaded
+    // extensions and values the running UI has already read only reset on relaunch.
     var requiresRelaunch: Bool {
         switch self {
-        case .cookiesAndLogins, .extensions, .siteSettings, .preferences: return true
+        case .extensions, .preferences: return true
         default: return false
         }
     }
@@ -94,9 +94,11 @@ struct DataResetTargets {
     var spaceIconImages: SpaceIconImageStore
     var extensions: ExtensionStore
     var contentBlocking: ContentBlockingController
-    var chromiumProfileDirectory: URL
+    var contentSettingsDirectory: URL
     var syncDirectory: URL
     var contentBlockingDirectory: URL
+    // nil means every session the engine and the open tabs know about.
+    var engineSessions: (@MainActor () -> [any EngineSession])?
 
     static func live(for environment: AppEnvironment) -> DataResetTargets {
         DataResetTargets(
@@ -104,9 +106,10 @@ struct DataResetTargets {
             spaceIconImages: environment.spaceIconImages,
             extensions: environment.extensionStore,
             contentBlocking: ContentBlockingRuntime.shared.controller,
-            chromiumProfileDirectory: environment.dataRoot.chromiumProfile,
+            contentSettingsDirectory: environment.dataRoot.contentSettings,
             syncDirectory: environment.dataRoot.sync,
-            contentBlockingDirectory: FilterListStore.defaultDirectory()
+            contentBlockingDirectory: FilterListStore.defaultDirectory(),
+            engineSessions: nil
         )
     }
 
@@ -123,99 +126,6 @@ extension AppEnvironment {
         if let override = DataResetTargets.override { return override }
         #endif
         return .live(for: self)
-    }
-}
-
-// MARK: - Chromium profile files
-
-nonisolated enum ChromiumProfileData {
-
-    static let credentialAndStorageEntries = [
-        "Cookies",
-        "Login Data",
-        "Login Data For Account",
-        "Web Data",
-        "Account Web Data",
-        "Affiliation Database",
-        "Local Storage",
-        "Session Storage",
-        "WebStorage",
-        "IndexedDB",
-        "Service Worker",
-        "File System",
-    ]
-
-    static let sqliteSidecarSuffixes = ["", "-journal", "-wal", "-shm"]
-
-    static let preferencesFileName = "Preferences"
-    static let contentSettingsKeyPath = ["profile", "content_settings", "exceptions"]
-
-    // Every persistent session gets its own directory, so a reset sweeps them all.
-    static func profileDirectories(in root: URL) -> [URL] {
-        let manager = FileManager.default
-        var isDirectory: ObjCBool = false
-        guard manager.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else { return [] }
-        let children = (try? manager.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        return [root] + children.filter {
-            (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-        }
-    }
-
-    static func removeCredentialsAndSiteStorage(in root: URL) -> Bool {
-        let manager = FileManager.default
-        var succeeded = true
-        for directory in profileDirectories(in: root) {
-            for entry in credentialAndStorageEntries {
-                for suffix in sqliteSidecarSuffixes {
-                    let url = directory.appendingPathComponent(entry + suffix)
-                    guard manager.fileExists(atPath: url.path) else { continue }
-                    do {
-                        try manager.removeItem(at: url)
-                    } catch {
-                        succeeded = false
-                    }
-                }
-            }
-        }
-        return succeeded
-    }
-
-    // Preferences carries state no reset category claims, so it is rewritten.
-    static func clearContentSettingsExceptions(in root: URL) -> Bool {
-        var succeeded = true
-        for directory in profileDirectories(in: root) {
-            let url = directory.appendingPathComponent(preferencesFileName)
-            guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            guard let data = try? Data(contentsOf: url),
-                  let decoded = try? JSONSerialization.jsonObject(with: data),
-                  var json = decoded as? [String: Any] else {
-                succeeded = false
-                continue
-            }
-            guard let stripped = removingContentSettingsExceptions(from: json) else { continue }
-            json = stripped
-            guard let encoded = try? JSONSerialization.data(withJSONObject: json),
-                  (try? encoded.write(to: url, options: .atomic)) != nil else {
-                succeeded = false
-                continue
-            }
-        }
-        return succeeded
-    }
-
-    static func removingContentSettingsExceptions(from json: [String: Any]) -> [String: Any]? {
-        var json = json
-        guard var profile = json[contentSettingsKeyPath[0]] as? [String: Any],
-              var contentSettings = profile[contentSettingsKeyPath[1]] as? [String: Any],
-              contentSettings[contentSettingsKeyPath[2]] != nil else { return nil }
-        contentSettings.removeValue(forKey: contentSettingsKeyPath[2])
-        profile[contentSettingsKeyPath[1]] = contentSettings
-        json[contentSettingsKeyPath[0]] = profile
-        return json
     }
 }
 
@@ -257,10 +167,8 @@ extension AppEnvironment {
         var outcome = await resetData(Set(DataResetCategory.allCases))
         let targets = dataResetTargets
 
-        if !AppEnvironment.removeContents(of: targets.chromiumProfileDirectory) {
-            outcome.clearedCategories.remove(.cookiesAndLogins)
-            outcome.failedCategories.insert(.cookiesAndLogins)
-        }
+        await clearEverythingInEngine()
+        materializeActiveTabIfNeeded()
         if AppEnvironment.removeContents(of: targets.contentBlockingDirectory) {
             ContentBlockingRuntime.shared.reset()
         } else {
@@ -279,11 +187,7 @@ extension AppEnvironment {
         case .history:
             return await clearAllHistory()
         case .cookiesAndLogins:
-            let engineCleared = await clearEngineData(.cookies)
-            let filesRemoved = ChromiumProfileData.removeCredentialsAndSiteStorage(
-                in: dataResetTargets.chromiumProfileDirectory
-            )
-            return engineCleared && filesRemoved
+            return await clearEngineData(.cookies)
         case .cache:
             dataResetTargets.faviconCache.removeAll()
             return await clearEngineData(.cache)
@@ -332,7 +236,25 @@ extension AppEnvironment {
         return true
     }
 
+    // Past what any scope names, then the persistent stores themselves. Tabs go first, since
+    // WebKit will not remove a store a web view still uses; the caller rebuilds the active tab.
+    func clearEverythingInEngine() async {
+        // Taken before the tabs close, so a private tab's session is still in the list.
+        let sessions = knownEngineSessions()
+        for session in sessions {
+            await (session as? WebKitSession)?.clearAllWebsiteData()
+        }
+        for tabID in Array(webContents.keys) {
+            releaseWebContents(for: tabID)
+        }
+        // A store WebKit refuses to remove has still been emptied above, so this is not a failure.
+        for session in sessions {
+            _ = await (session as? WebKitSession)?.removePersistentDataStore()
+        }
+    }
+
     private func knownEngineSessions() -> [any EngineSession] {
+        if let provided = dataResetTargets.engineSessions { return provided() }
         var seen: Set<ObjectIdentifier> = []
         var sessions: [any EngineSession] = []
 
@@ -418,9 +340,13 @@ extension AppEnvironment {
             guard let url = URL(string: "https://\(host)") else { continue }
             _ = await controller.setAllowlisted(false, for: url)
         }
-        return ChromiumProfileData.clearContentSettingsExceptions(
-            in: dataResetTargets.chromiumProfileDirectory
-        )
+        var cleared = true
+        for session in knownEngineSessions() {
+            if let session = session as? WebKitSession, !session.clearContentSettings() { cleared = false }
+        }
+        // Covers sessions this process never created, such as a deleted profile's.
+        if !AppEnvironment.removeContents(of: dataResetTargets.contentSettingsDirectory) { cleared = false }
+        return cleared
     }
 
     // Onboarding completion is deliberately preserved: Restart Onboarding owns it.

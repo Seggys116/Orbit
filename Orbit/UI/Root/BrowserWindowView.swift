@@ -22,15 +22,6 @@ struct PositionedWindowControls: View {
     }
 }
 
-struct SidebarTopRowDoubleClickCatcher: View {
-    var body: some View {
-        Color.clear
-            .frame(height: OrbitMetrics.sidebarTopRowHeight)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { OrbitTitleBarDoubleClick.handle(on: NSApp.keyWindow) }
-    }
-}
-
 struct HoverRevealSidebarLayer: View {
     @Environment(AppEnvironment.self) private var env
     var onHoverChanged: (Bool) -> Void
@@ -86,9 +77,6 @@ struct HoverRevealedFloatingPanel: View {
         SidebarView(paintsOwnBackground: true, backgroundOpacity: OrbitAcrylic.panelTintOpacity)
             .frame(width: env.sidebarWidth)
             .frame(maxHeight: .infinity, alignment: .leading)
-            // Attached before .compositingGroup() below so it stays a real ancestor of
-            // SidebarTopRow's own controls for gesture-priority purposes.
-            .background(alignment: .top) { SidebarTopRowDoubleClickCatcher() }
             .overlay(alignment: .topLeading) { PositionedWindowControls() }
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: OrbitHoverPanelMetrics.cornerRadius, style: .continuous))
@@ -181,7 +169,6 @@ struct BrowserWindowView: View {
                         SpaceSwitchingSidebarContainer()
                             .frame(width: env.sidebarWidth)
                             .contextMenu { sidebarBackgroundMenu }
-                            .background(alignment: .top) { SidebarTopRowDoubleClickCatcher() }
                             .overlay { newSpaceFlowPanel }
                         resizeHandle
                     }
@@ -207,6 +194,12 @@ struct BrowserWindowView: View {
         // already happens inside an explicit withAnimation in handleHoverEdge, and an
         // ambient modifier here could desynchronize the panel's transition from its content.
         .animation(OrbitMotion.standard, value: env.isCommandBarPresented)
+        .onChange(of: env.activeTabID) { _, newID in
+            // A click on a real page has to take the new-tab spotlight with it.
+            // A blank pane keeps the bar: that pane is what presents it.
+            guard env.isCommandBarPresented, let newID, env.blankPaneMode(for: newID) == nil else { return }
+            env.dismissCommandBar()
+        }
         .onPreferenceChange(SpaceSwipeBlendKey.self) { blend in
             spaceSwipeBlend = blend
         }
@@ -312,11 +305,21 @@ struct BrowserWindowView: View {
 
     // MARK: Content column
 
+    // Docked, the handle already takes its share of cardInset. Hidden, the leading edge is the window and keeps the full inset.
+    private var contentCardLeadingInset: CGFloat {
+        env.isSidebarVisible ? OrbitMetrics.contentCardLeadingSeam : OrbitMetrics.cardInset
+    }
+
     private var contentColumn: some View {
         VStack(spacing: 0) {
             ContentCardView()
                 .commandBarAnchor(.contentRegion)
-                .padding(OrbitMetrics.cardInset)
+                .padding(EdgeInsets(
+                    top: OrbitMetrics.cardInset,
+                    leading: contentCardLeadingInset,
+                    bottom: OrbitMetrics.cardInset,
+                    trailing: OrbitMetrics.cardInset
+                ))
                 #if DEBUG
                 .background(contentCardFrameProbe)
                 #endif
@@ -388,7 +391,23 @@ struct BrowserWindowView: View {
     // MARK: Command Bar
 
     private var commandBarOverlay: some View {
-        CommandBarOverlay(anchors: commandBarAnchors)
+        CommandBarOverlay(
+            anchors: commandBarAnchors,
+            passthroughLeadingWidth: commandBarSidebarPassthrough
+        )
+    }
+
+    /// Width of the sidebar the Command Bar must not cover, including the
+    /// hover-revealed panel. A click there selects a tab instead of only
+    /// dismissing the bar.
+    private var commandBarSidebarPassthrough: CGFloat {
+        if env.isSidebarVisible {
+            return env.sidebarWidth + OrbitMetrics.sidebarResizeHandleWidth
+        }
+        if env.isSidebarHoverRevealed {
+            return env.sidebarWidth
+        }
+        return 0
     }
 
     // MARK: Sidebar background context menu

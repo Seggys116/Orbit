@@ -155,7 +155,7 @@ final class UpdaterStatusTests: XCTestCase {
     private func body(after signaturePrefix: String, in source: String, file: StaticString = #filePath, line: UInt = #line) throws -> String {
         precondition(signaturePrefix.hasSuffix("{"), "signaturePrefix must end with the block's opening brace")
         guard let sigRange = source.range(of: signaturePrefix) else {
-            throw XCTSkip("could not find \"\(signaturePrefix)\" — the implementation shape changed; this test needs to be revisited against the new shape rather than silently passing")
+            throw TestStopped("could not find \"\(signaturePrefix)\" — the implementation shape changed; this test needs to be revisited against the new shape rather than silently passing")
         }
         let openBrace = source.index(before: sigRange.upperBound)
         var depth = 0
@@ -174,7 +174,7 @@ final class UpdaterStatusTests: XCTestCase {
             idx = source.index(after: idx)
         }
         guard let closeIndex else {
-            throw XCTSkip("unbalanced braces while extracting the body of \"\(signaturePrefix)\"")
+            throw TestStopped("unbalanced braces while extracting the body of \"\(signaturePrefix)\"")
         }
         return String(source[openBrace..<closeIndex])
     }

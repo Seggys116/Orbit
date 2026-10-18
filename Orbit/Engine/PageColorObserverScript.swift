@@ -14,7 +14,7 @@ public enum PageColorObserverScript {
 
     // MARK: - Source
 
-    public static let chromiumPostExpression =
+    public static let bridgePostExpression =
         "__orbitPost('\(channelName)', JSON.stringify(payload))"
 
     public static func source(postExpression: String) -> String {
@@ -141,8 +141,10 @@ public enum PageColorObserverScript {
 
           window.addEventListener('resize', schedule);
 
-          // capture: true because scroll doesn't bubble.
+          // capture: true because scroll doesn't bubble. window as well as
+          // document: some pages scroll the viewport without a document target.
           document.addEventListener('scroll', scheduleAfterScrollSettles, { passive: true, capture: true });
+          window.addEventListener('scroll', scheduleAfterScrollSettles, { passive: true, capture: true });
 
           // pushState/replaceState are left unwrapped (a patched native fn fails anti-bot's toString() check); an unmatched route push is caught by the idle safety net instead.
           window.addEventListener('popstate', schedule);
@@ -162,11 +164,11 @@ public enum PageColorObserverScript {
         """
     }
 
-    public static var chromiumUserScript: UserScript {
+    public static var userScript: UserScript {
         UserScript(
             id: scriptID,
             kind: .javaScript,
-            source: source(postExpression: chromiumPostExpression),
+            source: source(postExpression: bridgePostExpression),
             injectionTime: .documentStart,
             matchPatterns: ["<all_urls>"],
             // An ad iframe reporting its own background as the page's colour would be actively wrong.

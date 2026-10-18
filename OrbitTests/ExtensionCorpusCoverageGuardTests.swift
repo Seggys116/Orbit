@@ -1,4 +1,4 @@
-// Asserts every available pin in Chromium/extension-corpus.json has a live suite
+// Asserts every available pin in ExtensionCorpus/extension-corpus.json has a live suite
 // driving it, and that no corpus test reaches OrbitDataRoot.production. Host-less.
 
 import XCTest
@@ -22,7 +22,7 @@ final class ExtensionCorpusCoverageGuardTests: XCTestCase {
     private static let liveTestsDirectory = Schema.repositoryFile("OrbitAppTests")
 
     private func corpus() throws -> [CorpusEntry] {
-        let url = Schema.repositoryFile("Chromium/extension-corpus.json")
+        let url = Schema.repositoryFile("ExtensionCorpus/extension-corpus.json")
         let object = try Schema.readObject(url)
         guard let raw = object["extensions"] as? [[String: Any]] else {
             throw Schema.SchemaError.malformed(url, "missing the \"extensions\" list")
@@ -100,7 +100,7 @@ final class ExtensionCorpusCoverageGuardTests: XCTestCase {
             .sorted()
         XCTAssertEqual(
             undriven, [],
-            "these extensions are pinned in Chromium/extension-corpus.json and no live suite drives them. Add one in OrbitAppTests, named *LiveTests.swift, that resolves it through ExtensionCorpus and performs the pinned expectation. A pinned-but-undriven corpus is the same failure as a fixture: it looks like coverage and tests nothing."
+            "these extensions are pinned in ExtensionCorpus/extension-corpus.json and no live suite drives them. Add one in OrbitAppTests, named *LiveTests.swift, that resolves it through ExtensionCorpus and performs the pinned expectation. A pinned-but-undriven corpus is the same failure as a fixture: it looks like coverage and tests nothing."
         )
     }
 

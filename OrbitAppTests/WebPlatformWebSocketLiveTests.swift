@@ -9,7 +9,7 @@ import XCTest
 final class WebPlatformWebSocketLiveTests: XCTestCase {
 
     private func waitUntilTrue(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         _ expression: String,
         timeout: Duration = .seconds(10)
     ) async throws {
@@ -25,19 +25,18 @@ final class WebPlatformWebSocketLiveTests: XCTestCase {
     }
 
     func testWebSocketOpensExchangesMessagesBothWaysAndClosesCleanly() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let events = try LiveChromiumEngineHost.runLive { () -> [String] in
+        let events = try WebKitLiveEngineHost.runLive { () -> [String] in
             let server = try LiveHTTPTestServer(
                 routes: ["/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-websocket-test</body></html>")],
                 webSocketRoutes: ["/ws": .echo(greeting: "server-hello")]
             )
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitWSEvents = [];
@@ -66,19 +65,18 @@ final class WebPlatformWebSocketLiveTests: XCTestCase {
     }
 
     func testWebSocketReceivesMultipleSequentialServerPushedMessagesInOrder() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (messages, wasClean) = try LiveChromiumEngineHost.runLive { () -> ([String], Bool) in
+        let (messages, wasClean) = try WebKitLiveEngineHost.runLive { () -> ([String], Bool) in
             let server = try LiveHTTPTestServer(
                 routes: ["/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-websocket-push-test</body></html>")],
                 webSocketRoutes: ["/ws-push": .serverPush(messages: ["orbit-1", "orbit-2", "orbit-3"], interval: 0.1)]
             )
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitWSMessages = [];

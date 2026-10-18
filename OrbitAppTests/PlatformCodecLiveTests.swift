@@ -12,7 +12,7 @@ import XCTest
 final class PlatformCodecLiveTests: XCTestCase {
 
     private func waitUntilTrue(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         _ expression: String,
         timeout: Duration = .seconds(20)
     ) async throws {
@@ -30,19 +30,18 @@ final class PlatformCodecLiveTests: XCTestCase {
     // MARK: - Support reporting
 
     func testEngineReportsExactlyTheCodecsItCanDecode() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let answers = try LiveChromiumEngineHost.runLive { () -> [String: Any] in
+        let answers = try WebKitLiveEngineHost.runLive { () -> [String: Any] in
             // Served over http://127.0.0.1, not loadHTML: a data: origin is opaque, so [SecureContext] APIs are absent.
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-codec-support</body></html>"),
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             let result = try await contents.evaluateJavaScript("""
             (function() {
@@ -118,7 +117,6 @@ final class PlatformCodecLiveTests: XCTestCase {
 
     /// AudioDecoder is `[SecureContext]` and VideoFrame is not, which separates a missing secure context from a missing build.
     func testWebCodecsIsExposedOnLocalhostAndWithheldFromAnOpaqueDataOrigin() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let probe = """
         (function() {
           return {
@@ -131,24 +129,24 @@ final class PlatformCodecLiveTests: XCTestCase {
         })();
         """
 
-        let (overHTTP, overData) = try LiveChromiumEngineHost.runLive { () -> ([String: Any], [String: Any]) in
+        let (overHTTP, overData) = try WebKitLiveEngineHost.runLive { () -> ([String: Any], [String: Any]) in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-secure-context</body></html>"),
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
+            let engine = await WebKitLiveEngineHost.sharedEngine()
 
-            let served = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let served = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { served.close() }
             served.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(served)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(served)
             let http = (try await served.evaluateJavaScript(probe)) as? [String: Any] ?? [:]
 
-            let inlined = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let inlined = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { inlined.close() }
             inlined.loadHTML("<html><body>orbit-secure-context</body></html>", baseURL: nil)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(inlined)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(inlined)
             let data = (try await inlined.evaluateJavaScript(probe)) as? [String: Any] ?? [:]
 
             return (http, data)
@@ -174,7 +172,6 @@ final class PlatformCodecLiveTests: XCTestCase {
     /// WebCodecs reaches the same GPU-process decoder the media pipeline uses, without the
     /// autoplay policy in the way, so this proves decode rather than mere capability reporting.
     func testWebCodecsDecodesRealAacLcToNonSilentPcm() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let result = try decodeAacWithWebCodecs()
 
         XCTAssertEqual(result["configSupported"] as? Bool, true, "AudioDecoder.isConfigSupported rejected mp4a.40.2. diagnostics: \(result)")
@@ -195,18 +192,18 @@ final class PlatformCodecLiveTests: XCTestCase {
         let adts = LivePlatformCodecFixtures.aacLcADTS.base64EncodedString()
         let description = LivePlatformCodecFixtures.aacLcAudioSpecificConfig.map(String.init).joined(separator: ",")
 
-        return try LiveChromiumEngineHost.runLive { () -> [String: Any] in
+        return try WebKitLiveEngineHost.runLive { () -> [String: Any] in
             // AudioDecoder is [SecureContext]; a loadHTML data: origin is opaque and would not expose it.
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-webcodecs-aac</body></html>"),
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitAac = { done: false, frames: 0, peak: 0, sampleRate: 0, channels: 0, error: null, configSupported: null };
@@ -293,7 +290,7 @@ final class PlatformCodecLiveTests: XCTestCase {
     }
 
     private func playMuted(routePath: String, data: Data) throws -> PlaybackResult {
-        try LiveChromiumEngineHost.runLive { () -> PlaybackResult in
+        try WebKitLiveEngineHost.runLive { () -> PlaybackResult in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(
                     contentType: "text/html",
@@ -303,8 +300,8 @@ final class PlatformCodecLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 200, height: 200)
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -317,7 +314,7 @@ final class PlatformCodecLiveTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(150))
 
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitEvents = [];
@@ -378,7 +375,6 @@ final class PlatformCodecLiveTests: XCTestCase {
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testH264WithAacAudioPlaysAndAdvances
     func testH264WithAacAudioPlaysAndAdvances() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let result = try playMuted(routePath: "/avc-aac.mp4", data: LivePlatformCodecFixtures.avcAacMP4)
 
         XCTAssertTrue(result.reachedPlaying, "a real H.264+AAC-LC MP4 never reached 'playing'. Both tracks must decode for the pipeline to start. diagnostics: \(result.diagnostics)")
@@ -390,7 +386,6 @@ final class PlatformCodecLiveTests: XCTestCase {
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testHevcWithAacAudioPlaysAndAdvances
     func testHevcWithAacAudioPlaysAndAdvances() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let result = try playMuted(routePath: "/hevc-aac.mp4", data: LivePlatformCodecFixtures.hevcAacMP4)
 
         XCTAssertTrue(result.reachedPlaying, "a real HEVC Main + AAC-LC MP4 never reached 'playing'. diagnostics: \(result.diagnostics)")

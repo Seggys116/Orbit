@@ -42,6 +42,9 @@ final class DeveloperModeSettings {
     fileprivate func setEnabled(_ newValue: Bool) {
         isEnabled = newValue
         backingStore.set(newValue, forKey: Self.defaultsKey)
+        if !newValue {
+            InspectorDeviceMode.shared.clearAll()
+        }
     }
 
     @discardableResult

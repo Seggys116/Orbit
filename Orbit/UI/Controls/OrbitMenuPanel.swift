@@ -81,6 +81,7 @@ final class OrbitMenuPanelController {
         sentinel?.removeFromSuperview()
         sentinel = nil
         let owner = ownerWindow
+        let keyWasOurs = levels.contains { $0.panel === NSApp.keyWindow }
         for level in levels.reversed() {
             level.panel.parent?.removeChildWindow(level.panel)
             level.panel.orderOut(nil)
@@ -93,7 +94,11 @@ final class OrbitMenuPanelController {
         // parent when it closes -- without this an action chosen from the menu (e.g.
         // "New Tab") can run with no key window at all, silently dropping any focus
         // request it makes.
-        if NSApp.keyWindow == nil, let owner, owner.isVisible, owner.canBecomeKey {
+        // The panel we just closed can still be reported as key until the run loop
+        // turns. That is not another window taking focus.
+        let key = NSApp.keyWindow
+        let nothingElseIsKey = key == nil || keyWasOurs
+        if nothingElseIsKey, let owner, owner.isVisible, owner.canBecomeKey {
             owner.makeKeyAndOrderFront(nil)
         }
         let callback = onDismiss

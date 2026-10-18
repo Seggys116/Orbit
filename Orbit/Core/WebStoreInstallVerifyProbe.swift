@@ -16,7 +16,7 @@ enum WebStoreInstallVerifyProbe {
     // otherwise click. False outside that path; AppEnvironment+WebContentsDelegate reads this directly.
     static var autoApproveExtensionInstallConsent = false
 
-    // nil means normal operation (real sheet shown). Read by OrbitChromiumPermissionsBridge
+    // nil means normal operation (real sheet shown). Read by the extension permission sheet.
     // ahead of its isRunningUnderTests refusal, so a live suite can drive approve, not just refuse.
     static var autoAnswerExtensionPermissionsConsent: Bool?
 
@@ -479,7 +479,7 @@ enum WebStoreInstallVerifyProbe {
     // MARK: - Capture
 
     // WindowPixelCapture, shared with AppSmokeProbe: no Screen Recording grant needed. Same
-    // technique is used under XCTest — see EaselTeardownRegressionTests / ChromiumTabSwitchLiveTests.
+    // technique is used under XCTest — see EaselTeardownRegressionTests / PageFocusAfterTabSwitchTests.
     private static func captureAtBackingScale(of window: NSWindow, attempts: Int = 4) async -> CGImage? {
         await WindowPixelCapture.atBackingScale(of: window, attempts: attempts, log: emit)
     }

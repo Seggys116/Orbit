@@ -88,11 +88,11 @@ final class EngineStorageDirectoryTests: XCTestCase {
         )
     }
 
-    func testProductionProfileMatchesTheEnginesOwnDefault() {
+    func testProductionProfileIsTheOrbitDirectoryUnderApplicationSupport() {
         XCTAssertEqual(
             EngineStorageDirectory.productionProfile.path,
             NSHomeDirectory() + "/Library/Application Support/Orbit",
-            "this mirrors DefaultOrbitUserDataDir() in Chromium/Embedder/common/orbit_user_data_dir.cc"
+            "the production profile is the Orbit directory under Application Support, the one OrbitDataRoot.production names"
         )
     }
 

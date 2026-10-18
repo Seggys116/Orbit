@@ -76,6 +76,7 @@ final class AppEnvironment {
     func closeTab(_ id: TabID) { recordedActions.append("closeTab") }
     func closeTabPreservingBookmark(_ id: TabID) { recordedActions.append("closeTabPreservingBookmark") }
     func activateTab(_ id: TabID) { recordedActions.append("activateTab") }
+    func activateTabDismissingCommandBar(_ id: TabID) { recordedActions.append("activateTab") }
 
     // Not a recording stub: TabRowView reads this while rendering to pick between the
     // minus and the X on a bookmarked row, so a render test must drive both branches.

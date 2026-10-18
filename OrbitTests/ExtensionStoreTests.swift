@@ -51,6 +51,38 @@ final class ExtensionStoreTests: XCTestCase {
 
     // MARK: - Install
 
+    func test_aRootWithACommaInstallsAndIsListedAsEnabled() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrbitTests-Extension,Root-\(UUID().uuidString)", isDirectory: true)
+        createdDirectories.append(root)
+        let store = ExtensionStore(root: root)
+        let source = try makeSourceExtension(name: "Comma Root")
+
+        let loaded = try store.install(unpackedAt: source, publicKey: nil)
+
+        XCTAssertTrue(loaded.directory.path.contains(","), "test precondition: the install directory carries a comma")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: loaded.directory.appendingPathComponent("manifest.json").path))
+        XCTAssertEqual(store.enabledDirectories(), [loaded.directory], "an extension under a comma path must still be handed to the engine")
+        XCTAssertEqual(store.enabledInstallations().map(\.id), [loaded.id])
+    }
+
+    func test_aSourceDirectoryWithACommaStagesAndInstalls() throws {
+        let parent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrbitTests-Source,Parent-\(UUID().uuidString)", isDirectory: true)
+        let source = parent.appendingPathComponent("unpacked", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        createdDirectories.append(parent)
+        try Data(#"{"name":"Comma Source","version":"1.0","manifest_version":3}"#.utf8)
+            .write(to: source.appendingPathComponent("manifest.json"))
+        let store = ExtensionStore(root: makeRoot())
+
+        let loaded = try store.install(unpackedAt: source, publicKey: nil)
+
+        XCTAssertEqual(loaded.name, "Comma Source")
+        XCTAssertEqual(store.installed().count, 1)
+        XCTAssertEqual(store.enabledDirectories(), [loaded.directory])
+    }
+
     func test_installCopiesTheTreeAndRecordsIt() throws {
         let store = ExtensionStore(root: makeRoot())
         let source = try makeSourceExtension(name: "Copy Test", version: "1.2.3", extraFiles: ["content.js": "console.log(1)"])

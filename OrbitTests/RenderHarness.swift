@@ -131,6 +131,18 @@ struct RenderedImage {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
+    // PNG bytes are not a stable identity: the same pixels can encode to a different length.
+    var pixelDigest: UInt64 {
+        guard let data = bitmap.bitmapData else { return 0 }
+        let count = bitmap.bytesPerRow * bitmap.pixelsHigh
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for index in 0..<count {
+            hash ^= UInt64(data[index])
+            hash &*= 1_099_511_628_211
+        }
+        return hash
+    }
+
     // MARK: Diagnostics
 
     /// Never throws — an I/O failure here is swallowed rather than obscuring the real assertion failure.

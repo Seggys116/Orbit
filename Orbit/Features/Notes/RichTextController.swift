@@ -5,7 +5,18 @@ import SwiftUI
 @Observable
 final class RichTextController {
     weak var textView: NSTextView?
-    var onChange: ((NSAttributedString) -> Void)?
+    var onChange: (() -> Void)?
+
+    // Bumped only when NotesEditorView loads a document. updateNSView pushes the binding on a
+    // generation change, so a keystroke does not have to copy the whole attributed string into
+    // SwiftUI state just to keep the text view from being replaced on the next render.
+    @ObservationIgnored var documentGeneration = 0
+
+    // The note a debounced save must write. The body is read from the text view at flush time,
+    // not copied on the keystroke. detachedBody is filled only if the text view is going away first.
+    @ObservationIgnored var pendingNoteID: UUID?
+    @ObservationIgnored var saveTask: Task<Void, Never>?
+    @ObservationIgnored var detachedBody: NSAttributedString?
 
     private static let bodyFont = NSFont.systemFont(ofSize: 14)
     private static let headingFonts: [CGFloat] = [22, 18, 15] // H1, H2, H3
@@ -117,8 +128,8 @@ final class RichTextController {
     }
 
     func notifyChanged() {
-        guard let textView else { return }
-        onChange?(textView.attributedString())
+        guard textView != nil else { return }
+        onChange?()
     }
 }
 
@@ -146,9 +157,12 @@ enum NotesTextColor {
         guard range.length > 0, range.upperBound <= storage.length else { return }
         let ranges = rangesNeedingDynamicColor(in: storage, range: range)
         guard !ranges.isEmpty else { return }
+        // One processEditing for every run in the edit, not one layout invalidation per run.
+        storage.beginEditing()
         for subrange in ranges {
             storage.addAttribute(.foregroundColor, value: NSColor.textColor, range: subrange)
         }
+        storage.endEditing()
     }
 
     static func normalized(_ input: NSAttributedString) -> NSAttributedString {
@@ -172,6 +186,17 @@ enum NotesTextColor {
     }
 }
 
+private final class NotesTextView: NSTextView {
+    var onWillLeaveWindow: (() -> Void)?
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            onWillLeaveWindow?()
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+}
+
 struct RichTextEditorView: NSViewRepresentable {
     @Binding var attributedText: NSAttributedString
     var controller: RichTextController
@@ -188,7 +213,7 @@ struct RichTextEditorView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let textView = NSTextView()
+        let textView = NotesTextView()
         textView.isRichText = true
         textView.allowsUndo = true
         textView.isEditable = true
@@ -196,7 +221,6 @@ struct RichTextEditorView: NSViewRepresentable {
         textView.font = .systemFont(ofSize: 14)
         textView.textContainerInset = NSSize(width: 24, height: 20)
         textView.delegate = context.coordinator
-        textView.textStorage?.setAttributedString(attributedText)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -207,44 +231,41 @@ struct RichTextEditorView: NSViewRepresentable {
         )
         textView.textContainer?.widthTracksTextView = true
         textView.displaysLinkToolTips = true
-        textView.backgroundColor = OrbitInternalPageChrome.surfaceNSColor
         // usesFindBar must be true: performTextFinderAction: (Find, Find and Replace, Find Next/Previous)
         // is answered by NSTextView only when it has a find bar, otherwise those menu rows stay grey.
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
-        textView.appearance = documentAppearance
+        context.coordinator.controller = controller
+        context.coordinator.installStorageObservation(on: textView)
+        textView.onWillLeaveWindow = { [weak coordinator = context.coordinator, weak textView] in
+            guard let textView else { return }
+            coordinator?.captureDetachedBody(of: textView)
+        }
+        applyDocument(attributedText, to: textView, coordinator: context.coordinator)
+        context.coordinator.appliedGeneration = controller.documentGeneration
         controller.textView = textView
 
         let scrollView = NSScrollView()
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = OrbitInternalPageChrome.surfaceNSColor
-        scrollView.appearance = documentAppearance
+        applyChrome(to: textView, scrollView: scrollView)
         return scrollView
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
-        // Full attributed-string equality, not just plain-string: two notes can share text with
-        // different formatting, and a plain-string compare would leave stale formatting on screen.
-        if !textView.attributedString().isEqual(to: attributedText) {
-            // Clamped rather than reapplied verbatim: this also fires on a document switch to
-            // shorter content, and an out-of-bounds NSRange on selectedRanges is a real crash risk.
-            let newLength = (attributedText.string as NSString).length
-            let selectedRanges = textView.selectedRanges.map { value -> NSValue in
-                var range = value.rangeValue
-                range.location = min(range.location, newLength)
-                range.length = min(range.length, newLength - range.location)
-                return NSValue(range: range)
-            }
-            textView.textStorage?.setAttributedString(attributedText)
-            textView.selectedRanges = selectedRanges
+        context.coordinator.controller = controller
+        context.coordinator.installStorageObservation(on: textView)
+        // Generation, not attributed-string equality. Two notes can share text with different
+        // formatting, so a plain-string compare is not enough. Copying the storage to compare it
+        // retained a second document on every update, and a mismatch replaced the storage and
+        // re-laid-out the note. load(for:) bumps the generation when it installs a document.
+        if context.coordinator.appliedGeneration != controller.documentGeneration {
+            applyDocument(attributedText, to: textView, coordinator: context.coordinator)
+            context.coordinator.appliedGeneration = controller.documentGeneration
         }
-        textView.backgroundColor = OrbitInternalPageChrome.surfaceNSColor
-        nsView.backgroundColor = OrbitInternalPageChrome.surfaceNSColor
-        textView.appearance = documentAppearance
-        nsView.appearance = documentAppearance
+        applyChrome(to: textView, scrollView: nsView)
 
         // Refreshed every call, not only in makeCoordinator(): otherwise onEdit/attributedText stay
         // bound to whichever RichTextEditorView existed when this representable was first created.
@@ -253,26 +274,157 @@ struct RichTextEditorView: NSViewRepresentable {
         controller.textView = textView
     }
 
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.captureDetachedBody(from: nsView)
+    }
+
+    // Clamped rather than reapplied verbatim: this also fires on a document switch to shorter
+    // content, and an out-of-bounds NSRange on selectedRanges is a real crash risk.
+    private func applyDocument(_ attributedText: NSAttributedString, to textView: NSTextView, coordinator: Coordinator) {
+        coordinator.isApplyingExternalText = true
+        defer {
+            coordinator.isApplyingExternalText = false
+            coordinator.pendingRepairRange = nil
+        }
+        let newLength = (attributedText.string as NSString).length
+        let selectedRanges = textView.selectedRanges.map { value -> NSValue in
+            var range = value.rangeValue
+            range.location = min(range.location, newLength)
+            range.length = min(range.length, newLength - range.location)
+            return NSValue(range: range)
+        }
+        textView.textStorage?.setAttributedString(attributedText)
+        textView.selectedRanges = selectedRanges
+        NotesTextColor.normalizeTypingAttributes(of: textView)
+    }
+
+    private func applyChrome(to textView: NSTextView, scrollView: NSScrollView?) {
+        let appearance = documentAppearance
+        let surface = OrbitInternalPageChrome.surfaceNSColor
+        if textView.appearance?.name != appearance?.name {
+            textView.appearance = appearance
+        }
+        if textView.backgroundColor != surface {
+            textView.backgroundColor = surface
+        }
+        guard let scrollView else { return }
+        if scrollView.appearance?.name != appearance?.name {
+            scrollView.appearance = appearance
+        }
+        if scrollView.backgroundColor != surface {
+            scrollView.backgroundColor = surface
+        }
+    }
+
     final class Coordinator: NSObject, NSTextViewDelegate {
         var attributedText: Binding<NSAttributedString>
         var onEdit: (() -> Void)?
+        weak var controller: RichTextController?
+        var appliedGeneration = -1
+        var isApplyingExternalText = false
+        var isRepairingColor = false
+        var pendingRepairRange: NSRange?
+        private weak var observedStorage: NSTextStorage?
 
         init(attributedText: Binding<NSAttributedString>, onEdit: (() -> Void)?) {
             self.attributedText = attributedText
             self.onEdit = onEdit
         }
 
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        func installStorageObservation(on textView: NSTextView) {
+            guard let storage = textView.textStorage, observedStorage !== storage else { return }
+            if let observedStorage {
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: NSTextStorage.willProcessEditingNotification,
+                    object: observedStorage
+                )
+            }
+            observedStorage = storage
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(storageWillProcessEditing(_:)),
+                name: NSTextStorage.willProcessEditingNotification,
+                object: storage
+            )
+        }
+
+        // Posted before NSTextView turns the edit into textDidChange, so the repair range is
+        // known without walking the rest of the document. Skipped when shouldChangeTextIn already
+        // recorded a tighter range, and when the edit is our own colour repair or a document load.
+        @objc private func storageWillProcessEditing(_ notification: Notification) {
+            guard !isApplyingExternalText, !isRepairingColor, pendingRepairRange == nil else { return }
+            guard let storage = notification.object as? NSTextStorage else { return }
+            let mask = storage.editedMask
+            guard mask.contains(.editedCharacters) || mask.contains(.editedAttributes) else { return }
+            var range = storage.editedRange
+            guard range.location != NSNotFound else { return }
+            let adjustedLength = range.length + storage.changeInLength
+            guard adjustedLength > 0 else { return }
+            range.length = adjustedLength
+            pendingRepairRange = range
+        }
+
+        func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
+            guard !isApplyingExternalText, !isRepairingColor else { return true }
+            let replacementLength = (replacementString as NSString?)?.length ?? affectedCharRange.length
+            guard affectedCharRange.location != NSNotFound, replacementLength > 0 else { return true }
+            let inserted = NSRange(location: affectedCharRange.location, length: replacementLength)
+            if let existing = pendingRepairRange {
+                pendingRepairRange = NSUnionRange(existing, inserted)
+            } else {
+                pendingRepairRange = inserted
+            }
+            return true
+        }
+
+        func captureDetachedBody(from scrollView: NSScrollView) {
+            guard let textView = scrollView.documentView as? NSTextView else { return }
+            captureDetachedBody(of: textView)
+        }
+
+        func captureDetachedBody(of textView: NSTextView) {
+            guard let controller, controller.pendingNoteID != nil, controller.detachedBody == nil else { return }
+            controller.detachedBody = textView.attributedString()
+        }
+
         // Fires for every route into the storage: typing, paste, drag, dictation, services and undo.
         // Repairing here rather than from an NSTextStorageDelegate is deliberate — mutating the storage
         // inside didProcessEditing swallows the character edit, and the note then never saves.
+        // The repair stays inside the edited range: a full-storage attribute pass invalidates layout
+        // from the start of the note, and copying the storage into the binding retained a second
+        // document on every keystroke. The text view remains the source of truth until flush.
         func textDidChange(_ notification: Notification) {
+            guard !isApplyingExternalText, !isRepairingColor else { return }
             guard let textView = notification.object as? NSTextView else { return }
             NotesTextColor.normalizeTypingAttributes(of: textView)
-            if let storage = textView.textStorage {
-                NotesTextColor.applyDynamicTextColor(to: storage, in: NSRange(location: 0, length: storage.length))
+            let repairRange = takeRepairRange(in: textView)
+            if let storage = textView.textStorage, repairRange.length > 0 {
+                isRepairingColor = true
+                defer { isRepairingColor = false }
+                NotesTextColor.applyDynamicTextColor(to: storage, in: repairRange)
             }
-            attributedText.wrappedValue = textView.attributedString()
             onEdit?()
+        }
+
+        private func takeRepairRange(in textView: NSTextView) -> NSRange {
+            let length = (textView.string as NSString).length
+            let range = pendingRepairRange ?? NSRange(location: NSNotFound, length: 0)
+            pendingRepairRange = nil
+            return clamped(range, to: length)
+        }
+
+        private func clamped(_ range: NSRange, to length: Int) -> NSRange {
+            guard length > 0, range.location != NSNotFound, range.location >= 0 else {
+                return NSRange(location: 0, length: 0)
+            }
+            let location = min(range.location, length)
+            let end = min(location + max(range.length, 0), length)
+            return NSRange(location: location, length: end - location)
         }
     }
 }

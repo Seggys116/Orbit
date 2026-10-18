@@ -41,19 +41,26 @@ final class LiveHTTPTestServer {
         let body: Data
         let extraHeaders: [String: String]
         let supportsRangeRequests: Bool
+        /// Writes the body `chunkSize` bytes at a time with `delay` between writes, so a transfer stays in flight.
+        let throttle: (chunkSize: Int, delay: TimeInterval)?
 
         init(contentType: String, body: String, extraHeaders: [String: String] = [:]) {
             self.contentType = contentType
             self.body = Data(body.utf8)
             self.extraHeaders = extraHeaders
             self.supportsRangeRequests = false
+            self.throttle = nil
         }
 
-        init(contentType: String, data: Data, extraHeaders: [String: String] = [:], supportsRangeRequests: Bool = false) {
+        init(
+            contentType: String, data: Data, extraHeaders: [String: String] = [:], supportsRangeRequests: Bool = false,
+            throttle: (chunkSize: Int, delay: TimeInterval)? = nil
+        ) {
             self.contentType = contentType
             self.body = data
             self.extraHeaders = extraHeaders
             self.supportsRangeRequests = supportsRangeRequests
+            self.throttle = throttle
         }
     }
 
@@ -128,6 +135,7 @@ final class LiveHTTPTestServer {
     let requestLog = RequestLog()
 
     private let listenSocket: Int32
+    private var datagramSocket: Int32 = -1
     private let queue = DispatchQueue(label: "OrbitAppTests.LiveHTTPTestServer", attributes: .concurrent)
     private var isRunning = true
 
@@ -140,7 +148,8 @@ final class LiveHTTPTestServer {
         chunkedRoutes: [String: ChunkedRoute] = [:],
         webSocketRoutes: [String: WebSocketBehavior] = [:],
         authenticatedRoutes: [String: AuthenticatedRoute] = [:],
-        stallingRoutes: Set<String> = []
+        stallingRoutes: Set<String> = [],
+        rejectQUIC: Bool = false
     ) throws {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { throw ServerError.socketFailed("socket() failed: \(String(cString: strerror(errno)))") }
@@ -181,6 +190,7 @@ final class LiveHTTPTestServer {
             throw ServerError.socketFailed("getsockname() failed: \(String(cString: strerror(errno)))")
         }
         port = UInt16(bigEndian: actual.sin_port)
+        if rejectQUIC { try startQUICRejector(on: port) }
 
         let acceptSocket = fd
         let acceptRoutes = routes
@@ -217,6 +227,46 @@ final class LiveHTTPTestServer {
         isRunning = false
         liveness.halt()
         Darwin.close(listenSocket)
+        if datagramSocket >= 0 { Darwin.close(datagramSocket) }
+    }
+
+    /// WebTransport is QUIC. A port with nobody listening is silence, and WebKit waits out
+    /// the handshake. Accepting the first datagram and then closing the socket makes the
+    /// retransmit hit "port unreachable", which fails the attempt.
+    private func startQUICRejector(on port: UInt16) throws {
+        let udp = socket(AF_INET, SOCK_DGRAM, 0)
+        guard udp >= 0 else { throw ServerError.socketFailed("udp socket() failed: \(String(cString: strerror(errno)))") }
+        var reuse: Int32 = 1
+        setsockopt(udp, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = port.bigEndian
+        let bound = withUnsafePointer(to: &address) { pointer -> Int32 in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                bind(udp, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0 else {
+            Darwin.close(udp)
+            throw ServerError.socketFailed("udp bind() failed: \(String(cString: strerror(errno)))")
+        }
+        datagramSocket = udp
+        queue.async { [weak self] in
+            var buffer = [UInt8](repeating: 0, count: 2048)
+            var sender = sockaddr_in()
+            var senderLength = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let count = buffer.withUnsafeMutableBytes { raw -> Int in
+                guard let base = raw.baseAddress else { return -1 }
+                return withUnsafeMutablePointer(to: &sender) { pointer -> Int in
+                    pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                        recvfrom(udp, base, raw.count, 0, sockaddrPointer, &senderLength)
+                    }
+                }
+            }
+            if count >= 0 { Darwin.close(udp) }
+            self?.datagramSocket = -1
+        }
     }
 
     // MARK: - Per-connection handling
@@ -298,9 +348,7 @@ final class LiveHTTPTestServer {
             for (name, value) in route.extraHeaders { response += "\(name): \(value)\r\n" }
             response += "Content-Length: \(slice.count)\r\n"
             response += "Connection: close\r\n\r\n"
-            var responseData = Data(response.utf8)
-            responseData.append(slice)
-            writeAll(client, responseData)
+            writeBody(client: client, head: Data(response.utf8), body: slice, throttle: route.throttle)
             return
         }
 
@@ -310,9 +358,27 @@ final class LiveHTTPTestServer {
         for (name, value) in route.extraHeaders { response += "\(name): \(value)\r\n" }
         response += "Content-Length: \(route.body.count)\r\n"
         response += "Connection: close\r\n\r\n"
-        var responseData = Data(response.utf8)
-        responseData.append(route.body)
-        writeAll(client, responseData)
+        writeBody(client: client, head: Data(response.utf8), body: route.body, throttle: route.throttle)
+    }
+
+    private static func writeBody(client: Int32, head: Data, body: Data, throttle: (chunkSize: Int, delay: TimeInterval)?) {
+        guard let throttle else {
+            var responseData = head
+            responseData.append(body)
+            writeAll(client, responseData)
+            return
+        }
+        // A client that cancels mid-transfer closes the socket; that must fail the write, not raise SIGPIPE.
+        var noSigPipe: Int32 = 1
+        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+        guard writeAll(client, head) else { return }
+        var offset = 0
+        while offset < body.count {
+            let end = min(offset + throttle.chunkSize, body.count)
+            guard writeAll(client, body.subdata(in: offset..<end)) else { return }
+            offset = end
+            if offset < body.count { Thread.sleep(forTimeInterval: throttle.delay) }
+        }
     }
 
     private static func writeChunked(client: Int32, route: ChunkedRoute) {
@@ -501,15 +567,17 @@ final class LiveHTTPTestServer {
         }
     }
 
-    private static func writeAll(_ client: Int32, _ data: Data) {
+    @discardableResult
+    private static func writeAll(_ client: Int32, _ data: Data) -> Bool {
         data.withUnsafeBytes { rawBuffer in
-            guard let base = rawBuffer.baseAddress else { return }
+            guard let base = rawBuffer.baseAddress else { return true }
             var offset = 0
             while offset < rawBuffer.count {
                 let written = write(client, base + offset, rawBuffer.count - offset)
-                guard written > 0 else { break }
+                guard written > 0 else { return false }
                 offset += written
             }
+            return true
         }
     }
 }

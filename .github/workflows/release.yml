@@ -21,21 +21,9 @@ jobs:
     permissions:
       contents: read
 
-  # Its own job, in parallel with verify, so a stale pin fails the tag in
-  # seconds rather than after a full build and test run.
-  chromium-currency:
-    name: Chromium is the current stable
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: Scripts/chromium check-latest --require-stable
-
   release:
     name: Build, notarise and publish
-    needs: [verify, chromium-currency]
+    needs: [verify]
     runs-on: macos-26
     timeout-minutes: 120
     environment: release
@@ -71,27 +59,6 @@ jobs:
               *)   echo "prerelease=false" ;;
             esac
           } >> "$GITHUB_OUTPUT"
-
-      # Same key as ci.yml's release-build job. See build-test.yml.
-      - name: Restore the Chromium engine
-        id: engine
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ThirdParty/prebuilt
-          key: chromium-shipping-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Chromium/chromium-version.json') }}
-
-      - name: Install the Chromium engine
-        run: |
-          Scripts/chromium fetch --config shipping
-          Scripts/chromium doctor --config shipping
-          Scripts/chromium verify-engine --config shipping
-
-      - name: Save the Chromium engine
-        if: steps.engine.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ThirdParty/prebuilt
-          key: ${{ steps.engine.outputs.cache-primary-key }}
 
       - name: Restore the Swift package checkouts
         id: swiftpm
@@ -175,10 +142,6 @@ jobs:
           path: DerivedData/SourcePackages
           key: ${{ steps.swiftpm.outputs.cache-primary-key }}
 
-      # Nothing is signed or notarised until the engine in the archive has been read.
-      - name: The archive embeds the shipping engine
-        run: Scripts/chromium verify-engine --config shipping --bundle "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app"
-
       # Rejects a placeholder SUPublicEDKey, a plain-HTTP feed and a broken
       # Sparkle framework, before the notary submission rather than after.
       - name: The archive can actually take an update
@@ -194,9 +157,8 @@ jobs:
           ditto "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app" "$APP"
           Scripts/sign-app.sh "$APP" "$IDENTITY"
 
-      # The signed bundle, not a fresh Release build: the hardened runtime and
-      # the helper entitlements only exist here, and 1.0.1 shipped with every
-      # renderer dying on JIT because nothing ever launched what was signed.
+      # Launch the signed bundle, not a fresh Release build: the hardened
+      # runtime and entitlements only exist here.
       - name: The signed app actually launches
         run: |
           PRODUCTS="$RUNNER_TEMP/SmokeRelease/Build/Products/Release"

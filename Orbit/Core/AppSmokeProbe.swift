@@ -4,8 +4,8 @@
 import AppKit
 import CoreGraphics
 import Foundation
-import MachO
 import OSLog
+import WebKit
 
 @MainActor
 enum AppSmokeProbe {
@@ -28,10 +28,8 @@ enum AppSmokeProbe {
     // result.json, and every one of them must have passed.
     enum Check: String, CaseIterable {
         case browserWindow
-        case chromiumEngine
+        case webkitEngine
         case engineVersion
-        case engineBundleLayout
-        case loadedEngineFramework
         case scratchDataRoot
         case isolatedEngineStorage
         case pageLoad
@@ -123,7 +121,6 @@ enum AppSmokeProbe {
         noteStage(.windowReady)
 
         checkEngine(host: host)
-        checkEngineBundle()
         checkDataRoot(host: host)
         noteStage(.engineReady)
 
@@ -158,14 +155,14 @@ enum AppSmokeProbe {
 
     private static func checkEngine(host: AppEnvironment) {
         guard let engine = host.engine else {
-            record(.chromiumEngine, false, "host.engine is nil — no engine started at all")
+            record(.webkitEngine, false, "host.engine is nil — no engine started at all")
             record(.engineVersion, false, "no engine to ask for a version")
             return
         }
         let typeName = String(describing: type(of: engine))
-        guard let chromium = engine as? ChromiumEngine else {
-            record(.chromiumEngine, false, "engine is \(typeName), not ChromiumEngine")
-            record(.engineVersion, false, "engine is \(typeName), not ChromiumEngine")
+        guard engine is WebKitEngine, type(of: engine).kind == .webkit else {
+            record(.webkitEngine, false, "engine is \(typeName), not WebKitEngine")
+            record(.engineVersion, false, "engine is \(typeName), not WebKitEngine")
             return
         }
 
@@ -177,69 +174,17 @@ enum AppSmokeProbe {
         ]
         let missing = required.filter { !engine.capabilities.contains($0.0) }.map(\.1)
         if missing.isEmpty {
-            record(.chromiumEngine, true, "\(typeName), kind=\(type(of: engine).kind.rawValue), full capability set")
+            record(.webkitEngine, true, "\(typeName), kind=\(type(of: engine).kind.rawValue), full capability set")
         } else {
-            record(.chromiumEngine, false, "\(typeName) does not advertise \(missing.joined(separator: ", "))")
+            record(.webkitEngine, false, "\(typeName) does not advertise \(missing.joined(separator: ", "))")
         }
 
-        let version = chromium.versionDescription
-        if version.contains(ChromiumBuild.version) {
-            record(.engineVersion, true, "\(version) matches the pinned \(ChromiumBuild.version)")
+        let version = engine.versionDescription
+        if version.contains("WebKit") {
+            record(.engineVersion, true, version)
         } else {
-            record(.engineVersion, false, "the running engine reports \(version), but this build is pinned to \(ChromiumBuild.version)")
+            record(.engineVersion, false, "the running engine reports \(version)")
         }
-    }
-
-    private static func checkEngineBundle() {
-        let framework = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Frameworks/Orbit Framework.framework", isDirectory: true)
-        let versioned = framework.appendingPathComponent("Versions/A", isDirectory: true)
-
-        var missing: [String] = []
-        let binary = versioned.appendingPathComponent("Orbit Framework", isDirectory: false)
-        if !FileManager.default.isExecutableFile(atPath: binary.path) {
-            missing.append(binary.path)
-        }
-        for suffix in ["", " (GPU)", " (Renderer)"] {
-            let name = "Orbit Helper\(suffix)"
-            let executable = versioned.appendingPathComponent("Helpers/\(name).app/Contents/MacOS/\(name)")
-            if !FileManager.default.isExecutableFile(atPath: executable.path) {
-                missing.append(executable.path)
-            }
-        }
-        for resource in ["orbit_resources.pak", "icudtl.dat", "v8_context_snapshot.arm64.bin"] {
-            let url = versioned.appendingPathComponent("Resources/\(resource)", isDirectory: false)
-            if !FileManager.default.fileExists(atPath: url.path) {
-                missing.append(url.path)
-            }
-        }
-        if missing.isEmpty {
-            record(.engineBundleLayout, true, "framework binary, three helper apps and three engine resources all present")
-        } else {
-            record(.engineBundleLayout, false, "missing or non-executable: \(missing.joined(separator: ", "))")
-        }
-
-        if let loaded = loadedFrameworkPath() {
-            if loaded.hasPrefix(framework.path) {
-                record(.loadedEngineFramework, true, loaded)
-            } else {
-                record(.loadedEngineFramework, false, "the loaded Orbit Framework is \(loaded), outside this bundle (\(framework.path))")
-            }
-        } else {
-            record(.loadedEngineFramework, false, "no image named \"Orbit Framework\" is loaded in this process")
-        }
-    }
-
-    private static func loadedFrameworkPath() -> String? {
-        for index in 0..<_dyld_image_count() {
-            guard let raw = _dyld_get_image_name(index) else { continue }
-            let path = String(cString: raw)
-            if path.hasSuffix("/Orbit Framework.framework/Versions/A/Orbit Framework")
-                || path.hasSuffix("/Orbit Framework.framework/Orbit Framework") {
-                return path
-            }
-        }
-        return nil
     }
 
     // MARK: - Where this run is allowed to write
@@ -261,7 +206,7 @@ enum AppSmokeProbe {
         }
         let session = tabID.flatMap { host.webContents[$0]?.session } ?? engine.defaultSession
         guard let storageURL = session.storageURL else {
-            record(.isolatedEngineStorage, false, "session \"\(session.identifier)\" reports no storageURL — nothing knows where Chromium is writing")
+            record(.isolatedEngineStorage, false, "session \"\(session.identifier)\" reports no storageURL, so nothing knows where the engine's own files are")
             return
         }
         let resolved = storageURL.resolvingSymlinksInPath().path
@@ -269,22 +214,31 @@ enum AppSmokeProbe {
         let privateRoot = EngineStorageDirectory.privateRoot.resolvingSymlinksInPath().path
 
         if resolved == productionProfile || resolved.hasPrefix(productionProfile + "/") {
-            record(.isolatedEngineStorage, false, "the engine's browser context is \(storageURL.path), inside the real profile at \(productionProfile)")
+            record(.isolatedEngineStorage, false, "the engine directory is \(storageURL.path), inside the real profile at \(productionProfile)")
             return
         }
         guard resolved.hasPrefix(privateRoot + "/") else {
-            record(.isolatedEngineStorage, false, "the engine's browser context is \(storageURL.path), neither the production profile nor under \(privateRoot) — nothing knows to sweep it")
+            record(.isolatedEngineStorage, false, "the engine directory is \(storageURL.path), neither the production profile nor under \(privateRoot), so nothing knows to sweep it")
             return
         }
         guard session.isPersistent else {
             record(.isolatedEngineStorage, false, "session \"\(session.identifier)\" is ephemeral; a smoke run must exercise the persistent, extension-loading configuration the app really ships")
             return
         }
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: storageURL.path)) ?? []
-        if entries.isEmpty {
-            record(.isolatedEngineStorage, false, "\(storageURL.path) is empty — Chromium wrote its browser state somewhere else")
+        // WebKit writes website data under ~/Library/WebKit/<bundle id>/WebsiteDataStore/<store uuid>, not under the engine directory above.
+        guard let webKitSession = session as? WebKitSession,
+              let storeIdentifier = webKitSession.dataStore.identifier,
+              let bundleIdentifier = Bundle.main.bundleIdentifier else {
+            record(.isolatedEngineStorage, false, "session \"\(session.identifier)\" is persistent but has no identified WKWebsiteDataStore, so WebKit's website data location cannot be determined")
+            return
+        }
+        let websiteData = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/WebKit/\(bundleIdentifier)/WebsiteDataStore/\(storeIdentifier.uuidString)", isDirectory: true)
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: websiteData.path))
+        if let entries, !entries.isEmpty {
+            record(.isolatedEngineStorage, true, "persistent; engine files private at \(storageURL.path), WebKit website data at \(websiteData.path) (\(entries.count) entries)")
         } else {
-            record(.isolatedEngineStorage, true, "persistent, private at \(storageURL.path) (\(entries.count) entries)")
+            record(.isolatedEngineStorage, false, "\(websiteData.path) is missing or empty after a page loaded, so WebKit wrote this session's website data somewhere else")
         }
     }
 
@@ -339,6 +293,7 @@ enum AppSmokeProbe {
               href: location.href,
               ua: navigator.userAgent,
               title: document.title,
+              text: document.getElementById('fixture') ? document.getElementById('fixture').textContent : '',
               chrome: typeof window.chrome,
               math: String(6*7),
               bodyLength: document.body ? document.body.innerHTML.length : -1
@@ -364,20 +319,28 @@ enum AppSmokeProbe {
             return tabID
         }
 
-        record(.pageLoad, true, "\(committed.absoluteString) complete after \(String(format: "%.1f", waited + documentWaited))s, title=\(report["title"] ?? ""), bodyLength=\(report["bodyLength"] ?? "")")
+        let documentText = report["text"] as? String ?? ""
+        let expectedText = environment["ORBIT_SMOKE_PROBE_TEXT"] ?? ""
+        let pageDetail = "\(committed.absoluteString) complete after \(String(format: "%.1f", waited + documentWaited))s, title=\(report["title"] ?? ""), text=\(documentText), bodyLength=\(report["bodyLength"] ?? "")"
+        if !expectedText.isEmpty && documentText != expectedText {
+            record(.pageLoad, false, "\(pageDetail); expected text \(expectedText)")
+        } else {
+            record(.pageLoad, true, pageDetail)
+        }
 
+        // 6*7 proves the page ran script. window.chrome stays absent; the default identity is WebKit.
         let arithmetic = "\(report["math"] as? String ?? "")-\(report["chrome"] as? String ?? "")"
-        if arithmetic == "42-object" {
+        if arithmetic == "42-undefined" {
             record(.inPageJavaScript, true, arithmetic)
         } else {
-            record(.inPageJavaScript, false, "in-page JavaScript returned \(arithmetic), expected \"42-object\"")
+            record(.inPageJavaScript, false, "in-page JavaScript returned \(arithmetic), expected \"42-undefined\"")
         }
 
         let agent = report["ua"] as? String ?? ""
-        if agent.contains("Chrome/\(ChromiumBuild.majorVersion).") {
+        if agent.contains("AppleWebKit") {
             record(.userAgent, true, agent)
         } else {
-            record(.userAgent, false, "navigator.userAgent does not name Chrome \(ChromiumBuild.majorVersion): \(agent)")
+            record(.userAgent, false, "navigator.userAgent does not name AppleWebKit: \(agent)")
         }
         return tabID
     }

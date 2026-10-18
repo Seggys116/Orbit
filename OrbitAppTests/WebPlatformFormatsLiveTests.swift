@@ -10,7 +10,7 @@ import XCTest
 final class WebPlatformFormatsLiveTests: XCTestCase {
 
     private func waitUntilTrue(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         _ expression: String,
         timeout: Duration = .seconds(10)
     ) async throws {
@@ -28,7 +28,7 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
     // MARK: - Image codecs
 
     private func decodedImageDimensions(routePath: String, contentType: String, data: Data) throws -> (width: Int, height: Int) {
-        try LiveChromiumEngineHost.runLive { () -> (Int, Int) in
+        try WebKitLiveEngineHost.runLive { () -> (Int, Int) in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(
                     contentType: "text/html",
@@ -38,13 +38,13 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 200, height: 200)
 
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             try await self.waitUntilTrue(contents, "document.getElementById('i').complete && document.getElementById('i').naturalWidth > 0")
 
             let width = try await contents.evaluateJavaScript("document.getElementById('i').naturalWidth")
@@ -54,35 +54,30 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
     }
 
     func testJPEGImageDecodesToItsRealPixelDimensions() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let size = try decodedImageDimensions(routePath: "/i.jpg", contentType: "image/jpeg", data: LiveMediaFixtures.jpeg)
         XCTAssertEqual(size.width, 32, "a real 32x32 JPEG did not decode to its real width")
         XCTAssertEqual(size.height, 32, "a real 32x32 JPEG did not decode to its real height")
     }
 
     func testPNGImageDecodesToItsRealPixelDimensions() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let size = try decodedImageDimensions(routePath: "/i.png", contentType: "image/png", data: LiveMediaFixtures.png)
         XCTAssertEqual(size.width, 32)
         XCTAssertEqual(size.height, 32)
     }
 
     func testWebPImageDecodesToItsRealPixelDimensions() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let size = try decodedImageDimensions(routePath: "/i.webp", contentType: "image/webp", data: LiveMediaFixtures.webp)
         XCTAssertEqual(size.width, 32, "a real lossy WebP did not decode through Blink's real libwebp decoder")
         XCTAssertEqual(size.height, 32)
     }
 
     func testAVIFImageDecodesToItsRealPixelDimensions() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let size = try decodedImageDimensions(routePath: "/i.avif", contentType: "image/avif", data: LiveMediaFixtures.avif)
         XCTAssertEqual(size.width, 32, "a real AVIF did not decode through Blink's real libaom/dav1d decoder")
         XCTAssertEqual(size.height, 32)
     }
 
     func testSVGImageRendersAndReportsItsIntrinsicSize() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let size = try decodedImageDimensions(routePath: "/i.svg", contentType: "image/svg+xml", data: LiveMediaFixtures.svg)
         XCTAssertEqual(size.width, 32, "an <img src> SVG did not report its declared intrinsic width")
         XCTAssertEqual(size.height, 32)
@@ -91,21 +86,20 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
     // MARK: - WOFF2 web font
 
     func testWOFF2WebFontLoadsAndChangesRenderedTextWidth() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (loaded, fontFamilyWidth, monospaceWidth) = try LiveChromiumEngineHost.runLive { () -> (Bool, Double, Double) in
+        let (loaded, fontFamilyWidth, monospaceWidth) = try WebKitLiveEngineHost.runLive { () -> (Bool, Double, Double) in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-font-test</body></html>"),
                 "/orbit-test.woff2": LiveHTTPTestServer.Route(contentType: "font/woff2", data: LiveMediaFixtures.woff2),
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 400, height: 200)
 
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitFontLoaded = false;
@@ -147,10 +141,9 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
     // MARK: - CSS features (real Blink layout)
 
     func testCSSGridAndFlexboxProduceRealComputedLayout() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (gridItemLeft, gridItemTop, flexGap) = try LiveChromiumEngineHost.runLive { () -> (Double, Double, Double) in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+        let (gridItemLeft, gridItemTop, flexGap) = try WebKitLiveEngineHost.runLive { () -> (Double, Double, Double) in
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 400, height: 400)
 
@@ -164,7 +157,7 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
             </div>
             </body></html>
             """, baseURL: nil)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             let gridRect = try await contents.evaluateJavaScript("""
             (function() { var r = document.getElementById('gridItem').getBoundingClientRect(); return [r.left, r.top]; })();
@@ -189,10 +182,9 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
     }
 
     func testCSSCustomPropertiesAndCalcResolveToRealComputedValues() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (computedWidth, computedColor) = try LiveChromiumEngineHost.runLive { () -> (Double, String) in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+        let (computedWidth, computedColor) = try WebKitLiveEngineHost.runLive { () -> (Double, String) in
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 400, height: 200)
 
@@ -201,7 +193,7 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
             <div id="box" style="--orbit-base: 40px; --orbit-color: rgb(9, 99, 199); width: calc(var(--orbit-base) * 3 + 10px); color: var(--orbit-color)"></div>
             </body></html>
             """, baseURL: nil)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             let width = try await contents.evaluateJavaScript("document.getElementById('box').getBoundingClientRect().width")
             let color = try await contents.evaluateJavaScript("getComputedStyle(document.getElementById('box')).color")
@@ -215,19 +207,18 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
     // MARK: - fetch(): JSON, gzip, brotli
 
     func testFetchReturnsRealJSONBody() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let note = try LiveChromiumEngineHost.runLive { () -> String in
+        let note = try WebKitLiveEngineHost.runLive { () -> String in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-fetch-json-test</body></html>"),
                 "/data.json": LiveHTTPTestServer.Route(contentType: "application/json", data: LiveMediaFixtures.jsonBody),
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitFetchNote = null;
@@ -243,19 +234,17 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
     }
 
     func testGzipContentEncodedResponseDecodesToTheOriginalBody() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let matches = try compressedFetchMatchesOriginal(routePath: "/data.json.gz", contentEncoding: "gzip", compressed: LiveMediaFixtures.jsonGzip)
         XCTAssertTrue(matches, "fetch() did not transparently gunzip a real Content-Encoding: gzip response to the original body")
     }
 
     func testBrotliContentEncodedResponseDecodesToTheOriginalBody() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let matches = try compressedFetchMatchesOriginal(routePath: "/data.json.br", contentEncoding: "br", compressed: LiveMediaFixtures.jsonBrotli)
         XCTAssertTrue(matches, "fetch() did not transparently un-brotli a real Content-Encoding: br response to the original body")
     }
 
     private func compressedFetchMatchesOriginal(routePath: String, contentEncoding: String, compressed: Data) throws -> Bool {
-        try LiveChromiumEngineHost.runLive { () -> Bool in
+        try WebKitLiveEngineHost.runLive { () -> Bool in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-compression-test</body></html>"),
                 routePath: LiveHTTPTestServer.Route(
@@ -266,11 +255,11 @@ final class WebPlatformFormatsLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             let originalText = String(decoding: LiveMediaFixtures.jsonBody, as: UTF8.self)
                 .replacingOccurrences(of: "\\", with: "\\\\")

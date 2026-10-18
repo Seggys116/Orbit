@@ -51,42 +51,23 @@ final class ContentBlockingDeferredLoadCompositionGuardTests: XCTestCase {
         )
     }
 
-    // MARK: - The deferred load must exist, must wait on readiness, and must
-    // check it has not been superseded before firing.
+    // MARK: - The first navigation must not wait for content blocking.
 
-    func test_theDeferredLoadTaskAwaitsReadinessThenLoadsTheOriginalURL() throws {
+    func test_navigationIsNotHeldForContentBlocking() throws {
         let text = try text(at: appEnvironmentSourceURL())
-        XCTAssertTrue(
-            text.contains("if let contentBlockingReadiness {"),
-            "materializeWebContents must branch on whether content blocking handed back a readiness Task at all — a session on a backend without .contentBlocking, or a session already bound, gets nil and must not be made to wait on anything."
-        )
-        XCTAssertTrue(
+        XCTAssertFalse(
             text.contains("await contentBlockingReadiness.value"),
-            "the deferred Task must actually await the readiness Task's value — not merely check whether it exists — or the navigation is never really held back."
+            "materializeWebContents must not await content-blocking readiness before contents.load. A cold compile holds the main actor, so a timeout raced on that actor never fires and the first pages stay blank."
         )
+        XCTAssertFalse(
+            text.contains("if let contentBlockingReadiness"),
+            "There must not be a deferred-load branch that withholds the URL until the rule compile finishes."
+        )
+        let loadRange = try XCTUnwrap(text.range(of: "contents.load(url)"))
+        let adoptRange = try XCTUnwrap(text.range(of: "adoptWebContents(contents, for: tabID, url: url)"))
         XCTAssertTrue(
-            text.contains("contents.load(url)"),
-            "the deferred Task must eventually call load(url) with the ORIGINAL url materializeWebContents was asked to open — the whole point of withholding initialURL was to fetch this url once it is safe to."
-        )
-    }
-
-    func test_theDeferredLoadChecksItHasNotBeenSupersededBeforeFiring() throws {
-        let text = try text(at: appEnvironmentSourceURL())
-        XCTAssertTrue(
-            text.contains("let expectedGeneration = navigationGeneration[tabID, default: 0]"),
-            "the deferred load must capture the tab's navigation generation BEFORE it starts waiting, so there is something to compare against once the wait is over."
-        )
-        XCTAssertTrue(
-            text.contains("self.navigationGeneration[tabID, default: 0] == expectedGeneration else { return }"),
-            "the deferred load must refuse to fire when the tab's navigation generation has moved on since it was queued — otherwise a real navigation the user made while content blocking was still compiling is silently overwritten the moment readiness resolves."
-        )
-        let generationCheckRange = try XCTUnwrap(
-            text.range(of: "self.navigationGeneration[tabID, default: 0] == expectedGeneration else { return }")
-        )
-        let loadCallRange = try XCTUnwrap(text.range(of: "contents.load(url)"))
-        XCTAssertTrue(
-            generationCheckRange.lowerBound < loadCallRange.lowerBound,
-            "the generation check must appear BEFORE the deferred contents.load(url) call, not after — a guard that runs after the clobbering load has already fired is decorative."
+            adoptRange.upperBound < loadRange.lowerBound,
+            "The tab has to be registered before load(), and load() has to be the call that actually fetches the page."
         )
     }
 

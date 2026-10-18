@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import OSLog
 import Observation
+import WebKit
 
 @MainActor
 @Observable
@@ -217,7 +218,7 @@ final class AppEnvironment {
     /// request outstanding, so every abandonment path can call it blind.
     func resolveExtensionPermissionsConsent(for tabID: TabID, granted: Bool) {
         guard let request = pendingExtensionPermissionsConsent.removeValue(forKey: tabID) else { return }
-        OrbitChromiumBridge.shared.permissionsConsentResponse(requestID: request.requestID, approved: granted)
+        WebKitExtensionPermissionConsent.shared.answer(requestID: request.requestID, approved: granted)
     }
 
     /// The sheet's own way in: it knows the request it is showing, not the tab
@@ -397,8 +398,8 @@ final class AppEnvironment {
 
     // MARK: - Demo factory
 
-    // Scratch rooting here covers only the stores this type owns — it cannot
-    // cover Chromium's own state (cookies, cache, local storage). startEngineIfNeeded()
+    // Scratch rooting here covers only the stores this type owns. Cookies, cache,
+    // and local storage live in the WebKit data store. startEngineIfNeeded()
     // closes that half with an EngineStorage.isolated engine for any isDemo environment.
     private static func makeDemo() -> AppEnvironment {
         let scratchRoot = OrbitDataRoot.scratch(label: "Demo")
@@ -543,7 +544,7 @@ final class AppEnvironment {
     // MARK: - Engine lifecycle
 
     func startEngineIfNeeded() {
-        // Deliberately no guard !isDemo — the Orbit Demo app starts the real engine too. Started first on both paths, before anything can call materializeWebContents, giving the content-blocking cache parse a head start. Idempotent.
+        // Deliberately no guard !isDemo — the Orbit Demo app starts the real engine too. Queued first on both paths, before anything can call materializeWebContents, so the cache parse is already running when that function returns and waits on it. Idempotent. The head start disappears if materializeWebContents does unrelated synchronous work before returning.
         ContentBlockingRuntime.shared.beginInitialCacheLoad()
 
         // Recent Pages opens its own read-only connection, not historyStore's, so it must be pointed
@@ -564,7 +565,7 @@ final class AppEnvironment {
             // Borrowed: starting an engine is the provider's job alone; this
             // environment still owns materialising its own window's active tab.
             engineProvider.startEngineIfNeeded()
-            materializeActiveTabIfNeeded()
+            materializeWhenChromiumSiteDataIsReady()
             return
         }
         guard ownEngine == nil else { return }
@@ -572,11 +573,20 @@ final class AppEnvironment {
         // Store refuses installs. XCTest and the smoke probe both need this or they'd hit the real profile.
         let needsPrivateProfile = isDemo || DebugFlags.isRunningUnderTests || DebugFlags.isRunningSmokeProbe
         ownEngine = EngineFactory.makeEngine(storage: needsPrivateProfile ? .isolated : .persistent)
-        // Safe only after EngineFactory.makeEngine returns: it runs loadAndStart() through dlsym, and
-        // OrbitChromiumTabsBridge's init installs its delegate through that same table — see ChromiumTabsSetup.
-        ChromiumTabsSetup.installHandlerOnce
         startBackgroundTabRendererPolicy()
-        materializeActiveTabIfNeeded()
+        materializeWhenChromiumSiteDataIsReady()
+    }
+
+    /// The Chromium jar is copied before the first navigation, so the page that opens is already signed in.
+    private func materializeWhenChromiumSiteDataIsReady() {
+        guard let engine = engine as? WebKitEngine, engine.isMigratingChromiumSiteData else {
+            materializeActiveTabIfNeeded()
+            return
+        }
+        Task { @MainActor in
+            await engine.preparePersistentSiteData()
+            self.materializeActiveTabIfNeeded()
+        }
     }
 
     #if DEBUG
@@ -683,9 +693,7 @@ final class AppEnvironment {
 
     /// Sends Orbit's answer as chrome.privacy.services.searchSuggestEnabled's user value. An
     /// extension override still wins; the effective result comes back through applyEngineSearchSuggestPreference.
-    func pushSearchSuggestPreferenceToEngine() {
-        OrbitChromiumBridge.shared.setSearchSuggestEnabled(includesSearchSuggestions)
-    }
+    func pushSearchSuggestPreferenceToEngine() {}
 
     /// The effective value after an extension's types.ChromeSetting.set, written into the Profile —
     /// where this setting genuinely lives, so readers stay pure derivations with no engine dependency.
@@ -728,12 +736,12 @@ final class AppEnvironment {
             store.switchToSpace(id)
             // activeTabID is per Space, so the window is now showing a
             // different tab without any tab having been activated.
-            syncChromiumActiveTab()
+            syncExtensionActiveTab()
             return
         }
         guard store.space(id) != nil else { return }
         windowActiveSpaceID = id
-        syncChromiumActiveTab()
+        syncExtensionActiveTab()
     }
 
     func nextSpace() { stepSpace(offset: 1) }
@@ -829,9 +837,11 @@ final class AppEnvironment {
         let tabID = scopingActiveSpaceToThisWindow {
             store.openTab(url: url, in: spaceID, section: section, activate: activate)
         }
-        recordVisit(url: url, title: "", profileID: profileID(for: spaceID), spaceID: spaceID)
+        // History recording schedules its own task. Queuing it before materializeWebContents
+        // puts that task ahead of the deferred load, so the first navigation waits on a database write.
         materializeWebContents(for: tabID, url: url)
-        syncChromiumActiveTab()
+        recordVisit(url: url, title: "", profileID: profileID(for: spaceID), spaceID: spaceID)
+        syncExtensionActiveTab()
         return tabID
     }
 
@@ -839,19 +849,19 @@ final class AppEnvironment {
         guard let tab = store.tab(id) else { return }
         scopingActiveSpaceToThisWindow { store.selectTab(id) }
         materializeWebContents(for: id, url: tab.url)
-        syncChromiumActiveTab()
+        syncExtensionActiveTab()
         // Must move AppKit's real first responder, not just the visual highlight, guarded against the Command Bar/Find bar so a tab activation racing one of them never steals focus from a live text field.
         guard !isCommandBarPresented, !isFindBarPresented else { return }
         webContents[id]?.focus()
     }
 
-    func closeTab(_ id: TabID) {
+    func closeTab(_ id: TabID, destroyRenderer: Bool = true) {
         let spaceID = store.tab(id)?.spaceID
-        releaseWebContents(for: id)
+        releaseWebContents(for: id, destroyRenderer: destroyRenderer)
         PaneHeaderColorResolver.shared.forget(tab: id)
         store.closeTab(id)
         // BrowserStore's successor has no live renderer yet, so activateTab materialises it and pushes
-        // the activation through syncChromiumActiveTab — same as closeTabKeepingBookmark/removeBookmark.
+        // the activation through syncExtensionActiveTab — same as closeTabKeepingBookmark/removeBookmark.
         if let spaceID, let nowActive = store.activeTab(in: spaceID)?.id {
             if nowActive != id {
                 activateTab(nowActive)
@@ -860,18 +870,18 @@ final class AppEnvironment {
                 materializeWebContents(for: id, url: survivor.url)
             }
         }
-        syncChromiumActiveTab()
+        syncExtensionActiveTab()
     }
 
     // Every user-facing close verb funnels through here so a bookmarked tab closes by the same rule as the minus beside its row, rather than being silently unpinned.
-    func closeTabPreservingBookmark(_ id: TabID) {
-        guard store.tab(id)?.section == .pinned else { return closeTab(id) }
-        closeTabKeepingBookmark(id)
+    func closeTabPreservingBookmark(_ id: TabID, destroyRenderer: Bool = true) {
+        guard store.tab(id)?.section == .pinned else { return closeTab(id, destroyRenderer: destroyRenderer) }
+        closeTabKeepingBookmark(id, destroyRenderer: destroyRenderer)
     }
 
     func reopenLastClosedTab() {
         scopingActiveSpaceToThisWindow { store.reopenLastClosedTab() }
-        syncChromiumActiveTab()
+        syncExtensionActiveTab()
     }
 
     // MARK: - Bookmarked (pinned) rows that are also open tabs
@@ -883,16 +893,16 @@ final class AppEnvironment {
 
     // Order matters: a Split View pane is separated out first (closeSplitPane),
     // or it would be left rendering a torn-down WebContents as a blank rectangle.
-    func closeTabKeepingBookmark(_ id: TabID) {
+    func closeTabKeepingBookmark(_ id: TabID, destroyRenderer: Bool = true) {
         guard let tab = store.tab(id), tab.section == .pinned else { return }
         if splitGroup(for: id) != nil { closeSplitPane(id) }
-        releaseWebContents(for: id)
+        releaseWebContents(for: id, destroyRenderer: destroyRenderer)
         PaneHeaderColorResolver.shared.forget(tab: id)
         store.closeTabKeepingPin(id)
         if let nowActive = state.activeTabBySpace[tab.spaceID], nowActive != id {
             activateTab(nowActive)
         }
-        syncChromiumActiveTab()
+        syncExtensionActiveTab()
     }
 
     func removeBookmark(_ id: TabID) {
@@ -901,7 +911,7 @@ final class AppEnvironment {
         releaseWebContents(for: id)
         PaneHeaderColorResolver.shared.forget(tab: id)
         store.removeBookmark(id)
-        defer { syncChromiumActiveTab() }
+        defer { syncExtensionActiveTab() }
         if let nowActive = state.activeTabBySpace[tab.spaceID], nowActive != id {
             activateTab(nowActive)
         }
@@ -918,11 +928,11 @@ final class AppEnvironment {
     func pinTab(_ id: TabID) {
         let capture = livePinCapture(for: id)
         store.pin(id, capturedURL: capture.url, capturedTitle: capture.title)
-        pushChromiumTabPinnedChanged(id)
+        pushExtensionTabPinnedChanged(id)
     }
     func unpinTab(_ id: TabID) {
         store.unpin(id)
-        pushChromiumTabPinnedChanged(id)
+        pushExtensionTabPinnedChanged(id)
     }
 
     func togglePin(_ id: TabID) {
@@ -954,7 +964,7 @@ final class AppEnvironment {
         if let spaceID, let nowActive = store.activeTab(in: spaceID)?.id, nowActive != id {
             activateTab(nowActive)
         }
-        syncChromiumActiveTab()
+        syncExtensionActiveTab()
     }
 
     func restoreFromArchive(_ id: TabID, section: TabSection = .today) {
@@ -982,7 +992,7 @@ final class AppEnvironment {
 
     func moveTab(_ id: TabID, toSpace destinationSpaceID: SpaceID, section: TabSection = .today) {
         store.moveTab(id, toSpace: destinationSpaceID, section: section)
-        syncChromiumActiveTab()
+        syncExtensionActiveTab()
     }
 
     // MARK: - Favorites
@@ -1074,33 +1084,21 @@ final class AppEnvironment {
         // difference between a working browser and a blank window.
         let session: EngineSession
         let contents: WebContents
-        // Non-nil when ContentBlockingRuntime reports the session must wait on an uninstalled decider or uncompiled rule set; makeWebContents is then called with initialURL: nil, deferring the fetch until this resolves.
-        var contentBlockingReadiness: Task<Void, Never>?
         do {
             session = try engine.session(
                 identifier: profile.sessionIdentifier,
                 persistent: profile.isPersistent
             )
-            // Boosts before makeWebContents: the engine needs the compiled
-            // script in hand before the load starts.
-            BoostRuntime.shared.prepareSession(session, env: self)
-            // Bound at the same moment for the same reason — a session that
-            // gets its filter rules one navigation late serves that
-            // navigation's ads. No-op on a backend without .contentBlocking.
-            contentBlockingReadiness = ContentBlockingRuntime.shared.prepareSession(session, engine: engine)
-            // GitHub Live Folders: the one place a real EngineSession exists to read github.com cookies from; never reached for a non-persistent Profile or ephemeral Space, so Incognito can't hand it a session.
-            if profile.isPersistent, let space = state.spaces.first(where: { $0.id == spaceID }), !space.isEphemeral {
-                // Assigned here, not at the store's declaration: OrbitTests
-                // compiles the store through a symlink and doesn't build ChromiumVersion.swift.
-                GitHubLiveFolderStore.browserUserAgent = ChromiumBuild.userAgent
-                GitHubLiveFolderStore.shared.activate(space: space, session: session)
-                let spaceID = space.id
-                GitHubLiveFolderStore.shared.onAutoActivate = { [weak self] in
-                    self?.autoActivateGitHubLiveFolder(in: spaceID)
-                }
-            }
+            // Bound before the web view exists so the rule compile is already
+            // running. It must not gate load(): a cold compile keeps the main
+            // actor busy long enough that the timeout below never gets to
+            // fire, and the tab sits blank with its address already filled.
+            _ = ContentBlockingRuntime.shared.prepareSession(session, engine: engine)
             // Never initialURL: navigation must not start until adoptWebContents registers the tab, or
             // WillCreateURLLoaderFactory fires first and every webRequest event reports tabId -1, which extensions drop.
+            // The engine registers the tab inside makeWebContents, before this window is its delegate.
+            (engine as? WebKitEngine)?.registeringEnvironment = self
+            defer { (engine as? WebKitEngine)?.registeringEnvironment = nil }
             contents = try engine.makeWebContents(session: session, initialURL: nil)
         } catch {
             let engineError = error as? EngineError
@@ -1121,21 +1119,33 @@ final class AppEnvironment {
 
         adoptWebContents(contents, for: tabID, url: url)
 
-        // Deferred until content blocking is ready. `navigationGeneration` is captured before the wait and compared after: a mismatch means the user navigated meanwhile and that wins, otherwise this would snap the tab back to the original `url`.
-        if let contentBlockingReadiness {
-            let expectedGeneration = navigationGeneration[tabID, default: 0]
-            Task { @MainActor [weak self, weak contents] in
-                await contentBlockingReadiness.value
-                guard let contents, !contents.isClosed else { return }
-                guard let self, self.navigationGeneration[tabID, default: 0] == expectedGeneration else { return }
-                contents.load(url)
+        // Boosts reinstall onto a web view that already exists, so they do not have to
+        // finish before makeWebContents. They do have to finish before load(): the first
+        // document would otherwise start without them. Content blocking does not: its
+        // compile keeps running and applies to requests the page makes after the rules land.
+        BoostRuntime.shared.prepareSession(session, env: self)
+        contents.load(url)
+
+        // GitHub Live Folders only read this session's cookies and poll. They never
+        // touch the tab's request, so this must not sit in front of load(). Never
+        // reached for a non-persistent Profile or ephemeral Space, so Incognito
+        // can't hand it a session.
+        // browserUserAgent is assigned here, not at the store's declaration: OrbitTests
+        // compiles the store through a symlink and does not see EngineFactory.
+        if profile.isPersistent, let space = state.spaces.first(where: { $0.id == spaceID }), !space.isEphemeral {
+            let capturedSpace = space
+            Task { @MainActor in
+                GitHubLiveFolderStore.browserUserAgent = WebKitProduct.userAgent
+                GitHubLiveFolderStore.shared.activate(space: capturedSpace, session: session)
+                let capturedSpaceID = capturedSpace.id
+                GitHubLiveFolderStore.shared.onAutoActivate = { [weak self] in
+                    self?.autoActivateGitHubLiveFolder(in: capturedSpaceID)
+                }
             }
-        } else {
-            contents.load(url)
         }
     }
 
-    // Must go through this, not webContents[tabID]?.load(url) directly: bumping navigationGeneration here lets materializeWebContents's deferred content-blocking load detect it's been superseded.
+    // Must go through this, not webContents[tabID]?.load(url) directly: bumping navigationGeneration here lets a load that was queued before this one detect it has been superseded.
     // Also handles the no-renderer case, where a bare .load(url) would silently discard the navigation.
     func loadInTab(_ tabID: TabID, url: URL) {
         navigationGeneration[tabID, default: 0] += 1
@@ -1177,101 +1187,94 @@ final class AppEnvironment {
         // through, so no future call site can bring a tab back to life while leaving it flagged unloaded.
         store.setRendererLive(tabID, true)
         contents.setPreferredColorScheme(AppearanceSettings.shared.engineColorScheme)
+        if isCommandBarPresented {
+            (contents as? WebKitWebContents)?.setFocusSuppressed(true)
+        }
         // After adoption, never before, so the tab the user just asked for
         // is itself protected and can never be the one this frees.
         enforceLiveRendererBudget()
-        registerChromiumTab(tabID)
+        registerExtensionTab(tabID)
     }
 
     // MARK: - chrome.tabs / chrome.windows push
 
-    // What syncChromiumActiveTab last told OrbitTabRegistry, so a repeated
+    // What syncExtensionActiveTab last told OrbitTabRegistry, so a repeated
     // call is free and so the tab being deactivated can be named.
     private var lastPushedActiveTabID: TabID?
 
-    // No-op for a non-Chromium WebContents or an extension popup/options page, neither of which
-    // is adopted through this funnel. Module-internal: AppEnvironment+TearOff.swift reuses it too.
-    func registerChromiumTab(_ tabID: TabID) {
-        guard let contents = webContents[tabID] as? ChromiumWebContents else { return }
-        guard let tab = state.tabs[tabID] else { return }
-        let isActive = activeTabID == tabID
-        OrbitChromiumTabsBridge.shared.tabCreated(
-            tabUUID: tabID, handle: contents.chromiumHandle, windowOwner: self,
-            index: chromiumTabIndex(for: tab), active: isActive, pinned: tab.section == .pinned
-        )
-        // Not short-circuited for isActive: OnTabCreated fires no chrome.tabs.onActivated, which a
-        // foreground new tab owes its listeners. syncChromiumActiveTab is the one authority for that state.
-        syncChromiumActiveTab()
-        // The insert shifted every later sibling's position too.
-        pushChromiumTabIndexes()
+    // No-op unless this tab has a live WebKit web view. Module-internal: AppEnvironment+TearOff.swift reuses it too.
+    func registerExtensionTab(_ tabID: TabID) {
+        guard let contents = webContents[tabID] as? WebKitWebContents else { return }
+        let webKitEngine = self.engine as? WebKitEngine
+        webKitEngine?.bind(storeTabID: tabID, to: contents)
+        webKitEngine?.noteTabOpened(contents)
+        if activeTabID == tabID { webKitEngine?.noteActive(contents) }
+        syncExtensionActiveTab()
+        pushExtensionTabIndexes()
     }
 
     // Chrome guarantees pinned tabs lead the strip; Orbit flattens to each Space's pinned tree
     // then its Today list, in Space order. Tabs with no live renderer take up no index at all.
-    private func chromiumWindowTabOrder() -> [TabID] {
+    private func extensionWindowTabOrder() -> [TabID] {
         state.spaces.flatMap { pinnedNodes(in: $0.id).flatMap(\.allTabIDs) + $0.today }
     }
 
-    func chromiumTabIndex(for tabID: TabID) -> Int {
+    func extensionTabIndex(for tabID: TabID) -> Int {
         var index = 0
-        for candidate in chromiumWindowTabOrder() {
+        for candidate in extensionWindowTabOrder() {
             if candidate == tabID { return index }
-            if webContents[candidate] is ChromiumWebContents { index += 1 }
+            if webContents[candidate] is WebKitWebContents { index += 1 }
         }
         return index
     }
 
-    private func chromiumTabIndex(for tab: Tab) -> Int {
-        chromiumTabIndex(for: tab.id)
+    private func extensionTabIndex(for tab: Tab) -> Int {
+        extensionTabIndex(for: tab.id)
     }
 
     // Pushes every registered tab's position: Chrome fires no event for a tab merely displaced
     // by a sibling's insert/close/pin/move, though its index does change — without this it goes stale.
-    func pushChromiumTabIndexes() {
+    func pushExtensionTabIndexes() {
+        (engine as? WebKitEngine)?.noteTabLayoutChanged()
         var index = 0
-        for tabID in chromiumWindowTabOrder() {
-            guard webContents[tabID] is ChromiumWebContents else { continue }
-            OrbitChromiumTabsBridge.shared.tabIndexChanged(tabUUID: tabID, index: index)
+        for tabID in extensionWindowTabOrder() {
+            guard webContents[tabID] is WebKitWebContents else { continue }
             index += 1
         }
     }
 
     // The one place chrome.tabs is told the active tab — every path that changes it must call
     // this, not just openTab/activateTab, or extensions reading it get a wrong answer. Idempotent.
-    func syncChromiumActiveTab() {
+    func syncExtensionActiveTab() {
         let current = activeTabID
         guard current != lastPushedActiveTabID else { return }
         // A tab with no live renderer is not in OrbitTabRegistry, so it cannot
         // be named as active; nil deactivates instead, and it stays unrecorded
-        // so registerChromiumTab pushes it properly once it has one.
-        let live = current.flatMap { webContents[$0] is ChromiumWebContents ? $0 : nil }
+        // so registerExtensionTab pushes it properly once it has one.
+        let liveContents = current.flatMap { webContents[$0] as? WebKitWebContents }
         let previous = lastPushedActiveTabID
-        guard live != nil || previous != nil else { return }
-        lastPushedActiveTabID = live
-        OrbitChromiumTabsBridge.shared.activeTabChanged(
-            tabUUID: live, windowOwner: self, previousTabUUID: previous
-        )
+        guard liveContents != nil || previous != nil else { return }
+        lastPushedActiveTabID = liveContents == nil ? nil : current
+        if let liveContents { (engine as? WebKitEngine)?.noteActive(liveContents) }
     }
 
     // Module-internal, not private: AppEnvironment+SidebarTree.swift's own
     // pin/unpin(_:toParent:...) also need to push this.
-    func pushChromiumTabPinnedChanged(_ id: TabID) {
-        guard webContents[id] is ChromiumWebContents, let tab = state.tabs[id] else { return }
-        OrbitChromiumTabsBridge.shared.tabPinnedChanged(tabUUID: id, pinned: tab.section == .pinned)
+    func pushExtensionTabPinnedChanged(_ id: TabID) {
+        guard let contents = webContents[id] as? WebKitWebContents else { return }
+        (engine as? WebKitEngine)?.noteTabPropertiesChanged(contents, .pinned)
         // Pinning moves the tab between the two halves of the strip, so both
         // it and everything it stepped over has a new index.
-        pushChromiumTabIndexes()
+        pushExtensionTabIndexes()
     }
 
     // Called after a reorder has already happened; recomputes the tab's own
     // new index rather than trusting a caller-supplied one, since
     // store.reorderTab is free to clamp/adjust it.
-    func pushChromiumTabMoved(_ id: TabID, fromIndex: Int) {
-        guard webContents[id] is ChromiumWebContents, let tab = state.tabs[id] else { return }
-        let toIndex = chromiumTabIndex(for: tab)
-        guard toIndex != fromIndex else { return }
-        OrbitChromiumTabsBridge.shared.tabMoved(tabUUID: id, windowOwner: self, fromIndex: fromIndex, toIndex: toIndex)
-        pushChromiumTabIndexes()
+    func pushExtensionTabMoved(_ id: TabID, fromIndex: Int) {
+        guard let contents = webContents[id] as? WebKitWebContents else { return }
+        (engine as? WebKitEngine)?.noteTabMoved(contents, from: fromIndex)
+        pushExtensionTabIndexes()
     }
 
     // MARK: - Extension-adopted tabs
@@ -1280,19 +1283,9 @@ final class AppEnvironment {
     // Wraps it through the same funnel as any tab; nil means declined, and the caller must destroy handle.
     @discardableResult
     func adoptExtensionTab(handle: UnsafeMutableRawPointer, url: URL, active: Bool) -> TabID? {
-        guard let spaceID = activeSpace?.id, let engine else { return nil }
-        guard let contents = try? ChromiumWebContents(adopting: handle, session: engine.defaultSession) else {
-            return nil
-        }
-        let tabID = scopingActiveSpaceToThisWindow {
-            store.openTab(url: url, in: spaceID, section: .today, activate: active)
-        }
-        adoptWebContents(contents, for: tabID, url: url)
-        if active {
-            webContents[tabID]?.focus()
-        }
-        recordVisit(url: url, title: "", profileID: profileID(for: spaceID), spaceID: spaceID)
-        return tabID
+        guard let spaceID = activeSpace?.id else { return nil }
+        let contents = Unmanaged<WebKitWebContents>.fromOpaque(handle).takeUnretainedValue()
+        return adoptPageCreatedTab(contents, url: url, in: spaceID, activate: active)
     }
 
     // MARK: - Page-created windows
@@ -1309,7 +1302,7 @@ final class AppEnvironment {
             webContents[tabID]?.focus()
         }
         recordVisit(url: url, title: "", profileID: profileID(for: spaceID), spaceID: spaceID)
-        syncChromiumActiveTab()
+        syncExtensionActiveTab()
         return tabID
     }
 
@@ -1349,7 +1342,7 @@ final class AppEnvironment {
     // windowClosing threads through to tabRemoved's own OrbitTabsRemoved
     // push -- true only from disposeWindowSession()'s per-tab loop, when the
     // whole window this tab lives in is going away, not merely this one tab.
-    func releaseWebContents(for tabID: TabID, windowClosing: Bool = false) {
+    func releaseWebContents(for tabID: TabID, windowClosing: Bool = false, destroyRenderer: Bool = true) {
         // Resumed, never dropped: abandoning strands the task forever. The engine refuses its own half
         // regardless (~OrbitWebContentsHost); must run before .close(), while the decision still belongs to a live tab.
         certificateProblems.removeValue(forKey: tabID)
@@ -1361,16 +1354,25 @@ final class AppEnvironment {
         resolveExtensionPermissionsConsent(for: tabID, granted: false)
         // Must run before .close() destroys the native WebContents: OrbitTabRegistry's contract
         // (orbit_tab_registry.h's OrbitTabInfo) requires OrbitTabsRemoved first, or its raw_ptr dangles.
-        let wasRegistered = webContents[tabID] is ChromiumWebContents
-        if wasRegistered {
-            OrbitChromiumTabsBridge.shared.tabRemoved(tabUUID: tabID, windowClosing: windowClosing)
+        let wasRegistered = webContents[tabID] is WebKitWebContents
+        if windowClosing, let contents = webContents[tabID] as? WebKitWebContents {
+            (engine as? WebKitEngine)?.noteTabWillCloseWithWindow(contents)
         }
-        webContents[tabID]?.close()
+        if destroyRenderer {
+            webContents[tabID]?.close()
+        } else if let contents = webContents[tabID] as? WebKitWebContents {
+            // chrome.tabs.remove is still on WebKit's stack. Destroying the WKWebView here
+            // deallocates it (idle -> failed(deinit)) and takes the web process with it.
+            // Drop it from the extension's tab list now; the view itself goes later.
+            (engine as? WebKitEngine)?.noteTabClosed(contents)
+        } else {
+            webContents[tabID]?.close()
+        }
         webContents.removeValue(forKey: tabID)
         // After the removal, so the closing tab no longer takes an index off
         // everything that followed it in the strip.
         if wasRegistered {
-            pushChromiumTabIndexes()
+            pushExtensionTabIndexes()
         }
         // An exemption that outlived its WebContents would keep a tab out of
         // the auto-archive sweep forever, so it's cleared at this single funnel.
@@ -1568,7 +1570,7 @@ final class AppEnvironment {
 
     // MARK: - History
 
-    var chromiumHistoryStore: HistoryStore? { historyStore }
+    var browserHistory: HistoryStore? { historyStore }
 
     func recordVisit(url: URL, title: String, profileID: ProfileID, spaceID: SpaceID? = nil, wasTyped: Bool = false) {
         Task {
@@ -1591,7 +1593,7 @@ final class AppEnvironment {
         let recorded = (try? await historyStore.record(visit: visit)) != nil
         await refreshHistoryCache()
         guard recorded, let row = try? await historyStore.urlRow(forURL: url) else { return nil }
-        OrbitChromiumHistoryBridge.shared.notifyVisited(row)
+        ChromeExtensionAPI.postVisited(row)
         return row
     }
 
@@ -1616,6 +1618,7 @@ final class AppEnvironment {
         localHistoryCache = []
         historySearchQuery = ""
         historySearchResults = []
+        ChromeExtensionAPI.postVisitsRemoved(allHistory: true, urls: [])
         return true
     }
 

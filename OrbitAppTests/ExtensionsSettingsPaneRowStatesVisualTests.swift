@@ -164,7 +164,7 @@ final class ExtensionsSettingsPaneRowStatesVisualTests: XCTestCase {
         )
         XCTAssertTrue(
             Self.rendersDiffer(neutral, failed, size: size),
-            "Chromium's own load failure (lastError set) rendered identically to the plain 'not running yet' message — the banner is not showing the real error."
+            "WebKit's own load failure (lastError set) rendered identically to the plain 'not running yet' message — the banner is not showing the real error."
         )
     }
 
@@ -190,7 +190,7 @@ final class ExtensionsSettingsPaneRowStatesVisualTests: XCTestCase {
         let emptyList = render(Self.installedSection(extensions: []), size: size, appearance: .darkAqua)
         XCTAssertTrue(
             Self.rendersDiffer(notice, emptyList, size: size),
-            "\"Chromium isn't running yet\" rendered identically to \"No extensions installed.\" — the two states must not be confusable, since only one of them means the user has nothing installed."
+            "\"WebKit isn't running yet\" rendered identically to \"No extensions installed.\" — the two states must not be confusable, since only one of them means the user has nothing installed."
         )
     }
 

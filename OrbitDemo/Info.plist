@@ -12,30 +12,16 @@
 	file exists for the keys `INFOPLIST_KEY_*` cannot express, and for one
 	class of key that is not cosmetic at all.
 
-	## Why the demo needs a real Info.plist now
+	## Why the demo needs a real Info.plist
 
-	The demo used to run the WebKit backend and carried no Info.plist of its
-	own; `Orbit/Resources/Info.plist` was copied into it as an ordinary
-	resource, which lands at `Contents/Resources/Info.plist` and is read by
-	nothing. That was survivable only because the engine it ran was not the
-	one Orbit ships.
-
-	The demo now embeds and runs the same Chromium the `Orbit` target does,
-	which brings the same TCC surface with it, and TCC's contract is the one
-	`Orbit/Resources/Info.plist` documents at length: a process that touches
-	a protected resource with **no usage description for it** is not denied,
-	it is **terminated**. Web Bluetooth is the clearest case, because it is
-	reachable in the demo through the framework alone with no Orbit code
-	involved — the pinned distribution links CoreBluetooth and carries the
-	API (measured in `Orbit/Resources/Info.plist`'s own comment: `otool -L`
-	shows CoreBluetooth.framework and IOBluetooth.framework, and `strings`
-	matches `navigator.bluetooth` 30 times). A demo that dies the first time
-	a page calls one of these APIs is worse than a demo that cannot browse.
-
-	The strings below are copied verbatim from `Orbit/Resources/Info.plist`,
-	because they describe the same behaviour in the same product; that file
-	is where the argument for each one is written down and is the place to
-	change the wording.
+	The demo runs the same WKWebView engine as the `Orbit` target, so it
+	reaches the same TCC surface: a process that touches a protected
+	resource (camera, microphone, location, Downloads) with **no usage
+	description for it** is not denied, it is **terminated**. The strings
+	below are copied verbatim from `Orbit/Resources/Info.plist`, because they
+	describe the same behaviour in the same product; that file is where the
+	argument for each one is written down and is the place to change the
+	wording.
 
 	## Why this is a separate file rather than pointing `INFOPLIST_FILE` at
 	## the app's
@@ -93,8 +79,7 @@
 	</array>
 	<!--
 	TCC usage descriptions. Every one of these is reachable from the demo,
-	because the demo runs the same engine as the app; see the header above
-	for what happens without them. Kept in the same order as
+	because the demo runs the same engine as the app; see the header above. Kept in the same order as
 	`Orbit/Resources/Info.plist` so the two files diff cleanly.
 	-->
 	<key>NSCalendarsFullAccessUsageDescription</key>

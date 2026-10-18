@@ -481,7 +481,7 @@ private final class RecordingEngineSession: EngineSession {
 /// process a real one needs.
 @MainActor
 private final class StubEngineForOnboardingImportTests: BrowserEngine {
-    static let kind: EngineKind = .chromium
+    static let kind: EngineKind = .webkit
     let capabilities: EngineCapabilities = []
     let manageableContentSettings: Set<PermissionKind> = []
     let extensionActivation: ExtensionActivation = .immediate

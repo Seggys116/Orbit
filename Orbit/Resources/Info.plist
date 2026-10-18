@@ -107,10 +107,9 @@
 	<string>A website you open can ask where you are — a map or a store locator, say. Orbit always asks you before telling one, and remembers your answer for that site.</string>
 	<!--
 	Web Bluetooth: a page calling `navigator.bluetooth.requestDevice()`.
-	Not reached through Orbit's own permission bridge — the browser engine
-	can expose this capability on its own, so the key stays declared even
-	though no Orbit Swift code asks for it. Without it, the first page to
-	call that API terminates Orbit, the same crash class as the keys above.
+	No Orbit Swift code asks for it and WKWebView does not expose the API
+	today; the key stays so that a WebKit change cannot turn the first call
+	into the same crash class as the keys above.
 	-->
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>A website you open can ask to talk to a nearby Bluetooth device — a fitness tracker or a games controller, say. Orbit always asks you before letting one, and remembers your answer for that site.</string>
@@ -223,12 +222,10 @@
 
 	Left unset, Sparkle asks the user on second launch whether it may check
 	automatically. Orbit answers that question for them, which is a real
-	decision and not a default worth inheriting: Orbit is a browser, the
-	thing it is a wrapper around is Chromium, and Chromium's security fixes
-	are the reason to run a current one. An Orbit that is a version behind
-	is a Chromium that is a version behind, on the process that parses
-	whatever the web hands it. A browser that has to be asked for permission
-	to notice that is the wrong shape.
+	decision and not a default worth inheriting: Orbit is a browser, and its
+	own code (extension runtime, importers, content blocking) handles whatever
+	the web hands it. A browser that has to be asked for permission to notice
+	a security fix is the wrong shape.
 
 	This sets the default, not a lock. Sparkle resolves the same key out of
 	the app's user defaults before falling back to this file, so a Settings
@@ -246,9 +243,8 @@
 
 	Sparkle only checks while the app is running, and a browser is the
 	application most likely to be left open for days at a time. On the
-	default interval, a Chromium respin published to fix an actively
-	exploited bug could sit unnoticed for the better part of a day by a user
-	who never quits Orbit. Six hours bounds that. The cost is four
+	default interval, a security fix could sit unnoticed for the better part
+	of a day by a user who never quits Orbit. Six hours bounds that. The cost is four
 	conditional GETs a day against a static file on GitHub's CDN, which is
 	not a cost.
 

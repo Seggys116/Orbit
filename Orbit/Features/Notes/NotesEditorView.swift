@@ -8,7 +8,6 @@ struct NotesEditorView: View {
     @State private var title: String = ""
     @State private var attributedText = NSAttributedString(string: "")
     @State private var controller = RichTextController()
-    @State private var saveTask: Task<Void, Never>?
     @State private var showLinkPrompt = false
     @State private var linkURLString = ""
     @State private var saveStatusLabel = "Saved"
@@ -20,16 +19,8 @@ struct NotesEditorView: View {
     // so the load's own title assignment doesn't get mistaken for a keystroke and re-saved as a rename.
     @State private var loadedTitle: String = ""
 
-    // Captured by value at edit time — never re-read from @State after the debounce, when noteID/attributedText may have moved on.
-    @State private var pendingSave: PendingSave?
-
     // A fresh UUID, not noteID, so registration can't collide with another open note tab's own.
     @State private var flushRegistryToken = UUID()
-
-    private struct PendingSave {
-        let noteID: UUID
-        let attributedString: NSAttributedString
-    }
 
     #if DEBUG
     nonisolated(unsafe) static var controllerObserverForTests: ((RichTextController) -> Void)?
@@ -127,8 +118,7 @@ struct NotesEditorView: View {
 
         // controller.onChange -> this closure -> captured self -> _controller's storage -> controller is a
         // real reference cycle (RichTextController is a class, can't weak-capture value-type self); tearDown() breaks it.
-        controller.onChange = { newValue in
-            attributedText = newValue
+        controller.onChange = {
             scheduleSave(for: id)
         }
         #if DEBUG
@@ -140,11 +130,13 @@ struct NotesEditorView: View {
             title = ""
             loadedTitle = ""
             attributedText = NSAttributedString(string: "")
+            controller.documentGeneration &+= 1
             return
         }
         title = note.title
         loadedTitle = note.title
         attributedText = NotesEditorView.decode(note.bodyData) ?? NSAttributedString(string: "")
+        controller.documentGeneration &+= 1
         loadedNoteID = id
     }
 
@@ -153,10 +145,15 @@ struct NotesEditorView: View {
         // previous note, so a keystroke in that single-cycle window is dropped rather than saved to the wrong note.
         guard loadedNoteID == id else { return }
 
-        pendingSave = PendingSave(noteID: id, attributedString: attributedText)
-        saveStatusLabel = "Saving…"
-        saveTask?.cancel()
-        saveTask = Task {
+        // The body stays in the text view until flush. Copying it into @State here retained a second
+        // document on every keystroke and forced a SwiftUI update that re-laid-out the whole note.
+        controller.pendingNoteID = id
+        controller.detachedBody = nil
+        if saveStatusLabel != "Saving…" {
+            saveStatusLabel = "Saving…"
+        }
+        controller.saveTask?.cancel()
+        controller.saveTask = Task {
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
             await MainActor.run { flushPendingSaveIfNeeded() }
@@ -165,13 +162,18 @@ struct NotesEditorView: View {
 
     // Called from the debounce timer, load(for:) (before switching notes), tearDown(), and
     // DocumentEditorFlushRegistry's app-termination flush — the one case .onDisappear can't guarantee.
+    // load(for:) calls this before replacing the text view, so the live storage is still the note
+    // pendingNoteID names. detachedBody covers a flush that lands after the view has been dismantled.
     private func flushPendingSaveIfNeeded() {
-        saveTask?.cancel()
-        saveTask = nil
-        guard let pending = pendingSave else { return }
-        pendingSave = nil
-        if let data = NotesEditorView.encode(pending.attributedString) {
-            env.noteStore.setBody(data, forNote: pending.noteID)
+        controller.saveTask?.cancel()
+        controller.saveTask = nil
+        guard let noteID = controller.pendingNoteID else { return }
+        let body = controller.textView?.attributedString() ?? controller.detachedBody
+        guard let body else { return }
+        controller.pendingNoteID = nil
+        controller.detachedBody = nil
+        if let data = NotesEditorView.encode(body) {
+            env.noteStore.setBody(data, forNote: noteID)
         }
         saveStatusLabel = "Saved"
     }

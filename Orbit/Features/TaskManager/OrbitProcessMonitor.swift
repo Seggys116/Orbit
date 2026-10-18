@@ -5,38 +5,37 @@ import Foundation
 
 nonisolated struct OrbitProcessInfo: Identifiable, Equatable, Sendable {
 
-    // Derived from the executable's file name: Chromium's helper bundles are named for their role
-    // (Orbit Helper (Renderer)/(GPU)/(Plugin)/(Alerts)), so no --type= probe or extra privilege is needed.
+    // WebKit's services (WebContent, Networking, GPU) are launched by launchd, not as children of
+    // Orbit, so their roles come from WebKitProcessAttribution; the name is the fallback for children.
     enum Role: String, Sendable, CaseIterable {
         case browser
-        case renderer
+        case webContent
+        case extensionProcess
+        case networking
         case gpu
-        case plugin
-        case alerts
         case helper
         case other
 
         var displayName: String {
             switch self {
             case .browser: return "Orbit"
-            case .renderer: return "Web Page"
+            case .webContent: return "Web Page"
+            case .extensionProcess: return "Extension"
+            case .networking: return "Network Service"
             case .gpu: return "GPU Process"
-            case .plugin: return "Plugin Process"
-            case .alerts: return "Notifications"
             case .helper: return "Utility"
             case .other: return "Subprocess"
             }
         }
 
-        // Substring, case-insensitive: the bundle name carries the app name as a prefix,
-        // which a product rename would change while the parenthesised role would not.
+        // Substring, case-insensitive: Apple's service names are reverse-DNS
+        // (com.apple.WebKit.WebContent) and variants append a suffix.
         static func forExecutableName(_ name: String, isBrowserProcess: Bool) -> Role {
             if isBrowserProcess { return .browser }
             let lowered = name.lowercased()
-            if lowered.contains("(renderer)") { return .renderer }
-            if lowered.contains("(gpu)") { return .gpu }
-            if lowered.contains("(plugin)") { return .plugin }
-            if lowered.contains("(alerts)") { return .alerts }
+            if lowered.contains("webkit.webcontent") { return .webContent }
+            if lowered.contains("webkit.networking") { return .networking }
+            if lowered.contains("webkit.gpu") { return .gpu }
             if lowered.contains("helper") { return .helper }
             return .other
         }
@@ -52,6 +51,10 @@ nonisolated struct OrbitProcessInfo: Identifiable, Equatable, Sendable {
     // Absolute lifetime CPU time, user + system; only meaningful as a delta between two samples.
     var cpuTimeNanoseconds: UInt64
     var cpuPercent: Double
+    // Titles of the open tabs a WebContent process is rendering; empty for every other role.
+    var tabTitles: [String] = []
+    // Names of the extensions whose pages this process hosts; empty for every other role.
+    var extensionNames: [String] = []
 
     var isBrowserProcess: Bool { role == .browser }
 }
@@ -74,33 +77,46 @@ nonisolated struct OrbitProcessMonitor {
         var baseline: Baseline
     }
 
-    static func sample(against baseline: Baseline = .none) -> Sample {
+    static func sample(
+        against baseline: Baseline = .none,
+        attribution: WebKitProcessAttribution = .none
+    ) -> Sample {
         let now = DispatchTime.now().uptimeNanoseconds
         let elapsed = baseline.isEmpty ? 0 : now &- baseline.wallClockNanoseconds
+        let identifiers = processIdentifiers(attribution: attribution)
 
         var rows: [OrbitProcessInfo] = []
         var cpuTimes: [pid_t: UInt64] = [:]
+        rows.reserveCapacity(identifiers.count)
+        cpuTimes.reserveCapacity(identifiers.count)
+        // One path buffer for the whole sample. proc_pidpath null-terminates, so the next pid
+        // overwrites the previous path instead of allocating another 4KB buffer.
+        var pathBuffer = [CChar](repeating: 0, count: pathBufferCount)
 
-        for pid in processIdentifiers() {
+        for pid in identifiers {
             guard let usage = resourceUsage(of: pid) else { continue }
             let cpuTime = usage.userTimeNanoseconds &+ usage.systemTimeNanoseconds
             cpuTimes[pid] = cpuTime
 
             let isBrowser = pid == getpid()
-            let name = executableName(of: pid) ?? (isBrowser ? ProcessInfo.processInfo.processName : "Process \(pid)")
+            let name = executableName(of: pid, pathBuffer: &pathBuffer)
+                ?? (isBrowser ? ProcessInfo.processInfo.processName : "Process \(pid)")
 
             rows.append(
                 OrbitProcessInfo(
                     processID: pid,
                     executableName: name,
-                    role: OrbitProcessInfo.Role.forExecutableName(name, isBrowserProcess: isBrowser),
+                    role: attribution.roles[pid]
+                        ?? OrbitProcessInfo.Role.forExecutableName(name, isBrowserProcess: isBrowser),
                     memoryFootprintBytes: usage.physicalFootprintBytes,
                     cpuTimeNanoseconds: cpuTime,
                     cpuPercent: cpuPercent(
                         previousCPUTime: baseline.cpuTimeByProcessID[pid],
                         currentCPUTime: cpuTime,
                         elapsedNanoseconds: elapsed
-                    )
+                    ),
+                    tabTitles: attribution.tabTitles[pid] ?? [],
+                    extensionNames: attribution.extensionNames[pid] ?? []
                 )
             )
         }
@@ -141,26 +157,45 @@ nonisolated struct OrbitProcessMonitor {
         case notAnOrbitProcess
     }
 
-    static func refusalForEndingProcess(_ processID: pid_t) -> EndProcessRefusal? {
+    static func refusalForEndingProcess(
+        _ processID: pid_t,
+        attribution: WebKitProcessAttribution = .none
+    ) -> EndProcessRefusal? {
         if processID == getpid() { return .isBrowserProcess }
-        guard processIdentifiers().contains(processID) else { return .notAnOrbitProcess }
+        guard processIdentifiers(attribution: attribution).contains(processID) else { return .notAnOrbitProcess }
         return nil
     }
 
     // SIGKILL, not SIGTERM: the button exists for a task that already ignores polite signals.
     // The engine reports the death through webContentsDidCrash, which becomes the crashed-tab card.
     @discardableResult
-    static func endProcess(_ processID: pid_t) -> EndProcessRefusal? {
-        if let refusal = refusalForEndingProcess(processID) { return refusal }
+    static func endProcess(
+        _ processID: pid_t,
+        attribution: WebKitProcessAttribution = .none
+    ) -> EndProcessRefusal? {
+        if let refusal = refusalForEndingProcess(processID, attribution: attribution) { return refusal }
         guard kill(processID, SIGKILL) == 0 else { return .notAnOrbitProcess }
         return nil
     }
 
     // MARK: - libproc
 
-    // One level deep on purpose: descending further would sweep in whatever a page spawned
-    // (a downloaded installer the user ran) and offer to kill it under Orbit's name.
-    static func processIdentifiers() -> [pid_t] {
+    // Children are one level deep on purpose: descending further would sweep in whatever a page
+    // spawned (a downloaded installer the user ran) and offer to kill it under Orbit's name.
+    // WebKit's services are not children, so only the pids Orbit's own web views report are added.
+    static func processIdentifiers(attribution: WebKitProcessAttribution = .none) -> [pid_t] {
+        var identifiers = childProcessIdentifiers()
+        let attributed = attribution.processIdentifiers
+        if attributed.isEmpty { return identifiers }
+        // Children stay in proc_listpids order; attributed services follow, sorted, once each.
+        var seen = Set(identifiers)
+        for pid in attributed where seen.insert(pid).inserted {
+            identifiers.append(pid)
+        }
+        return identifiers
+    }
+
+    private static func childProcessIdentifiers() -> [pid_t] {
         let parent = getpid()
         var identifiers: [pid_t] = [parent]
 
@@ -204,12 +239,23 @@ nonisolated struct OrbitProcessMonitor {
         )
     }
 
-    // proc_pidpath, not proc_name, which truncates to shorter than "Orbit Helper (Renderer)".
-    private static func executableName(of processID: pid_t) -> String? {
-        var buffer = [CChar](repeating: 0, count: 4 * Int(PATH_MAX)) // PROC_PIDPATHINFO_MAXSIZE, not imported by Swift
-        let length = proc_pidpath(processID, &buffer, UInt32(buffer.count))
+    // PROC_PIDPATHINFO_MAXSIZE, not imported by Swift.
+    private static let pathBufferCount = 4 * Int(PATH_MAX)
+
+    // proc_pidpath, not proc_name, which truncates to shorter than "com.apple.WebKit.WebContent".
+    private static func executableName(of processID: pid_t, pathBuffer: inout [CChar]) -> String? {
+        let length = pathBuffer.withUnsafeMutableBufferPointer { buffer -> Int32 in
+            guard let baseAddress = buffer.baseAddress else { return 0 }
+            return proc_pidpath(processID, baseAddress, UInt32(buffer.count))
+        }
         guard length > 0 else { return nil }
-        let path = String(cString: buffer)
+        // proc_pidpath null-terminates, but a reused buffer must not keep the previous path's tail
+        // if a future OS reports the length without writing that null.
+        pathBuffer[min(Int(length), pathBuffer.count - 1)] = 0
+        let path = pathBuffer.withUnsafeBufferPointer { buffer -> String in
+            guard let baseAddress = buffer.baseAddress else { return "" }
+            return String(cString: baseAddress)
+        }
         guard !path.isEmpty else { return nil }
         return (path as NSString).lastPathComponent
     }
@@ -220,12 +266,20 @@ nonisolated struct OrbitProcessMonitor {
 extension OrbitProcessInfo {
 
     // .memory style: the same units Activity Monitor uses for this quantity.
+    // One formatter for every row. Building a ByteCountFormatter per body pass dominates
+    // the cost of drawing the table, and the units do not change between rows.
+    @MainActor
     var memoryFootprintText: String {
+        Self.memoryFormatter.string(fromByteCount: Int64(clamping: memoryFootprintBytes))
+    }
+
+    @MainActor
+    private static let memoryFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .memory
         formatter.allowedUnits = [.useMB, .useGB]
-        return formatter.string(fromByteCount: Int64(clamping: memoryFootprintBytes))
-    }
+        return formatter
+    }()
 
     var cpuPercentText: String {
         String(format: "%.1f%%", cpuPercent)

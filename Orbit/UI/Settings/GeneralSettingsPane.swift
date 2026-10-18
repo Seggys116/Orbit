@@ -55,13 +55,10 @@ struct GeneralSettingsPane: View {
                     }
                 } trailing: { EmptyView() }
                 OrbitSettingsValueRow(title: "Engine") {
-                    Text(ChromiumBuild.engineDescription).foregroundStyle(.secondary)
+                    Text(WebKitProduct.versionDescription).foregroundStyle(.secondary)
                 }
-                OrbitSettingsValueRow(title: "Chromium") {
-                    Text("\(ChromiumBuild.version) · \(ChromiumBuild.channel)").foregroundStyle(.secondary)
-                }
-                OrbitSettingsValueRow(title: "Pinned") {
-                    Text(ChromiumBuild.pinnedAt).foregroundStyle(.secondary)
+                OrbitSettingsValueRow(title: "WebKit") {
+                    Text(WebKitProduct.version).foregroundStyle(.secondary)
                 }
                 OrbitSettingsValueRow(title: "Copyright") {
                     Text(copyrightDescription).foregroundStyle(.secondary)

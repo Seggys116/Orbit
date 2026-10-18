@@ -463,7 +463,7 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
         )
         defer { window.orderOut(nil) }
         guard settleFrameUntilStable(window, of: engine) else {
-            throw XCTSkip("The engine view's frame never stabilized within the settle budget.")
+            throw TestStopped("The engine view's frame never stabilized within the settle budget.")
         }
         let points: [(String, NSPoint)] = [
             ("centre", NSPoint(x: 450, y: 350)),
@@ -602,7 +602,7 @@ final class PageClipShapeHitTestEvidenceTests: XCTestCase {
             ("lower-right quadrant", NSPoint(x: 700, y: 150)),
         ]
         guard settleFrameUntilStable(window, of: engine, timeout: 8) else {
-            throw XCTSkip("The engine view's frame never stabilized within the settle budget.")
+            throw TestStopped("The engine view's frame never stabilized within the settle budget.")
         }
         window.contentView?.displayIfNeeded()
 

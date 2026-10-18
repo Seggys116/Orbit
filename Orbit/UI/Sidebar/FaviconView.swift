@@ -18,9 +18,22 @@ struct FaviconView: View {
     var url: URL?
     var host: String
 
-    @Environment(\.faviconCache) private var faviconCache
+    var body: some View {
+        ResolvedFaviconView(url: url, host: host)
+            .equatable()
+    }
+}
 
+private struct ResolvedFaviconView: View, Equatable {
+    var url: URL?
+    var host: String
+
+    @Environment(\.faviconCache) private var faviconCache
     @State private var image: NSImage?
+
+    static func == (lhs: ResolvedFaviconView, rhs: ResolvedFaviconView) -> Bool {
+        lhs.url == rhs.url && lhs.host == rhs.host
+    }
 
     var body: some View {
         Group {
@@ -35,11 +48,28 @@ struct FaviconView: View {
         }
         .task(id: FaviconRequestKey(url: url, host: host)) {
             if let cached = faviconCache.cachedImage(forHost: host) {
-                image = cached
+                assign(PreparedFavicon.prepare(cached))
                 return
             }
-            image = await faviconCache.image(for: url, host: host)
+            assign(PreparedFavicon.prepare(await faviconCache.image(for: url, host: host)))
         }
+    }
+
+    private func assign(_ resolved: NSImage) {
+        if image !== resolved {
+            image = resolved
+        }
+    }
+}
+
+// The default cache mode is allowed to drop a file-backed bitmap, so the next
+// draw decodes the file again. Keep the decoded representation for the life of this image.
+private enum PreparedFavicon {
+    static func prepare(_ image: NSImage) -> NSImage {
+        if image.cacheMode != .always {
+            image.cacheMode = .always
+        }
+        return image
     }
 }
 

@@ -120,11 +120,6 @@ public final class ExtensionStore {
         )
 
         let destination = root.appendingPathComponent(directoryName, isDirectory: true)
-        // A comma here would corrupt --load-extension; must not be weakened.
-        guard !destination.path.contains(",") else {
-            throw ExtensionStoreError.pathContainsComma(destination)
-        }
-
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
         }
@@ -215,7 +210,6 @@ public final class ExtensionStore {
         records
             .filter(\.isEnabled)
             .map { (id: $0.id, directory: directory(of: $0)) }
-            .filter { !$0.directory.path.contains(",") }
     }
 
     public func markActivated(ids: [String]) {
@@ -327,7 +321,6 @@ public enum ExtensionStoreError: LocalizedError, Equatable {
     case manifestUnreadable(URL, String)
     case manifestInvalid(URL, String)
     case notInstalled(String)
-    case pathContainsComma(URL)
 
     public var errorDescription: String? {
         switch self {
@@ -339,8 +332,6 @@ public enum ExtensionStoreError: LocalizedError, Equatable {
             return "manifest.json at \(url.path) is not a valid Chrome extension manifest: \(reason)"
         case .notInstalled(let id):
             return "No extension with id \"\(id)\" is installed."
-        case .pathContainsComma(let url):
-            return "\(url.path) contains a comma, which would corrupt Chromium's --load-extension switch."
         }
     }
 }

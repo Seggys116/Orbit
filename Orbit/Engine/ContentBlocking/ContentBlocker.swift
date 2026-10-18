@@ -9,6 +9,7 @@ nonisolated public final class ContentBlocker: NSObject, @unchecked Sendable {
     private var allowlist: Set<String> = []
     private var blockedCount: UInt64 = 0
     private var perHostBlockedCount: [String: UInt64] = [:]
+    private var report = ContentBlockingEngineReport()
 
     public override init() {
         super.init()
@@ -64,6 +65,21 @@ nonisolated public final class ContentBlocker: NSObject, @unchecked Sendable {
         return hosts.contains { ContentBlockingURL.host(host, matchesDomain: $0) }
     }
 
+    // MARK: - Engine report
+
+    public var engineReport: ContentBlockingEngineReport {
+        lock.lock()
+        defer { lock.unlock() }
+        return report
+    }
+
+    public func setEngineReport(_ newValue: ContentBlockingEngineReport) {
+        lock.lock()
+        report = newValue
+        lock.unlock()
+        NotificationCenter.default.post(name: .contentBlockingEngineReportDidChange, object: self)
+    }
+
     // MARK: - Counters
 
     public var blockedRequestCount: UInt64 {
@@ -76,6 +92,16 @@ nonisolated public final class ContentBlocker: NSObject, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return perHostBlockedCount[host.lowercased()] ?? 0
+    }
+
+    // For engines that learn of a blocked request from the platform instead of calling decision().
+    public func recordBlockedRequest(documentHost: String?) {
+        lock.lock()
+        blockedCount &+= 1
+        if let documentHost {
+            perHostBlockedCount[documentHost.lowercased(), default: 0] &+= 1
+        }
+        lock.unlock()
     }
 
     public func resetCounters() {

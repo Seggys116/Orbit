@@ -164,6 +164,46 @@ final class PageFocusAfterTabSwitchTests: XCTestCase {
         )
     }
 
+    func testSidebarActivationDismissesTheCommandBarAndThenFocuses() {
+        let (tabID, page) = makeTabWithPage("from-sidebar")
+        env.isCommandBarPresented = true
+
+        env.activateTabDismissingCommandBar(tabID)
+
+        XCTAssertEqual(env.activeTabID, tabID)
+        XCTAssertFalse(env.isCommandBarPresented, "A sidebar tab click must take the new-tab bar down, or the blank page stays on top of the tab that was selected.")
+        XCTAssertEqual(page.focusCallCount, 1, "Dismissing the bar after the click is what hands the keyboard to the page.")
+    }
+
+    func testDevicePageRectLetterboxesAPhoneInsideAWidePane() {
+        let pane = CGRect(x: 0, y: 0, width: 1200, height: 900)
+        let phone = InspectorDeviceMode.pageRect(cssSize: CGSize(width: 390, height: 844), in: pane)
+        XCTAssertEqual(phone.width, 390, accuracy: 0.5)
+        XCTAssertEqual(phone.height, 844, accuracy: 0.5)
+        XCTAssertEqual(phone.midX, pane.midX, accuracy: 0.5)
+
+        let narrow = CGRect(x: 10, y: 20, width: 300, height: 700)
+        let fitted = InspectorDeviceMode.pageRect(cssSize: CGSize(width: 390, height: 844), in: narrow)
+        XCTAssertLessThanOrEqual(fitted.width, narrow.width)
+        XCTAssertLessThanOrEqual(fitted.height, narrow.height)
+        XCTAssertEqual(fitted.midX, narrow.midX, accuracy: 0.5)
+
+        XCTAssertEqual(
+            InspectorDeviceMode.pageRect(cssSize: nil, in: pane),
+            pane,
+            "Desktop is the whole pane."
+        )
+    }
+
+    func testDeviceUserAgentIsMobileOnlyForPhoneAndTablet() {
+        let phone = InspectorDeviceMode.userAgent(for: .iPhone)
+        XCTAssertTrue(phone?.contains("iPhone") == true)
+        XCTAssertTrue(phone?.contains("Mobile/") == true)
+        XCTAssertTrue(InspectorDeviceMode.userAgent(for: .iPad)?.contains("iPad") == true)
+        XCTAssertNil(InspectorDeviceMode.userAgent(for: .desktop))
+        XCTAssertNil(InspectorDeviceMode.userAgent(for: .responsive))
+    }
+
     // MARK: - The presented flag must never get stuck
 
     func testEveryDismissalPathLeavesThePresentedFlagsFalse() throws {

@@ -47,21 +47,34 @@ public final class ContentBlockingRuntime {
             })
         }
 
-        if !didStartInitialLoad {
+        // refresh() recompiles even when loadFromCache already installed a hit.
+        // That recompile stays off this list: the returned task is the first
+        // navigation's wait, and it must resume with the cached rules in place.
+        let scheduleRefresh = !didStartInitialLoad
+        if scheduleRefresh {
             didStartInitialLoad = true
             readiness.append(cacheLoadTask)
-            Task { @MainActor in
-                await cacheLoadTask.value
-                await self.controller.refresh()
-            }
         } else if !controller.hasCompletedInitialCacheLoad {
             readiness.append(cacheLoadTask)
         }
 
         guard !readiness.isEmpty else { return nil }
-        return Task { @MainActor in
+
+        let readinessTask = Task { @MainActor in
             for task in readiness { await task.value }
         }
+
+        if scheduleRefresh {
+            Task { @MainActor in
+                await readinessTask.value
+                // The navigation waiter is queued behind this task. Yield so
+                // its load runs before refresh() takes the main actor to recompile.
+                await Task.yield()
+                await self.controller.refresh()
+            }
+        }
+
+        return readinessTask
     }
 
     public func reset() {

@@ -96,11 +96,23 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
             }
             pendingContent = nil
 
-            let hostingController = NSHostingController(rootView: content)
+            let hostingController = SizingHostingController(rootView: content)
+            // preferredContentSize only. minSize would floor the popover above a small page,
+            // and the safe area would inset that page a second time — the popover's border
+            // and arrow already sit outside the content rect.
             hostingController.sizingOptions = [.preferredContentSize]
+            hostingController.safeAreaRegions = []
 
             let popover = NSPopover()
             popover.contentViewController = hostingController
+            // NSPopover reads preferredContentSize when it is shown and does not follow
+            // later changes. An extension popup is born at 25×25 and grows once the page
+            // reports; without this the bubble stays the loading size and clips the page.
+            hostingController.onPreferredSizeChange = { [weak popover] preferred in
+                guard let popover, popover.isShown else { return }
+                guard let next = OrbitHoverPopoverContentSize.next(current: popover.contentSize, preferred: preferred) else { return }
+                popover.contentSize = next
+            }
             popover.behavior = .applicationDefined // Default .transient eats the click that dismisses it.
             popover.animates = true
 
@@ -123,9 +135,11 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
 
         func dismiss() {
             pendingContent = nil
-            guard popover != nil else { return }
-            popover?.close()
-            popover = nil
+            guard let popover else { return }
+            // An animating close outlives this object and releases the popover again from the animation.
+            popover.animates = false
+            popover.close()
+            self.popover = nil
             hostingController = nil
             currentAnchor = nil
             removeDismissalMonitors()
@@ -207,6 +221,32 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
                 NSEvent.removeMonitor(globalOutsideClickMonitor)
             }
         }
+    }
+}
+
+enum OrbitHoverPopoverContentSize {
+    /// `nil` when `preferred` is not a real size yet, or already applied.
+    static func next(current: NSSize, preferred: NSSize) -> NSSize? {
+        guard preferred.width > 1, preferred.height > 1 else { return nil }
+        let next = NSSize(width: ceil(preferred.width), height: ceil(preferred.height))
+        if abs(current.width - next.width) <= 0.5, abs(current.height - next.height) <= 0.5 { return nil }
+        return next
+    }
+}
+
+private final class SizingHostingController<Content: View>: NSHostingController<Content> {
+    var onPreferredSizeChange: ((NSSize) -> Void)?
+
+    // An explicit deinit keeps the Release SIL optimiser off the synthesised destructor.
+    deinit {}
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        // preferredContentSize tracks the bounds the popover already has. fittingSize
+        // is the SwiftUI frame, which follows the document both when it grows and when it shrinks.
+        let fitted = view.fittingSize
+        guard fitted.width > 1, fitted.height > 1 else { return }
+        onPreferredSizeChange?(fitted)
     }
 }
 

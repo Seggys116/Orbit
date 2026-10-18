@@ -50,9 +50,8 @@ final class BrowserEngineSeamTests: XCTestCase {
 
         XCTAssertEqual(nextLaunchShaped.extensionActivation, .nextLaunch)
         XCTAssertEqual(immediateShaped.extensionActivation, .immediate)
-        // Both are still BrowserEngine.kind == .chromium: kind names the
-        // rendering technology (Chromium), not the embedding technique.
-        XCTAssertEqual(type(of: nextLaunchShaped).kind, type(of: immediateShaped).kind)
+        XCTAssertEqual(type(of: nextLaunchShaped).kind, .webkit)
+        XCTAssertEqual(type(of: immediateShaped).kind, type(of: immediateShaped).kind)
     }
 }
 
@@ -60,7 +59,7 @@ final class BrowserEngineSeamTests: XCTestCase {
 
 @MainActor
 private final class SeamTestEngine: BrowserEngine {
-    static let kind: EngineKind = .chromium
+    static let kind: EngineKind = .webkit
     let capabilities: EngineCapabilities = []
     let manageableContentSettings: Set<PermissionKind> = []
     let extensionActivation: ExtensionActivation

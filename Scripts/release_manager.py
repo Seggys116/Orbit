@@ -20,21 +20,15 @@ import xml.etree.ElementTree as ElementTree
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
-sys.path.insert(0, SCRIPT_DIR)
-import chromium_manager  # noqa: E402
-
 XCODEPROJ = os.path.join(REPO_ROOT, "Orbit.xcodeproj")
 SCHEME = "Orbit"
 APP_NAME = "Orbit.app"
 
 RESOURCES_DIR = os.path.join(REPO_ROOT, "Orbit", "Resources")
-MANIFEST_PATH = os.path.join(REPO_ROOT, "Chromium", "chromium-version.json")
-GENERATED_XCCONFIG = os.path.join(REPO_ROOT, "Chromium", "Generated", "Chromium.xcconfig")
 
 DEFAULT_WORK_DIR = os.path.join(REPO_ROOT, "build", "release")
 
 SPARKLE_FRAMEWORK_NAME = "Sparkle.framework"
-ENGINE_FRAMEWORK_NAME = "Orbit Framework.framework"
 
 SPARKLE_XPC_SERVICES = ("Downloader.xpc", "Installer.xpc")
 SPARKLE_XPC_PLIST_KEYS = (
@@ -64,32 +58,17 @@ SPARKLE_XPC_NOTE = (
 SPARKLE_UPDATER_ENTITLEMENTS_NOTE = (
     "Sparkle.framework brings two more signed executables into Orbit.app that "
     "are not roles in the table above: 'Autoupdate', a plain Mach-O tool, and "
-    "'Updater.app', a full nested application bundle that shows the progress "
-    "window and relaunches Orbit once the new copy is in place. Both are "
-    "signed here with the hardened runtime and with NO entitlements at all, "
-    "and that is a decision rather than an omission. Their linkage was read "
-    "with otool: between them they link Foundation, AppKit, Cocoa, "
-    "CoreServices, ApplicationServices, Security, CoreFoundation, libobjc, "
-    "libSystem and the compression libraries, and nothing else. They never "
-    "load 'Orbit Framework.framework', so the one entitlement "
-    "every Orbit process carries, disable-library-validation, is exactly the "
-    "one they do not need; granting it would switch off library validation on "
-    "the two processes that are allowed to replace Orbit on disk, which is "
-    "the worst possible place to switch it off. They run no JavaScript and "
-    "compile no shaders, so allow-jit does not apply. Relaunching the host "
-    "application needs no entitlement. iCloud must never appear here: the "
-    "browser role's CloudKit keys require a provisioning profile, and a "
-    "nested bundle claiming a container it was not provisioned for fails to "
-    "sign at all. No SignedRole was added for them, because a role's whole "
-    "purpose is to render an .entitlements file, an empty one would embed an "
-    "empty entitlement blob where none is wanted, and it would put a seventh "
-    "generated file into Orbit/Resources for the check mode to police in "
-    "exchange for nothing. Sparkle upstream ships Autoupdate with a "
-    "com.apple.application-identifier entitlement naming "
-    "org.sparkle-project.Sparkle.Autoupdate; re-signing without an "
-    "entitlements file drops it, which is correct, because Orbit does not own "
-    "that identifier and the key is only meaningful to a sandboxed keychain "
-    "access group."
+    "'Updater.app', a nested application that shows the progress window and "
+    "relaunches Orbit once the new copy is in place. Both are signed here "
+    "with the hardened runtime and with NO entitlements at all, on purpose: "
+    "they link only system frameworks, so they do not need "
+    "disable-library-validation, and granting it would switch off library "
+    "validation on the two processes that are allowed to replace Orbit on "
+    "disk. iCloud must never appear here either: a nested bundle claiming a "
+    "container it was not provisioned for fails to sign at all. Sparkle "
+    "upstream ships Autoupdate with a com.apple.application-identifier "
+    "entitlement; re-signing without an entitlements file drops it, which is "
+    "correct because Orbit does not own that identifier."
 )
 
 SPARKLE_FEED_HOSTING_NOTE = (
@@ -199,35 +178,25 @@ def run(cmd: list, capture: bool = False, check: bool = True, env: dict | None =
             + (f"\n{detail}" if detail else "")
         )
 
-# chrome/installer/mac/signing/parts.py and chrome/app/helper-*-entitlements.plist.
-
 ENTITLEMENT_RATIONALE = {
-    "com.apple.security.cs.allow-jit": (
-        "V8 compiles JavaScript to native code at runtime (Ignition/TurboFan), "
-        "and ANGLE/Metal compiles shaders the same way. Under the hardened "
-        "runtime that requires an explicitly MAP_JIT-mapped region, which is "
-        "what this entitlement permits - and only that: it does not allow "
-        "arbitrary writable-executable memory. Chromium grants it to exactly "
-        "the renderer and the GPU process."
-    ),
     "com.apple.security.cs.disable-library-validation": (
         "Turns off the hardened runtime's requirement that every loaded library "
-        "be signed by the same Team ID as the executable loading it. Every role "
-        "here carries it only under the ad hoc signing waiver recorded below "
+        "be signed by the same Team ID as the executable loading it. Orbit "
+        "carries it only under the ad hoc signing waiver recorded below "
         "(ENTITLEMENT_WAIVERS): two separately ad hoc signed Mach-O images are "
         "treated by AMFI as having different Team IDs, so a local or CI build "
-        "(CODE_SIGN_IDENTITY = '-') cannot load its own code under the hardened "
-        "runtime without it. A Developer ID build signs every part with one "
-        "real Team ID and needs none of it."
+        "(CODE_SIGN_IDENTITY = '-') cannot load the embedded Sparkle.framework "
+        "under the hardened runtime without it. A Developer ID build signs every "
+        "part with one real Team ID and needs none of it. JIT needs no "
+        "entitlement here: WKWebView compiles JavaScript in Apple's own "
+        "WebContent process, not in Orbit."
     ),
     "com.apple.developer.icloud-container-identifiers": (
         "Names the private CloudKit container Orbit syncs its document "
         "through. CKContainer(identifier:) raises for a container the process "
         "is not signed for, so this key is what makes iCloud sync possible at "
         "all; without it Orbit detects the absence at launch and works "
-        "locally. Browser process only: no helper touches CloudKit, and a "
-        "renderer running untrusted web content must never be able to reach "
-        "the user's iCloud container."
+        "locally."
     ),
     "com.apple.developer.icloud-services": (
         "Selects CloudKit specifically. Orbit uses the private database and "
@@ -243,16 +212,14 @@ ENTITLEMENT_RATIONALE = {
     ),
 }
 
-# Deliberately granted to nothing: com.apple.security.cs.allow-dyld-environment-variables, a code-injection surface Chromium does not need.
+# Deliberately granted to nothing: com.apple.security.cs.allow-dyld-environment-variables, a code-injection surface.
 
 SANDBOX_NOTE = (
-    "App Sandbox is intentionally absent: Chromium's multi-process architecture "
-    "(shared memory, Mach IPC between the browser and its renderer/GPU helpers, "
-    "direct GPU access) is incompatible with it. The key is omitted rather than "
-    "set to false, because ENABLE_APP_SANDBOX = NO already keeps it out of the "
-    "signed entitlements. Chromium's own Seatbelt sandbox still confines every "
-    "subprocess it launches; how Orbit's own engine bridge wires that in is "
-    "undecided, since the bridge itself does not exist yet."
+    "App Sandbox is intentionally absent: Orbit reads other browsers' profiles "
+    "for import and manages its own data root, which the sandbox would block. "
+    "The key is omitted rather than set to false, because ENABLE_APP_SANDBOX = "
+    "NO already keeps it out of the signed entitlements. WebKit's own "
+    "WebContent, Networking and GPU processes are sandboxed by the system."
 )
 
 class SignedRole:
@@ -278,21 +245,15 @@ BROWSER_ROLE = SignedRole(
     display="Orbit.app (browser process)",
     filename="Orbit.entitlements",
     purpose=(
-        "The browser process: the only process with a user interface, the one "
-        "that owns the window, the profile on disk and the network stack, and "
-        "the one that launches all five helper roles below. It renders no web "
-        "content itself. Chrome's browser process is signed with no hardened "
-        "runtime exceptions at all; Orbit keeps allow-jit here because it is "
-        "the configuration this app has actually been run under, and dropping "
-        "it is a change no test in this repository can prove safe (nothing "
-        "here ever starts the engine). See refs/RELEASING.md, 'Entitlements we "
-        "could not narrow'."
+        "The browser process: the only process Orbit signs. It owns the "
+        "window, the profile on disk and the embedded Sparkle updater. Web "
+        "content runs in WebKit's system WebContent, Networking and GPU "
+        "processes, which carry their own entitlements, so this role holds no "
+        "JIT or executable-memory exception."
     ),
     entitlements=(
-        "com.apple.security.cs.allow-jit",
         "com.apple.security.cs.disable-library-validation",
     ),
-    # No helper role may ever carry these: a renderer running untrusted web content must not reach the user's iCloud container.
     provisioned=(
         "com.apple.developer.icloud-container-identifiers",
         "com.apple.developer.icloud-services",
@@ -300,71 +261,7 @@ BROWSER_ROLE = SignedRole(
     ),
 )
 
-HELPER_ROLES = (
-    SignedRole(
-        key="utility",
-        display="Orbit Helper.app",
-        filename="OrbitHelper.entitlements",
-        purpose=(
-            "The general-purpose helper. Chromium launches processes of this "
-            "kind for utility work - network service, storage service, audio "
-            "service - none of which execute untrusted script or compile "
-            "shaders. It therefore gets the smallest set of any process here. "
-            "No target in this project builds or signs a bundle for it yet: "
-            "this file exists for whoever writes the engine bridge to sign "
-            "against once it does."
-        ),
-        entitlements=("com.apple.security.cs.disable-library-validation",),
-    ),
-    SignedRole(
-        key="renderer",
-        display="Orbit Helper (Renderer).app",
-        filename="OrbitHelper-Renderer.entitlements",
-        purpose=(
-            "The renderer. This is the process that parses and executes "
-            "untrusted web content, so it is the one whose entitlements matter "
-            "most: it gets JIT because V8 cannot run without it, and nothing "
-            "else. Chromium's helper-renderer-entitlements.plist is this exact "
-            "single key."
-        ),
-        entitlements=(
-            "com.apple.security.cs.allow-jit",
-            "com.apple.security.cs.disable-library-validation",
-        ),
-    ),
-    SignedRole(
-        key="gpu",
-        display="Orbit Helper (GPU).app",
-        filename="OrbitHelper-GPU.entitlements",
-        purpose=(
-            "The GPU process: rasterisation, compositing, and ANGLE/Metal "
-            "shader compilation, which generates and runs code at runtime the "
-            "same way V8 does. Chromium's helper-gpu-entitlements.plist is, "
-            "likewise, allow-jit and nothing else."
-        ),
-        entitlements=(
-            "com.apple.security.cs.allow-jit",
-            "com.apple.security.cs.disable-library-validation",
-        ),
-    ),
-    # A direct Chromium embed has no plugin helper: the CDM runs as a kCdm
-    # utility process in the plain helper with no entitlements.
-    SignedRole(
-        key="alerts",
-        display="Orbit Helper (Alerts).app",
-        filename="OrbitHelper-Alerts.entitlements",
-        purpose=(
-            "The alerts helper: a tiny process whose whole job is to post user "
-            "notifications through UNUserNotificationCenter on the browser's "
-            "behalf. It renders nothing and runs no script, so it gets no JIT "
-            "and no executable memory. Chromium signs its equivalent with no "
-            "entitlements at all."
-        ),
-        entitlements=("com.apple.security.cs.disable-library-validation",),
-    ),
-)
-
-ALL_ROLES = (BROWSER_ROLE,) + HELPER_ROLES
+ALL_ROLES = (BROWSER_ROLE,)
 ROLES_BY_KEY = {r.key: r for r in ALL_ROLES}
 
 # --- Entitlement invariants ---
@@ -376,17 +273,13 @@ FORBIDDEN_ENTITLEMENTS = {
         "Permits writable-and-executable memory that is not MAP_JIT mapped, which "
         "is strictly weaker than allow-jit: it lets a process build and run code "
         "in ordinary anonymous memory, which is what almost every exploit chain "
-        "wants. Chromium grants it to nothing on any platform. No role here needs "
-        "it: there is no plugin helper, the CDM runs as a kCdm utility process "
-        "with no entitlements at all, and Orbit cannot ship Widevine regardless."
+        "wants. No role here needs it."
     ),
     "com.apple.security.cs.disable-executable-page-protection": (
         "Turns off W^X for the whole process: any page may be made writable and "
         "executable at any time. It defeats the hardened runtime's central "
         "guarantee and makes every memory-corruption bug in a renderer directly "
-        "exploitable as code execution. Chromium grants it to nothing, on any "
-        "platform, and neither does Orbit. There is no process that needs it: a "
-        "JIT needs MAP_JIT, which is allow-jit."
+        "exploitable as code execution. No process here needs it."
     ),
     "com.apple.security.cs.allow-dyld-environment-variables": (
         "Restores DYLD_INSERT_LIBRARIES and friends, i.e. lets any process that "
@@ -421,15 +314,14 @@ def _dev_signing_split_exists() -> bool:
 ENTITLEMENT_WAIVERS = (
     EntitlementWaiver(
         key="com.apple.security.cs.disable-library-validation",
-        roles=("app", "utility", "renderer", "gpu", "alerts"),
+        roles=("app",),
         why=(
             "Measured, not assumed: dlopen versus linking is irrelevant here. Two "
             "separately ad hoc signed Mach-Os are treated by AMFI as having "
             "different Team IDs, so an ad hoc build (CODE_SIGN_IDENTITY = '-', "
-            "which is every developer and CI build) cannot load its own framework "
+            "which is every developer and CI build) cannot load the embedded Sparkle framework "
             "under the hardened runtime without this. A Developer ID build signs "
-            "every part with one Team ID and needs none of it, which is why "
-            "Chrome ships without it anywhere."
+            "every part with one Team ID and needs none of it."
         ),
         expiry=(
             "the dev/release signing split. When release_manager grows "
@@ -445,27 +337,14 @@ ENTITLEMENT_WAIVERS = (
 FORBIDDEN_ENTITLEMENTS["com.apple.security.cs.disable-library-validation"] = (
     "Turns off the hardened runtime's requirement that a loaded library carry the "
     "same Team ID as the executable loading it, i.e. it lets Orbit load code Orbit "
-    "did not sign. No shipped Chromium browser carries it. It is forbidden here "
+    "did not sign. It is forbidden here "
     "and survives only under the waiver below, which exists for ad hoc signing and "
     "expires with the dev/release signing split."
 )
 
 # Grants as they stand. A role gaining or losing one is a deliberate act and has to be recorded here in the same commit.
 ENTITLEMENT_BASELINE = {
-    "app": (
-        "com.apple.security.cs.allow-jit",
-        "com.apple.security.cs.disable-library-validation",
-    ),
-    "utility": ("com.apple.security.cs.disable-library-validation",),
-    "renderer": (
-        "com.apple.security.cs.allow-jit",
-        "com.apple.security.cs.disable-library-validation",
-    ),
-    "gpu": (
-        "com.apple.security.cs.allow-jit",
-        "com.apple.security.cs.disable-library-validation",
-    ),
-    "alerts": ("com.apple.security.cs.disable-library-validation",),
+    "app": ("com.apple.security.cs.disable-library-validation",),
 }
 
 def check_entitlement_policy(checks) -> None:
@@ -535,20 +414,6 @@ def check_entitlement_policy(checks) -> None:
                "ENTITLEMENT_RATIONALE explaining what it turns off."),
         )
 
-    for role in ALL_ROLES:
-        if role.key == "app":
-            continue
-        developer = sorted(k for k in role.keys(provisioned=True) if k.startswith("com.apple.developer."))
-        checks.check(
-            f"{role.key} reaches no user data capability",
-            not developer,
-            "none" if not developer else (
-                f"{developer}. A helper runs untrusted web content; the browser process "
-                "is the only role that may reach iCloud, the keychain groups or any "
-                "other capability tied to the user's data."
-            ),
-        )
-
     claimed = {r.filename for r in ALL_ROLES}
     on_disk = sorted(f for f in os.listdir(RESOURCES_DIR) if f.endswith(".entitlements")) \
         if os.path.isdir(RESOURCES_DIR) else []
@@ -558,9 +423,9 @@ def check_entitlement_policy(checks) -> None:
         not orphans,
         f"{len(on_disk)} file(s), all claimed" if not orphans else (
             f"{orphans} is not claimed by any role. A role deleted from the table leaves "
-            "its plist behind, and a build phase that still signs with it ships stale, "
-            "over-permissive entitlements that nothing in this file describes. Delete the "
-            "file, or restore the role."
+            "its plist behind, and a build phase that still signs with it ships stale "
+            "entitlements that nothing in this file describes. Delete the file, or "
+            "restore the role."
         ),
     )
 
@@ -795,14 +660,6 @@ def project_sparkle_link_status() -> tuple:
             requirement = " ".join(f"{k}={v}" for k, v in sorted(req.items()))
     return True, f"Orbit target; {requirement or 'no requirement recorded'}"
 
-def load_manifest() -> dict:
-    if not os.path.exists(MANIFEST_PATH):
-        die(
-            f"{os.path.relpath(MANIFEST_PATH, REPO_ROOT)} is missing. "
-            "This is not an Orbit checkout, or the checkout is incomplete."
-        )
-    with open(MANIFEST_PATH, "r", encoding="utf-8") as handle:
-        return json.load(handle)
 
 _BUILD_SETTINGS_CACHE: dict = {}
 
@@ -833,7 +690,6 @@ def build_settings(target: str, configuration: str = "Release") -> dict:
 
 def resolve_version(explicit: str | None = None, manifest_only: bool = False) -> dict:
     """manifest_only answers without spawning xcodebuild, which is required inside an `xcodebuild test` (the build system's lock) and on Linux CI."""
-    manifest = load_manifest()
     settings = {} if manifest_only else build_settings("Orbit")
     marketing = explicit or settings.get("MARKETING_VERSION", "")
     return {
@@ -841,8 +697,6 @@ def resolve_version(explicit: str | None = None, manifest_only: bool = False) ->
         "build_version": settings.get("CURRENT_PROJECT_VERSION", ""),
         "bundle_identifier": settings.get("PRODUCT_BUNDLE_IDENTIFIER", ""),
         "deployment_target": settings.get("MACOSX_DEPLOYMENT_TARGET", ""),
-        "chromium_version": manifest.get("chromium_version", ""),
-        "chromium_channel": manifest.get("channel", ""),
         "dmg_name": f"Orbit-{marketing}-{host_arch()}.dmg" if marketing else "",
     }
 
@@ -1186,14 +1040,11 @@ def cmd_doctor(args) -> int:
             absolute if not inside_repo else "a .p8 inside the repo risks being committed",
         )
 
-    checks.section("Chromium engine")
+    checks.section("Engine")
     checks.check(
-        "engine bridge exists",
-        False,
-        "the browser-side bridge in Orbit/Engine/Chromium/ is not release-ready yet. "
-        "Nothing in this pipeline can archive, sign or verify a working browser until it is. "
-        "Chromium toolchain state (fetched, built, published) is Scripts/chromium "
-        "doctor's job, not this one's.",
+        "system WebKit",
+        True,
+        "Orbit renders with system WebKit; there is no engine to fetch or embed.",
     )
 
     checks.section("Entitlements")
@@ -1265,14 +1116,13 @@ def cmd_doctor(args) -> int:
     )
 
     checks.section("Hardened runtime")
-    for target in ("Orbit", "OrbitHelper"):
-        settings = build_settings(target)
-        checks.check(
-            f"{target} enables the hardened runtime",
-            settings.get("ENABLE_HARDENED_RUNTIME") == "YES",
-            settings.get("ENABLE_HARDENED_RUNTIME", "unset")
-            + ("" if settings.get("ENABLE_HARDENED_RUNTIME") == "YES" else " - notarisation requires YES"),
-        )
+    settings = build_settings("Orbit")
+    checks.check(
+        "Orbit enables the hardened runtime",
+        settings.get("ENABLE_HARDENED_RUNTIME") == "YES",
+        settings.get("ENABLE_HARDENED_RUNTIME", "unset")
+        + ("" if settings.get("ENABLE_HARDENED_RUNTIME") == "YES" else " - notarisation requires YES"),
+    )
 
     if args.app:
         checks.section("Bundle")
@@ -1305,8 +1155,7 @@ def cmd_version(args) -> int:
     print(f"  minimum macOS       {resolved['deployment_target']}")
     print()
     print(bold("Engine"))
-    print(f"  Chromium            {resolved['chromium_version']} ({resolved['chromium_channel']})")
-    print(f"  engine bridge       {dim('does not exist yet')}")
+    print("  WebKit              system")
     print()
     print(bold("Would produce"))
     print(f"  {resolved['dmg_name'] or dim('no marketing version set')}")
@@ -1424,7 +1273,7 @@ def cmd_archive(args) -> int:
 
     info(
         f"Archiving Orbit {resolved['marketing_version'] or '(version unset)'} "
-        f"for {' '.join(archs)} with Chromium {resolved['chromium_version']}"
+        f"for {' '.join(archs)} on system WebKit"
     )
     step(f"archive path: {archive_path}")
     run(command)
@@ -1479,7 +1328,6 @@ def cmd_sign(args) -> int:
     # Quarantine flags and resource forks make codesign fail with "resource fork, Finder information, or similar detritus not allowed"; strip them first.
     run(["xattr", "-cr", app], capture=True, check=False)
 
-    # No engine bridge exists yet (Chromium/README.md); nothing to sign here.
     signed_paths = set()
     frameworks_dir = os.path.join(app, "Contents", "Frameworks")
 
@@ -1565,31 +1413,6 @@ def cmd_sign(args) -> int:
 
     sign(sparkle, label=SPARKLE_FRAMEWORK_NAME)
 
-    # 1b. The engine's helper bundles, each with its own entitlements. Signed as
-    # bundles, not as the loose executables step 2 would otherwise find: without
-    # allow-jit the renderer's V8 and the GPU's shader compiler cannot allocate
-    # executable memory under the hardened runtime, and every page stays blank.
-    helpers_dir = os.path.join(
-        frameworks_dir, ENGINE_FRAMEWORK_NAME, "Versions", "A", "Helpers"
-    )
-    helper_prefixes = []
-    if os.path.isdir(helpers_dir):
-        roles_by_display = {role.display: role for role in HELPER_ROLES}
-        for entry in sorted(os.listdir(helpers_dir)):
-            bundle = os.path.join(helpers_dir, entry)
-            if not entry.endswith(".app") or not os.path.isdir(bundle):
-                continue
-            role = roles_by_display.get(entry)
-            if role is None:
-                die(
-                    f"{entry} is embedded but no SignedRole describes it, so it "
-                    "would be signed with the hardened runtime and no "
-                    "entitlements. Add a role for it rather than shipping a "
-                    "helper whose permissions nobody chose."
-                )
-            sign(bundle, role.path, label=f"{entry}  ({', '.join(role.entitlements)})")
-            helper_prefixes.append(bundle + os.sep)
-
     # 2. Anything else Mach-O not signed above; the outer bundle would otherwise seal it unsigned.
     for path in nested_machos(app):
         if path in signed_paths:
@@ -1598,9 +1421,6 @@ def cmd_sign(args) -> int:
             continue
         # Sparkle was sealed as bundles in step 1; re-signing its executables here would undo that ordering.
         if path.startswith(sparkle + os.sep):
-            continue
-        # Same for the helper bundles sealed in step 1b.
-        if any(path.startswith(prefix) for prefix in helper_prefixes):
             continue
         sign(path, label=f"{os.path.relpath(path, app)}  (additional nested code)")
 
@@ -1716,21 +1536,6 @@ def verify_structure(app: str, checks: Checklist) -> None:
     checks.check("Info.plist", os.path.isfile(os.path.join(contents, "Info.plist")), "Contents/Info.plist")
 
     verify_sparkle_structure(app, checks)
-    verify_engine_configuration(app, checks)
-
-def verify_engine_configuration(app: str, checks: Checklist) -> None:
-    frameworks = os.path.join(app, "Contents", "Frameworks")
-    if not os.path.isdir(os.path.join(frameworks, "Orbit Framework.framework")):
-        checks.note("embedded Chromium engine", False, "no Orbit Framework.framework in this bundle")
-        return
-    compiled = chromium_manager.compiled_engine_config(frameworks, "orbit")
-    checks.check(
-        "embedded engine has DCHECKs compiled out",
-        compiled == "shipping",
-        "shipping" if compiled == "shipping"
-        else f"binary reports '{compiled or 'no marker'}'; a distributable build must embed "
-             "the shipping engine, in which a development assertion is not there to abort on",
-    )
 
 def verify_signature(app: str, checks: Checklist, require_timestamp: bool, require_notarised: bool) -> None:
     app = os.path.abspath(app)
@@ -1777,8 +1582,7 @@ def verify_signature(app: str, checks: Checklist, require_timestamp: bool, requi
 
     frameworks_dir = os.path.join(app, "Contents", "Frameworks")
 
-    # No engine bridge exists yet (Chromium/README.md); the browser process is
-    # the only signed role to check.
+    # The browser process is the only signed role to check.
     embedded = codesign_entitlements(app)
     granted = sorted(k for k, v in embedded.items() if v is True)
     expected = sorted(BROWSER_ROLE.entitlements)
@@ -2088,7 +1892,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_version.add_argument("--json", action="store_true", help="machine-readable output")
     p_version.add_argument("--set", help="resolve as if MARKETING_VERSION were this")
     p_version.add_argument("--manifest-only", action="store_true",
-                           help="answer from Chromium/chromium-version.json alone; do not run xcodebuild")
+                           help="answer without running xcodebuild")
     p_version.set_defaults(func=cmd_version)
 
     p_ent = sub.add_parser("entitlements", help="show, regenerate or drift-check the per-role plists")

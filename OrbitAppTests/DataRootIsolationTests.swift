@@ -9,11 +9,11 @@ import XCTest
 @MainActor
 final class DataRootIsolationTests: XCTestCase {
 
-    // Chromium's own directory is excluded: it is the engine's, it runs to
-    // hundreds of thousands of entries, and EngineStorageDirectoryTests covers it.
+    // The engine's own private storage directory is not watched: it is the engine's and
+    // EngineStorageDirectoryTests covers it. WebKit keeps website data outside this root.
     private static let watchedSubdirectories = [
         "State", "SpaceIcons", "Favicons", "Extensions", "Downloads",
-        "Boosts", "Notes", "Easels", "SiteSearch", "History", "Sync", "ContentBlocking",
+        "Boosts", "Notes", "Easels", "SiteSearch", "History", "Sync", "ContentBlocking", "ContentSettings",
     ]
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -50,7 +50,7 @@ final class DataRootIsolationTests: XCTestCase {
         XCTAssertEqual(root.extensions.path, base + "/Extensions")
         XCTAssertEqual(root.contentBlocking.path, base + "/ContentBlocking")
         XCTAssertEqual(root.sync.path, base + "/Sync")
-        XCTAssertEqual(root.chromiumProfile.path, base + "/Chromium")
+        XCTAssertEqual(root.contentSettings.path, base + "/ContentSettings")
         XCTAssertEqual(root.downloadsFile.path, base + "/Downloads/downloads.json")
         XCTAssertEqual(root.boostsFile.path, base + "/Boosts/boosts.json")
         XCTAssertEqual(root.siteSearchFile.path, base + "/SiteSearch/site-search.json")
@@ -81,6 +81,31 @@ final class DataRootIsolationTests: XCTestCase {
             "nil leaves the engine on DefaultOrbitUserDataDir(), which is the real user's profile"
         )
         assertOutsideTheRealProfile(directory, what: "the engine's persistent profile")
+    }
+
+    func testPersistedSiteSettingsDefaultToTheScratchRootUnderXCTest() throws {
+        let session = WebKitSession(identifier: "isolation-probe", persistent: true, storageURL: nil)
+
+        let file = try XCTUnwrap(session.contentSettingsFileURL)
+
+        assertOutsideTheRealProfile(file, what: "a persistent session's site settings file")
+    }
+
+    func testPersistedSiteSettingsLandInTheEnvironmentsDataRootWhenGivenOne() throws {
+        let session = WebKitSession(
+            identifier: "isolation-probe",
+            persistent: true,
+            storageURL: nil,
+            settingsDirectory: env.dataRoot.contentSettings
+        )
+        session.setContentSetting(.allow, for: .camera, url: URL(string: "https://example.com")!)
+        defer { session.clearContentSettings() }
+
+        let file = try XCTUnwrap(session.contentSettingsFileURL)
+
+        XCTAssertEqual(file.deletingLastPathComponent().standardizedFileURL, env.dataRoot.contentSettings.standardizedFileURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        assertOutsideTheRealProfile(file, what: "the demo environment's site settings file")
     }
 
     func testOrbitDefaultsIsItsOwnPreferencesDomainUnderXCTest() {
@@ -223,11 +248,13 @@ final class DataRootIsolationTests: XCTestCase {
 
     /// Fails rather than skips: a store still rooted in the real profile is
     /// the bug. Every caller returns without writing when this throws, so an unscoped build isn't damaged.
+    private struct UnscopedProfile: Error {}
+
     private func requireScoped(_ env: AppEnvironment) throws {
         let directories = [env.spaceIconImages.diskDirectory, env.faviconCache.diskDirectory, env.extensionStore.root]
         for directory in directories where isInsideTheRealProfile(directory) {
             XCTFail("\(directory.path) is inside the real profile — refusing to write or prune through it")
-            throw XCTSkip("environment is not scoped away from the real profile")
+            throw UnscopedProfile()
         }
     }
 

@@ -989,7 +989,7 @@ final class ArcSidebarDocumentTests: XCTestCase {
                 file: file,
                 line: line
             )
-            throw XCTSkip("Parse did not terminate; the rest of this test cannot run.")
+            throw TestStopped("Parse did not terminate; the rest of this test cannot run.")
         }
         if let error = box.error { throw error }
         return try XCTUnwrap(box.document, file: file, line: line)

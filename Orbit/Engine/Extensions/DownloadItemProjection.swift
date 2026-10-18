@@ -27,7 +27,7 @@ nonisolated public enum DownloadItemProjection {
             "mime": download.mimeType,
             "startTime": download.startedAt.timeIntervalSince1970,
             "endTime": download.finishedAt.map { $0.timeIntervalSince1970 as Any } ?? NSNull(),
-            "state": state(for: download.state),
+            "state": Self.chromeState(for: download.state),
             "paused": download.state == .paused,
             "bytesReceived": Double(download.receivedBytes),
             "totalBytes": Double(download.totalBytes),
@@ -39,7 +39,7 @@ nonisolated public enum DownloadItemProjection {
         return item
     }
 
-    private static func state(for state: DownloadState) -> String {
+    static func chromeState(for state: DownloadState) -> String {
         switch state {
         case .pending, .inProgress, .paused: return "in_progress"
         case .completed: return "complete"

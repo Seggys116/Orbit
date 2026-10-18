@@ -12,7 +12,7 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
 
     private lazy var demoEnvironment: AppEnvironment = AppEnvironment.demo
     private let orbitEnvironment = AppEnvironment.shared
-    private let engine = ChromiumLikeStubEngine()
+    private let engine = WebKitStubEngine()
     private var window: NSWindow?
 
     override func tearDown() {
@@ -24,17 +24,17 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - 1. A running Chromium engine draws the real pane, in both environments
+    // MARK: - 1. A running WebKit engine draws the real pane, in both environments
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theRealChromiumEngineAdvertisesExtensions
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theRealWebKitEngineAdvertisesExtensions
 
-    func test_theRealChromiumEngineAdvertisesExtensions() {
+    func test_theRealWebKitEngineAdvertisesExtensions() {
         XCTAssertTrue(
-            ChromiumEngine(storage: .isolated).capabilities.contains(.extensions),
+            WebKitEngine(storage: .isolated).capabilities.contains(.extensions),
             """
-            ChromiumEngine no longer reports .extensions, so every extensions surface in the app \
-            silently turns itself off. Chromium is the only engine Orbit embeds; if this is false, \
-            the pane's "not running yet" state has become permanent rather than transient.
+            WebKitEngine no longer reports .extensions, so every extensions surface in the app \
+            silently turns itself off. If this is false, the pane's "not running yet" state has \
+            become permanent rather than transient.
             """
         )
     }
@@ -130,34 +130,18 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
         }
     }
 
-    // MARK: - 4. The deleted WebKit backend must not come back as prose
-
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noShippedSourceDescribesTheDeletedWebKitBackend
-
-    func test_noShippedSourceDescribesTheDeletedWebKitBackend() throws {
-        let phrases = ["WebKit fallback", "WKWebView", "Safari Web Extensions", "fallback backend", "fallback engine"]
-        var offences: [String] = []
-
-        for root in ["Orbit", "OrbitDemo"] {
-            let directory = Self.repositoryRoot.appendingPathComponent(root, isDirectory: true)
-            for fileURL in try Self.swiftFiles(under: directory) {
-                guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
-                for phrase in phrases where contents.contains(phrase) {
-                    offences.append("\(Self.relativePath(of: fileURL)): \"\(phrase)\"")
-                }
-            }
-        }
-
-        XCTAssertTrue(
-            offences.isEmpty,
-            """
-            Orbit embeds Chromium and nothing else — there is no WebKit fallback backend, no \
-            WKWebView and no Safari Web Extensions support to describe. The following \
-            source(s) describe one anyway: \(offences.sorted().joined(separator: "; ")). \
-            Every one of these is a branch or a string the user can be shown that is simply \
-            untrue; delete it rather than rewording it.
-            """
+    func test_shippedEngineIsWebKit() throws {
+        let engine = try String(
+            contentsOf: Self.repositoryRoot.appendingPathComponent("Orbit/Engine/EngineFactory.swift"),
+            encoding: .utf8
         )
+        XCTAssertTrue(engine.contains("WebKitEngine"), "EngineFactory must start WebKitEngine")
+        let webKit = try String(
+            contentsOf: Self.repositoryRoot.appendingPathComponent("Orbit/Engine/WebKit/WebKitWebContents.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(webKit.contains("WKWebView"))
+        XCTAssertTrue(webKit.contains("WKWebExtension"))
     }
 
     // MARK: - Harness
@@ -256,11 +240,11 @@ final class ExtensionsSettingsPaneEngineStateTests: XCTestCase {
     }
 }
 
-/// Stands in for a started ChromiumEngine: the capabilities the pane gates on,
+/// Stands in for a started WebKitEngine: the capabilities the pane gates on,
 /// none of the process the real one needs.
 @MainActor
-private final class ChromiumLikeStubEngine: BrowserEngine {
-    static let kind: EngineKind = .chromium
+private final class WebKitStubEngine: BrowserEngine {
+    static let kind: EngineKind = .webkit
     let capabilities: EngineCapabilities = [.extensions, .developerTools, .backgroundSnapshots]
     let manageableContentSettings: Set<PermissionKind> = []
     let extensionActivation: ExtensionActivation = .immediate

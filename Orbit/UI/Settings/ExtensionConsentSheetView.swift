@@ -7,8 +7,8 @@ struct ExtensionConsentSheetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: OrbitMetrics.extensionInstallStackSpacing) {
             header
-            if let chromiumVersionWarning = pending.chromiumVersionWarning {
-                OrbitInlineNotice(systemImage: "exclamationmark.triangle.fill", tint: .orange, text: chromiumVersionWarning)
+            if let minimumChromeVersionWarning = pending.minimumChromeVersionWarning {
+                OrbitInlineNotice(systemImage: "exclamationmark.triangle.fill", tint: .orange, text: minimumChromeVersionWarning)
             }
             warningsList
             buttons
@@ -139,7 +139,7 @@ struct ExtensionConsentSheetView: View {
             ],
             isUpdate: false,
             previousVersion: nil,
-            chromiumVersionWarning: "This extension declares that it requires Chrome 200.0 or later. Orbit currently embeds an older Chromium, so some of its features may not work correctly."
+            minimumChromeVersionWarning: "This extension declares that it requires Chrome 200.0 or later. Orbit runs system WebKit, so some Chrome-only features may not work correctly."
         ),
         onAnswer: { _ in }
     )

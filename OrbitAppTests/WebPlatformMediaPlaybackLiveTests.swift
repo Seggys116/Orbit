@@ -11,7 +11,7 @@ import XCTest
 final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
 
     private func waitUntilTrue(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         _ expression: String,
         timeout: Duration = .seconds(15)
     ) async throws {
@@ -30,7 +30,7 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
     /// true on several consecutive polls -- proof against a transient true
     /// (a poll that has not finished settling) being mistaken for the real answer.
     private func waitUntilStablyTrue(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         _ expression: String,
         consecutiveChecks: Int = 5,
         timeout: Duration = .seconds(15)
@@ -66,7 +66,7 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
     }
 
     private func drivePlayback(elementTag: String, routePath: String, contentType: String, data: Data) throws -> (PlaybackResult, [String: Any]) {
-        try LiveChromiumEngineHost.runLive { () -> (PlaybackResult, [String: Any]) in
+        try WebKitLiveEngineHost.runLive { () -> (PlaybackResult, [String: Any]) in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(
                     contentType: "text/html",
@@ -76,8 +76,8 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 200, height: 200)
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -90,7 +90,7 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(150))
 
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitMediaEvents = [];
@@ -170,7 +170,7 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
         }
     }
 
-    private func mediaDiagnostics(_ contents: ChromiumWebContents) async throws -> String {
+    private func mediaDiagnostics(_ contents: WebKitWebContents) async throws -> String {
         let result = try await contents.evaluateJavaScript("""
         (function() {
           var m = document.getElementById('m');
@@ -191,7 +191,6 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testVideoReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly
 
     func testVideoReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let (result, metadata) = try drivePlayback(
             elementTag: "video", routePath: "/v.webm", contentType: "video/webm", data: LiveMediaFixtures.videoWebM
         )
@@ -210,11 +209,9 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
     }
 
     /// Metadata (duration) is proven unconditionally before the play()-dependent assertions;
-    /// a NotAllowedError from Chromium's real autoplay policy XCTSkips them instead of failing.
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testAudioReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly
+    /// A NotAllowedError from the autoplay policy fails the test. Muted audio must reach playing.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAudioReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly
     func testAudioReachesPlayingStateAdvancesCurrentTimeAndPausesCleanly() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let (result, metadata) = try drivePlayback(
             elementTag: "audio", routePath: "/a.webm", contentType: "audio/webm", data: LiveMediaFixtures.audioWebM
         )
@@ -222,13 +219,11 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
         XCTAssertEqual((metadata["duration"] as? NSNumber)?.doubleValue ?? -1, 2.0, accuracy: 0.5, "the decoded audio's real duration should be close to the real ~2s encode")
 
         if !result.reachedPlaying, let playError = result.playErrorMessage, playError.contains("NotAllowedError") {
-            throw XCTSkip(
-                "play() on a plain <audio> element was correctly rejected by Chromium's real autoplay policy "
-                    + "(only muted <video> is exempt from the user-activation requirement -- AutoplayPolicy::"
-                    + "IsEligibleForAutoplayMuted requires IsA<HTMLVideoElement>()), and no bridge entry point "
-                    + "carries a user gesture: OrbitWebContentsEvaluateJavaScript takes no such argument. "
-                    + "Real error: \(playError)"
+            XCTFail(
+                "play() on a muted <audio> element was rejected (\(playError)). "
+                    + "WebKit is configured with no media type requiring a user gesture, so this element must reach playing."
             )
+            return
         }
 
         XCTAssertTrue(result.reachedPlaying, "a real muted <audio> with a real Opus WebM src never fired 'playing'. diagnostics: \(result.diagnostics)")
@@ -247,12 +242,11 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
     // There is no OrbitWebContentsSetMuted in the bridge; setMuted drives the
     // page's real elements through the shared media-session observer script.
     func testSetMutedReallyMutesAndUnmutesTheLiveVideoElement() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let outcome = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> (
+        let outcome = try WebKitLiveEngineHost.runLive(timeout: 60) { () -> (
             mutedAfterEnable: Bool, mediaStateReflectsIt: Bool, newElementInheritsMute: Bool, unmutedAfterDisable: Bool
         ) in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            engine.addUserScript(MediaSessionObserverScript.chromiumUserScript, session: engine.defaultSession)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            engine.addUserScript(MediaSessionObserverScript.userScript, session: engine.defaultSession)
 
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(
@@ -263,7 +257,7 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 320, height: 240)
             let window = NSWindow(
@@ -278,7 +272,7 @@ final class WebPlatformMediaPlaybackLiveTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(150))
 
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             // Off before asserting Orbit's mute reaches it, or the page's own <video muted> attribute would pass the assertion for free.
             _ = try await contents.evaluateJavaScript("document.getElementById('v').muted = false; true;")
 

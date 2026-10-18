@@ -60,25 +60,19 @@ final class CorpusPrivacyBadgerLiveTests: CorpusLiveTestCase {
     })()
     """
 
-    // Skips only when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testRealPrivacyBadgersPopupRendersItsOwnStateFromItsOwnServiceWorker
+    // Fails when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testRealPrivacyBadgersPopupRendersItsOwnStateFromItsOwnServiceWorker
+    // The Chrome Web Store returns HTTP 204 to the hosted runner, so this pin is not on disk there.
     func testRealPrivacyBadgersPopupRendersItsOwnStateFromItsOwnServiceWorker() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
         try ExtensionCorpus.verifyManifestVersionMatchesPin(for: Self.corpusName)
 
-        try LiveChromiumEngineHost.runLive(timeout: 180) {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        try WebKitLiveEngineHost.runLive(timeout: 180) {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
 
-            let bridge = OrbitChromiumTabsBridge.shared
-            if !bridge.isWindowRegistered(env) {
-                bridge.windowCreated(owner: env, focused: false)
-            }
-            bridge.windowFocusChanged(owner: env)
 
             let spaceID = try XCTUnwrap(env.activeSpace?.id)
             let server = try self.makeServer()
@@ -93,9 +87,9 @@ final class CorpusPrivacyBadgerLiveTests: CorpusLiveTestCase {
             )
 
             let subjectTabID = env.openTab(url: server.baseURL, in: spaceID)
-            let contents = try XCTUnwrap(env.webContents[subjectTabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
-            let registryID = try XCTUnwrap(bridge.existingTabID(for: subjectTabID))
+            let contents = try XCTUnwrap(env.webContents[subjectTabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
+            let registryID = try XCTUnwrap(engine.numericID(for: subjectTabID))
             env.activateTab(subjectTabID)
 
             let session = env.webContents[subjectTabID]?.session ?? engine.defaultSession
@@ -109,9 +103,9 @@ final class CorpusPrivacyBadgerLiveTests: CorpusLiveTestCase {
 
             let model = ExtensionActionPopupModel(engine: engine, session: session, url: action.popupURL)
             model.start()
-            let popup = try XCTUnwrap(model.contents as? ChromiumWebContents, model.loadFailure ?? "no popup contents")
+            let popup = try XCTUnwrap(model.contents as? WebKitWebContents, model.loadFailure ?? "no popup contents")
             defer { model.teardown() }
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(popup)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(popup)
 
             var state = PopupState(
                 slidersDone: false, noTrackersVisible: false, trackerHeaderVisible: false,

@@ -119,6 +119,7 @@ struct CommandBarView: View {
                 TextField(inputPlaceholder, text: $query)
                     .textFieldStyle(.plain)
                     .font(OrbitFont.commandBarInput)
+                    .accessibilityIdentifier(CommandBarFieldFocus.fieldIdentifier)
                     .focused($isFocused)
                     .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
                     .onKeyPress(.downArrow) { moveSelection(1); return .handled }

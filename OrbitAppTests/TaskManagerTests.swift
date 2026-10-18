@@ -1,3 +1,4 @@
+import WebKit
 import XCTest
 @testable import Orbit
 
@@ -92,18 +93,18 @@ final class OrbitProcessMonitorTests: XCTestCase {
         XCTAssertEqual(
             OrbitProcessMonitor.cpuPercent(previousCPUTime: 0, currentCPUTime: oneSecond * 2, elapsedNanoseconds: oneSecond),
             200, accuracy: 0.0001,
-            "A multi-threaded renderer genuinely exceeds one core, and clamping it would hide exactly the case this window is for."
+            "A multi-threaded web content process genuinely exceeds one core, and clamping it would hide exactly the case this window is for."
         )
     }
 
     // MARK: - Roles
 
-    func test_helperBundleNamesClassifyIntoTheirRoles() {
+    func test_webKitServiceNamesClassifyIntoTheirRoles() {
         let expected: [(String, OrbitProcessInfo.Role)] = [
-            ("Orbit Helper (Renderer)", .renderer),
-            ("Orbit Helper (GPU)", .gpu),
-            ("Orbit Helper (Plugin)", .plugin),
-            ("Orbit Helper (Alerts)", .alerts),
+            ("com.apple.WebKit.WebContent", .webContent),
+            ("com.apple.WebKit.WebContent.Development", .webContent),
+            ("com.apple.WebKit.Networking", .networking),
+            ("com.apple.WebKit.GPU", .gpu),
             ("Orbit Helper", .helper),
             ("some-other-binary", .other),
         ]
@@ -118,8 +119,88 @@ final class OrbitProcessMonitorTests: XCTestCase {
 
     func test_theBrowserProcessIsClassifiedByItsIdentityNotItsName() {
         XCTAssertEqual(
-            OrbitProcessInfo.Role.forExecutableName("Orbit Helper (Renderer)", isBrowserProcess: true), .browser
+            OrbitProcessInfo.Role.forExecutableName("com.apple.WebKit.WebContent", isBrowserProcess: true), .browser
         )
+    }
+
+    // MARK: - WebKit attribution
+
+    func test_attributedProcessesJoinTheListWithTheirRolesAndTabTitles() {
+        let own = getpid()
+        let attribution = WebKitProcessAttribution(
+            roles: [own &+ 1_000_000: .webContent],
+            tabTitles: [own &+ 1_000_000: ["Example", "Docs"]]
+        )
+
+        XCTAssertEqual(
+            OrbitProcessMonitor.processIdentifiers(attribution: attribution).last, own &+ 1_000_000,
+            "An attributed pid was not added to the process list."
+        )
+        XCTAssertEqual(
+            OrbitProcessMonitor.processIdentifiers(attribution: attribution).filter { $0 == own }.count, 1,
+            "Orbit's own pid must not be listed twice."
+        )
+        XCTAssertEqual(OrbitProcessMonitor.processIdentifiers(), OrbitProcessMonitor.processIdentifiers(attribution: .none))
+    }
+
+    func test_anAttributedProcessCanBeEndedOnlyWhileTheAttributionNamesIt() {
+        let stranger = pid_t(Int32.max - 1)
+        let attribution = WebKitProcessAttribution(roles: [stranger: .gpu], tabTitles: [:])
+
+        XCTAssertNil(OrbitProcessMonitor.refusalForEndingProcess(stranger, attribution: attribution))
+        XCTAssertEqual(
+            OrbitProcessMonitor.refusalForEndingProcess(stranger), .notAnOrbitProcess,
+            "A pid Orbit's web views do not report must be refused."
+        )
+    }
+
+    func test_subtitleNamesTheTabsAProcessIsRendering() {
+        func process(_ titles: [String]) -> OrbitProcessInfo {
+            OrbitProcessInfo(
+                processID: 7, executableName: "com.apple.WebKit.WebContent", role: .webContent,
+                memoryFootprintBytes: 0, cpuTimeNanoseconds: 0, cpuPercent: 0, tabTitles: titles
+            )
+        }
+
+        XCTAssertEqual(TaskManagerView.subtitle(for: process([])), "PID 7 · com.apple.WebKit.WebContent")
+        XCTAssertEqual(TaskManagerView.subtitle(for: process(["A"])), "PID 7 · com.apple.WebKit.WebContent · A")
+        XCTAssertEqual(TaskManagerView.subtitle(for: process(["A", "B", "C"])), "PID 7 · com.apple.WebKit.WebContent · A +2 more")
+    }
+
+    func test_subtitleNamesTheExtensionsAProcessHosts() {
+        func process(_ names: [String]) -> OrbitProcessInfo {
+            OrbitProcessInfo(
+                processID: 9, executableName: "com.apple.WebKit.WebContent", role: .extensionProcess,
+                memoryFootprintBytes: 0, cpuTimeNanoseconds: 0, cpuPercent: 0, extensionNames: names
+            )
+        }
+
+        XCTAssertEqual(OrbitProcessInfo.Role.extensionProcess.displayName, "Extension")
+        XCTAssertEqual(TaskManagerView.subtitle(for: process(["Dark Reader"])), "PID 9 · com.apple.WebKit.WebContent · Dark Reader")
+        XCTAssertEqual(TaskManagerView.subtitle(for: process(["A", "B"])), "PID 9 · com.apple.WebKit.WebContent · A +1 more")
+    }
+
+    func test_anExtensionProcessRowCarriesTheNameTheAttributionGivesIt() throws {
+        let service = Process()
+        service.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        service.arguments = ["600"]
+        try service.run()
+        addTeardownBlock {
+            service.terminate()
+            service.waitUntilExit()
+        }
+        let pid = service.processIdentifier
+        let attribution = WebKitProcessAttribution(
+            roles: [pid: .extensionProcess], tabTitles: [:], extensionNames: [pid: ["Wappalyzer"]]
+        )
+        let model = TaskManagerModel(attributionProvider: { attribution })
+
+        model.refresh()
+
+        let row = try XCTUnwrap(model.processes.first { $0.processID == pid }, "The extension process is missing from the list.")
+        XCTAssertEqual(row.role, .extensionProcess)
+        XCTAssertEqual(row.extensionNames, ["Wappalyzer"])
+        XCTAssertTrue(row.tabTitles.isEmpty)
     }
 
     // MARK: - Ordering
@@ -137,7 +218,7 @@ final class OrbitProcessMonitorTests: XCTestCase {
         }
 
         let sorted = OrbitProcessMonitor.sorted([
-            process(30, .renderer, memory: 100),
+            process(30, .webContent, memory: 100),
             process(10, .browser, memory: 1),
             process(20, .gpu, memory: 900),
         ])
@@ -177,7 +258,7 @@ final class OrbitProcessMonitorTests: XCTestCase {
     func test_memoryFootprintIsFormattedInBinaryUnits() {
         let process = OrbitProcessInfo(
             processID: 42,
-            executableName: "Orbit Helper (GPU)",
+            executableName: "com.apple.WebKit.GPU",
             role: .gpu,
             memoryFootprintBytes: 512 * 1024 * 1024,
             cpuTimeNanoseconds: 0,
@@ -192,8 +273,8 @@ final class OrbitProcessMonitorTests: XCTestCase {
     func test_smallCPUSharesAreNotRoundedAwayToZero() {
         let process = OrbitProcessInfo(
             processID: 42,
-            executableName: "Orbit Helper (Renderer)",
-            role: .renderer,
+            executableName: "com.apple.WebKit.WebContent",
+            role: .webContent,
             memoryFootprintBytes: 0,
             cpuTimeNanoseconds: 0,
             cpuPercent: 0.4
@@ -201,6 +282,61 @@ final class OrbitProcessMonitorTests: XCTestCase {
 
         XCTAssertNotEqual(process.cpuPercentText, "0.0%", "0.4% was rounded down to nothing.")
         XCTAssertTrue(process.cpuPercentText.hasSuffix("%"))
+    }
+}
+
+// MARK: - Live WebKit processes
+
+@MainActor
+final class WebKitProcessAttributionLiveTests: XCTestCase {
+
+    func test_aLiveWebViewsServiceProcessesAppearInTheSampleWithTheirRoles() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 60) {
+            let contents = try await WebKitLiveEngineHost.makeContents()
+            defer { contents.close() }
+
+            let attribution = WebKitProcessAttribution.gather(from: [contents.webView])
+
+            let webContent = try XCTUnwrap(
+                attribution.roles.first { $0.value == .webContent }?.key,
+                "The web view reported no WebContent process."
+            )
+            XCTAssertNotEqual(webContent, getpid())
+            XCTAssertFalse(attribution.roles.values.contains(.browser))
+
+            let sample = OrbitProcessMonitor.sample(attribution: attribution)
+            let row = try XCTUnwrap(sample.processes.first { $0.processID == webContent }, "The WebContent process is not in the sample.")
+            XCTAssertEqual(row.role, .webContent)
+            XCTAssertTrue(row.executableName.contains("WebContent"), "Unexpected executable \(row.executableName).")
+            XCTAssertGreaterThan(row.memoryFootprintBytes, 0)
+            XCTAssertNil(OrbitProcessMonitor.refusalForEndingProcess(webContent, attribution: attribution))
+            XCTAssertEqual(sample.processes.first?.processID, getpid(), "Orbit's own row must stay first.")
+
+            for (pid, role) in attribution.roles {
+                let name = try XCTUnwrap(sample.processes.first { $0.processID == pid }?.executableName)
+                XCTAssertEqual(
+                    OrbitProcessInfo.Role.forExecutableName(name, isBrowserProcess: false), role,
+                    "\(name) is attributed as \(role) but its name says otherwise."
+                )
+            }
+        }
+    }
+
+    func test_aWebContentProcessListsTheTabsItRenders() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 60) {
+            let contents = try await WebKitLiveEngineHost.makeContents()
+            defer { contents.close() }
+            contents.webView.loadHTMLString("<html><head><title>Task Manager Probe</title></head></html>", baseURL: URL(string: "https://probe.orbit.test/"))
+            let deadline = ContinuousClock.now + .seconds(10)
+            while contents.webView.title != "Task Manager Probe", ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+
+            let attribution = WebKitProcessAttribution.gather(from: [contents.webView])
+
+            let titles = attribution.tabTitles.values.flatMap { $0 }
+            XCTAssertTrue(titles.contains("Task Manager Probe"), "Tab titles were \(titles).")
+        }
     }
 }
 
@@ -249,6 +385,29 @@ final class TaskManagerModelTests: XCTestCase {
 
         model.refresh()
         XCTAssertTrue(model.hasMeasuredCPU)
+    }
+
+    func test_theModelListsWhateverTheAttributionProviderReports() throws {
+        let service = Process()
+        service.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        service.arguments = ["600"]
+        try service.run()
+        addTeardownBlock {
+            service.terminate()
+            service.waitUntilExit()
+        }
+        let stranger = service.processIdentifier
+        let attribution = WebKitProcessAttribution(roles: [stranger: .networking], tabTitles: [:])
+        let model = TaskManagerModel(attributionProvider: { attribution })
+
+        model.refresh()
+
+        let row = try XCTUnwrap(model.processes.first { $0.processID == stranger }, "The attributed process is missing from the list.")
+        XCTAssertEqual(row.role, .networking)
+        XCTAssertEqual(model.processes.first?.processID, getpid())
+
+        model.selectedProcessID = stranger
+        XCTAssertNil(model.endProcessRefusal, "An attributed Orbit service must be endable.")
     }
 
     func test_theListIsTheRealProcessTreeWithOrbitFirst() throws {

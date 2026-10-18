@@ -15,18 +15,8 @@ updates:
     labels:
       - ci
 
-  # ThirdParty/depot_tools. Chromium versions themselves stay on the daily
-  # chromium-update workflow, which pins a Git ref, not a Dependabot-trackable
-  # version -- this only picks up depot_tools' own upstream commits.
-  - package-ecosystem: gitsubmodule
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-    commit-message:
-      prefix: ci
-    labels:
-      - ci
-
+  # GitHub Actions only. The browser is system WebKit: there is no Chromium
+  # pin, depot_tools submodule, or other third-party checkout for Dependabot
+  # to bump.
   # No swift entry: Dependabot reads Package.swift, and Sparkle lives in
   # Orbit.xcodeproj. Bump it in Xcode and commit Package.resolved.

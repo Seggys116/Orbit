@@ -1,3 +1,4 @@
+import WebKit
 import XCTest
 @testable import Orbit
 
@@ -10,6 +11,7 @@ final class AppEnvironmentDataResetTests: XCTestCase {
     private var scratchDefaults: UserDefaults!
     private var scratchRoot: URL!
     private var originalTargets: DataResetTargets?
+    private var sessions: [any EngineSession] = []
 
     override func setUp() async throws {
         try await super.setUp()
@@ -22,7 +24,7 @@ final class AppEnvironmentDataResetTests: XCTestCase {
 
         scratchRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent(suiteName, isDirectory: true)
-        for directory in [faviconsDirectory, spaceIconsDirectory, extensionsDirectory, chromiumDirectory, syncDirectory, contentBlockingDirectory] {
+        for directory in [faviconsDirectory, spaceIconsDirectory, extensionsDirectory, contentSettingsDirectory, syncDirectory, contentBlockingDirectory] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
 
@@ -35,13 +37,18 @@ final class AppEnvironmentDataResetTests: XCTestCase {
                 store: FilterListStore(directory: contentBlockingDirectory),
                 defaults: scratchDefaults
             ),
-            chromiumProfileDirectory: chromiumDirectory,
+            contentSettingsDirectory: contentSettingsDirectory,
             syncDirectory: syncDirectory,
-            contentBlockingDirectory: contentBlockingDirectory
+            contentBlockingDirectory: contentBlockingDirectory,
+            engineSessions: { [unowned self] in self.sessions }
         )
     }
 
     override func tearDown() async throws {
+        for session in sessions.compactMap({ $0 as? WebKitSession }) {
+            try? await WKWebsiteDataStore.remove(forIdentifier: WebKitSession.dataStoreIdentifier(for: session.identifier))
+        }
+        sessions.removeAll()
         DataResetTargets.override = originalTargets
         AppEnvironment.defaults = OrbitDefaults.standard
         SiteZoomStore.defaults = OrbitDefaults.standard
@@ -54,13 +61,13 @@ final class AppEnvironmentDataResetTests: XCTestCase {
     private var faviconsDirectory: URL { scratchRoot.appendingPathComponent("Favicons", isDirectory: true) }
     private var spaceIconsDirectory: URL { scratchRoot.appendingPathComponent("SpaceIcons", isDirectory: true) }
     private var extensionsDirectory: URL { scratchRoot.appendingPathComponent("Extensions", isDirectory: true) }
-    private var chromiumDirectory: URL { scratchRoot.appendingPathComponent("Chromium", isDirectory: true) }
+    private var contentSettingsDirectory: URL { scratchRoot.appendingPathComponent("ContentSettings", isDirectory: true) }
     private var syncDirectory: URL { scratchRoot.appendingPathComponent("Sync", isDirectory: true) }
     private var contentBlockingDirectory: URL { scratchRoot.appendingPathComponent("ContentBlocking", isDirectory: true) }
 
     // MARK: - Category metadata
 
-    func testEveryCategoryDescribesItselfAndOnlyTheEngineOnesNeedARelaunch() {
+    func testEveryCategoryDescribesItselfAndOnlyTheOnesWebKitCannotClearLiveNeedARelaunch() {
         var ids: Set<String> = []
         for category in DataResetCategory.allCases {
             XCTAssertFalse(category.title.isEmpty, "\(category.rawValue) has no title for the Settings row.")
@@ -69,8 +76,8 @@ final class AppEnvironmentDataResetTests: XCTestCase {
         }
         XCTAssertEqual(
             Set(DataResetCategory.allCases.filter(\.requiresRelaunch)),
-            [.cookiesAndLogins, .extensions, .siteSettings, .preferences],
-            "Every category that reaches into the Chromium profile or the settings layer has to demand a relaunch."
+            [.extensions, .preferences],
+            "Website data and site settings clear live through WebKit; only loaded extensions and already-read preferences need a relaunch."
         )
     }
 
@@ -182,103 +189,54 @@ final class AppEnvironmentDataResetTests: XCTestCase {
 
     // MARK: - Cookies and logins
 
-    func testCookiesAndLoginsCategoryRemovesCredentialAndStorageFilesFromEverySessionProfile() async throws {
-        let sessionProfile = try makeProfile(named: "0A28A41D-CFBE-4FE5-B639-F252B8014652")
-        let defaultProfile = try makeProfile(named: "Default")
-        let keptRootFile = chromiumDirectory.appendingPathComponent("Local State")
-        FileManager.default.createFile(atPath: keptRootFile.path, contents: Data("{}".utf8))
+    func testCookiesAndLoginsCategoryNeedsNoRelaunchAndSucceedsWithoutAnEngine() async {
+        XCTAssertNil(env.engine, "Precondition: a demo environment has no engine to clear.")
 
         let outcome = await env.resetData([.cookiesAndLogins])
 
         XCTAssertEqual(outcome.clearedCategories, [.cookiesAndLogins])
         XCTAssertTrue(outcome.failedCategories.isEmpty)
-        XCTAssertTrue(outcome.needsRelaunch, "The browser process holds the profile files open, so the removal only sticks after a relaunch.")
-        for profile in [sessionProfile, defaultProfile] {
-            for entry in ChromiumProfileData.credentialAndStorageEntries + ["Cookies-journal", "Login Data-journal", "Web Data-wal"] {
-                XCTAssertFalse(
-                    FileManager.default.fileExists(atPath: profile.appendingPathComponent(entry).path),
-                    "\(profile.lastPathComponent)/\(entry) survived a Cookies and Logins reset."
-                )
-            }
-            XCTAssertTrue(
-                FileManager.default.fileExists(atPath: profile.appendingPathComponent("History").path),
-                "Cookies and Logins took a file belonging to another category."
-            )
-            XCTAssertTrue(FileManager.default.fileExists(atPath: profile.path), "The profile directory itself must survive.")
-        }
-        XCTAssertTrue(FileManager.default.fileExists(atPath: keptRootFile.path))
-    }
-
-    func testCookiesAndLoginsCategoryReportsFailureWhenAProfileFileCannotBeRemoved() async throws {
-        let profile = try makeProfile(named: "Locked")
-        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: profile.path)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: profile.path) }
-
-        let outcome = await env.resetData([.cookiesAndLogins])
-
-        XCTAssertEqual(outcome.failedCategories, [.cookiesAndLogins], "A locked profile file has to be reported, not silently skipped.")
-        XCTAssertTrue(outcome.clearedCategories.isEmpty)
-        XCTAssertFalse(outcome.needsRelaunch, "Nothing was cleared, so there is nothing for a relaunch to finish.")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: profile.appendingPathComponent("Login Data").path))
+        XCTAssertFalse(outcome.needsRelaunch, "WebKit removes website data from a running data store, so nothing waits on a relaunch.")
     }
 
     // MARK: - Site settings
 
-    func testSiteSettingsCategoryClearsPerSiteContentSettingsAndLeavesTheRestOfPreferences() async throws {
-        let profile = try makeProfile(named: "Default")
-        try writePreferences(
-            [
-                "profile": [
-                    "content_settings": [
-                        "exceptions": [
-                            "media_stream_camera": ["https://example.com,*": ["setting": 1]],
-                            "notifications": ["https://example.com,*": ["setting": 1]],
-                        ],
-                        "pref_version": 1,
-                    ],
-                    "name": "Person 1",
-                ],
-                "extensions": ["settings": ["abc": ["state": 1]]],
-            ],
-            in: profile
+    func testSiteSettingsCategoryClearsPersistedPerSiteDecisionsInEverySession() async throws {
+        let first = makeSession(named: "reset-first")
+        let second = makeSession(named: "reset-second")
+        let origin = URL(string: "https://example.com/page")!
+        first.setContentSetting(.allow, for: .camera, url: origin)
+        second.setContentSetting(.block, for: .geolocation, url: origin)
+        let firstFile = try XCTUnwrap(first.contentSettingsFileURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstFile.path), "Precondition: the decision was persisted.")
+        let orphan = contentSettingsDirectory.appendingPathComponent("deleted-profile.json")
+        FileManager.default.createFile(atPath: orphan.path, contents: Data("{}".utf8))
+
+        let outcome = await env.resetData([.siteSettings])
+
+        XCTAssertEqual(outcome.clearedCategories, [.siteSettings])
+        XCTAssertFalse(outcome.needsRelaunch)
+        XCTAssertEqual(first.contentSetting(.camera, for: origin), .ask, "A live session kept its camera grant.")
+        XCTAssertEqual(second.contentSetting(.geolocation, for: origin), .ask)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstFile.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphan.path), "A session this process never created kept its stored decisions.")
+
+        let reloaded = WebKitSession(
+            identifier: first.identifier, persistent: true, storageURL: nil, settingsDirectory: contentSettingsDirectory
         )
-
-        let outcome = await env.resetData([.siteSettings])
-
-        XCTAssertEqual(outcome.clearedCategories, [.siteSettings])
-        XCTAssertTrue(outcome.needsRelaunch, "A running browser process rewrites Preferences on exit, so the clear only sticks after a relaunch.")
-        let rewritten = try readPreferences(in: profile)
-        let contentSettings = try XCTUnwrap((rewritten["profile"] as? [String: Any])?["content_settings"] as? [String: Any])
-        XCTAssertNil(contentSettings["exceptions"], "Per-origin camera and notification grants survived a Site Settings reset.")
-        XCTAssertNotNil(contentSettings["pref_version"], "Only the exceptions may go — the rest of content_settings is unrelated state.")
-        XCTAssertEqual((rewritten["profile"] as? [String: Any])?["name"] as? String, "Person 1")
-        XCTAssertNotNil(rewritten["extensions"], "Preferences carries state no reset category claims; it must not be deleted wholesale.")
+        XCTAssertEqual(reloaded.contentSetting(.camera, for: origin), .ask, "The decision came back after a relaunch.")
     }
 
-    func testSiteSettingsCategoryReportsFailureWhenPreferencesCannotBeRead() async throws {
-        let profile = try makeProfile(named: "Default")
-        try Data("not json".utf8).write(to: profile.appendingPathComponent(ChromiumProfileData.preferencesFileName))
+    func testSiteSettingsCategoryReportsFailureWhenStoredDecisionsCannotBeRemoved() async throws {
+        let session = makeSession(named: "reset-locked")
+        session.setContentSetting(.allow, for: .camera, url: URL(string: "https://example.com")!)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: contentSettingsDirectory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: contentSettingsDirectory.path) }
 
         let outcome = await env.resetData([.siteSettings])
 
-        XCTAssertEqual(outcome.failedCategories, [.siteSettings], "Unreadable Preferences means the permissions are still there.")
+        XCTAssertEqual(outcome.failedCategories, [.siteSettings], "Decisions still on disk have to be reported, not skipped.")
         XCTAssertTrue(outcome.clearedCategories.isEmpty)
-    }
-
-    func testSiteSettingsCategoryClearsPerSiteContentSettingsInEverySessionProfile() async throws {
-        let profiles = try ["Default", "4D16A368-BC2C-4733-A15E-3B10EBCD0422"].map { try makeProfile(named: $0) }
-        for profile in profiles {
-            try writePreferences(["profile": ["content_settings": ["exceptions": ["geolocation": ["https://example.com,*": ["setting": 1]]]]]], in: profile)
-        }
-
-        let outcome = await env.resetData([.siteSettings])
-
-        XCTAssertEqual(outcome.clearedCategories, [.siteSettings])
-        for profile in profiles {
-            let rewritten = try readPreferences(in: profile)
-            let contentSettings = (rewritten["profile"] as? [String: Any])?["content_settings"] as? [String: Any]
-            XCTAssertNil(contentSettings?["exceptions"], "\(profile.lastPathComponent) kept its per-origin permissions.")
-        }
     }
 
     func testSiteSettingsCategoryClearsZoomSiteSearchesAndTheAdBlockAllowlist() async {
@@ -334,10 +292,11 @@ final class AppEnvironmentDataResetTests: XCTestCase {
 
     // MARK: - Everything
 
-    func testResetEverythingClearsEveryCategoryPlusTheProfileAndFilterListDirectories() async {
-        let profileFile = chromiumDirectory.appendingPathComponent("Cookies")
+    func testResetEverythingClearsEveryCategoryPlusStoredDecisionsAndFilterLists() async {
+        let session = makeSession(named: "reset-everything")
+        let origin = URL(string: "https://example.com")!
+        session.setContentSetting(.allow, for: .microphone, url: origin)
         let filterListFile = contentBlockingDirectory.appendingPathComponent("index.json")
-        FileManager.default.createFile(atPath: profileFile.path, contents: Data("cookies".utf8))
         FileManager.default.createFile(atPath: filterListFile.path, contents: Data("{}".utf8))
         env.noteStore.createNote(title: "Gone")
 
@@ -346,7 +305,7 @@ final class AppEnvironmentDataResetTests: XCTestCase {
         XCTAssertEqual(outcome.failedCategories, [], "Reset Everything reported a category it could not clear.")
         XCTAssertEqual(outcome.clearedCategories, Set(DataResetCategory.allCases))
         XCTAssertTrue(outcome.needsRelaunch)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: profileFile.path), "The Chromium profile directory still holds the user's browsing state.")
+        XCTAssertEqual(session.contentSetting(.microphone, for: origin), .ask)
         XCTAssertFalse(FileManager.default.fileExists(atPath: filterListFile.path))
         XCTAssertTrue(env.noteStore.index.isEmpty)
         XCTAssertEqual(env.spaces.count, 1)
@@ -365,32 +324,15 @@ final class AppEnvironmentDataResetTests: XCTestCase {
 
     // MARK: - Helpers
 
-    @discardableResult
-    private func makeProfile(named name: String) throws -> URL {
-        let profile = chromiumDirectory.appendingPathComponent(name, isDirectory: true)
-        try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
-        let files = ChromiumProfileData.credentialAndStorageEntries
-            + ["Cookies-journal", "Login Data-journal", "Web Data-wal", "History"]
-        for file in files {
-            let url = profile.appendingPathComponent(file)
-            if ["Local Storage", "Session Storage", "WebStorage", "IndexedDB", "Service Worker", "File System"].contains(file) {
-                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-                FileManager.default.createFile(atPath: url.appendingPathComponent("000003.log").path, contents: Data("leveldb".utf8))
-            } else {
-                FileManager.default.createFile(atPath: url.path, contents: Data(file.utf8))
-            }
-        }
-        return profile
-    }
-
-    private func writePreferences(_ json: [String: Any], in profile: URL) throws {
-        try JSONSerialization.data(withJSONObject: json)
-            .write(to: profile.appendingPathComponent(ChromiumProfileData.preferencesFileName))
-    }
-
-    private func readPreferences(in profile: URL) throws -> [String: Any] {
-        let data = try Data(contentsOf: profile.appendingPathComponent(ChromiumProfileData.preferencesFileName))
-        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    private func makeSession(named name: String) -> WebKitSession {
+        let session = WebKitSession(
+            identifier: "\(name)-\(UUID().uuidString)",
+            persistent: true,
+            storageURL: nil,
+            settingsDirectory: contentSettingsDirectory
+        )
+        sessions.append(session)
+        return session
     }
 
     private func waitUntil(

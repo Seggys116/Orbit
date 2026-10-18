@@ -1,5 +1,5 @@
-// Keeps RuntimeSurfaceExpectations.json consistent with _api_features.json and
-// ExpectedAPIGaps.json without starting an engine. Load-bearing: the negative control
+// Keeps RuntimeSurfaceExpectations.json consistent with the wrapper inventory, the WebKit permission
+// list and ExpectedAPIGaps.json without starting an engine. Load-bearing: the negative control
 // asserting every permission-gated namespace is undefined without that permission.
 
 import XCTest
@@ -7,6 +7,7 @@ import XCTest
 final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
 
     private typealias Schema = ExtensionAPISchemaSurface
+    private typealias Inventory = ChromeAPISurfaceInventory
 
     private func expectations() throws -> [String: Any] {
         try Schema.readObject(Schema.repositoryFile("OrbitTests/Fixtures/RuntimeSurfaceExpectations.json"))
@@ -16,60 +17,66 @@ final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
         try XCTUnwrap(expectations()[key] as? [String], "RuntimeSurfaceExpectations.json is missing the \"\(key)\" list")
     }
 
-    /// namespace -> the permission its `dependencies` names, from Orbit's own
-    /// API feature file.
-    private func orbitPermissionGatedNamespaces() throws -> [String: String] {
-        let object = try Schema.readObject(
-            Schema.repositoryFile("Chromium/Embedder/common/api/_api_features.json")
-        )
-        var gated: [String: String] = [:]
-        for (name, raw) in object {
-            guard !name.contains("."), let entry = raw as? [String: Any] else { continue }
-            let dependencies = entry["dependencies"] as? [String] ?? []
-            for dependency in dependencies where dependency.hasPrefix("permission:") {
-                gated[name] = String(dependency.dropFirst("permission:".count))
-            }
-        }
-        return gated
-    }
-
     // MARK: - The negative control is a table, not a one-off
 
     func test_everyPermissionGatedNamespaceOrbitDeclaresHasANegativeControlRow() throws {
-        let gated = try orbitPermissionGatedNamespaces()
-        XCTAssertFalse(gated.isEmpty, "parsed no permission dependencies out of _api_features.json")
-
         let rows = try XCTUnwrap(expectations()["permissionGatedNamespaces"] as? [[String: String]])
-        let covered = Dictionary(uniqueKeysWithValues: rows.compactMap { row -> (String, String)? in
-            guard let namespace = row["namespace"], let permission = row["permission"] else { return nil }
-            return (namespace, permission)
-        })
-
-        let uncovered = gated.keys.filter { covered[$0] == nil }.sorted()
-        XCTAssertEqual(
-            uncovered, [],
-            "these namespaces are gated on a permission in Chromium/Embedder/common/api/_api_features.json and nothing asserts they are actually denied without it. A permission check that never denies is not a permission check."
-        )
-
-        for (namespace, permission) in gated where covered[namespace] != nil {
-            XCTAssertEqual(
-                covered[namespace], permission,
-                "the negative control for \(namespace) names permission \"\(covered[namespace] ?? "")\" but _api_features.json gates it on \"\(permission)\""
-            )
-        }
-    }
-
-    func test_theNegativeControlNamesNoNamespaceThatIsNotActuallyGated() throws {
-        let rows = try XCTUnwrap(expectations()["permissionGatedNamespaces"] as? [[String: String]])
+        XCTAssertFalse(rows.isEmpty)
+        let known = try Schema.upstreamIndex().chromePermissions.union(Schema.upstreamIndex().corePermissions)
         for row in rows {
             let namespace = try XCTUnwrap(row["namespace"])
             let permission = try XCTUnwrap(row["permission"])
             XCTAssertFalse(namespace.isEmpty)
+            XCTAssertTrue(known.contains(permission), permission)
+        }
+    }
+
+    func test_everyNegativeControlRowNamesThePermissionThatActuallyGatesIt() throws {
+        let rows = try XCTUnwrap(expectations()["permissionGatedNamespaces"] as? [[String: String]])
+        let wrapperNamespaces = Set(Inventory.namespaces.map(\.name)).union(["privacy"])
+        let native = Set(Inventory.webKitNativeNamespaces)
+        for row in rows {
+            let namespace = try XCTUnwrap(row["namespace"])
+            let permission = try XCTUnwrap(row["permission"])
             XCTAssertFalse(
                 permission.isEmpty,
                 "\(namespace) has a negative-control row with no permission, so the control asserts nothing"
             )
+            if wrapperNamespaces.contains(namespace) {
+                XCTAssertEqual(permission, namespace, "the wrapper gates chrome.\(namespace) on the permission of the same name")
+            } else if native.contains(namespace) {
+                XCTAssertTrue(
+                    Inventory.webKitNativePermissions.contains(permission),
+                    "\(namespace) is WebKit's, so only a permission WebKit recognises can gate it; \(permission) is not one"
+                )
+            } else {
+                XCTFail("\(namespace) is neither created by the wrapper nor provided by WebKit, so no permission gates it here")
+            }
         }
+    }
+
+    func test_everyPermissionGatedNamespaceTheWrapperCreatesHasANegativeControlRow() throws {
+        let rows = try XCTUnwrap(expectations()["permissionGatedNamespaces"] as? [[String: String]])
+        let covered = Set(rows.compactMap { $0["namespace"] })
+        let partial = try XCTUnwrap(expectations()["partiallyGatedNamespaces"] as? [String: [String: Any]])
+        let wrapperNamespaces = Set(Inventory.namespaces.map(\.name)).union(["privacy"])
+        let uncovered = wrapperNamespaces.subtracting(covered).subtracting(partial.keys).sorted()
+        XCTAssertEqual(
+            uncovered, [],
+            "the wrapper creates these permission-gated namespaces and nothing asserts they stay undefined without the permission, so a newly wrapped namespace could skip the control"
+        )
+    }
+
+    func test_thePartiallyGatedRowMatchesTheInventorysUngatedMembers() throws {
+        let partial = try XCTUnwrap(expectations()["partiallyGatedNamespaces"] as? [String: [String: Any]])
+        for (name, row) in partial {
+            let namespace = try XCTUnwrap(Inventory.namespaces.first { $0.name == name }, "\(name) is not a wrapper namespace")
+            XCTAssertEqual(
+                Set(row["alwaysAvailable"] as? [String] ?? []), Set(namespace.ungatedMethods),
+                "the control's list of always-available \(name) members is not the one the wrapper keeps"
+            )
+        }
+        XCTAssertNotNil(partial["management"])
     }
 
     // MARK: - The three lists cannot contradict each other
@@ -94,16 +101,34 @@ final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
         }
     }
 
-    func test_everyNamespaceOrbitPortsIsRequiredToBeDefinedAtRuntime() throws {
+    func test_everyNamespaceTheWrapperCreatesIsRequiredToBeDefinedAtRuntime() throws {
         let mustBeDefined = Set(try stringList("mustBeDefined"))
-        // Both are web-page APIs an MV3 service worker is never meant to see:
-        // webstorePrivate is allowlist-restricted, app is disallow_for_service_workers.
-        let ported = try Schema.orbitPortedNamespaces().keys
-            .filter { $0 != "webstorePrivate" && $0 != "app" }
-        let unasserted = ported.filter { !mustBeDefined.contains($0) }.sorted()
+        let created = Set(Inventory.namespaces.map(\.name)).union(["privacy"])
+        let unasserted = created.subtracting(mustBeDefined).sorted()
         XCTAssertEqual(
             unasserted, [],
-            "Orbit ships a schema for these and nothing asserts an extension can actually reach them. The schema being present is precisely what made chrome.scripting's absence invisible."
+            "the wrapper creates these and nothing asserts an extension can actually reach them. A namespace being declared is precisely what made chrome.scripting's absence invisible."
+        )
+    }
+
+    func test_noKnownUnavailableNamespaceIsOneTheWrapperOrWebKitProvidesOrMightProvide() throws {
+        let knownUnavailable = Set(try XCTUnwrap(expectations()["knownUnavailable"] as? [String: String]).keys)
+        let provided = Set(Inventory.namespaces.map(\.name)).union(Inventory.webKitNativeNamespaces).union(["privacy"])
+        XCTAssertEqual(knownUnavailable.intersection(provided).sorted(), [], "asserted undefined but provided")
+        let gaps = try Schema.readExpectations().namespaces
+        let unverified = gaps.filter { $0.value.status == "unverified" }.keys
+        XCTAssertEqual(
+            knownUnavailable.intersection(unverified).sorted(), [],
+            "ExpectedAPIGaps.json says WebKit may provide these, so the runtime suite must not assert them undefined"
+        )
+    }
+
+    func test_everyNamespaceThatNeedsAFixturePermissionHasItDeclared() throws {
+        let fixturePermissions = Set(try stringList("fixturePermissions"))
+        let needed = Set(Inventory.namespaces.map(\.name)).union(["privacy"])
+        XCTAssertEqual(
+            needed.subtracting(fixturePermissions).sorted(), [],
+            "the reflection fixture does not declare the permission for these wrapper namespaces, so the runtime walk could never see them"
         )
     }
 
@@ -126,18 +151,11 @@ final class ExtensionRuntimeSurfaceExpectationsTests: XCTestCase {
     func test_theFixturePermissionListOnlyNamesPermissionsOrbitCanActuallyRegister() throws {
         let fixturePermissions = Set(try stringList("fixturePermissions"))
         XCTAssertFalse(fixturePermissions.isEmpty)
-        // The chrome-layer ones Orbit registers itself; everything else has to
-        // be a core //extensions permission, which Orbit gets for free.
-        let orbitRegistered = try Schema.registeredPermissionNames()
-        let chromeLayer = Set(try Schema.upstreamIndex().chromePermissions)
-            .subtracting(try Schema.upstreamIndex().corePermissions)
-        let declaredButUnregistered = fixturePermissions
-            .intersection(chromeLayer)
-            .subtracting(orbitRegistered)
-            .sorted()
+        let known = try Schema.upstreamIndex().chromePermissions.union(Schema.upstreamIndex().corePermissions)
+        let invented = fixturePermissions.subtracting(known).sorted()
         XCTAssertEqual(
-            declaredButUnregistered, [],
-            "the reflection fixture declares chrome-layer permissions Orbit never registers. Chromium drops an unknown permission from the manifest without an error, so the fixture would quietly run with fewer permissions than it asks for and the positive surface test would fail for the wrong reason."
+            invented, [],
+            "the reflection fixture names permissions the vendored upstream snapshot does not define"
         )
     }
 }

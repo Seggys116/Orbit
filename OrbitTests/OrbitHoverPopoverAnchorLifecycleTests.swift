@@ -9,12 +9,6 @@ final class OrbitHoverPopoverAnchorLifecycleTests: XCTestCase {
 
     private var window: NSWindow!
 
-    // Each test drains its own pool: the CI crash is a release inside XCTest's own
-    // pool pop at the test boundary, not anything the test asserts.
-    override func invokeTest() {
-        autoreleasepool { super.invokeTest() }
-    }
-
     override func setUp() {
         super.setUp()
         window = NSWindow(
@@ -27,7 +21,8 @@ final class OrbitHoverPopoverAnchorLifecycleTests: XCTestCase {
     }
 
     override func tearDown() {
-        window?.close()
+        window?.orderOut(nil)
+        window?.contentView = nil
         window = nil
         super.tearDown()
     }

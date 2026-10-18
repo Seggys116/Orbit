@@ -22,12 +22,12 @@ enum EngineFactory {
 
     /// Traps on failure; does not throw or return an optional.
     static func makeEngine(storage: EngineStorage = .persistent) -> BrowserEngine {
-        let engine = ChromiumEngine(storage: storage)
+        let engine = WebKitEngine(storage: storage)
         do {
             try engine.start()
         } catch {
-            logger.fault("ChromiumEngine.start() failed: \(String(describing: error), privacy: .public)")
-            fatalError("ChromiumEngine.start() failed: \(error)")
+            logger.fault("WebKitEngine.start() failed: \(String(describing: error), privacy: .public)")
+            fatalError("WebKitEngine.start() failed: \(error)")
         }
         installBuiltInUserScripts(on: engine)
         // Not under XCTest: a hosted test run must not load the real user's
@@ -43,11 +43,13 @@ enum EngineFactory {
     private static func installBuiltInUserScripts(on engine: BrowserEngine) {
         let session = engine.defaultSession
         for script in [
-            MediaSessionObserverScript.chromiumUserScript,
-            PageColorObserverScript.chromiumUserScript,
-            LinkHoverObserverScript.chromiumUserScript,
+            MediaSessionObserverScript.userScript,
+            PageColorObserverScript.userScript,
+            LinkHoverObserverScript.userScript,
             MediaTransportScript.userScript,
             PageScrollbarStyleScript.userScript,
+            WebStorePrivateBridgeScript.userScript,
+            WebStoreAddToChromeButtonScript.userScript,
         ] {
             engine.addUserScript(script, session: session)
         }

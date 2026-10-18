@@ -32,6 +32,7 @@ struct SidebarNodeRow: View {
                     onDrop: onInsertion
                 ) {
                     PinnedFolderRowView(folder: folder, spaceID: spaceID, theme: theme, depth: depth)
+                        .equatable()
                 }
 
                 if folder.isExpanded {

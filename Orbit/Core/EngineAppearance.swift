@@ -27,7 +27,15 @@ enum EngineAppearance {
     /// the engine ignores a value it already holds -- so callers do not have
     /// to track whether anything changed.
     static func apply() {
-        OrbitChromiumBridge.shared.setColorScheme(isDark: isDark)
+        AppEnvironment.applyContentAppearanceEverywhere()
+        let scheme = AppearanceSettings.shared.engineColorScheme
+        for contents in WebKitLiveContents.all {
+            contents.setPreferredColorScheme(scheme)
+        }
+        let appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+        for window in NSApp.windows where window.title.hasPrefix("Web Inspector") {
+            window.appearance = appearance
+        }
     }
 
     /// One process-wide observer, deliberately not one per surface: the value

@@ -21,12 +21,39 @@ final class PiPController {
 
     static let tickInterval: TimeInterval = 0.5
 
+    /// Nothing playing and nothing floating: focus cannot open or close picture-in-picture.
+    /// A pending request stays on `tickInterval`, because confirmation is counted in those ticks.
+    private static let idleTickInterval: TimeInterval = 2
+
     func start(env: AppEnvironment) {
         guard timer == nil else { return }
         lastActiveTabID = env.activeTabID
-        timer = Timer.scheduledTimer(withTimeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
+        armTimer(env: env, interval: desiredTickInterval(env: env))
+    }
+
+    private func desiredTickInterval(env: AppEnvironment) -> TimeInterval {
+        let busy = pendingRequest != nil
+            || pipTabID != nil
+            || env.mediaStates.values.contains { $0.isPlaying || $0.isPictureInPictureActive }
+        return busy ? Self.tickInterval : Self.idleTickInterval
+    }
+
+    private func armTimer(env: AppEnvironment, interval: TimeInterval) {
+        timer?.invalidate()
+        let armed = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick(env: env) }
         }
+        if interval > Self.tickInterval {
+            armed.tolerance = 0.5
+        }
+        timer = armed
+    }
+
+    private func notePlaybackCadence(env: AppEnvironment) {
+        guard let timer else { return }
+        let interval = desiredTickInterval(env: env)
+        guard abs(timer.timeInterval - interval) > 0.001 else { return }
+        armTimer(env: env, interval: interval)
     }
 
     func stop() {
@@ -38,7 +65,10 @@ final class PiPController {
         settlePendingRequest(env: env)
 
         let currentActive = env.activeTabID
-        defer { lastActiveTabID = currentActive }
+        defer {
+            lastActiveTabID = currentActive
+            notePlaybackCadence(env: env)
+        }
 
         guard currentActive != lastActiveTabID else { return }
 
