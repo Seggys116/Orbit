@@ -295,6 +295,8 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
 
     // Fails if the pinned corpus is not vendored: ExtensionCorpus never downloads
     // at test time, so a clone without `Scripts/extension-corpus fetch` has no Wappalyzer to drive.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testRealWappalyzerPopupListsTheSameTechnologiesItsBadgeCounts
+    // The Chrome Web Store returns HTTP 204 to the hosted runner, so this pin is not on disk there.
     func testRealWappalyzerPopupListsTheSameTechnologiesItsBadgeCounts() throws {
         let subject = try pinnedWappalyzer()
 
@@ -331,6 +333,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testRealWappalyzerPopupStillResolvesTheActiveTabAfterTheActiveTabIsClosed
     func testRealWappalyzerPopupStillResolvesTheActiveTabAfterTheActiveTabIsClosed() throws {
         let subject = try pinnedWappalyzer()
 
@@ -362,6 +365,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testRealWappalyzerPopupResolvesTheActiveTabAfterASpaceSwitch
     func testRealWappalyzerPopupResolvesTheActiveTabAfterASpaceSwitch() throws {
         let subject = try pinnedWappalyzer()
 
@@ -536,6 +540,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
     })();
     """
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testRealWappalyzerWorkerReportsDetectionsForTheTabItResolves
     func testRealWappalyzerWorkerReportsDetectionsForTheTabItResolves() throws {
         let subject = try pinnedWappalyzer()
 
@@ -619,6 +624,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
 
     // Loopback is always transient to Wappalyzer (IP-literal host, and isPrivateIpAddress() calls
     // 127.x private); "transient" only moves where results cache, it never suppresses reporting.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testWappalyzerTreatsLoopbackAsTransientAndStillReportsItsDetections
     func testWappalyzerTreatsLoopbackAsTransientAndStillReportsItsDetections() throws {
         let subject = try pinnedWappalyzer()
 
@@ -655,6 +661,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
 
     // A rejected chrome.action.setIcon path throws out of Driver.getDetections, leaving the popup
     // showing "No technologies detected" while the badge still shows the count. Hermetic on purpose.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testActionSetIconAcceptsTheAbsoluteURLsRuntimeGetURLReturns
     func testActionSetIconAcceptsTheAbsoluteURLsRuntimeGetURLReturns() throws {
         let subject = try pinnedWappalyzer()
 
@@ -783,6 +790,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
     }
 
     // Also needs the real network: no local fixture carries Cloudflare's headers or a real Next.js bundle.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testRealWappalyzerOnThePublicSiteReportsEachChannel
     func testRealWappalyzerOnThePublicSiteReportsEachChannel() throws {
         let subject = try pinnedWappalyzer()
         let siteURL = URL(string: "https://zaknobleclarke.com")!
@@ -951,6 +959,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testRealWappalyzerPopupReloadLinkReloadsTheActiveTab
     func testRealWappalyzerPopupReloadLinkReloadsTheActiveTab() throws {
         let subject = try pinnedWappalyzer()
 

@@ -165,6 +165,8 @@ final class CorpusVimiumLiveTests: CorpusLiveTestCase {
     // MARK: - Tests
 
     // Fails when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testVimiumOffersAToolbarActionThroughTheProductionEntryPath
+    // The Chrome Web Store returns HTTP 204 to the hosted runner, so this pin is not on disk there.
     func testVimiumOffersAToolbarActionThroughTheProductionEntryPath() throws {
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
@@ -217,6 +219,7 @@ final class CorpusVimiumLiveTests: CorpusLiveTestCase {
     }
 
     // Fails when the corpus has not been vendored on this machine.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testPressingJScrollsTheRealPage
     func testPressingJScrollsTheRealPage() throws {
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)

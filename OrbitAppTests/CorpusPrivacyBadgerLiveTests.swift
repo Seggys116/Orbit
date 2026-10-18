@@ -61,6 +61,8 @@ final class CorpusPrivacyBadgerLiveTests: CorpusLiveTestCase {
     """
 
     // Fails when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testRealPrivacyBadgersPopupRendersItsOwnStateFromItsOwnServiceWorker
+    // The Chrome Web Store returns HTTP 204 to the hosted runner, so this pin is not on disk there.
     func testRealPrivacyBadgersPopupRendersItsOwnStateFromItsOwnServiceWorker() throws {
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)

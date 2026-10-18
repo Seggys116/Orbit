@@ -91,11 +91,6 @@ jobs:
           path: DerivedData/SourcePackages
           key: swiftpm-${{ runner.os }}-${{ hashFiles('Orbit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
-      # ThirdParty/* is gitignored. The corpus tests load the unpacked pins, so a checkout without
-      # this step fails them as notVendored before any extension code runs.
-      - name: Fetch the pinned extension corpus
-        run: Scripts/extension-corpus fetch
-
       # This job runs every hosted test, the live WebKit suites included, in one shared test process; only tests declared
       # CANNOT-RUN are excluded. .github/workflows/live-engine.yml re-runs the live suites nightly through
       # Scripts/live-engine-tests.

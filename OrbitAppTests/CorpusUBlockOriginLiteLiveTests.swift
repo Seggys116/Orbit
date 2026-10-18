@@ -141,6 +141,8 @@ final class CorpusUBlockOriginLiteLiveTests: CorpusLiveTestCase {
     }
 
     // Fails when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testUBlockOriginLiteStopsARuleMatchedRequestFromEverReachingTheServer
+    // The Chrome Web Store returns HTTP 204 to the hosted runner, so this pin is not on disk there.
     func testUBlockOriginLiteStopsARuleMatchedRequestFromEverReachingTheServer() throws {
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
@@ -223,6 +225,7 @@ final class CorpusUBlockOriginLiteLiveTests: CorpusLiveTestCase {
 
     // Separates "declarativeNetRequest blocks nothing" from "the ruleset was
     // never enabled" -- two different bugs with the same symptom above.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testUBlockOriginLiteReportsItsDefaultRulesetsEnabled
     func testUBlockOriginLiteReportsItsDefaultRulesetsEnabled() throws {
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
