@@ -548,9 +548,10 @@ final class WebKitRealExtensionEndToEndLiveTests: LiveEnvironmentTestCase {
             try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             try await Self.pollUntil("the content script to finish its analysis and write its report") {
+                // JavaScript null comes back as NSNull, which is not nil. Waiting on `!= nil` returns before the attribute exists.
                 try await contents.evaluateJavaScript(
                     "document.documentElement.getAttribute('\(Self.reportAttribute)')"
-                ) != nil
+                ) as? String != nil
             }
 
             let rawReportValue = try await contents.evaluateJavaScript(
@@ -759,7 +760,7 @@ final class WebKitRealExtensionEndToEndLiveTests: LiveEnvironmentTestCase {
             try await Self.pollUntil("the content script to finish its analysis") {
                 try await contents.evaluateJavaScript(
                     "document.documentElement.getAttribute('\(Self.reportAttribute)')"
-                ) != nil
+                ) as? String != nil
             }
 
             // The popup is a real extension page, loaded from its real
@@ -839,7 +840,7 @@ final class WebKitRealExtensionEndToEndLiveTests: LiveEnvironmentTestCase {
             try await Self.pollUntil("the content script to finish its analysis") {
                 try await contents.evaluateJavaScript(
                     "document.documentElement.getAttribute('\(Self.reportAttribute)')"
-                ) != nil
+                ) as? String != nil
             }
 
             // Clicking a toolbar icon: the popover takes key status and the

@@ -118,9 +118,10 @@ final class WebKitExtensionStoragePersistenceLiveTests: XCTestCase {
             readerContents.load(server.baseURL.appendingPathComponent("reader"))
             try await WebKitLiveEngineHost.waitUntilStoppedLoading(readerContents)
             try await Self.pollUntil {
+                // JavaScript null comes back as NSNull, which is not nil.
                 try await readerContents.evaluateJavaScript(
                     "document.documentElement.getAttribute('data-orbit-storage-read-result')"
-                ) != nil
+                ) as? String != nil
             }
             let result = try await readerContents.evaluateJavaScript(
                 "document.documentElement.getAttribute('data-orbit-storage-read-result')"
@@ -169,7 +170,7 @@ final class WebKitExtensionStoragePersistenceLiveTests: XCTestCase {
             try await Self.pollUntil {
                 try await readerContents.evaluateJavaScript(
                     "document.documentElement.getAttribute('data-orbit-storage-read-result')"
-                ) != nil
+                ) as? String != nil
             }
             let result = try await readerContents.evaluateJavaScript(
                 "document.documentElement.getAttribute('data-orbit-storage-read-result')"
