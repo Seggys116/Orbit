@@ -12,11 +12,9 @@ final class WebKitContentSizing: NSObject, WKScriptMessageHandler {
     private weak var contents: WebKitWebContents?
     private(set) var minimum: CGSize
     private(set) var maximum: CGSize
-    private let attached = NSHashTable<WKUserContentController>.weakObjects()
-    /// Controllers that already contain the measure script. Limits are remembered globally,
-    /// so a second web view (the extension page that replaces the first) used to get the
-    /// handler and not the script, and the popup stayed at the loading size.
-    private let scripted = NSHashTable<WKUserContentController>.weakObjects()
+    /// Strong while the web view is alive. A weak table zeroes the controller during its own dealloc.
+    private var attachedControllers: [WKUserContentController] = []
+    private var scriptedControllers: [WKUserContentController] = []
     private var lastReported: CGSize?
     /// Limits baked into a user script. A later change injects another script so the next document clamps with the new box.
     private var injectedMinimum: CGSize?
@@ -41,13 +39,15 @@ final class WebKitContentSizing: NSObject, WKScriptMessageHandler {
     /// Wires the web view up once per user content controller: a controller takes a handler name once.
     func attach(to webView: WKWebView) {
         let controller = webView.configuration.userContentController
-        if !attached.contains(controller) {
+        if !attachedControllers.contains(where: { $0 === controller }) {
             controller.add(self, name: Self.handlerName)
-            attached.add(controller)
+            attachedControllers.append(controller)
         }
-        if !scripted.contains(controller) || injectedMinimum != minimum || injectedMaximum != maximum {
+        if !scriptedControllers.contains(where: { $0 === controller }) || injectedMinimum != minimum || injectedMaximum != maximum {
             addScript(to: controller)
-            scripted.add(controller)
+            if !scriptedControllers.contains(where: { $0 === controller }) {
+                scriptedControllers.append(controller)
+            }
         }
         // Page zoom would scale the measured size and size the host wrong.
         webView.pageZoom = 1
@@ -99,6 +99,16 @@ final class WebKitContentSizing: NSObject, WKScriptMessageHandler {
         guard size != lastReported else { return }
         lastReported = size
         contents.delegate?.webContents(contents, didChangePreferredSize: size)
+    }
+
+    /// Drop the handler before the web view goes. The controller deallocates on the next turn.
+    func detach() {
+        for controller in attachedControllers {
+            controller.removeScriptMessageHandler(forName: Self.handlerName)
+        }
+        attachedControllers.removeAll()
+        scriptedControllers.removeAll()
+        contents = nil
     }
 
     private static func source(minimum: CGSize, maximum: CGSize) -> String {

@@ -925,6 +925,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     private func destroyWebView() {
+        contentSizing?.detach()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
         detachResourceLoadDelegate(webView)
