@@ -278,7 +278,8 @@ extension AppEnvironment: WebContentsDelegate {
         // A second error on a tab already showing one would strand the first
         // continuation with no way left to resume it. Refuse the newcomer.
         guard pendingCertificateDecisions[tabID] == nil else { return false }
-        refusedCertificateTabIDs.remove(tabID)
+        // WebKit repeats the challenge after a refusal. That retry is still the same navigation.
+        if refusedCertificateTabIDs.contains(tabID) { return false }
         certificateProblems[tabID] = problem
         return await withCheckedContinuation { continuation in
             pendingCertificateDecisions[tabID] = continuation
