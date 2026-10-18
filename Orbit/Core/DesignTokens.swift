@@ -21,7 +21,8 @@ enum OrbitMetrics {
     static let sidebarDefaultWidth: CGFloat = 240
     static let sidebarMinWidth: CGFloat = 180
     static let sidebarMaxWidth: CGFloat = 560
-    static let sidebarResizeHandleWidth: CGFloat = 8
+    // Hit column. The hover pill fills it; anything wider is empty padding that also steals clicks from the tab edge.
+    static let sidebarResizeHandleWidth: CGFloat = 4
     static let sidebarHoverEdgeWidth: CGFloat = 8
     static let sidebarAutoHideDelay: Double = 0.45
 
@@ -148,6 +149,9 @@ enum OrbitMetrics {
     static let cardCornerRadius: CGFloat = 10
 
     static let cardInset: CGFloat = 9
+
+    // Docked leading padding. The handle sits in the rest of cardInset, so the page stays one inset from the sidebar. Top, bottom, and trailing keep the full cardInset; a hidden sidebar uses cardInset on the leading window edge too.
+    static let contentCardLeadingSeam: CGFloat = cardInset - sidebarResizeHandleWidth
 
     static let cardBorderWidth: CGFloat = 1
     static let cardBorderOpacity: Double = 0.10

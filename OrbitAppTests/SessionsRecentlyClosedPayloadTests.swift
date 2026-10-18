@@ -2,8 +2,8 @@ import Foundation
 import XCTest
 @testable import Orbit
 
-/// The bridge's own payload, driven against a scratch store with no engine and no window.
-/// Lives here rather than in OrbitTests because OrbitChromiumSessionsBridge and
+/// chrome.sessions.getRecentlyClosed, driven against a scratch store with no engine and no window.
+/// Lives here rather than in OrbitTests because ChromeExtensionAPI and
 /// AppEnvironment+DataReset are only reachable through @testable import Orbit.
 @MainActor
 final class SessionsRecentlyClosedPayloadTests: XCTestCase {
@@ -41,7 +41,11 @@ final class SessionsRecentlyClosedPayloadTests: XCTestCase {
     }
 
     private func sessionIDs(maxResults: Int32) throws -> [String] {
-        let sessions = ChromeExtensionAPI.recentlyClosed(maxResults: Int(maxResults), in: store)
+        let payload = ChromeExtensionAPI.recentlyClosed(maxResults: Int(maxResults), in: store)
+        // The payload reaches the extension as JSON, so it has to survive that trip, not just be a Swift array.
+        XCTAssertTrue(JSONSerialization.isValidJSONObject(payload), "the sessions payload is not JSON-serialisable")
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let sessions = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         return sessions.compactMap { $0["sessionId"] as? String }
     }
 

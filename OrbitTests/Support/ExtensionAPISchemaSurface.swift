@@ -1,7 +1,11 @@
-// Independent, second implementation of Scripts/extension_schemas.py: a bug shared by
-// both would have to be written twice. Host-less -- reads only files in this repo.
+// Host-less support for the schema, runtime-surface and permission guards: reads the vendored
+// upstream snapshot and the fixtures, and runs the generated chrome wrapper in JavaScriptCore.
 
 import Foundation
+import JavaScriptCore
+#if canImport(Orbit)
+@testable import Orbit
+#endif
 
 enum ExtensionAPISchemaSurface {
 
@@ -177,29 +181,6 @@ enum ExtensionAPISchemaSurface {
         return result
     }
 
-    /// Upstream schemas are .json, .idl or .webidl. The vendored copy keeps its own name.
-    static let schemaExtensions = ["json", "idl", "webidl"]
-
-    static func resolveSchema(in directory: URL, file: String) -> URL? {
-        let stem = (file as NSString).deletingPathExtension
-        for suffix in schemaExtensions {
-            let candidate = directory.appendingPathComponent("\(stem).\(suffix)")
-            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
-        }
-        return nil
-    }
-
-    static func upstreamSurface(namespace: String, file: String) throws -> Surface {
-        guard let url = resolveSchema(in: vendoredUpstreamDirectory, file: file) else {
-            return Surface()
-        }
-        switch url.pathExtension {
-        case "idl": return try idlSurfaces(inSchemaAt: url)[namespace] ?? Surface()
-        case "webidl": return try webidlSurfaces(inSchemaAt: url)[namespace] ?? Surface()
-        default: return try surfaces(inSchemaAt: url)[namespace] ?? Surface()
-        }
-    }
-
     /// Only dictionaries and enums are types: the per-event `interface FooEvent`
     /// and its `callback FooListener` are plumbing the compiler never emits.
     static func webidlSurfaces(inSchemaAt url: URL) throws -> [String: Surface] {
@@ -341,22 +322,20 @@ enum ExtensionAPISchemaSurface {
         try permissionFeatures(at: upstreamCorePermissionFeaturesFile)
     }
 
-    /// Chrome-layer permissions the vendored core table registers without a core feature.
-    static func permissionsCoreRegistersWithoutAFeature() throws -> Set<String> {
-        let index = try upstreamIndex()
-        return index.coreRegisteredPermissions
-            .subtracting(index.coreInternalPermissions)
-            .subtracting(index.corePermissions)
+    /// Both upstream layers' permission features, the chrome layer winning a name both state.
+    static func effectivePermissionFeatures() throws -> [String: Any] {
+        var features = try upstreamCorePermissionFeatures()
+        for (name, value) in try upstreamChromePermissionFeatures() { features[name] = value }
+        return features
     }
 
-    /// A JSON value rendered so two of them can be compared and printed. Object
-    /// key order is normalised; list order is not, because a feature's
-    /// `extension_types` and `allowlist` are ordered upstream data.
-    static func canonicalJSON(_ value: Any) -> String {
-        guard JSONSerialization.isValidJSONObject([value]),
-              let data = try? JSONSerialization.data(withJSONObject: [value], options: [.sortedKeys])
-        else { return String(describing: value) }
-        return String(decoding: data, as: UTF8.self)
+    /// Whether upstream Chrome lets an ordinary stable-channel macOS extension hold `permission`.
+    static func isGrantableToAnOrdinaryExtension(_ permission: String) throws -> Bool {
+        let features = try effectivePermissionFeatures()
+        guard let value = features[permission] else { return false }
+        return featureEntries(value).contains {
+            isGrantableToAnOrdinaryExtension(resolvedEntry($0, named: permission, in: features))
+        }
     }
 
     private static func featureEntries(_ value: Any) -> [[String: Any]] {
@@ -386,8 +365,7 @@ enum ExtensionAPISchemaSurface {
         return resolvedEntry(chosen, named: name, in: features)
     }
 
-    /// Whether an ordinary extension can hold this permission. Errs toward "yes": an
-    /// unmodelled gate widens the set rather than hiding a permission from coverage.
+    /// Errs toward "yes": an unmodelled gate widens the set rather than hiding a permission from coverage.
     private static func isGrantableToAnOrdinaryExtension(_ entry: [String: Any]) -> Bool {
         if let channel = entry["channel"] as? String, channel != "stable" { return false }
         if let platforms = entry["platforms"] as? [String], !platforms.contains("mac") { return false }
@@ -414,6 +392,9 @@ enum ExtensionAPISchemaSurface {
         var coreRegisteredPermissions: Set<String>
         var coreInternalPermissions: Set<String>
         var schemaSHA256: [String: String]
+
+        var knownNamespaces: Set<String> { chromeNamespaces.union(coreNamespaces) }
+        var knownPermissions: Set<String> { chromePermissions.union(corePermissions) }
     }
 
     static func upstreamIndex() throws -> UpstreamIndex {
@@ -440,33 +421,94 @@ enum ExtensionAPISchemaSurface {
         )
     }
 
+    /// The declared surface of `namespace` in the vendored snapshot, or nil when no schema file is vendored for it.
+    static func upstreamSurface(ofNamespace namespace: String) throws -> Surface? {
+        let names = try FileManager.default.contentsOfDirectory(atPath: vendoredUpstreamDirectory.path)
+        for name in names.sorted() where !name.hasPrefix("_") {
+            let url = vendoredUpstreamDirectory.appendingPathComponent(name)
+            let surfaces: [String: Surface]
+            switch url.pathExtension {
+            case "json": surfaces = try Self.surfaces(inSchemaAt: url)
+            case "idl": surfaces = try idlSurfaces(inSchemaAt: url)
+            case "webidl": surfaces = try webidlSurfaces(inSchemaAt: url)
+            default: continue
+            }
+            if let surface = surfaces[namespace] { return surface }
+        }
+        return nil
+    }
+
     // MARK: - The diff
+
+    /// Types are schema plumbing a runtime object cannot show, so only these are compared.
+    static let comparedKinds: [MemberKind] = [.functions, .events, .properties]
 
     struct NamespaceGap: Equatable {
         var status: String
+        var provider: String?
         var reason: String?
         var missing: [MemberKind: [String]] = [:]
         var extra: [MemberKind: [String]] = [:]
+        /// Members WebKit's own version decides; the live suite accepts either state.
+        var uncertain: [MemberKind: [String]] = [:]
     }
 
-    struct Gaps: Equatable {
-        var namespaces: [String: NamespaceGap]
-        var unregisteredChromePermissions: [String]
+    /// What the generated wrapper defines for every namespace of the inventory that also has a
+    /// vendored schema, against that schema. Types are not diffed: a runtime object cannot show them.
+    static func computeWrapperGaps(in session: ChromeWrapperRuntime.Session) throws -> [String: NamespaceGap] {
+        var paths = ChromeAPISurfaceInventory.namespaces.map(\.name)
+        paths.append("privacy")
+        var gaps: [String: NamespaceGap] = [:]
+        for path in paths {
+            guard let upstream = try upstreamSurface(ofNamespace: path) else { continue }
+            let runtime = try requireMembers(session, path)
+            var gap = NamespaceGap(status: "partial")
+            for kind in comparedKinds {
+                let provided = runtime.names(ofKind: kind)
+                let wanted = upstream.names(ofKind: kind)
+                let missing = wanted.subtracting(provided).sorted()
+                let extra = provided.subtracting(wanted).sorted()
+                if !missing.isEmpty { gap.missing[kind] = missing }
+                if !extra.isEmpty { gap.extra[kind] = extra }
+            }
+            if gap.missing.isEmpty && gap.extra.isEmpty { gap.status = "complete" }
+            gaps[path] = gap
+        }
+        return gaps
+    }
+
+    private static func requireMembers(_ session: ChromeWrapperRuntime.Session, _ path: String) throws -> ChromeWrapperRuntime.Members {
+        guard let members = session.members(of: path) else {
+            throw SchemaError.malformed(vendoredUpstreamDirectory, "the generated wrapper defines no chrome.\(path) with every permission granted")
+        }
+        return members
+    }
+
+    /// Chrome permissions neither the wrapper nor WebKit gives any meaning to.
+    static func permissionsWithoutProvider() throws -> [String] {
+        try upstreamIndex().knownPermissions
+            .subtracting(ChromeAPISurfaceInventory.wrappedPermissions)
+            .subtracting(ChromeAPISurfaceInventory.webKitNativePermissions)
+            .sorted()
     }
 
     // MARK: - Expectations
 
     struct Expectations {
-        var chromiumVersion: String
+        var engine: String
+        var upstreamVersion: String
         var neverDispatchedEvents: [String]
         var namespaces: [String: NamespaceGap]
-        var unregisteredChromePermissions: [String]
+        var permissionsWithoutProvider: [String]
     }
 
     static func readExpectations() throws -> Expectations {
         let object = try readObject(expectationsFile)
-        guard let version = object["chromium_version"] as? String else {
-            throw SchemaError.malformed(expectationsFile, "missing \"chromium_version\"")
+        guard let engine = object["engine"] as? String else {
+            throw SchemaError.malformed(expectationsFile, "missing \"engine\"")
+        }
+        guard let upstreamVersion = object["upstreamVersion"] as? String else {
+            throw SchemaError.malformed(expectationsFile, "missing \"upstreamVersion\"")
         }
         guard let rawNamespaces = object["namespaces"] as? [String: [String: Any]] else {
             throw SchemaError.malformed(expectationsFile, "missing \"namespaces\"")
@@ -474,18 +516,21 @@ enum ExtensionAPISchemaSurface {
         var namespaces: [String: NamespaceGap] = [:]
         for (name, raw) in rawNamespaces {
             var gap = NamespaceGap(status: raw["status"] as? String ?? "")
+            gap.provider = raw["provider"] as? String
             gap.reason = raw["reason"] as? String
             for kind in MemberKind.allCases {
                 if let missing = raw[kind.missingKey] as? [String] { gap.missing[kind] = missing }
                 if let extra = raw[kind.extraKey] as? [String] { gap.extra[kind] = extra }
+                if let uncertain = raw[kind.uncertainKey] as? [String] { gap.uncertain[kind] = uncertain }
             }
             namespaces[name] = gap
         }
         return Expectations(
-            chromiumVersion: version,
+            engine: engine,
+            upstreamVersion: upstreamVersion,
             neverDispatchedEvents: object["neverDispatchedEvents"] as? [String] ?? [],
             namespaces: namespaces,
-            unregisteredChromePermissions: object["unregisteredChromePermissions"] as? [String] ?? []
+            permissionsWithoutProvider: object["permissionsWithoutProvider"] as? [String] ?? []
         )
     }
 
@@ -498,7 +543,7 @@ enum ExtensionAPISchemaSurface {
                 lines.append("\(name): namespace absent")
                 continue
             }
-            for kind in MemberKind.allCases {
+            for kind in comparedKinds {
                 for member in gap.missing[kind] ?? [] {
                     lines.append("\(name).\(member) (\(kind.singular)) missing")
                 }
@@ -508,5 +553,232 @@ enum ExtensionAPISchemaSurface {
             }
         }
         return lines
+    }
+}
+
+extension ExtensionAPISchemaSurface.MemberKind {
+    /// The key this kind takes for members the live suite accepts either way.
+    var uncertainKey: String { "uncertain" + rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+}
+
+// MARK: - The generated wrapper, run
+
+/// Runs the wrapper exactly as `ChromeAPIWrapperScript.install(in:)` writes it, in JavaScriptCore,
+/// over a stand-in `chrome` that models nothing but the namespaces the wrapper extends.
+enum ChromeWrapperRuntime {
+
+    struct Members: Equatable {
+        var functions: Set<String> = []
+        var events: Set<String> = []
+        var properties: Set<String> = []
+        /// Objects made only of plain values: constants and enum tables, which a schema calls types.
+        var enums: Set<String> = []
+
+        func names(ofKind kind: ExtensionAPISchemaSurface.MemberKind) -> Set<String> {
+            switch kind {
+            case .functions: return functions
+            case .events: return events
+            case .properties: return properties
+            case .types: return enums
+            }
+        }
+    }
+
+    struct GeneratedWrapper {
+        var script: String
+        var manifest: [String: Any]
+    }
+
+    enum RunError: Error, CustomStringConvertible {
+        case noContext
+        case scriptFailed([String])
+
+        var description: String {
+            switch self {
+            case .noContext: return "JavaScriptCore could not create a context"
+            case .scriptFailed(let failures): return "the wrapper threw while loading: \(failures.joined(separator: "; "))"
+            }
+        }
+    }
+
+    /// Every namespace the wrapper extends exists as an empty object, with the handful of native
+    /// functions its own set-up calls. Nothing else is modelled, so everything found afterwards was added by the wrapper.
+    static let nativeStub = """
+    var __orbitNativeEvent = function () {
+      return {
+        addListener: function () {}, removeListener: function () {},
+        hasListener: function () { return false; }, hasListeners: function () { return false; }
+      };
+    };
+    var __orbitNoop = function () {};
+    globalThis.setTimeout = function () { return 0; };
+    globalThis.setInterval = function () { return 0; };
+    globalThis.clearInterval = function () {};
+    globalThis.chrome = {
+      runtime: {
+        onMessage: __orbitNativeEvent(),
+        getURL: function (path) { return "chrome-extension://orbit-surface-probe/" + (path || ""); },
+        getManifest: function () { return {}; },
+        sendMessage: __orbitNoop
+      },
+      tabs: { query: __orbitNoop, get: __orbitNoop, reload: __orbitNoop },
+      webNavigation: {},
+      webRequest: {},
+      cookies: { set: __orbitNoop, remove: __orbitNoop },
+      permissions: { request: __orbitNoop },
+      scripting: {},
+      storage: { sync: { set: __orbitNoop }, local: { set: __orbitNoop } },
+      commands: {}
+    };
+    """
+
+    private static let reflection = """
+    function __orbitReflect(path) {
+      var parts = path.split(".");
+      var value = globalThis.chrome;
+      for (var i = 0; i < parts.length; i++) {
+        if (value === null || value === undefined || typeof value !== "object") { return null; }
+        value = value[parts[i]];
+      }
+      if (value === null || value === undefined || typeof value !== "object") { return null; }
+      var report = { functions: [], events: [], properties: [], enums: [] };
+      function isEvent(member) {
+        return member !== null && typeof member === "object"
+          && typeof member.addListener === "function" && typeof member.removeListener === "function"
+          && typeof member.hasListener === "function";
+      }
+      function isPlain(member) { return member === null || (typeof member !== "object" && typeof member !== "function"); }
+      function walk(object, prefix, depth) {
+        Object.keys(object).forEach(function (key) {
+          if (key.indexOf("__orbit") === 0) { return; }
+          var member = object[key];
+          if (typeof member === "function") { if (depth === 0) { report.functions.push(key); } return; }
+          if (isEvent(member)) { if (depth === 0) { report.events.push(key); } return; }
+          if (member !== null && typeof member === "object") {
+            var keys = Object.keys(member);
+            var hasFunction = keys.some(function (name) { return typeof member[name] === "function"; });
+            if (hasFunction) {
+              report.properties.push(prefix + key);
+              keys.forEach(function (name) { if (isPlain(member[name])) { report.properties.push(prefix + key + "." + name); } });
+              return;
+            }
+            if (keys.every(function (name) { return isPlain(member[name]); })) { report.enums.push(prefix + key); return; }
+            report.properties.push(prefix + key);
+            walk(member, prefix + key + ".", depth + 1);
+            return;
+          }
+          report.properties.push(prefix + key);
+        });
+      }
+      walk(value, "", 0);
+      ["functions", "events", "properties", "enums"].forEach(function (name) { report[name].sort(); });
+      return JSON.stringify(report);
+    }
+    """
+
+    final class Session {
+        let context: JSContext
+        private(set) var failures: [String] = []
+
+        fileprivate init(context: JSContext) {
+            self.context = context
+            context.exceptionHandler = { [unowned self] _, exception in
+                self.failures.append(exception?.toString() ?? "unknown JavaScript exception")
+            }
+        }
+
+        @discardableResult
+        func evaluate(_ source: String) -> JSValue? {
+            context.evaluateScript(source)
+        }
+
+        func exists(_ path: String) -> Bool {
+            members(of: path) != nil
+        }
+
+        func members(of path: String) -> Members? {
+            guard let value = evaluate("__orbitReflect(\(JavaScriptLiteral.string(path)))"),
+                  value.isString,
+                  let data = value.toString()?.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: [String]]
+            else { return nil }
+            return Members(
+                functions: Set(object["functions"] ?? []),
+                events: Set(object["events"] ?? []),
+                properties: Set(object["properties"] ?? []),
+                enums: Set(object["enums"] ?? [])
+            )
+        }
+
+        /// Delivers the grant list Orbit pushes after an optional permission changes.
+        func deliverGrants(_ granted: [String]) {
+            let list = (try? JSONSerialization.data(withJSONObject: granted)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            evaluate("""
+            globalThis.__orbitDeliverChromeEvent({ orbitChromeEvent: true, namespace: "__orbit", event: "grants", args: [\(list)] });
+            """)
+        }
+
+        func value(of expression: String) -> Any? {
+            evaluate(expression)?.toObject()
+        }
+    }
+
+    /// The wrapper and the manifest as `install(in:)` leaves them, for a manifest declaring these permissions.
+    static func generate(
+        manifestPermissions: [String],
+        optionalPermissions: [String] = [],
+        grantedOptional: [String] = [],
+        maxSessionResults: Int? = nil
+    ) throws -> GeneratedWrapper {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrbitTests-WrapperSurface-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manifest: [String: Any] = [
+            "manifest_version": 3,
+            "name": "Orbit Wrapper Surface Probe",
+            "version": "1.0",
+            "permissions": manifestPermissions,
+            "optional_permissions": optionalPermissions,
+        ]
+        try JSONSerialization.data(withJSONObject: manifest)
+            .write(to: directory.appendingPathComponent("manifest.json"))
+
+        var configuration = ChromeAPIWrapperScript.Configuration()
+        configuration.grantedOptionalPermissions = grantedOptional
+        if let maxSessionResults { configuration.maxSessionResults = maxSessionResults }
+        try ChromeAPIWrapperScript.install(in: directory, configuration: configuration)
+
+        let script = try String(contentsOf: directory.appendingPathComponent(ChromeAPIWrapperScript.fileName), encoding: .utf8)
+        let rewritten = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: directory.appendingPathComponent("manifest.json"))
+        ) as? [String: Any] ?? [:]
+        return GeneratedWrapper(script: script, manifest: rewritten)
+    }
+
+    static func start(
+        manifestPermissions: [String],
+        optionalPermissions: [String] = [],
+        grantedOptional: [String] = [],
+        maxSessionResults: Int? = nil,
+        native: String = nativeStub
+    ) throws -> Session {
+        let generated = try generate(
+            manifestPermissions: manifestPermissions, optionalPermissions: optionalPermissions,
+            grantedOptional: grantedOptional, maxSessionResults: maxSessionResults
+        )
+        guard let context = JSContext() else { throw RunError.noContext }
+        let session = Session(context: context)
+        session.evaluate(native)
+        session.evaluate(reflection)
+        session.evaluate(generated.script)
+        guard session.failures.isEmpty else { throw RunError.scriptFailed(session.failures) }
+        return session
+    }
+
+    /// Every permission the wrapper acts on, declared, so every wrapper namespace exists.
+    static func startWithEveryWrappedPermission() throws -> Session {
+        try start(manifestPermissions: ChromeAPISurfaceInventory.wrappedPermissions.sorted())
     }
 }

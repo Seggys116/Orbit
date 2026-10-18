@@ -41,33 +41,25 @@ final class CorpusStylusLiveTests: CorpusLiveTestCase {
         return false
     }
 
-    private func backgroundColour(of contents: ChromiumWebContents) async -> String {
+    private func backgroundColour(of contents: WebKitWebContents) async -> String {
         let raw = try? await contents.evaluateJavaScript(
             "String(window.getComputedStyle(document.body).backgroundColor)"
         )
         return (raw as? String) ?? ""
     }
 
-    // Skips only when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testAStylusUserStyleChangesAComputedStyleOnThePage
+    // Fails when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
     func testAStylusUserStyleChangesAComputedStyleOnThePage() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
         let manifestVersion = try ExtensionCorpus.verifyManifestVersionMatchesPin(for: Self.corpusName)
         XCTAssertEqual(manifestVersion, 3, "Stylus 2.4.9 is the MV3 build this expectation was written against")
 
-        try LiveChromiumEngineHost.runLive(timeout: 300) {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        try WebKitLiveEngineHost.runLive(timeout: 300) {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
 
-            let bridge = OrbitChromiumTabsBridge.shared
-            if !bridge.isWindowRegistered(env) {
-                bridge.windowCreated(owner: env, focused: false)
-            }
-            bridge.windowFocusChanged(owner: env)
             let spaceID = try XCTUnwrap(env.activeSpace?.id)
 
             let server = try self.makeServer()
@@ -98,10 +90,10 @@ final class CorpusStylusLiveTests: CorpusLiveTestCase {
             model.start()
             defer { model.teardown() }
             let driver = try XCTUnwrap(
-                model.contents as? ChromiumWebContents,
+                model.contents as? WebKitWebContents,
                 model.loadFailure ?? "Stylus's own extension page could not be opened at \(driverURL)"
             )
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(driver)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(driver)
 
             // Exactly the message js/apply.js/common.js build, with the path
             // its editor's Save uses. A style with no id is a new one.
@@ -170,8 +162,8 @@ final class CorpusStylusLiveTests: CorpusLiveTestCase {
             // Opened after the style exists, so the assertion does not depend
             // on Stylus's live styleAdded broadcast reaching an open tab.
             let tabID = env.openTab(url: server.baseURL, in: spaceID)
-            let contents = try XCTUnwrap(env.webContents[tabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            let contents = try XCTUnwrap(env.webContents[tabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             env.activateTab(tabID)
 
             var observed = ""

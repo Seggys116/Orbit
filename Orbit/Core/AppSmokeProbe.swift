@@ -4,8 +4,8 @@
 import AppKit
 import CoreGraphics
 import Foundation
-import MachO
 import OSLog
+import WebKit
 
 @MainActor
 enum AppSmokeProbe {
@@ -28,10 +28,8 @@ enum AppSmokeProbe {
     // result.json, and every one of them must have passed.
     enum Check: String, CaseIterable {
         case browserWindow
-        case chromiumEngine
+        case webkitEngine
         case engineVersion
-        case engineBundleLayout
-        case loadedEngineFramework
         case scratchDataRoot
         case isolatedEngineStorage
         case pageLoad
@@ -123,7 +121,6 @@ enum AppSmokeProbe {
         noteStage(.windowReady)
 
         checkEngine(host: host)
-        checkEngineBundle()
         checkDataRoot(host: host)
         noteStage(.engineReady)
 
@@ -158,13 +155,13 @@ enum AppSmokeProbe {
 
     private static func checkEngine(host: AppEnvironment) {
         guard let engine = host.engine else {
-            record(.chromiumEngine, false, "host.engine is nil — no engine started at all")
+            record(.webkitEngine, false, "host.engine is nil — no engine started at all")
             record(.engineVersion, false, "no engine to ask for a version")
             return
         }
         let typeName = String(describing: type(of: engine))
         guard engine is WebKitEngine, type(of: engine).kind == .webkit else {
-            record(.chromiumEngine, false, "engine is \(typeName), not WebKitEngine")
+            record(.webkitEngine, false, "engine is \(typeName), not WebKitEngine")
             record(.engineVersion, false, "engine is \(typeName), not WebKitEngine")
             return
         }
@@ -177,9 +174,9 @@ enum AppSmokeProbe {
         ]
         let missing = required.filter { !engine.capabilities.contains($0.0) }.map(\.1)
         if missing.isEmpty {
-            record(.chromiumEngine, true, "\(typeName), kind=\(type(of: engine).kind.rawValue), full capability set")
+            record(.webkitEngine, true, "\(typeName), kind=\(type(of: engine).kind.rawValue), full capability set")
         } else {
-            record(.chromiumEngine, false, "\(typeName) does not advertise \(missing.joined(separator: ", "))")
+            record(.webkitEngine, false, "\(typeName) does not advertise \(missing.joined(separator: ", "))")
         }
 
         let version = engine.versionDescription
@@ -188,33 +185,6 @@ enum AppSmokeProbe {
         } else {
             record(.engineVersion, false, "the running engine reports \(version)")
         }
-    }
-
-    private static func checkEngineBundle() {
-        let framework = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Frameworks/Orbit Framework.framework", isDirectory: true)
-        if FileManager.default.fileExists(atPath: framework.path) {
-            record(.engineBundleLayout, false, "Orbit Framework.framework is still in the app bundle")
-        } else {
-            record(.engineBundleLayout, true, "no Chromium framework in the app bundle")
-        }
-        if let loaded = loadedFrameworkPath() {
-            record(.loadedEngineFramework, false, "Orbit Framework is loaded from \(loaded)")
-        } else {
-            record(.loadedEngineFramework, true, "no Orbit Framework image is loaded")
-        }
-    }
-
-    private static func loadedFrameworkPath() -> String? {
-        for index in 0..<_dyld_image_count() {
-            guard let raw = _dyld_get_image_name(index) else { continue }
-            let path = String(cString: raw)
-            if path.hasSuffix("/Orbit Framework.framework/Versions/A/Orbit Framework")
-                || path.hasSuffix("/Orbit Framework.framework/Orbit Framework") {
-                return path
-            }
-        }
-        return nil
     }
 
     // MARK: - Where this run is allowed to write
@@ -236,7 +206,7 @@ enum AppSmokeProbe {
         }
         let session = tabID.flatMap { host.webContents[$0]?.session } ?? engine.defaultSession
         guard let storageURL = session.storageURL else {
-            record(.isolatedEngineStorage, false, "session \"\(session.identifier)\" reports no storageURL — nothing knows where Chromium is writing")
+            record(.isolatedEngineStorage, false, "session \"\(session.identifier)\" reports no storageURL, so nothing knows where the engine's own files are")
             return
         }
         let resolved = storageURL.resolvingSymlinksInPath().path
@@ -244,22 +214,31 @@ enum AppSmokeProbe {
         let privateRoot = EngineStorageDirectory.privateRoot.resolvingSymlinksInPath().path
 
         if resolved == productionProfile || resolved.hasPrefix(productionProfile + "/") {
-            record(.isolatedEngineStorage, false, "the engine's browser context is \(storageURL.path), inside the real profile at \(productionProfile)")
+            record(.isolatedEngineStorage, false, "the engine directory is \(storageURL.path), inside the real profile at \(productionProfile)")
             return
         }
         guard resolved.hasPrefix(privateRoot + "/") else {
-            record(.isolatedEngineStorage, false, "the engine's browser context is \(storageURL.path), neither the production profile nor under \(privateRoot) — nothing knows to sweep it")
+            record(.isolatedEngineStorage, false, "the engine directory is \(storageURL.path), neither the production profile nor under \(privateRoot), so nothing knows to sweep it")
             return
         }
         guard session.isPersistent else {
             record(.isolatedEngineStorage, false, "session \"\(session.identifier)\" is ephemeral; a smoke run must exercise the persistent, extension-loading configuration the app really ships")
             return
         }
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: storageURL.path)) ?? []
-        if entries.isEmpty {
-            record(.isolatedEngineStorage, false, "\(storageURL.path) is empty — Chromium wrote its browser state somewhere else")
+        // WebKit writes website data under ~/Library/WebKit/<bundle id>/WebsiteDataStore/<store uuid>, not under the engine directory above.
+        guard let webKitSession = session as? WebKitSession,
+              let storeIdentifier = webKitSession.dataStore.identifier,
+              let bundleIdentifier = Bundle.main.bundleIdentifier else {
+            record(.isolatedEngineStorage, false, "session \"\(session.identifier)\" is persistent but has no identified WKWebsiteDataStore, so WebKit's website data location cannot be determined")
+            return
+        }
+        let websiteData = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/WebKit/\(bundleIdentifier)/WebsiteDataStore/\(storeIdentifier.uuidString)", isDirectory: true)
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: websiteData.path))
+        if let entries, !entries.isEmpty {
+            record(.isolatedEngineStorage, true, "persistent; engine files private at \(storageURL.path), WebKit website data at \(websiteData.path) (\(entries.count) entries)")
         } else {
-            record(.isolatedEngineStorage, true, "persistent, private at \(storageURL.path) (\(entries.count) entries)")
+            record(.isolatedEngineStorage, false, "\(websiteData.path) is missing or empty after a page loaded, so WebKit wrote this session's website data somewhere else")
         }
     }
 

@@ -15,5 +15,8 @@ updates:
     labels:
       - ci
 
+  # GitHub Actions only. The browser is system WebKit: there is no Chromium
+  # pin, depot_tools submodule, or other third-party checkout for Dependabot
+  # to bump.
   # No swift entry: Dependabot reads Package.swift, and Sparkle lives in
   # Orbit.xcodeproj. Bump it in Xcode and commit Package.resolved.

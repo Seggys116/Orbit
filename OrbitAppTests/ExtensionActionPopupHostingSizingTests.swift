@@ -65,7 +65,7 @@ final class ExtensionActionPopupHostingSizingTests: XCTestCase {
 
         XCTAssertEqual(
             settledPreferredContentSize(for: model), ExtensionActionPopupSupport.popupLoadingSize,
-            "A popup with no preferred-size report yet must offer its real popover host the compact loading size, not the 320x420 default that used to flash a huge box before every small popup's first layout."
+            "A popup with no preferred-size report yet must offer its real popover host the compact loading size, not a fixed box."
         )
     }
 
@@ -81,9 +81,14 @@ final class ExtensionActionPopupHostingSizingTests: XCTestCase {
         contents.reportPreferredSize(CGSize(width: 180, height: 64))
 
         let preferred = settledPreferredContentSize(for: model)
+        let page = CGSize(width: 180, height: 64)
         XCTAssertEqual(
-            preferred, CGSize(width: 180, height: 64),
+            preferred, page,
             "The real NSHostingController.preferredContentSize (what NSPopover actually reads) did not shrink to the reported content size -- exactly the class of defect where the popover keeps showing at some larger fixed frame regardless of tiny real content."
+        )
+        XCTAssertFalse(
+            ExtensionActionPopupSupport.showsSpuriousScrollbars(content: page, frame: preferred),
+            "A frame taller than the page, or shorter by less than a scrollbar, scrolls on both axes."
         )
         XCTAssertLessThan(
             preferred.width, ExtensionActionPopupSupport.popupDefaultSize.width,
@@ -152,7 +157,7 @@ final class ExtensionActionPopupHostingSizingTests: XCTestCase {
 
 @MainActor
 private final class PopupHostingTestEngine: BrowserEngine {
-    static let kind: EngineKind = .chromium
+    static let kind: EngineKind = .webkit
     let capabilities: EngineCapabilities = [.extensions]
     let manageableContentSettings: Set<PermissionKind> = []
     let extensionActivation: ExtensionActivation = .immediate

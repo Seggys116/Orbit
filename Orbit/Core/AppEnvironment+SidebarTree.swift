@@ -7,22 +7,22 @@ extension AppEnvironment {
     }
 
     func moveTodayTab(_ tabID: TabID, toIndex index: Int, in spaceID: SpaceID) {
-        // chromiumTabIndex, not the Space-scoped Today position: onMoved's
+        // extensionTabIndex, not the Space-scoped Today position: onMoved's
         // fromIndex/toIndex must be in the same coordinate space as Tab.index.
-        let fromIndex = chromiumTabIndex(for: tabID)
+        let fromIndex = extensionTabIndex(for: tabID)
         store.reorderTab(tabID, toIndex: index, in: spaceID)
-        pushChromiumTabMoved(tabID, fromIndex: fromIndex)
+        pushExtensionTabMoved(tabID, fromIndex: fromIndex)
     }
 
     func pinTab(_ tabID: TabID, toParent parentFolderID: FolderID?, atIndex index: Int, in spaceID: SpaceID) {
         let capture = livePinCapture(for: tabID)
         store.pin(tabID, toParent: parentFolderID, atIndex: index, in: spaceID, capturedURL: capture.url, capturedTitle: capture.title)
-        pushChromiumTabPinnedChanged(tabID)
+        pushExtensionTabPinnedChanged(tabID)
     }
 
     func unpinTab(_ tabID: TabID, toIndex index: Int, in spaceID: SpaceID) {
         store.unpin(tabID, toIndex: index, in: spaceID)
-        pushChromiumTabPinnedChanged(tabID)
+        pushExtensionTabPinnedChanged(tabID)
     }
 
     // Favorite.id and TabID are both bare UUIDs — never pass a .favorite payload's nodeID as a TabID; resolve it here.

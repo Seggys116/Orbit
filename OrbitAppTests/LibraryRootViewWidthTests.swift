@@ -97,7 +97,7 @@ final class LibraryRootViewWidthTests: XCTestCase {
 
         let size = CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
         guard let image = capture(size: size) else {
-            throw XCTSkip("Could not capture this process's own window pixels on this machine.")
+            throw TestStopped("Could not capture this process's own window pixels on this machine.")
         }
 
         // Well inside the list's own horizontal padding margin, below the header: guaranteed

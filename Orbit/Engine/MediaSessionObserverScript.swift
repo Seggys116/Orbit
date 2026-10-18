@@ -15,7 +15,7 @@ public enum MediaSessionObserverScript {
 
     // MARK: - Source
 
-    public static let chromiumPostExpression =
+    public static let bridgePostExpression =
         "__orbitPost('\(channelName)', JSON.stringify(payload))"
 
     public static func source(postExpression: String) -> String {
@@ -73,13 +73,13 @@ public enum MediaSessionObserverScript {
             try {
               var elements = Array.prototype.slice.call(document.querySelectorAll('video, audio'));
               var hasVideo = elements.some(function(el) { return el.tagName === 'VIDEO'; });
-              var playing = elements.filter(function(el) { return !el.paused && !el.ended && el.readyState > 2; });
-              var isAudible = playing.some(function(el) { return !el.muted && el.volume > 0; });
+              var started = elements.filter(function(el) { return !el.paused && !el.ended; });
+              var audible = started.filter(function(el) { return el.readyState >= 2 && !el.muted && el.volume > 0; });
               var sessionState = sessionPlaybackState();
-              // With no elements to scan, trust mediaSession.playbackState instead
-              // of defaulting to "not playing".
-              var isPlaying = playing.length > 0
-                || (elements.length === 0 && sessionState === 'playing');
+              // paused is the playback flag. readyState lags play(), including on a
+              // background tab that has not decoded a frame yet.
+              var isPlaying = started.length > 0 || sessionState === 'playing';
+              var isAudible = audible.length > 0;
               var hasActiveMediaSession =
                 elements.some(function(el) { return el.__orbitPlaybackBegun === true; })
                 || sessionState === 'playing'
@@ -159,8 +159,32 @@ public enum MediaSessionObserverScript {
           });
           window.addEventListener('load', function() { reportPlaybackState(); checkMediaSession(); });
 
+          function anyLiveMedia() {
+            try {
+              if (document.pictureInPictureElement) { return true; }
+              if (sessionPlaybackState() === 'playing') { return true; }
+              var elements = document.querySelectorAll('video, audio');
+              for (var i = 0; i < elements.length; i++) {
+                var el = elements[i];
+                if (!el.paused && !el.ended) { return true; }
+                if (isInPictureInPicture(el)) { return true; }
+              }
+              return false;
+            } catch (e) { return true; }
+          }
+
+          document.addEventListener('visibilitychange', function() {
+            if (document.hidden) { return; }
+            document.querySelectorAll('video, audio').forEach(enforceMute);
+            reportPlaybackState();
+            checkMediaSession();
+          });
+
           // Polled, not watched: patching MediaSession's setters fails anti-bot scripts' native-code check.
+          // A hidden page with nothing playing skips the scan so the web process can nap. Play events
+          // and visibilitychange still report, including background audio for the mini player.
           setInterval(function() {
+            if (document.hidden && !anyLiveMedia()) { return; }
             document.querySelectorAll('video, audio').forEach(enforceMute);
             reportPlaybackState();
             checkMediaSession();
@@ -170,11 +194,11 @@ public enum MediaSessionObserverScript {
     }
 
     /// Installed once per session, not per-tab: must keep working across navigations.
-    public static var chromiumUserScript: UserScript {
+    public static var userScript: UserScript {
         UserScript(
             id: scriptID,
             kind: .javaScript,
-            source: source(postExpression: chromiumPostExpression),
+            source: source(postExpression: bridgePostExpression),
             injectionTime: .documentStart,
             matchPatterns: ["<all_urls>"],
             allFrames: false
@@ -209,8 +233,13 @@ public enum MediaSessionObserverScript {
             updated.nowPlayingArtist = payload["artist"] as? String
             updated.nowPlayingArtworkURL = (payload["artwork"] as? String).flatMap(URL.init(string:))
             if let playbackState = payload["playbackState"] as? String {
-                updated.isPlaying = playbackState == "playing"
-                if playbackState == "playing" || playbackState == "paused" {
+                // "none" is the unset default, not a pause. Applying it used to
+                // clear a playback report that had already arrived.
+                if playbackState == "playing" {
+                    updated.isPlaying = true
+                    updated.hasActiveMediaSession = true
+                } else if playbackState == "paused" {
+                    updated.isPlaying = false
                     updated.hasActiveMediaSession = true
                 }
             }

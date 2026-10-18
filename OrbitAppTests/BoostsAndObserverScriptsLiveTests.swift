@@ -14,9 +14,8 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
     /// A compiled Boost's JavaScript half is always `.documentEnd` (see
     /// BoostCompiler.compile); proven live for the first time here.
     func testDocumentEndUserScriptRunsAfterDOMContentLoaded() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let result = try LiveChromiumEngineHost.runLive { () -> Any? in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
+        let result = try WebKitLiveEngineHost.runLive { () -> Any? in
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let probe = UserScript(
                 kind: .javaScript,
                 source: "window.__orbitDocumentEndProbe = 'ran';",
@@ -27,7 +26,7 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
             engine.addUserScript(probe, session: engine.defaultSession)
             defer { engine.removeUserScript(id: probe.id, session: engine.defaultSession) }
 
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             return try await contents.evaluateJavaScript("window.__orbitDocumentEndProbe")
         }
@@ -39,9 +38,8 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
     /// Proves WebDocument::InsertStyleSheet reaches computed style, not just
     /// that RunDocumentStartScripts's non-stylesheet branch runs -- first live proof of CSS delivery.
     func testAllURLsStylesheetUserScriptReachesComputedStyle() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let backgroundColor = try LiveChromiumEngineHost.runLive { () -> Any? in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
+        let backgroundColor = try WebKitLiveEngineHost.runLive { () -> Any? in
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             // Removed before this test returns: the engine is shared by every
             // live suite, and a leftover !important background repaints every later page.
             let sheet = UserScript(
@@ -54,7 +52,7 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
             engine.addUserScript(sheet, session: engine.defaultSession)
             defer { engine.removeUserScript(id: sheet.id, session: engine.defaultSession) }
 
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             return try await contents.evaluateJavaScript("getComputedStyle(document.body).backgroundColor")
         }
@@ -67,9 +65,8 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
     /// A host-restricted stylesheet must not leak onto a non-matching page,
     /// proven against the real C++ matcher, not Swift's own mirror.
     func testHostRestrictedStylesheetDoesNotApplyToANonMatchingPage() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let backgroundColor = try LiveChromiumEngineHost.runLive { () -> Any? in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
+        let backgroundColor = try WebKitLiveEngineHost.runLive { () -> Any? in
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let sheet = UserScript(
                 kind: .stylesheet,
                 source: "body { background-color: rgb(44, 55, 66) !important; }",
@@ -82,7 +79,7 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
 
             // about:blank's scheme can never satisfy an https:// pattern --
             // a genuine non-match, not a stand-in for one.
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             return try await contents.evaluateJavaScript("getComputedStyle(document.body).backgroundColor")
         }
@@ -103,12 +100,11 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
     }
 
     func testLinkHoverObserverScriptReportsAndClearsTheHoveredLink() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (hoveredURL, clearedURL) = try LiveChromiumEngineHost.runLive { () -> (URL??, URL??) in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            engine.addUserScript(LinkHoverObserverScript.chromiumUserScript, session: engine.defaultSession)
+        let (hoveredURL, clearedURL) = try WebKitLiveEngineHost.runLive { () -> (URL??, URL??) in
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            engine.addUserScript(LinkHoverObserverScript.userScript, session: engine.defaultSession)
 
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             let delegate = HoverRecordingDelegate()
             contents.delegate = delegate
@@ -156,12 +152,11 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
     /// Native-initiated: unlike MediaSessionObserverScript (page reports to
     /// native), this is native invoking `window.__orbitMediaTransport` as the mini player's buttons do.
     func testMediaTransportScriptDOMFallbackPlaysAPausedElement() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let played = try LiveChromiumEngineHost.runLive { () -> Any? in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
+        let played = try WebKitLiveEngineHost.runLive { () -> Any? in
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             engine.addUserScript(MediaTransportScript.userScript, session: engine.defaultSession)
 
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
 
             _ = try await contents.evaluateJavaScript("""
@@ -184,15 +179,14 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
     /// A real playing <video> reports state through MediaSessionObserverScript
     /// into AppEnvironment.mediaStates, and mediaTransport(_:for:) commands genuinely control it back.
     func testAppEnvironmentMediaBridgeRoundTripReportsRealPlaybackAndNativeCommandsControlIt() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let outcome = try LiveChromiumEngineHost.runLive { () -> (
+        let outcome = try WebKitLiveEngineHost.runLive { () -> (
             reportedTitle: String?, reportedArtist: String?, reportedPlayingAfterStart: Bool, reportedHasVideo: Bool,
             pausedAfterNativePause: Bool, reportedPlayingAfterNativePause: Bool,
             resumedAfterNativePlay: Bool, reportedPlayingAfterNativePlay: Bool,
             nextTrackInvoked: Bool
         ) in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            engine.addUserScript(MediaSessionObserverScript.chromiumUserScript, session: engine.defaultSession)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            engine.addUserScript(MediaSessionObserverScript.userScript, session: engine.defaultSession)
             engine.addUserScript(MediaTransportScript.userScript, session: engine.defaultSession)
 
             let server = try LiveHTTPTestServer(routes: [
@@ -204,7 +198,7 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 200, height: 200)
 
@@ -221,7 +215,7 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
             }
 
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             var v = document.getElementById('v');
@@ -307,9 +301,8 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
     /// The test above proves the fallback against an <audio> that never
     /// played. This proves it against a real, decoding <video> with no registered Media Session handler.
     func testMediaTransportScriptDOMFallbackPausesARealPlayingVideoWithNoRegisteredHandler() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (acknowledgedByScript, pausedAfterCommand) = try LiveChromiumEngineHost.runLive { () -> (Bool, Bool) in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
+        let (acknowledgedByScript, pausedAfterCommand) = try WebKitLiveEngineHost.runLive { () -> (Bool, Bool) in
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             engine.addUserScript(MediaTransportScript.userScript, session: engine.defaultSession)
 
             let server = try LiveHTTPTestServer(routes: [
@@ -321,11 +314,11 @@ final class BoostsAndObserverScriptsLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 200, height: 200)
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             var v = document.getElementById('v');

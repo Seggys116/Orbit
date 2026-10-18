@@ -1,4 +1,3 @@
-import MachO
 import WebKit
 import XCTest
 @testable import Orbit
@@ -27,8 +26,77 @@ final class WebKitEngineLaunchTests: XCTestCase {
         contents.loadHTML(html, baseURL: URL(string: "https://orbit.test/"))
         let text = try await waitForText(contents, script: "document.getElementById('fixture') ? document.getElementById('fixture').textContent : ''", equals: fixture)
         XCTAssertEqual(text, fixture)
-        assertNoChromiumLinked()
         engine.shutdown()
+    }
+
+    /// Factory boot, private storage, then a background script's chrome.bookmarks.getTree.
+    func testFactoryInstallsAChromeExtensionAndBookmarksAnswers() async throws {
+        let previousRoot = AppEnvironment.processRoot
+        let environment = LiveEnvironmentTestCase.makeEnvironmentWithNoOpenTabs()
+        AppEnvironment.processRoot = environment
+        defer { AppEnvironment.processRoot = previousRoot }
+
+        let engine = EngineFactory.makeEngine(storage: .isolated)
+        defer { engine.shutdown() }
+        let webKit = try XCTUnwrap(engine as? WebKitEngine)
+        XCTAssertEqual(type(of: engine).kind, .webkit)
+        print("ENGINE \(type(of: engine).kind.rawValue)")
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("orbit-factory-probe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try """
+        {
+          "manifest_version": 3,
+          "name": "Orbit Factory Probe",
+          "version": "1.0.0",
+          "description": "Asks chrome.bookmarks for the real tree.",
+          "permissions": ["bookmarks"],
+          "background": { "service_worker": "background.js" }
+        }
+        """.write(to: directory.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
+        try """
+        chrome.bookmarks.getTree(function () {});
+        """.write(to: directory.appendingPathComponent("background.js"), atomically: true, encoding: .utf8)
+        try """
+        document.title = "script-started";
+        try {
+          chrome.bookmarks.getTree(function (tree) {
+            var err = chrome.runtime && chrome.runtime.lastError;
+            document.title = err ? ("lastError:" + err.message) : JSON.stringify(tree);
+          });
+        } catch (e) {
+          document.title = "threw:" + String(e);
+        }
+        """.write(to: directory.appendingPathComponent("probe.js"), atomically: true, encoding: .utf8)
+        try """
+        <!doctype html><html><head><title>pending</title></head>
+        <body><script src="orbit-chrome-wrapper.js"></script><script src="probe.js"></script></body>
+        </html>
+        """.write(to: directory.appendingPathComponent("probe.html"), atomically: true, encoding: .utf8)
+
+        let loaded = try await webKit.loadExtension(at: directory, session: engine.defaultSession)
+        let contents = try XCTUnwrap(
+            try webKit.makeWebContents(session: engine.defaultSession, initialURL: nil) as? WebKitWebContents
+        )
+        host(contents)
+        contents.load(URL(string: "chrome-extension://\(loaded.id)/probe.html")!)
+        let result = try await waitForText(contents, script: "document.title", equals: "") { title in
+            title.contains("\"permanent\"")
+        }
+        let stable = result
+            .replacing(/"id":"[^"]*"/, with: "\"id\":\"_\"")
+            .replacing(/"dateAdded":[0-9]+/, with: "\"dateAdded\":0")
+        let object = try JSONSerialization.jsonObject(with: Data(stable.utf8))
+        let canonicalData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        let canonical = String(decoding: canonicalData, as: UTF8.self)
+        print("CHROME_BOOKMARKS \(canonical)")
+        XCTAssertTrue(result.contains("\"id\""), result)
+        XCTAssertTrue(result.contains("\"permanent\""), result)
+        XCTAssertTrue(result.contains("https://www.google.com"), result)
+        XCTAssertFalse(result.contains("__orbitError"), result)
+        XCTAssertFalse(canonical.isEmpty)
     }
 
     func testCosmeticAndStylesheetCSSStayData() async throws {
@@ -84,26 +152,6 @@ final class WebKitEngineLaunchTests: XCTestCase {
         engine.shutdown()
     }
 
-    func testContentRulesKeepSubdomainsAndCosmeticDomains() throws {
-        let network = try XCTUnwrap(SafariContentRuleCompiler.compiledRule(from: "||example.com^"))
-        let filter = try XCTUnwrap((network["trigger"] as? [String: Any])?["url-filter"] as? String)
-        XCTAssertFalse(filter.contains("\\\\."))
-        let regex = try NSRegularExpression(pattern: filter)
-        func matches(_ url: String) -> Bool {
-            regex.firstMatch(in: url, range: NSRange(url.startIndex..., in: url)) != nil
-        }
-        XCTAssertTrue(matches("https://example.com/"))
-        XCTAssertTrue(matches("https://ads.example.com/"))
-        XCTAssertFalse(matches("https://ads.example.org/"))
-
-        let cosmetic = try XCTUnwrap(SafariContentRuleCompiler.compiledRule(from: "example.com##.ad"))
-        let trigger = try XCTUnwrap(cosmetic["trigger"] as? [String: Any])
-        XCTAssertEqual(trigger["if-domain"] as? [String], ["*example.com"])
-        XCTAssertEqual((cosmetic["action"] as? [String: Any])?["selector"] as? String, ".ad")
-        let global = try XCTUnwrap(SafariContentRuleCompiler.compiledRule(from: "##.banner"))
-        XCTAssertNil((global["trigger"] as? [String: Any])?["if-domain"])
-    }
-
     func testTargetBlankOpensTheDocument() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-blank-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -152,36 +200,6 @@ final class WebKitEngineLaunchTests: XCTestCase {
         engine.shutdown()
     }
 
-    func testChromiumToolchainIsGoneAndCorpusRemains() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let callers = [
-            ".github/workflows/ci.yml",
-            ".github/workflows/build-test.yml",
-            ".github/workflows/release.yml",
-            ".github/workflows/live-engine.yml",
-            ".github/dependabot.yml",
-            "Scripts/extension_schemas.py",
-        ]
-        let forbidden = [
-            "Scripts/chromium",
-            "chromium-version.json",
-            "ensure-chromium-engine.sh",
-            "ChromiumEngine",
-            "depot_tools",
-            "gitsubmodule",
-            "ThirdParty/chromium",
-        ]
-        for relative in callers {
-            let text = try String(contentsOf: root.appendingPathComponent(relative), encoding: .utf8)
-            for needle in forbidden where text.contains(needle) {
-                XCTFail("\(relative) still contains \(needle)")
-            }
-        }
-        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Chromium/extension-corpus.json").path))
-    }
-
     func testPageMenuAndInspectorAndWebStoreAreInstalled() async throws {
         let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let contents = try XCTUnwrap(try engine.makeWebContents(session: engine.defaultSession, initialURL: nil) as? WebKitWebContents)
@@ -194,10 +212,10 @@ final class WebKitEngineLaunchTests: XCTestCase {
         )
         XCTAssertEqual(ready, "go")
         let agent = try await waitForText(contents, script: "navigator.userAgent", equals: "pending") { text in
-            text.contains("Chrome/") && text.contains("AppleWebKit")
+            text.contains("Safari/") && text.contains("AppleWebKit")
         }
-        XCTAssertTrue(agent.contains("Chrome/"))
-        XCTAssertTrue(agent.contains("AppleWebKit"))
+        XCTAssertEqual(agent, WebKitProduct.userAgent)
+        XCTAssertFalse(agent.contains("Chrome/"))
         let sources = contents.webView.configuration.userContentController.userScripts.map(\.source).joined(separator: "\n")
         XCTAssertTrue(sources.contains("__orbitWebStorePrivate"))
         XCTAssertTrue(sources.contains("__orbitOwnsAddToChromeButton"))
@@ -379,15 +397,6 @@ http.server.HTTPServer(('127.0.0.1', \(port)), H).serve_forever()
         )
         XCTAssertEqual(second, "cache-second")
         engine.shutdown()
-    }
-
-    private func assertNoChromiumLinked() {
-        for index in 0..<_dyld_image_count() {
-            guard let raw = _dyld_get_image_name(index) else { continue }
-            let path = String(cString: raw)
-            XCTAssertFalse(path.contains("Orbit Framework.framework"), path)
-            XCTAssertFalse(path.contains("Chromium Framework"), path)
-        }
     }
 
 }

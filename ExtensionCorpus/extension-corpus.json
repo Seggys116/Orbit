@@ -27,9 +27,9 @@
     "into a flake generator, and the whole point of a corpus entry is that its",
     "expectation was verified against that exact build.",
     "",
-    "`prodversion` on the download request comes from Chromium/chromium-version.json,",
-    "so bumping Chromium changes which build the store serves; re-run `pin`",
-    "after a Chromium bump if a fetch starts returning a different version."
+    "`prodversion` on the download request is the fixed value chromium_major() in",
+    "Scripts/extension_corpus.py returns, so changing it changes which build the",
+    "store serves; re-run `pin` if a fetch starts returning a different version."
   ],
   "update_service_url": "https://clients2.google.com/service/update2/crx",
   "unpack_root": "ThirdParty/extension-corpus",

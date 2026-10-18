@@ -138,7 +138,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:])
         else {
-            throw XCTSkip("could not synthesize a PNG fixture on this machine")
+            throw TestStopped("could not synthesize a PNG fixture on this machine")
         }
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("SpaceIconViewRenderTests-\(UUID().uuidString).png")
         try png.write(to: fileURL)

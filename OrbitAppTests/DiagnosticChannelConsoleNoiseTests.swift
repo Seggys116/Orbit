@@ -133,7 +133,7 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
     func test_toolbarColourProbe_isSilentByDefaultAndSpeaksWhenAskedFor() throws {
         #if DEBUG
         guard channelsNotForcedByEnvironment().contains(.toolbarColour) else {
-            throw XCTSkip("ORBIT_LOG_TOOLBAR_COLOUR is set in this environment, so the default state cannot be measured here.")
+            throw TestStopped("ORBIT_LOG_TOOLBAR_COLOUR is set in this environment, so the default state cannot be measured here.")
         }
         let store = try OSLogStore(scope: .currentProcessIdentifier)
 
@@ -167,7 +167,7 @@ final class DiagnosticChannelConsoleNoiseTests: XCTestCase {
             XCTAssertTrue(sample.contains(field), "The [colour] record lost its \(field) field: \(sample)")
         }
         #else
-        throw XCTSkip("The toolbar self-check probes are compiled out of Release builds.")
+        throw TestStopped("The toolbar self-check probes are compiled out of Release builds.")
         #endif
     }
 

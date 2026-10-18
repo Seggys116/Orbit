@@ -1,36 +1,38 @@
 {
   "_readme": [
-    "The machine-readable form of refs/EXTENSION_CONFORMANCE.md sections 1.3, 1.4 and 1.5:",
-    "every extension API member Orbit is known NOT to have.",
+    "The machine-readable gap register for Orbit's chrome.* surface on WebKit (WKWebExtension) plus Orbit's chrome wrapper.",
     "",
-    "OrbitTests/ExtensionSchemaConformanceTests.swift diffs Orbit's own schemas",
-    "(Chromium/Embedder/common/api/*.json) against the vendored upstream snapshot in",
-    "OrbitTests/Fixtures/UpstreamAPISchemas/ and asserts the delta is EXACTLY this file.",
+    "Each namespace names who provides it:",
+    "  wrapper         ChromeAPIWrapperScript creates it (the inventory is Orbit/Engine/WebKit/ChromeAPISurfaceInventory.swift)",
+    "  webkit          WebKit implements it natively",
+    "  webkit+wrapper  WebKit implements it and the wrapper adds members WebKit leaves out",
+    "  none            nothing provides it",
     "",
-    "That means the test fails in both directions, on purpose:",
-    "  - a member that disappears from Orbit and appears here is a regression;",
-    "  - a member that Orbit IMPLEMENTS also fails, until someone deletes it from",
-    "    this file. Updating the file is the deliberate act that records the win.",
-    "A fixture-based test can only check members its author thought to write down;",
-    "this is the only check in the suite that can detect ABSENCE.",
+    "status:",
+    "  complete    every upstream member exists",
+    "  partial     the missing* lists are the upstream members that do not exist",
+    "  unvendored  wrapper-provided core namespace whose schema is not vendored; the generated wrapper is pinned by the inventory",
+    "  absent      the namespace does not exist; reason says why",
+    "  unverified  WebKit may or may not provide it and a service-worker reflection cannot tell; reason is webkitVariable",
     "",
-    "Regenerate with:  Scripts/extension-schemas sync && Scripts/extension-schemas update-expectations",
-    "Then READ THE DIFF. Notes and reasons are preserved across regeneration.",
+    "How each half is proven, in both directions (a regression fails, and so does an implemented member that is still listed):",
+    "  wrapper members   OrbitTests/ExtensionSchemaConformanceTests runs the generated wrapper in JavaScriptCore and diffs it against the vendored schemas.",
+    "  WebKit members    OrbitAppTests/WebKitExtensionRuntimeSurfaceReflectionLiveTests walks the real chrome object in a real MV3 service worker.",
+    "",
+    "missing*: upstream members confirmed absent. uncertain*: members whose presence depends on the WebKit version; the live suite accepts either state and reports the one it saw, so move an entry to missing* or delete it once observed.",
     "",
     "reason, on an absent namespace:",
-    "  notPorted       chrome-layer, in scope, Orbit has not ported it (section 1.4)",
-    "  outOfScope      ChromeOS hardware/shell, enterprise, or the Chrome Apps model",
-    "                  Orbit does not host (section 1.5)",
-    "  chromeInternal  allowlist-only; no third-party extension can reach it",
-    "  unclassified    a new Chromium added it and nobody has triaged it yet -- the",
-    "                  test rejects this value, so the bump forces the triage",
+    "  notPorted        in scope, Orbit has not built it",
+    "  outOfScope       ChromeOS hardware or shell, enterprise, or the Chrome Apps model Orbit does not host",
+    "  chromeInternal   allowlist-only; no third-party extension can reach it",
+    "  webkitImpossible WebKit exposes no hook that could provide it",
+    "  unclassified     new upstream and not yet triaged; the test rejects this value",
     "",
-    "neverDispatchedEvents: events Orbit DECLARES in a schema and never fires. These are",
-    "invisible to a schema diff -- the member is present -- and are the failure mode",
-    "OrbitTests/Fixtures/EventLiveness.json plus ChromiumExtensionEventLivenessLiveTests",
-    "exist to catch. An event listed here must also be listed as notDispatched there."
+    "neverDispatchedEvents: events that exist and are never fired. A schema diff cannot see them. Each must also be notDispatched in EventLiveness.json.",
+    "permissionsWithoutProvider: Chrome permissions neither the wrapper nor WKWebExtension.Permission gives any meaning to."
   ],
-  "chromium_version": "152.0.7977.54",
+  "engine": "WebKit WKWebExtension + Orbit chrome wrapper",
+  "upstreamVersion": "152.0.7977.54",
   "neverDispatchedEvents": [
     "action.onClicked",
     "tabs.onReplaced",
@@ -38,508 +40,518 @@
   ],
   "namespaces": {
     "accessibilityFeatures": {
-      "status": "absent",
-      "reason": "notPorted"
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
     },
     "accessibilityPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "accessibilityServicePrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "activityLogPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "appviewTag": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "autofillPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "autotestPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "bookmarkManagerPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "brailleDisplayPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "browserAction": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "browsingData": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "certificateProvider": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "certificateProviderInternal": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "chromeWebViewInternal": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "chromeosInfoPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "commandLinePrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "contentSettings": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "contextualTasksPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "crashReportPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "debugger": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "declarativeContent": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "desktopCapture": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "developerPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "devtools.inspectedWindow": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "devtools.network": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "devtools.panels": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "devtools.performance": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "devtools.recorder": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "dictationPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "documentScan": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "downloadsInternal": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "echoPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "enterprise": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "enterprise.deviceAttributes": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "enterprise.hardwarePlatform": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "enterprise.kioskInput": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "enterprise.login": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "enterprise.networkingAttributes": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "enterprise.platformKeys": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "enterprise.platformKeysInternal": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "enterprise.platformKeysPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "enterprise.reportingPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "experimentalActor": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "experimentalAiData": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "extension": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "fileBrowserHandler": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "fileManagerPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "fileManagerPrivateInternal": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "fileSystemProvider": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "fileSystemProviderInternal": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "fontSettings": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "gcm": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "glicPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "identity": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "imageLoaderPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "imageWriterPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "indigoPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "input.ime": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "inputMethodPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "instanceID": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "languageSettingsPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "login": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "loginScreenStorage": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "loginScreenUi": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "loginState": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "manifestTypes": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "mdns": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "mediaPlayerPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "notifications": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "odfsConfigPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "omnibox": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "pageAction": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "pageCapture": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "passwordsPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "pdfViewerPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "platformKeys": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "platformKeysInternal": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "printing": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "printingMetrics": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "processes": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "proxyOverrideRulesPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "quickUnlockPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "readingList": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "resourcesPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "safeBrowsingPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "settingsPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "sidePanel": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "smartCardProviderPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "speechRecognitionPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "systemLog": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "systemPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "tabCapture": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "tabGroups": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "terminalPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "topSites": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "tts": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "ttsEngine": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "usersPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "vpnProvider": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "wallpaper": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "webAuthenticationProxy": {
-      "status": "absent",
-      "reason": "notPorted"
-    },
-    "webrtcDesktopCapturePrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "webrtcLoggingPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
-    },
-    "webviewTag": {
-      "status": "absent",
-      "reason": "outOfScope"
-    },
-    "wmDesksPrivate": {
-      "status": "absent",
-      "reason": "chromeInternal"
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "action": {
+      "note": "WebKit supplies chrome.action. onClicked exists but Orbit never dispatches it for a popup-less action: see neverDispatchedEvents. The badge text colour pair, getUserSettings, openPopup and onUserSettingsChanged depend on the WebKit version; the live suite accepts either state and reports what it saw.",
+      "provider": "webkit",
       "status": "partial",
-      "missingFunctions": [
-        "getUserSettings",
-        "openPopup"
-      ],
-      "missingEvents": [
+      "uncertainEvents": [
         "onUserSettingsChanged"
       ],
-      "missingTypes": [
-        "OpenPopupOptions",
-        "UserSettings",
-        "UserSettingsChange"
-      ],
-      "note": "onClicked is declared and never fired; see neverDispatchedEvents. The missing members here are the separate, schema-level half of the same section 1.3 row."
+      "uncertainFunctions": [
+        "getBadgeTextColor",
+        "getUserSettings",
+        "openPopup",
+        "setBadgeTextColor"
+      ]
+    },
+    "activityLogPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "app": {
-      "status": "complete"
+      "note": "chrome.app is a web-page API for the Chrome Apps model; no extension context sees it.",
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "appviewTag": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "autofillPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "autotestPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "bookmarkManagerPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "bookmarks": {
-      "status": "partial",
       "missingEvents": [
         "onChildrenReordered",
         "onImportBegan",
         "onImportEnded"
       ],
-      "missingTypes": [
-        "BookmarkTreeNodeUnmodifiable",
-        "FolderType"
-      ]
+      "missingFunctions": [
+        "getRecent"
+      ],
+      "missingProperties": [
+        "MAX_SUSTAINED_WRITE_OPERATIONS_PER_MINUTE",
+        "MAX_WRITE_OPERATIONS_PER_HOUR",
+        "ROOT_NODE_ID"
+      ],
+      "note": "getRecent and the folder-reorder and import events have no Orbit source; the bookmark write-rate constants are not exposed because Orbit does not rate-limit bookmark writes.",
+      "provider": "wrapper",
+      "status": "partial"
+    },
+    "brailleDisplayPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "browserAction": {
+      "note": "MV2 only: WebKit maps browser_action for MV2 manifests, which the MV3 reflection fixture cannot show.",
+      "provider": "none",
+      "reason": "webkitVariable",
+      "status": "unverified"
+    },
+    "browsingData": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "certificateProvider": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "certificateProviderInternal": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "chromeWebViewInternal": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "chromeosInfoPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "commandLinePrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "commands": {
+      "note": "The wrapper guarantees getAll and onCommand; Orbit dispatches onCommand from its own shortcut registry.",
+      "provider": "webkit+wrapper",
       "status": "complete"
+    },
+    "contentSettings": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
     },
     "contextMenus": {
-      "status": "complete"
+      "provider": "webkit",
+      "status": "partial",
+      "uncertainProperties": [
+        "ACTION_MENU_TOP_LEVEL_LIMIT"
+      ]
+    },
+    "contextualTasksPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "cookies": {
-      "status": "partial",
       "missingFunctions": [
         "getPartitionKey"
       ],
-      "missingTypes": [
-        "CookiePartitionKey",
-        "FrameDetails"
-      ],
-      "note": "No CHIPS/partitioned-cookie support."
+      "note": "No partitioned-cookie (CHIPS) support: WebKit does not expose cookie partition keys. The wrapper adds onChanged and dispatches it around set and remove.",
+      "provider": "webkit+wrapper",
+      "status": "partial"
+    },
+    "crashReportPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "debugger": {
+      "note": "WebKit has no public remote debugging protocol an extension could drive.",
+      "provider": "none",
+      "reason": "webkitImpossible",
+      "status": "absent"
+    },
+    "declarativeContent": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "desktopCapture": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "developerPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "devtools.inspectedWindow": {
+      "note": "Only defined inside a devtools page, never in a service worker, so the reflection suite cannot observe it.",
+      "provider": "none",
+      "reason": "webkitVariable",
+      "status": "unverified"
+    },
+    "devtools.network": {
+      "note": "Only defined inside a devtools page, never in a service worker, so the reflection suite cannot observe it.",
+      "provider": "none",
+      "reason": "webkitVariable",
+      "status": "unverified"
+    },
+    "devtools.panels": {
+      "note": "Only defined inside a devtools page, never in a service worker, so the reflection suite cannot observe it.",
+      "provider": "none",
+      "reason": "webkitVariable",
+      "status": "unverified"
+    },
+    "devtools.performance": {
+      "note": "Only defined inside a devtools page, never in a service worker, so the reflection suite cannot observe it.",
+      "provider": "none",
+      "reason": "webkitVariable",
+      "status": "unverified"
+    },
+    "devtools.recorder": {
+      "note": "Only defined inside a devtools page, never in a service worker, so the reflection suite cannot observe it.",
+      "provider": "none",
+      "reason": "webkitVariable",
+      "status": "unverified"
+    },
+    "dictationPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "documentScan": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
     },
     "downloads": {
-      "status": "partial",
+      "missingEvents": [
+        "onDeterminingFilename"
+      ],
       "missingFunctions": [
         "acceptDanger",
         "getFileIcon",
         "setShelfEnabled",
         "setUiOptions"
       ],
-      "missingEvents": [
-        "onDeterminingFilename"
-      ],
-      "missingTypes": [
-        "FilenameSuggestion",
-        "GetFileIconOptions",
-        "UiOptions"
-      ]
+      "note": "acceptDanger, getFileIcon, setShelfEnabled, setUiOptions and onDeterminingFilename need a download shelf, icon service and filename-interception hook Orbit's download list does not have.",
+      "provider": "wrapper",
+      "status": "partial"
+    },
+    "downloadsInternal": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "echoPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "enterprise": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "enterprise.deviceAttributes": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "enterprise.hardwarePlatform": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "enterprise.kioskInput": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "enterprise.login": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "enterprise.networkingAttributes": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "enterprise.platformKeys": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "enterprise.platformKeysInternal": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "enterprise.platformKeysPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "enterprise.reportingPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "experimentalActor": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "experimentalAiData": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "extension": {
+      "note": "WebKit may expose the legacy chrome.extension namespace; whether a service worker sees it depends on the WebKit version, so the reflection suite does not assert either way.",
+      "provider": "none",
+      "reason": "webkitVariable",
+      "status": "unverified"
+    },
+    "fileBrowserHandler": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "fileManagerPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "fileManagerPrivateInternal": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "fileSystemProvider": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "fileSystemProviderInternal": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "fontSettings": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "gcm": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "glicPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "history": {
+      "note": "Backed by Orbit's own history store; onVisited and onVisitRemoved are dispatched from its change notifications.",
+      "provider": "wrapper",
       "status": "complete"
     },
+    "identity": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "idle": {
+      "note": "queryState, setDetectionInterval and onStateChanged are backed by the system's input idle time and screen lock. getAutoLockDelay is ChromeOS-only. The core-layer schema is not vendored, so its members are pinned by ChromeAPISurfaceInventory and the generated-wrapper test rather than diffed here.",
+      "provider": "wrapper",
+      "status": "unvendored"
+    },
+    "imageLoaderPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "imageWriterPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "indigoPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "input.ime": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "inputMethodPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "instanceID": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "languageSettingsPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "login": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "loginScreenStorage": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "loginScreenUi": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "loginState": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "management": {
+      "note": "The three dependencies-free members stay available without the permission. launchApp, createAppShortcut, setLaunchType, generateAppForLink and installReplacementWebApp are Chrome Apps surface Orbit does not host. The core-layer schema is not vendored, so its members are pinned by ChromeAPISurfaceInventory and the generated-wrapper test rather than diffed here.",
+      "provider": "wrapper",
+      "status": "unvendored"
+    },
+    "manifestTypes": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "mdns": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "mediaPlayerPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "notifications": {
+      "note": "WKWebExtension.Permission has no notifications permission, so WebKit does not provide the API.",
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "odfsConfigPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "offscreen": {
+      "note": "createDocument, closeDocument and hasDocument run a hidden WebKit page owned by the extension. The core-layer schema is not vendored, so its members are pinned by ChromeAPISurfaceInventory and the generated-wrapper test rather than diffed here.",
+      "provider": "wrapper",
+      "status": "unvendored"
+    },
+    "omnibox": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "pageAction": {
+      "note": "MV2 only: WebKit maps page_action for MV2 manifests, which the MV3 reflection fixture cannot show.",
+      "provider": "none",
+      "reason": "webkitVariable",
+      "status": "unverified"
+    },
+    "pageCapture": {
+      "note": "WebKit can archive a page as .webarchive but has no MHTML writer.",
+      "provider": "none",
+      "reason": "webkitImpossible",
+      "status": "absent"
+    },
+    "passwordsPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "pdfViewerPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
     "permissions": {
-      "status": "partial",
       "missingFunctions": [
         "addHostAccessRequest",
         "removeHostAccessRequest"
       ],
-      "note": "addHostAccessRequest/removeHostAccessRequest only."
+      "note": "The wrapper replaces getAll, contains, request and remove with Orbit's consent-backed implementation and adds onAdded and onRemoved.",
+      "provider": "webkit+wrapper",
+      "status": "partial"
+    },
+    "platformKeys": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "platformKeysInternal": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "power": {
+      "note": "requestKeepAwake and releaseKeepAwake hold a real IOPMAssertion. reportActivity is ChromeOS-only. The core-layer schema is not vendored, so its members are pinned by ChromeAPISurfaceInventory and the generated-wrapper test rather than diffed here.",
+      "provider": "wrapper",
+      "status": "unvendored"
+    },
+    "printing": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "printingMetrics": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "privacy": {
-      "status": "partial",
-      "missingTypes": [
-        "AutofillBlockedType",
-        "AutofillSettings",
-        "IPHandlingPolicy"
-      ],
       "missingProperties": [
         "network",
         "network.networkPredictionEnabled",
@@ -565,127 +577,253 @@
         "websites.thirdPartyCookiesAllowed",
         "websites.topicsEnabled"
       ],
-      "note": "The two absent GROUPS (network, websites) are the dangerous half: chrome.privacy.websites.thirdPartyCookiesAllowed throws TypeError on the group, and a top-level throw during service worker evaluation is the 'Status code: 15' registration failure (section 1.3)."
+      "note": "Only services.searchSuggestEnabled is backed by a real Orbit preference. Every other setting is withheld on purpose: a ChromeSetting for a feature Orbit lacks would accept a value and change nothing.",
+      "provider": "wrapper",
+      "status": "partial"
+    },
+    "processes": {
+      "note": "WebKit exposes no public per-renderer process information.",
+      "provider": "none",
+      "reason": "webkitImpossible",
+      "status": "absent"
+    },
+    "proxyOverrideRulesPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "quickUnlockPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "readingList": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "resourcesPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "safeBrowsingPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "search": {
+      "note": "chrome.search.query resolves the Profile's configured search engine; the disposition and tabId rules are pinned by WebKitExtensionSearchLiveTests.",
+      "provider": "wrapper",
       "status": "complete"
     },
     "sessions": {
-      "status": "partial",
-      "missingFunctions": [
-        "getDevices"
-      ],
-      "missingTypes": [
-        "Device"
-      ]
+      "note": "getDevices answers an empty list: Orbit has no synced-device model.",
+      "provider": "wrapper",
+      "status": "complete"
+    },
+    "settingsPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "sidePanel": {
+      "note": "WKWebExtension.Permission has no sidePanel permission and Orbit has no side panel host.",
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "smartCardProviderPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "speechRecognitionPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "system.cpu": {
+      "note": "getInfo reads the real processor topology. The core-layer schema is not vendored, so its members are pinned by ChromeAPISurfaceInventory and the generated-wrapper test rather than diffed here.",
+      "provider": "wrapper",
+      "status": "unvendored"
+    },
+    "system.display": {
+      "note": "getInfo and getDisplayLayout read NSScreen. The display-mutating calls (setDisplayProperties, overscan and touch calibration, unified desktop) are ChromeOS-only or need system settings access. The core-layer schema is not vendored, so its members are pinned by ChromeAPISurfaceInventory and the generated-wrapper test rather than diffed here.",
+      "provider": "wrapper",
+      "status": "unvendored"
+    },
+    "system.memory": {
+      "note": "getInfo reads real physical and available memory. The core-layer schema is not vendored, so its members are pinned by ChromeAPISurfaceInventory and the generated-wrapper test rather than diffed here.",
+      "provider": "wrapper",
+      "status": "unvendored"
+    },
+    "system.storage": {
+      "note": "getInfo, getAvailableCapacity and ejectDevice use mounted volumes and NSWorkspace. The core-layer schema is not vendored, so its members are pinned by ChromeAPISurfaceInventory and the generated-wrapper test rather than diffed here.",
+      "provider": "wrapper",
+      "status": "unvendored"
+    },
+    "systemLog": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "systemPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "tabCapture": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "tabGroups": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
     },
     "tabs": {
-      "status": "partial",
+      "missingEvents": [
+        "onActiveChanged",
+        "onHighlightChanged",
+        "onSelectionChanged"
+      ],
       "missingFunctions": [
-        "captureVisibleTab",
-        "detectLanguage",
+        "group",
+        "ungroup"
+      ],
+      "note": "WebKit has no tab groups. The deprecated onActiveChanged, onHighlightChanged, onSelectionChanged are not exposed. executeScript, insertCSS and removeCSS are MV2-only on WebKit and the reflection fixture is MV3. The wrapper guarantees onCreated, onUpdated, onMoved, onActivated, onRemoved and onReplaced exist.",
+      "provider": "webkit+wrapper",
+      "status": "partial",
+      "uncertainEvents": [
+        "onAttached",
+        "onDetached",
+        "onHighlighted",
+        "onZoomChange"
+      ],
+      "uncertainFunctions": [
         "discard",
-        "duplicate",
         "executeScript",
         "getAllInWindow",
         "getSelected",
-        "getZoom",
-        "getZoomSettings",
-        "goBack",
-        "goForward",
-        "group",
         "highlight",
         "insertCSS",
-        "move",
         "removeCSS",
-        "sendRequest",
-        "setZoom",
-        "setZoomSettings",
-        "ungroup"
+        "sendRequest"
       ],
-      "missingEvents": [
-        "onActiveChanged",
-        "onAttached",
-        "onDetached",
-        "onHighlightChanged",
-        "onHighlighted",
-        "onSelectionChanged",
-        "onZoomChange"
-      ],
-      "missingTypes": [
-        "MutedInfoReason",
-        "ZoomSettings",
-        "ZoomSettingsMode",
-        "ZoomSettingsScope"
-      ],
-      "missingProperties": [
+      "uncertainProperties": [
         "MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND",
         "SPLIT_VIEW_ID_NONE",
         "TAB_INDEX_NONE"
-      ],
-      "note": "Concurrent work: the tabs/windows defect sweep (section 5.4) owns orbit_tabs_api.cc. sendMessage, connect and reload have already landed and are correctly absent from this list. Deleting more entries here is how that work records itself."
+      ]
+    },
+    "terminalPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "topSites": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "tts": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "ttsEngine": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
+    },
+    "usersPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "vpnProvider": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "wallpaper": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
+    },
+    "webAuthenticationProxy": {
+      "provider": "none",
+      "reason": "notPorted",
+      "status": "absent"
     },
     "webNavigation": {
-      "status": "partial",
-      "missingEvents": [
-        "onCreatedNavigationTarget"
-      ],
-      "extraTypes": [
-        "UrlFilter"
-      ],
-      "note": "extraTypes UrlFilter: Orbit declares its own inline UrlFilter type where upstream reuses events.UrlFilter. Orbit-only members are reported, not tolerated silently, so a divergence has to be looked at."
+      "note": "WebKit reports sub-frame events; the wrapper adds every event so a worker can always register, and Orbit's document observer supplies main-frame events.",
+      "provider": "webkit+wrapper",
+      "status": "complete"
+    },
+    "webrtcDesktopCapturePrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "webrtcLoggingPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     },
     "webstorePrivate": {
-      "status": "partial",
-      "missingFunctions": [
-        "enableAppLauncher",
-        "getBrowserLogin",
-        "getIsLauncherEnabled",
-        "getMV2DeprecationStatus",
-        "install",
-        "isInIncognitoMode",
-        "logEnterprisePromoShown",
-        "onEnterprisePromoClick",
-        "shouldShowEnterprisePromotionBanner"
-      ],
-      "missingTypes": [
-        "MV2DeprecationStatus",
-        "PromotionType"
-      ],
-      "note": "install/getBrowserLogin/isInIncognitoMode and the MV2-deprecation members are deliberately unported: refs memory records that CEF ships a dead webstorePrivate and Orbit implements only the install flow it drives itself."
+      "note": "Allowlisted to the Chrome Web Store itself. Orbit drives the install flow natively and exposes no webstorePrivate to any page or worker.",
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
+    },
+    "webviewTag": {
+      "provider": "none",
+      "reason": "outOfScope",
+      "status": "absent"
     },
     "windows": {
+      "provider": "webkit",
       "status": "partial",
-      "missingFunctions": [
-        "create",
-        "remove",
-        "update"
-      ],
-      "missingEvents": [
+      "uncertainEvents": [
         "onBoundsChanged"
-      ],
-      "missingTypes": [
-        "CreateType"
-      ],
-      "note": "create/remove/update are the reason no extension can open a popup window (section 1.3). Under active work in the same sweep as tabs -- do not 'fix' this file, delete the entries when the functions land."
+      ]
+    },
+    "wmDesksPrivate": {
+      "provider": "none",
+      "reason": "chromeInternal",
+      "status": "absent"
     }
   },
-  "unregisteredChromePermissions": [
+  "permissionsWithoutProvider": [
     "accessibilityFeatures.modify",
     "accessibilityFeatures.read",
     "accessibilityPrivate",
     "accessibilityServicePrivate",
     "activityLogPrivate",
+    "app.window.alpha",
+    "app.window.alwaysOnTop",
+    "app.window.fullscreen",
+    "app.window.fullscreen.overrideEsc",
+    "app.window.ime",
+    "app.window.shape",
+    "appview",
+    "audio",
+    "audioCapture",
     "autofillPrivate",
     "autotestPrivate",
     "background",
+    "bluetoothPrivate",
     "brailleDisplayPrivate",
     "browsingData",
+    "cecPrivate",
     "certificateProvider",
     "chromePrivate",
     "chromeosInfoPrivate",
+    "clipboard",
     "clipboardRead",
-    "clipboardWrite",
     "commandLinePrivate",
     "commands.accessibility",
     "contentSettings",
@@ -693,9 +831,13 @@
     "crashReportPrivate",
     "debugger",
     "declarativeContent",
+    "declarativeWebRequest",
     "desktopCapture",
     "developerPrivate",
+    "devtools",
+    "diagnostics",
     "dictationPrivate",
+    "dns",
     "documentScan",
     "downloads.shelf",
     "downloads.ui",
@@ -712,15 +854,23 @@
     "experimental",
     "experimentalActor",
     "experimentalAiData",
+    "externally_connectable.all_urls",
     "favicon",
+    "feedbackPrivate",
     "fileBrowserHandler",
     "fileManagerPrivate",
+    "fileSystem",
+    "fileSystem.directory",
+    "fileSystem.requestFileSystem",
+    "fileSystem.retainEntries",
+    "fileSystem.write",
     "fileSystemProvider",
     "fontSettings",
     "gcm",
     "geolocation",
     "glicPrivate",
     "glicPrivate.invoke",
+    "hid",
     "identity",
     "identity.email",
     "imageLoaderPrivate",
@@ -735,24 +885,36 @@
     "loginScreenUi",
     "loginState",
     "mdns",
+    "mediaPerceptionPrivate",
     "mediaPlayerPrivate",
+    "metricsPrivate",
+    "networking.onc",
+    "networkingPrivate",
     "notifications",
+    "odfsConfigPrivate",
+    "omnibox.directInput",
     "pageCapture",
     "passwordsPrivate",
     "pdfViewerPrivate",
     "platformKeys",
     "plugin",
+    "printerProvider",
     "printing",
     "printingMetrics",
     "processes",
+    "proxy",
     "proxyOverrideRulesPrivate",
     "readingList",
     "resourcesPrivate",
+    "runtime",
     "safeBrowsingPrivate",
+    "serial",
     "settingsPrivate",
     "sidePanel",
     "smartCardProviderPrivate",
+    "socket",
     "speechRecognitionPrivate",
+    "system.network",
     "systemLog",
     "systemPrivate",
     "tabCapture",
@@ -762,13 +924,23 @@
     "transientBackground",
     "tts",
     "ttsEngine",
+    "u2fDevices",
+    "usb",
+    "usbDevices",
+    "userScripts",
     "usersPrivate",
+    "videoCapture",
+    "virtualKeyboard",
+    "virtualKeyboardPrivate",
+    "vpnProvider",
     "wallpaper",
     "webAuthenticationProxy",
+    "webRequestBlocking",
     "webcamPrivate",
     "webrtcDesktopCapturePrivate",
     "webrtcLoggingPrivate",
     "webrtcLoggingPrivate.audioDebug",
+    "webview",
     "wmDesksPrivate"
   ]
 }

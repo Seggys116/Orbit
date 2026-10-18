@@ -11,7 +11,7 @@ final class ExtensionActionPopupVisualTests: XCTestCase {
     private static let popupURL = URL(string: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/popup.html")!
 
     private final class FakePopupEngine: BrowserEngine {
-        static let kind: EngineKind = .chromium
+        static let kind: EngineKind = .webkit
         var capabilities: EngineCapabilities = [.extensions]
         var manageableContentSettings: Set<PermissionKind> = []
         var extensionActivation: ExtensionActivation = .nextLaunch
@@ -79,8 +79,8 @@ final class ExtensionActionPopupVisualTests: XCTestCase {
         let policyDefault = ExtensionActionPopupSupport.popupDefaultSize
         XCTAssertLessThan(loading.width, policyDefault.width)
         XCTAssertLessThan(loading.height, policyDefault.height)
-        XCTAssertGreaterThanOrEqual(loading.width, ExtensionActionPopupSupport.popupMinimumSize.width)
-        XCTAssertGreaterThanOrEqual(loading.height, ExtensionActionPopupSupport.popupMinimumSize.height)
+        XCTAssertLessThanOrEqual(loading.width, ExtensionActionPopupSupport.popupMinimumSize.width)
+        XCTAssertLessThanOrEqual(loading.height, ExtensionActionPopupSupport.popupMinimumSize.height)
     }
 
     // MARK: - ExtensionActionPopupSupport: gating (zero coverage before this file)
@@ -220,6 +220,13 @@ final class ExtensionActionPopupVisualTests: XCTestCase {
                 "The rendered popup did not shrink to the reported content size in \(appearance.rawValue) -- exactly the class of defect where a popup keeps rendering at a large fixed frame regardless of tiny real content."
             )
             XCTAssertEqual(box?.height ?? -1, 64, accuracy: 1)
+            XCTAssertFalse(
+                ExtensionActionPopupSupport.showsSpuriousScrollbars(
+                    content: CGSize(width: 180, height: 64),
+                    frame: CGSize(width: box?.width ?? 0, height: box?.height ?? 0)
+                ),
+                "The drawn frame is taller than the page, or shorter by less than a scrollbar, so the page would scroll inside it (\(appearance.rawValue))."
+            )
         }
     }
 

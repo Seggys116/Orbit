@@ -162,7 +162,8 @@ struct SplitGroupRowView: View {
         // An overlay, not a reserved-width close control or one inserted only on hover: either of those reflows the pane on hover, which can land the very click that arrives on a button that just moved.
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(maxHeight: .infinity)
-        // After both .frames, deliberately: an overlay attached before them would anchor to the title's intrinsic width rather than the pane's own trailing edge.
+        // After both .frames, deliberately: a catcher or overlay attached before them would anchor to the title's intrinsic width rather than the pane's own trailing edge.
+        .background(paneActivationCatcher(tab))
         .overlay(alignment: .trailing) {
             paneCloseControl(tab)
                 .opacity(isPaneHovered ? 1 : 0)
@@ -186,7 +187,22 @@ struct SplitGroupRowView: View {
                 hoveredPaneID = nil
             }
         }
-        .onTapGesture { env.activateTab(tab.id) }
+    }
+
+    // AppKit catcher, not .onTapGesture: SwiftUI gestures and AppKit mouseDown are independent, so both would fire and the pane would activate as its own close ran.
+    private func paneActivationCatcher(_ tab: Tab) -> some View {
+        OrbitNSActionButton(
+            action: { env.activateTabDismissingCommandBar(tab.id) },
+            hitContains: { bounds, point in
+                SidebarRowPillHitTarget.contains(
+                    point,
+                    in: bounds,
+                    cornerRadius: OrbitMetrics.sidebarSplitGroupPaneCornerRadius
+                )
+            }
+        ) {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private func paneCloseControl(_ tab: Tab) -> some View {

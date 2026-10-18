@@ -1,4 +1,4 @@
-//  `id` is its own freshly generated UUID, exactly like ChromiumWebContents
+//  `id` is its own freshly generated UUID, exactly like WebKitWebContents
 //  — never the tab's TabID. Tests must not assume id == tabID.
 
 import AppKit

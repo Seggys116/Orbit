@@ -211,7 +211,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
         let (window, host) = hostNoteIdentityDirectly(noteID: noteA.id, size: CGSize(width: 900, height: 700))
         guard pumpUntil(window: window, { !(bodyTextView(in: window)?.string ?? "").isEmpty }) else {
-            throw XCTSkip("Note A's body never loaded into the NSTextView within the pump budget.")
+            throw TestStopped("Note A's body never loaded into the NSTextView within the pump budget.")
         }
 
         guard let firstTextView = bodyTextView(in: window) else {
@@ -225,7 +225,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
         host.rootView = NoteIdentityHost(noteID: noteB.id, env: env)
         guard pumpUntil(window: window, { bodyTextView(in: window)?.string != noteA.body }) else {
-            throw XCTSkip("The NSTextView's content never changed away from Note A's body within the pump budget after reassigning noteID.")
+            throw TestStopped("The NSTextView's content never changed away from Note A's body within the pump budget after reassigning noteID.")
         }
 
         guard let secondTextView = bodyTextView(in: window) else {
@@ -369,7 +369,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
         env.activateTab(noteTab)
         let window = hostLikeProduction(ContentCardView().environment(env), size: CGSize(width: 900, height: 700))
         guard pumpUntil(window: window, { !(bodyTextView(in: window)?.string ?? "").isEmpty }) else {
-            throw XCTSkip("The note's body never loaded into the NSTextView within the pump budget.")
+            throw TestStopped("The note's body never loaded into the NSTextView within the pump budget.")
         }
 
         guard let textView = bodyTextView(in: window) else {
@@ -397,7 +397,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
 
         env.activateTab(noteTab)
         guard pumpUntil(window: window, { !(bodyTextView(in: window)?.string ?? "").isEmpty }) else {
-            throw XCTSkip("The note's body never reloaded into the NSTextView within the pump budget after switching back to its tab.")
+            throw TestStopped("The note's body never reloaded into the NSTextView within the pump budget after switching back to its tab.")
         }
 
         guard let textViewAfterReturn = bodyTextView(in: window) else {
@@ -510,7 +510,7 @@ final class NotesTeardownRegressionTests: XCTestCase {
         )
 
         guard bodyLoaded else {
-            throw XCTSkip("The note's body never loaded into the NSTextView within the pump budget.")
+            throw TestStopped("The note's body never loaded into the NSTextView within the pump budget.")
         }
 
         guard let textView = bodyTextView(in: window) else {

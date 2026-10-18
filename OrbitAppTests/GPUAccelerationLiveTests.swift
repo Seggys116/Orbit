@@ -281,7 +281,7 @@ final class GPUAccelerationLiveTests: XCTestCase {
     /// Polls for the page's own `window.__orbitProbe`, which every fixture
     /// above sets once its async work is finished.
     private static func pageProbeResult(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         timeout: Duration = .seconds(30)
     ) async throws -> [String: Any] {
         let deadline = ContinuousClock.now + timeout
@@ -300,20 +300,13 @@ final class GPUAccelerationLiveTests: XCTestCase {
         )
     }
 
-    private static func centrePixel(of contents: ChromiumWebContents) async -> (Int, Int, Int)? {
+    private static func centrePixel(of contents: WebKitWebContents) async -> (Int, Int, Int)? {
         // The compositor is one or two frames behind the JS that queued the
         // draw, and capturePreview reads the latest surface, not the DOM.
         try? await Task.sleep(for: .milliseconds(500))
         guard let image = await contents.capturePreview(rect: nil, size: CGSize(width: 320, height: 240)),
-              let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let colour = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?
-                  .usingColorSpace(.deviceRGB)
+              let sample = ImagePixelSampler.sample(image)
         else { return nil }
-        return (
-            Int((colour.redComponent * 255).rounded()),
-            Int((colour.greenComponent * 255).rounded()),
-            Int((colour.blueComponent * 255).rounded())
-        )
+        return (sample.pixel.red, sample.pixel.green, sample.pixel.blue)
     }
 }

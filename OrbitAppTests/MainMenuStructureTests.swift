@@ -230,6 +230,42 @@ final class MainMenuStructureTests: XCTestCase {
         XCTAssertEqual(dockItems.first { $0.title == "New Tab" }?.command, .newTabCommandBar)
     }
 
+    func testDockClickOpensAWindowWhenTheOnlyWindowIsOffScreen() {
+        let helper = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 800, height: 600),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        helper.isReleasedWhenClosed = false
+        helper.setFrame(NSRect(x: -20000, y: -20000, width: 800, height: 600), display: false)
+        helper.orderFrontRegardless()
+        defer { helper.orderOut(nil) }
+
+        XCTAssertTrue(helper.isVisible, "The helper is ordered front, which is what makes AppKit report a visible window.")
+        XCTAssertNil(helper.screen, "It sits on no display, so it is not a window the user can click.")
+        guard case .openNewWindow = OrbitAppDelegate.dockReopenAction(windows: [helper]) else {
+            return XCTFail("A dock click with no on-screen window must open one. Trusting hasVisibleWindows here is why the click did nothing.")
+        }
+    }
+
+    func testDockClickRevealsAWindowThatIsActuallyOnScreen() throws {
+        let screen = try XCTUnwrap(NSScreen.main)
+        let window = NSWindow(
+            contentRect: NSRect(x: screen.frame.midX, y: screen.frame.midY, width: 200, height: 120),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        guard case .revealExisting = OrbitAppDelegate.dockReopenAction(windows: [window]) else {
+            return XCTFail("A window on a display must be brought forward, not replaced.")
+        }
+    }
+
     func testOrbitDelegateSuppliesTheDockMenu() {
         let delegate = OrbitAppDelegate()
         let menu = delegate.applicationDockMenu(NSApp)

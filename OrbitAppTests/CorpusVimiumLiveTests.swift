@@ -78,7 +78,7 @@ final class CorpusVimiumLiveTests: CorpusLiveTestCase {
     }
 
     private func waitUntilEngineViewIsMounted(
-        _ contents: ChromiumWebContents, in window: NSWindow, timeout: Duration = .seconds(15)
+        _ contents: WebKitWebContents, in window: NSWindow, timeout: Duration = .seconds(15)
     ) async throws {
         let deadline = ContinuousClock.now + timeout
         while true {
@@ -99,7 +99,7 @@ final class CorpusVimiumLiveTests: CorpusLiveTestCase {
         }
     }
 
-    private func engineCentre(of contents: ChromiumWebContents) -> NSPoint {
+    private func engineCentre(of contents: WebKitWebContents) -> NSPoint {
         let frame = contents.view.convert(contents.view.bounds, to: nil)
         return NSPoint(x: frame.midX, y: frame.midY)
     }
@@ -164,25 +164,17 @@ final class CorpusVimiumLiveTests: CorpusLiveTestCase {
 
     // MARK: - Tests
 
-    // Skips only when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testVimiumOffersAToolbarActionThroughTheProductionEntryPath
+    // Fails when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
     func testVimiumOffersAToolbarActionThroughTheProductionEntryPath() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
         try ExtensionCorpus.verifyManifestVersionMatchesPin(for: Self.corpusName)
 
-        try LiveChromiumEngineHost.runLive(timeout: 180) {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        try WebKitLiveEngineHost.runLive(timeout: 180) {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
 
-            let bridge = OrbitChromiumTabsBridge.shared
-            if !bridge.isWindowRegistered(env) {
-                bridge.windowCreated(owner: env, focused: false)
-            }
-            bridge.windowFocusChanged(owner: env)
             let spaceID = try XCTUnwrap(env.activeSpace?.id)
 
             let server = try self.makeServer()
@@ -200,9 +192,9 @@ final class CorpusVimiumLiveTests: CorpusLiveTestCase {
             )
 
             let tabID = env.openTab(url: server.baseURL, in: spaceID)
-            let contents = try XCTUnwrap(env.webContents[tabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
-            let registryID = try XCTUnwrap(bridge.existingTabID(for: tabID))
+            let contents = try XCTUnwrap(env.webContents[tabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
+            let registryID = try XCTUnwrap(engine.numericID(for: tabID))
             env.activateTab(tabID)
 
             let session = env.webContents[tabID]?.session ?? engine.defaultSession
@@ -224,25 +216,17 @@ final class CorpusVimiumLiveTests: CorpusLiveTestCase {
         }
     }
 
-    // Skips only when the corpus has not been vendored on this machine.
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testPressingJScrollsTheRealPage
+    // Fails when the corpus has not been vendored on this machine.
     func testPressingJScrollsTheRealPage() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
         try ExtensionCorpus.verifyManifestVersionMatchesPin(for: Self.corpusName)
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
 
-            let bridge = OrbitChromiumTabsBridge.shared
-            if !bridge.isWindowRegistered(env) {
-                bridge.windowCreated(owner: env, focused: false)
-            }
-            bridge.windowFocusChanged(owner: env)
             let spaceID = try XCTUnwrap(env.activeSpace?.id)
 
             let server = try self.makeServer()
@@ -256,8 +240,8 @@ final class CorpusVimiumLiveTests: CorpusLiveTestCase {
             )
 
             let tabID = env.openTab(url: server.baseURL, in: spaceID)
-            let contents = try XCTUnwrap(env.webContents[tabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            let contents = try XCTUnwrap(env.webContents[tabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             env.activateTab(tabID)
 
             let window = self.hostContentCard()

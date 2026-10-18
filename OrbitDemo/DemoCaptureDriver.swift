@@ -412,7 +412,7 @@ enum DemoCaptureDriver {
         ))
         body.append(NSAttributedString(
             string: "\u{2022} Read the engineering notes in docs/\n"
-                  + "\u{2022} Pair on the Chromium bridge\n"
+                  + "\u{2022} Pair on the extension bridge\n"
                   + "\u{2022} Ship one small fix end to end\n\n",
             attributes: [.font: NSFont.systemFont(ofSize: 15),
                          .foregroundColor: NSColor.labelColor]

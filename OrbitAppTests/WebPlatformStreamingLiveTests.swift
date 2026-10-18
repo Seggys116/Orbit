@@ -10,7 +10,7 @@ import XCTest
 final class WebPlatformStreamingLiveTests: XCTestCase {
 
     private func waitUntilTrue(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         _ expression: String,
         timeout: Duration = .seconds(10)
     ) async throws {
@@ -28,8 +28,7 @@ final class WebPlatformStreamingLiveTests: XCTestCase {
     // MARK: - Chunked transfer encoding
 
     func testChunkedTransferEncodedFetchArrivesAsMultipleReadsAndReassemblesCorrectly() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (readCount, body, firstToLastGapMillis) = try LiveChromiumEngineHost.runLive { () -> (Int, String, Double) in
+        let (readCount, body, firstToLastGapMillis) = try WebKitLiveEngineHost.runLive { () -> (Int, String, Double) in
             let chunkTexts = ["orbit-chunk-one;", "orbit-chunk-two;", "orbit-chunk-three;", "orbit-chunk-four;"]
             let server = try LiveHTTPTestServer(
                 routes: [
@@ -41,11 +40,11 @@ final class WebPlatformStreamingLiveTests: XCTestCase {
             )
             defer { server.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitStreamDone = false;
@@ -86,9 +85,8 @@ final class WebPlatformStreamingLiveTests: XCTestCase {
     // MARK: - Range requests: a resource loaded progressively in pieces
 
     func testByteRangeRequestsLoadAResourceProgressivelyInTwoPieces() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let fullBody = String(repeating: "0123456789", count: 50) // 500 bytes, deterministic content
-        let (firstStatus, secondStatus, reassembled) = try LiveChromiumEngineHost.runLive { () -> (Int, Int, String) in
+        let (firstStatus, secondStatus, reassembled) = try WebKitLiveEngineHost.runLive { () -> (Int, Int, String) in
             let rangedServer = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-range-test</body></html>"),
                 "/resource.bin": LiveHTTPTestServer.Route(
@@ -97,11 +95,11 @@ final class WebPlatformStreamingLiveTests: XCTestCase {
             ])
             defer { rangedServer.stop() }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             defer { contents.close() }
             contents.load(rangedServer.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             _ = try await contents.evaluateJavaScript("""
             window.__orbitRangeResult = null;
@@ -152,21 +150,20 @@ final class WebPlatformStreamingLiveTests: XCTestCase {
     }
 
     func testNavigatingToAPDFReportsWhatOrbitActuallyDoesWithIt() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("OrbitAppTests-PDFNavigationProbe-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
         let pdfBytes = Self.minimalPDFData()
 
-        let readings = try LiveChromiumEngineHost.runLive { () -> [String: String] in
+        let readings = try WebKitLiveEngineHost.runLive { () -> [String: String] in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(contentType: "text/html", body: "<html><body>orbit-pdf-navigation-probe</body></html>"),
                 "/document.pdf": LiveHTTPTestServer.Route(contentType: "application/pdf", data: pdfBytes),
             ])
             defer { server.stop() }
 
-            let contents = try await LiveChromiumEngineHost.makeContents()
+            let contents = try await WebKitLiveEngineHost.makeContents()
             defer { contents.close() }
             let recorder = DownloadRecordingDelegate(destinationDirectory: scratch)
             contents.delegate = recorder
@@ -211,10 +208,9 @@ final class WebPlatformStreamingLiveTests: XCTestCase {
     }
 
     func testEmbeddingAPDFReportsWhatOrbitActuallyInstantiates() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let pdfBytes = Self.minimalPDFData()
 
-        let readings = try LiveChromiumEngineHost.runLive { () -> [String: String] in
+        let readings = try WebKitLiveEngineHost.runLive { () -> [String: String] in
             let server = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(
                     contentType: "text/html",
@@ -224,13 +220,13 @@ final class WebPlatformStreamingLiveTests: XCTestCase {
             ])
             defer { server.stop() }
 
-            let contents = try await LiveChromiumEngineHost.makeContents()
+            let contents = try await WebKitLiveEngineHost.makeContents()
             defer { contents.close() }
             let recorder = DownloadRecordingDelegate(destinationDirectory: nil)
             contents.delegate = recorder
 
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             try await Task.sleep(for: .milliseconds(300)) // let a late plugin-placeholder swap settle
 
             var out: [String: String] = [:]
@@ -260,7 +256,7 @@ final class WebPlatformStreamingLiveTests: XCTestCase {
 }
 
 /// Records the real content::DownloadManagerDelegate callback Chromium fires
-/// -- see ChromiumWebContents.willBeginDownloadTrampoline. `destinationDirectory`
+/// -- see WebKitWebContents.willBeginDownloadTrampoline. `destinationDirectory`
 /// nil declines the download (still records that it was offered).
 @MainActor
 private final class DownloadRecordingDelegate: WebContentsDelegate {

@@ -11,9 +11,9 @@ final class LiveSuiteTabIsolationGuardTests: XCTestCase {
         .deletingLastPathComponent()
         .appendingPathComponent("OrbitAppTests")
 
-    /// The same marker Scripts/live-engine-tests uses to decide a file is a
-    /// live suite, so a suite cannot be one for the runner and not for this.
-    private static let liveGateMarker = "LiveChromiumEngineHost.isEnabled"
+    /// Live suites call the shared WebKit engine. This guard uses that call
+    /// so a file that drives tabs cannot fall out of the live set.
+    private static let liveGateMarker = "WebKitLiveEngineHost.sharedEngine"
 
     private static let tabMutations = [
         ".openTab(", ".closeTab(", ".closeTabPreservingBookmark(", ".closeTabKeepingBookmark(", ".archiveTab(",

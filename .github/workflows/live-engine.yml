@@ -1,7 +1,7 @@
 # Live engine
 #
 # Nightly, on demand, and on pull requests labelled live-engine.
-# Runs the WebKit launch and Chrome-extension tests.
+# Runs every live WebKit suite through Scripts/live-engine-tests.
 
 name: Live engine
 
@@ -28,12 +28,9 @@ jobs:
     name: Live engine suites
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'live-engine')
     runs-on: macos-26
-    # A hung browser must cost an hour, not a day. The suites' own oracles time
-    # out well inside this, and `Scripts/live-engine-tests` now also runs every
-    # pass under XCTest's own per-test timeout (600s), so a single test that
-    # never returns fails by name and the run still reaches a verdict. Hitting
-    # the hour therefore means something went wrong outside any test at all.
-    timeout-minutes: 60
+    # The full live set takes about 25 minutes on a developer Mac; a hosted runner is slower and the build comes first. Scripts/live-engine-tests
+    # also applies a 600s per-test timeout, so a hung test fails by name well inside this.
+    timeout-minutes: 120
     env:
       NSUnbufferedIO: "YES"
     steps:
@@ -44,11 +41,7 @@ jobs:
           sw_vers
           xcodebuild -version
 
-      # A live suite added without re-running the synchroniser would not be in
-      # the compiled bundle, while `Scripts/live-engine-tests` would still count
-      # its tests from the working tree -- so the run would fail on the count
-      # check with a confusing message. Fail here instead, where the message
-      # says what is actually wrong.
+      # A suite missing from the project would still be counted from the sources and fail the count check confusingly.
       - name: Project file lists match the working tree
         run: Scripts/xcodeproj-sync --check
 
@@ -59,48 +52,14 @@ jobs:
           path: DerivedData/SourcePackages
           key: swiftpm-${{ runner.os }}-${{ hashFiles('Orbit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
-      # One build, then one test process per configuration for everything that
-      # can share an engine, plus one more per destructive suite, with
-      # ORBIT_LIVE_ENGINE patched into the .xctestrun -- the only route that
-      # actually reaches a hosted test target's process. The script fails the
-      # step if a live test fails, if a pass did not run everything it was
-      # given, or if the number that executed across all of them is not the
-      # number declared in the sources. A skip fails it too, unless the suite
-      # declared that test with `// ORBIT-LIVE-ENGINE: MAY-SKIP <testName>`; a
-      # skip on the live-engine gate itself fails whatever is declared, because
-      # that one means the engine was never switched on. A silent skip is the
-      # failure mode this job was built to end, so it is checked explicitly
-      # rather than inferred from an exit status.
-      #
-      # The split exists because a suite that shuts the engine down ends it for
-      # its whole process, and that cannot be undone: run in
-      # the shared process it would kill every live test scheduled after it, and
-      # the job would report a mid-run host death with no indication of which
-      # suite caused it. A suite declares itself with the line
-      # `// ORBIT-LIVE-ENGINE: DESTRUCTIVE` in its own source -- there is no
-      # list of names in the script or in this file to keep in step -- and
-      # `Scripts/live-engine-tests` then gives it a process of its own, after
-      # the shared ones, and still counts its tests towards the total. This job
-      # therefore needs no `--suite` filter and must not grow one: filtering
-      # here would drop coverage silently, which is the one outcome this whole
-      # job exists to prevent.
-      #
-      # ORBIT_LIVE_ENGINE_FORCE_PUMP=1 is the second configuration: it drives
-      # the engine's message pump at 60 Hz instead of letting the engine
-      # schedule its own work. A pump that
-      # intermittently fails to re-arm reaches a user as input that stops
-      # working, and running both configurations is what tells that apart from
-      # everything else. Both must be green.
-      - name: Run the WebKit engine and extension tests
+      # One build, then one test process for every live suite. The step fails on any test failure, any skip, or an
+      # executed count that differs from the count declared in the sources. Do not add a --suite filter: it would drop coverage silently.
+      - name: Run the live WebKit suites
         run: |
           set -o pipefail
-          xcodebuild test \
-            -project Orbit.xcodeproj \
-            -scheme OrbitAppTestsOnly \
-            -destination 'platform=macOS,arch=arm64' \
-            -derivedDataPath DerivedData \
-            -only-testing:OrbitAppTests/WebKitEngineLaunchTests \
-            -only-testing:OrbitAppTests/WebKitChromeExtensionTests \
+          Scripts/live-engine-tests \
+            --results-dir "$RUNNER_TEMP/live-engine-results" \
+            -- \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_STYLE=Manual \
@@ -116,14 +75,7 @@ jobs:
           path: DerivedData/SourcePackages
           key: ${{ steps.swiftpm.outputs.cache-primary-key }}
 
-      # The counts, in the job summary, whether the run passed or failed. The
-      # line worth reading is the verdict -- "N/N live tests executed and
-      # passed, over M test process(es)"; "0 executed" is the failure this job
-      # exists for, and it should be visible without opening the log. The
-      # per-pass counts above it say which process each number came from, so a
-      # host that died part-way names the suites that were in it. Every line the
-      # script prints carries its own prefix precisely so this grep cannot pick
-      # up a test's own diagnostics by accident.
+      # The verdict line ("N/N live tests ...") in the job summary; "0 executed" is the failure this job exists to catch.
       - name: Summarise
         if: always()
         run: |
@@ -136,9 +88,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Always, not just on failure: a live run that passed is also the record
-      # of what a working engine looked like on this runner, and the next
-      # failure is read against it.
+      # Always, not just on failure: a passing run is the baseline the next failure is read against.
       - name: Upload the logs and result bundles
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

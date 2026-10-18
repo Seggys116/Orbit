@@ -15,7 +15,7 @@ enum LiveContextMenuGesture {
     /// A bare window, not Orbit's own view tree: the layering is
     /// PageLinkNavigationLiveTests' subject, this only needs the engine view on
     /// screen and sized so the renderer has somewhere to hit-test.
-    static func host(_ contents: ChromiumWebContents) -> NSWindow {
+    static func host(_ contents: WebKitWebContents) -> NSWindow {
         let window = UnconstrainedTestWindow(
             contentRect: NSRect(origin: .zero, size: windowSize),
             styleMask: [.titled, .closable, .resizable],
@@ -40,7 +40,7 @@ enum LiveContextMenuGesture {
     /// has no key window, so real dispatch swallows the event for an unrelated
     /// reason -- see PageLinkNavigationLiveTests.
     @discardableResult
-    static func rightClickCentre(of contents: ChromiumWebContents, in window: NSWindow) -> NSView? {
+    static func rightClickCentre(of contents: WebKitWebContents, in window: NSWindow) -> NSView? {
         let view = contents.view
         let frame = view.convert(view.bounds, to: nil)
         let point = NSPoint(x: frame.midX, y: frame.midY)
@@ -69,7 +69,7 @@ enum LiveContextMenuGesture {
     /// gesture crosses into the renderer and back, and the first one can land
     /// before the page is hit-testable, so a single attempt is a flake.
     static func rightClickUntilExtensionItemsAppear(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         in window: NSWindow,
         timeout: Duration = .seconds(15)
     ) async throws -> [ExtensionContextMenuGroup] {

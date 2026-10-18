@@ -24,8 +24,7 @@ final class CertificateInterstitialLiveTests: XCTestCase {
     // MARK: - Interstitial facts
 
     func testExpiredSelfSignedCertificateShowsInterstitialCarryingTheRealCertificateFacts() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let observed = try LiveChromiumEngineHost.runLive(timeout: 90) {
+        let observed = try WebKitLiveEngineHost.runLive(timeout: 90) {
             () -> (problem: CertificateProblem, expectedIssuer: String, expectedSubject: String,
                    expectedNotAfter: Date, title: String, hadError: Bool) in
             let server = try LiveHTTPSTestServer(routes: ["/": .init(body: Self.securedPage)])
@@ -71,8 +70,7 @@ final class CertificateInterstitialLiveTests: XCTestCase {
     // MARK: - Proceed Anyway
 
     func testProceedAnywayActuallyLoadsAndPaintsThePage() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let observed = try LiveChromiumEngineHost.runLive(timeout: 90) {
+        let observed = try WebKitLiveEngineHost.runLive(timeout: 90) {
             () -> (title: String, red: Int, green: Int, blue: Int, problemCleared: Bool)? in
             let server = try LiveHTTPSTestServer(routes: ["/": .init(body: Self.securedPage)])
             defer { server.stop() }
@@ -87,16 +85,13 @@ final class CertificateInterstitialLiveTests: XCTestCase {
             // lag one or two frames behind the DOM commit above.
             try await Task.sleep(for: .milliseconds(400))
             guard let image = await fixture.contents.capturePreview(rect: nil, size: CGSize(width: 320, height: 240)),
-                  let tiff = image.tiffRepresentation,
-                  let bitmap = NSBitmapImageRep(data: tiff),
-                  let color = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?
-                      .usingColorSpace(.deviceRGB)
+                  let sample = ImagePixelSampler.sample(image)
             else { return nil }
             return (
                 (try? await fixture.contents.evaluateJavaScript("document.title")) as? String ?? "",
-                Int((color.redComponent * 255).rounded()),
-                Int((color.greenComponent * 255).rounded()),
-                Int((color.blueComponent * 255).rounded()),
+                sample.pixel.red,
+                sample.pixel.green,
+                sample.pixel.blue,
                 fixture.env.certificateProblems[fixture.tabID] == nil
             )
         }
@@ -110,11 +105,73 @@ final class CertificateInterstitialLiveTests: XCTestCase {
         XCTAssertEqual(result.blue, 51, accuracy: 12, "the proceeded-to page was not the one actually painted")
     }
 
+    // MARK: - The certificate behind the lock
+
+    func testProceededPageExposesTheCertificateTheServerActuallyServed() throws {
+        let observed = try WebKitLiveEngineHost.runLive(timeout: 90) {
+            () -> (certificate: SiteCertificate?, facts: LiveHTTPSTestServer.CertificateFacts, before: SiteCertificate?) in
+            let server = try LiveHTTPSTestServer(routes: ["/": .init(body: Self.securedPage)])
+            defer { server.stop() }
+            let fixture = try await Fixture.make(loading: server.baseURL)
+            defer { fixture.tearDown() }
+
+            _ = try await Self.waitForInterstitial(fixture)
+            let before = fixture.contents.currentCertificate()
+            fixture.env.resolveCertificateDecision(for: fixture.tabID, proceed: true)
+            try await Self.waitForTitle("Orbit Cert Secured Page", fixture)
+            return (fixture.contents.currentCertificate(), server.certificate, before)
+        }
+
+        XCTAssertNil(observed.before, "no certificate belongs to a page that never loaded")
+        let certificate = try XCTUnwrap(observed.certificate, "a page served over TLS reported no certificate")
+        XCTAssertEqual(certificate.subject, observed.facts.subjectCommonName)
+        XCTAssertEqual(certificate.issuer, observed.facts.issuerCommonName)
+        XCTAssertEqual(
+            try XCTUnwrap(certificate.validUntil).timeIntervalSince1970, observed.facts.notAfter.timeIntervalSince1970, accuracy: 1
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(certificate.validFrom).timeIntervalSince1970, observed.facts.notBefore.timeIntervalSince1970, accuracy: 1
+        )
+        let serial = try XCTUnwrap(certificate.serialNumber)
+        XCTAssertFalse(serial.isEmpty)
+        XCTAssertNotNil(serial.range(of: "^[0-9A-F]+$", options: .regularExpression), "the serial must be upper-case hex, got \(serial)")
+    }
+
+    func testAPlainHTTPPageHasNoCertificate() throws {
+        let certificate = try WebKitLiveEngineHost.runLive(timeout: 60) { () -> SiteCertificate? in
+            let plain = try LiveHTTPTestServer(routes: [
+                "/": LiveHTTPTestServer.Route(contentType: "text/html", body: Self.plainPage),
+            ])
+            defer { plain.stop() }
+            let fixture = try await Fixture.make(loading: plain.baseURL)
+            defer { fixture.tearDown() }
+            try await Self.waitForTitle("Orbit Cert Plain Page", fixture)
+            return fixture.contents.currentCertificate()
+        }
+        XCTAssertNil(certificate)
+    }
+
+    func testARefusedCertificateIsNotAskedAgainForTheSameNavigation() throws {
+        let observed = try WebKitLiveEngineHost.runLive(timeout: 90) { () -> (stillShowing: Bool, askedAgain: Bool) in
+            let server = try LiveHTTPSTestServer(routes: ["/": .init(body: Self.securedPage)])
+            defer { server.stop() }
+            let fixture = try await Fixture.make(loading: server.baseURL)
+            defer { fixture.tearDown() }
+
+            _ = try await Self.waitForInterstitial(fixture)
+            fixture.env.resolveCertificateDecision(for: fixture.tabID, proceed: false)
+            // WebKit repeats a failed trust challenge; the refusal has to stand for the whole navigation.
+            try await Task.sleep(for: .seconds(3))
+            return (fixture.env.certificateProblems[fixture.tabID] != nil, fixture.env.pendingCertificateDecisions[fixture.tabID] != nil)
+        }
+        XCTAssertFalse(observed.stillShowing, "the interstitial reopened after the user refused")
+        XCTAssertFalse(observed.askedAgain, "a second decision was queued for the navigation the user already refused")
+    }
+
     // MARK: - Go Back
 
     func testGoBackReturnsToThePreviousPageAndNeverLoadsTheBlockedOne() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let observed = try LiveChromiumEngineHost.runLive(timeout: 90) {
+        let observed = try WebKitLiveEngineHost.runLive(timeout: 90) {
             () -> (title: String, red: Int, green: Int, blue: Int, problemCleared: Bool, hadError: Bool)? in
             let plain = try LiveHTTPTestServer(routes: [
                 "/": LiveHTTPTestServer.Route(contentType: "text/html", body: Self.plainPage),
@@ -134,16 +191,13 @@ final class CertificateInterstitialLiveTests: XCTestCase {
             try await Self.waitForTitle("Orbit Cert Plain Page", fixture)
             try await Task.sleep(for: .milliseconds(400))
             guard let image = await fixture.contents.capturePreview(rect: nil, size: CGSize(width: 320, height: 240)),
-                  let tiff = image.tiffRepresentation,
-                  let bitmap = NSBitmapImageRep(data: tiff),
-                  let color = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?
-                      .usingColorSpace(.deviceRGB)
+                  let sample = ImagePixelSampler.sample(image)
             else { return nil }
             return (
                 (try? await fixture.contents.evaluateJavaScript("document.title")) as? String ?? "",
-                Int((color.redComponent * 255).rounded()),
-                Int((color.greenComponent * 255).rounded()),
-                Int((color.blueComponent * 255).rounded()),
+                sample.pixel.red,
+                sample.pixel.green,
+                sample.pixel.blue,
                 fixture.env.certificateProblems[fixture.tabID] == nil,
                 fixture.env.tabErrors[fixture.tabID] != nil
             )
@@ -162,8 +216,7 @@ final class CertificateInterstitialLiveTests: XCTestCase {
     // MARK: - Subresources
 
     func testSubresourceCertificateErrorIsBlockedWithNoInterstitial() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let observed = try LiveChromiumEngineHost.runLive(timeout: 90) {
+        let observed = try WebKitLiveEngineHost.runLive(timeout: 90) {
             () -> (fetchFailed: Bool, fetchSucceeded: Bool, sawInterstitial: Bool, mainFrameTitle: String) in
             let server = try LiveHTTPSTestServer(routes: ["/sub": .init(contentType: "text/plain", body: "subresource")])
             defer { server.stop() }
@@ -214,8 +267,7 @@ final class CertificateInterstitialLiveTests: XCTestCase {
     // MARK: - Fail closed
 
     func testUnansweredCertificateDecisionLeavesTheNavigationBlocked() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let observed = try LiveChromiumEngineHost.runLive(timeout: 90) {
+        let observed = try WebKitLiveEngineHost.runLive(timeout: 90) {
             () -> (titleWhileUnanswered: String, stillPending: Bool, titleAfterTabDied: String, committedAfterDeath: Bool) in
             let server = try LiveHTTPSTestServer(routes: ["/": .init(body: Self.securedPage)])
             defer { server.stop() }
@@ -249,13 +301,22 @@ final class CertificateInterstitialLiveTests: XCTestCase {
 
     private struct Fixture {
         var env: AppEnvironment
-        var contents: ChromiumWebContents
+        var contents: WebKitWebContents
         var tabID: TabID
+        var window: NSWindow
 
         static func make(loading url: URL) async throws -> Fixture {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            let contents = try await LiveChromiumEngineHost.makeContents(engine: engine)
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
             contents.view.frame = NSRect(x: 0, y: 0, width: 320, height: 240)
+            let window = NSWindow(
+                contentRect: contents.view.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = contents.view
+            window.orderFront(nil)
 
             let env = AppEnvironment.demo
             let spaceID = env.state.spaces.first?.id
@@ -269,10 +330,11 @@ final class CertificateInterstitialLiveTests: XCTestCase {
             contents.delegate = env
 
             contents.load(url)
-            return Fixture(env: env, contents: contents, tabID: tab.id)
+            return Fixture(env: env, contents: contents, tabID: tab.id, window: window)
         }
 
         func tearDown() {
+            window.orderOut(nil)
             // Resumed, never dropped: an abandoned continuation would strand
             // its task and the engine would still be waiting on an answer.
             if env.pendingCertificateDecisions[tabID] != nil {

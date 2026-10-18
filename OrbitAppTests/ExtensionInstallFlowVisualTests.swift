@@ -16,7 +16,7 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         warnings: [ExtensionPermissionWarning] = [],
         isUpdate: Bool = false,
         previousVersion: String? = nil,
-        chromiumVersionWarning: String? = nil,
+        minimumChromeVersionWarning: String? = nil,
         description: String? = "A short description of what this extension does."
     ) -> ExtensionInstaller.PendingInstall {
         ExtensionInstaller.PendingInstall(
@@ -28,7 +28,7 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
             warnings: warnings,
             isUpdate: isUpdate,
             previousVersion: previousVersion,
-            chromiumVersionWarning: chromiumVersionWarning
+            minimumChromeVersionWarning: minimumChromeVersionWarning
         )
     }
 
@@ -197,13 +197,13 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         }
     }
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_consentSheet_withChromiumVersionWarning_paintsTheNoticeRow
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_consentSheet_withMinimumChromeVersionWarning_paintsTheNoticeRow
 
-    func test_consentSheet_withChromiumVersionWarning_paintsTheNoticeRow() async {
+    func test_consentSheet_withMinimumChromeVersionWarning_paintsTheNoticeRow() async {
         let size = CGSize(width: 460, height: 420)
         let pending = Self.samplePendingInstall(
             warnings: [Self.grantedWarning],
-            chromiumVersionWarning: "This extension declares that it requires Chrome 200.0 or later."
+            minimumChromeVersionWarning: "This extension declares that it requires Chrome 200.0 or later."
         )
         let withNotice = render(ExtensionConsentSheetView(pending: pending, onAnswer: { _ in }), size: size, appearance: .darkAqua)
         let withoutNotice = render(
@@ -213,7 +213,7 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
         )
         XCTAssertTrue(
             Self.rendersDiffer(withNotice, withoutNotice, size: size),
-            "Adding a chromiumVersionWarning did not visibly change the rendered sheet."
+            "Adding a minimumChromeVersionWarning did not visibly change the rendered sheet."
         )
     }
 

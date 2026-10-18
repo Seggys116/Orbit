@@ -71,6 +71,7 @@ struct FindBarView: View {
         Binding(
             get: { env.findQuery },
             set: { newValue in
+                guard newValue != env.findQuery else { return }
                 env.findQuery = newValue
                 contents?.find(newValue, options: FindOptions(forward: true, findNext: false))
             }

@@ -87,7 +87,10 @@ final class SidebarRenderTests: XCTestCase {
 
         let width: CGFloat = 260
         let size = CGSize(width: width, height: OrbitMetrics.sidebarRowHeight)
-        let rendered = render(TabRowView(tab: tab, theme: theme).environment(env), size: size)
+        let rendered = render(
+            TabRowView(tab: tab, theme: theme).environment(env).environment(\.orbitScreenshotModeDragDisabled, true),
+            size: size
+        )
 
         let verticalInset = OrbitMetrics.sidebarRowPillVerticalInset
         let horizontalInset = OrbitMetrics.sidebarHorizontalPadding
@@ -146,7 +149,10 @@ final class SidebarRenderTests: XCTestCase {
 
         let width: CGFloat = 262
         let size = CGSize(width: width, height: OrbitMetrics.sidebarRowHeight)
-        let rendered = render(TabRowView(tab: tab, theme: theme).environment(env), size: size)
+        let rendered = render(
+            TabRowView(tab: tab, theme: theme).environment(env).environment(\.orbitScreenshotModeDragDisabled, true),
+            size: size
+        )
 
         let barBand = CGRect(
             x: 0,

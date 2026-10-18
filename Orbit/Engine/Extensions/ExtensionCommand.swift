@@ -1,6 +1,6 @@
 //  chrome.commands as it crosses the bridge, plus the one spelling both sides
 //  agree on. Chromium's ui::Command::AcceleratorToString is the wire format;
-//  ChromiumAccelerator is its Swift twin, so an Orbit binding and an extension's
+//  ExtensionCommandAccelerator is its Swift twin, so an Orbit binding and an extension's
 //  suggested_key can be compared as strings without a keycode table.
 
 import AppKit
@@ -63,7 +63,7 @@ nonisolated public struct ExtensionCommand: Equatable, Sendable {
     }
 }
 
-nonisolated enum ChromiumAccelerator {
+nonisolated enum ExtensionCommandAccelerator {
     /// Modifier order is Chromium's, not AppKit's: Ctrl, Alt, Command, Shift.
     static func canonical(key: String, modifiers: NSEvent.ModifierFlags) -> String? {
         guard let keyToken = token(forKey: key) else { return nil }

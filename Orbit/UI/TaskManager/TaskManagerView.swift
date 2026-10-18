@@ -51,7 +51,7 @@ struct TaskManagerView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(process.role.displayName)
                     .font(.system(size: Layout.rowFontSize))
-                Text("PID \(process.processID) · \(process.executableName)")
+                Text(Self.subtitle(for: process))
                     .font(.system(size: Layout.secondaryFontSize))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -75,11 +75,24 @@ struct TaskManagerView: View {
         .onTapGesture { model.selectedProcessID = process.processID }
     }
 
+    static func subtitle(for process: OrbitProcessInfo) -> String {
+        var text = "PID \(process.processID) · \(process.executableName)"
+        if let first = process.extensionNames.first {
+            text += " · " + first
+            if process.extensionNames.count > 1 { text += " +\(process.extensionNames.count - 1) more" }
+        }
+        if let first = process.tabTitles.first {
+            text += " · " + first
+            if process.tabTitles.count > 1 { text += " +\(process.tabTitles.count - 1) more" }
+        }
+        return text
+    }
+
     // MARK: Footer
 
     private var footer: some View {
         HStack(spacing: Layout.footerSpacing) {
-            Text("Renderer processes are shared between tabs and cannot be traced back to one.")
+            Text("A web page process can be shared by several tabs, so it lists each tab it is rendering.")
                 .font(.system(size: Layout.secondaryFontSize))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -18,6 +18,7 @@ public final class ContentBlockingController: ObservableObject {
     @Published public private(set) var isUpdating = false
     @Published public private(set) var lastUpdatedAt: Date?
     @Published public private(set) var compiledRuleCount = 0
+    @Published public private(set) var engineReport = ContentBlockingEngineReport()
 
     // MARK: - Collaborators
 
@@ -32,6 +33,7 @@ public final class ContentBlockingController: ObservableObject {
     private var sessions: [ObjectIdentifier: WeakSessionBox] = [:]
 
     private var initialCacheLoadTask: Task<Void, Never>?
+    private var engineReportObserver: NSObjectProtocol?
 
     public private(set) var hasCompletedInitialCacheLoad = false
 
@@ -73,6 +75,17 @@ public final class ContentBlockingController: ObservableObject {
 
         blocker.isEnabled = isEnabled
         blocker.setAllowlist(allowlistedHosts)
+
+        engineReportObserver = NotificationCenter.default.addObserver(
+            forName: .contentBlockingEngineReportDidChange,
+            object: blocker,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.engineReport = self.blocker.engineReport
+            }
+        }
 
         Self.migrateEnabledLists(
             &enabledListIDs,
@@ -285,7 +298,7 @@ public final class ContentBlockingController: ObservableObject {
     ) async -> (ContentBlockerRuleSet, [String: ContentBlockingCompileStats]) {
         let descriptors = FilterListCatalog.all.filter { ids.contains($0.id) }
 
-        let outputs: [String: FilterListParser.Output] = await withTaskGroup(
+        var outputs: [String: FilterListParser.Output] = await withTaskGroup(
             of: (String, FilterListParser.Output?).self
         ) { group in
             for descriptor in descriptors {
@@ -301,11 +314,15 @@ public final class ContentBlockingController: ObservableObject {
         }
 
         var ruleSet = ContentBlockerRuleSet()
+        var perListStats: [String: ContentBlockingCompileStats] = [:]
+        perListStats.reserveCapacity(descriptors.count)
         for descriptor in descriptors {
-            guard let output = outputs[descriptor.id] else { continue }
+            // Drop each parsed list once it has been copied into the rule set.
+            guard let output = outputs.removeValue(forKey: descriptor.id) else { continue }
+            perListStats[descriptor.id] = output.stats
             ruleSet.add(parsed: output, listID: descriptor.id)
         }
-        return (ruleSet, outputs.mapValues(\.stats))
+        return (ruleSet, perListStats)
     }
 
     @concurrent

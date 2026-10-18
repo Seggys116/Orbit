@@ -23,7 +23,7 @@ final class UpdaterChannelGatingSourceTests: XCTestCase {
         guard let match = regex.firstMatch(in: source, range: range),
               let trueRange = Range(match.range(at: 1), in: source),
               let falseRange = Range(match.range(at: 2), in: source) else {
-            throw XCTSkip("could not find the isPrereleaseChannelEnabled ? [...] : [...] ternary in UpdaterController+UpdaterDelegate.swift — the implementation shape changed; this test needs to be revisited against the new shape rather than silently passing")
+            throw TestStopped("could not find the isPrereleaseChannelEnabled ? [...] : [...] ternary in UpdaterController+UpdaterDelegate.swift — the implementation shape changed; this test needs to be revisited against the new shape rather than silently passing")
         }
         return (String(source[trueRange]), String(source[falseRange]))
     }

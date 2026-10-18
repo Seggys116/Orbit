@@ -580,7 +580,7 @@ final class ExtensionToolbarActionVisualTests: XCTestCase {
     // MARK: - A minimal, mutable BrowserEngine stand-in whose loadedExtensions is fully controlled
 
     private final class StubEngine: BrowserEngine {
-        static let kind: EngineKind = .chromium
+        static let kind: EngineKind = .webkit
         var capabilities: EngineCapabilities = [.extensions]
         var manageableContentSettings: Set<PermissionKind> = []
         var extensionActivation: ExtensionActivation = .nextLaunch

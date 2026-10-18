@@ -4,12 +4,14 @@ enum PageScrollbarStyleScript {
 
     static let scriptID = UUID(uuidString: "5C401BA0-0000-4000-8000-5C0117BA0001")!
 
-    /// Load-bearing: `ChromiumScrollbarLiveTests` finds this by its text.
+    /// Load-bearing: `WebKitScrollbarLiveTests` finds this by its text.
     static let marker = "orbit-scrollbar"
 
     static let css = """
     /* \(marker): Orbit's page scrollbar. Orbit/Engine/PageScrollbarStyleScript.swift */
     ::-webkit-scrollbar {
+      -webkit-appearance: none;
+      appearance: none;
       width: 9px;
       height: 9px;
       background: transparent;

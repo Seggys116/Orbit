@@ -260,11 +260,11 @@ final class MediaSessionBridgeTests: XCTestCase {
     // MARK: - One script, one transport
 
     func test_chromiumInstallsTheSharedObserverWithOnlyTheChromiumTransport() {
-        let script = MediaSessionObserverScript.chromiumUserScript
+        let script = MediaSessionObserverScript.userScript
 
         XCTAssertEqual(
             script.source,
-            MediaSessionObserverScript.source(postExpression: MediaSessionObserverScript.chromiumPostExpression),
+            MediaSessionObserverScript.source(postExpression: MediaSessionObserverScript.bridgePostExpression),
             """
             The installed observer is no longer the shared generator's output. That is how this defect \
             happened the first time: a second, hand-maintained copy of the script drifted from the \
@@ -272,7 +272,7 @@ final class MediaSessionBridgeTests: XCTestCase {
             """
         )
         XCTAssertTrue(
-            script.source.contains(MediaSessionObserverScript.chromiumPostExpression),
+            script.source.contains(MediaSessionObserverScript.bridgePostExpression),
             "The generated source does not carry the transport, so nothing it observes can reach the host."
         )
         XCTAssertEqual(script.injectionTime, .documentStart, "Injected after the page's scripts, the prototype overrides would miss every metadata assignment the page already made.")
@@ -294,7 +294,7 @@ final class MediaSessionBridgeTests: XCTestCase {
             .source(postExpression: placeholder)
             .split(separator: "\n", omittingEmptySubsequences: false)
         let rhs = MediaSessionObserverScript
-            .source(postExpression: MediaSessionObserverScript.chromiumPostExpression)
+            .source(postExpression: MediaSessionObserverScript.bridgePostExpression)
             .split(separator: "\n", omittingEmptySubsequences: false)
 
         XCTAssertEqual(lhs.count, rhs.count, "Changing the post expression changed the shape of the script.")
@@ -306,7 +306,7 @@ final class MediaSessionBridgeTests: XCTestCase {
             "The differing line is not the substituted expression."
         )
         XCTAssertTrue(
-            differing.first?.1.contains(MediaSessionObserverScript.chromiumPostExpression) == true,
+            differing.first?.1.contains(MediaSessionObserverScript.bridgePostExpression) == true,
             "The differing line is not the Chromium post expression."
         )
     }
@@ -362,6 +362,10 @@ final class MediaSessionBridgeTests: XCTestCase {
         XCTAssertTrue(
             source.contains("setInterval"),
             "Without a poll, a lazily inserted <video> (an ad, a carousel) would never pick up Orbit's mute state."
+        )
+        XCTAssertTrue(
+            source.contains("if (document.hidden && !anyLiveMedia()) { return; }"),
+            "A hidden page with nothing playing must not keep scanning for media."
         )
     }
 }

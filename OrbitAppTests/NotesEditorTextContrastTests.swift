@@ -217,7 +217,7 @@ final class NotesEditorTextContrastTests: XCTestCase {
     func test_plainTypedNoteStaysDarkInkOnLightPaper() throws {
         let id = makeNote(body: bakedColourBody(NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)))
         guard let sample = renderNote(id, appearance: .aqua) else {
-            throw XCTSkip("Could not capture this process's own window pixels on this machine.")
+            throw TestStopped("Could not capture this process's own window pixels on this machine.")
         }
         XCTAssertGreaterThan(
             sample.background, sample.ink,

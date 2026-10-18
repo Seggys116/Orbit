@@ -5,14 +5,8 @@ import Foundation
 
 nonisolated public enum EngineKind: String, Codable, Sendable, CaseIterable {
     case webkit
-    /// Compatibility name for call sites and tests written against the previous engine. The running engine is WebKit.
-    case chromium
 
-    public var displayName: String {
-        switch self {
-        case .webkit, .chromium: return "WebKit"
-        }
-    }
+    public var displayName: String { "WebKit" }
 }
 
 /// Identity of the system WebKit Orbit renders with. Not a downloaded engine pin.
@@ -30,12 +24,59 @@ enum WebKitProduct {
 
     static var versionDescription: String { "WebKit \(version)" }
 
+    // Safari's own bundle is the source of the Version/ token, so the UA tracks the installed Safari.
+    private static let safariBundlePaths = [
+        "/Applications/Safari.app",
+        "/System/Cryptexes/App/System/Applications/Safari.app",
+        "/System/Applications/Safari.app",
+    ]
+
+    /// Safari's major.minor, the form its User-Agent carries. Nil when no Safari bundle is readable.
+    static let safariVersion: String? = {
+        for path in safariBundlePaths {
+            guard let value = Bundle(path: path)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                  let major = value.split(separator: ".").first, !major.isEmpty
+            else { continue }
+            let minor = value.split(separator: ".").dropFirst().first.map(String.init) ?? "0"
+            return "\(major).\(minor)"
+        }
+        return nil
+    }()
+
+    /// The suffix WKWebViewConfiguration.applicationNameForUserAgent appends to WebKit's base string.
+    static let applicationNameForUserAgent: String? = safariVersion.map { "Version/\($0) Safari/605.1.15" }
+
+    /// What a web view without an override sends: the system WebKit base string plus Safari's suffix.
     static var userAgent: String {
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Chrome/\(webStoreProductVersion) Safari/605.1.15"
+        let base = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+        guard let suffix = applicationNameForUserAgent else { return base }
+        return base + " " + suffix
     }
 
+    /// The one place the Chrome identity's version lives; bump it when the Web Store raises its minimum.
+    static let webStoreChromeMajorVersion = 152
+
     /// Chrome Web Store's update protocol asks for a product version. This is that token, not the rendering engine.
-    static let webStoreProductVersion = "120.0.0.0"
+    static var webStoreProductVersion: String { "\(webStoreChromeMajorVersion).0.0.0" }
+
+    /// Sent only on the Web Store, where install flows refuse a browser that does not say it is Chrome.
+    static var webStoreUserAgent: String {
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/\(webStoreProductVersion) Safari/537.36"
+    }
+
+    /// True for the pages that get the Chrome identity: the store's own hosts, https only.
+    static func usesChromeIdentity(for url: URL?) -> Bool {
+        guard let url, url.scheme?.lowercased() == "https", let host = url.host?.lowercased() else { return false }
+        switch host {
+        case "chromewebstore.google.com":
+            return true
+        case "chrome.google.com":
+            let path = url.path.lowercased()
+            return path == "/webstore" || path.hasPrefix("/webstore/")
+        default:
+            return false
+        }
+    }
 }
 
 nonisolated public struct EngineCapabilities: OptionSet, Sendable {
@@ -60,7 +101,7 @@ nonisolated public struct EngineCapabilities: OptionSet, Sendable {
 /// two of them cannot drift apart.
 nonisolated public enum EngineCapabilityCopy {
     public static let developerToolsUnavailable =
-        "The browser engine isn't running yet, so there is no developer tools inspector to open."
+        "The browser engine isn't running yet, so there is no Web Inspector to open."
 }
 
 // MARK: - Extensions
@@ -152,22 +193,6 @@ nonisolated public enum NewContentDisposition: String, Sendable {
     case download
 }
 
-public extension NewContentDisposition {
-    /// Numbering comes from `WindowOpenDisposition`'s own declaration order -- see
-    /// `OrbitSetNewContentRequestCallback` in orbit_bridge_api.h. Anything Orbit has
-    /// no distinct surface for opens as an ordinary foreground tab rather than being dropped.
-    init(chromiumWindowOpenDisposition raw: Int32) {
-        switch raw {
-        case 1: self = .currentTab
-        case 4: self = .newBackgroundTab
-        case 5: self = .popup
-        case 6: self = .newWindow
-        case 7: self = .download
-        default: self = .newForegroundTab
-        }
-    }
-}
-
 nonisolated public struct NewContentRequest: Sendable {
     public var url: URL
     public var disposition: NewContentDisposition
@@ -226,10 +251,6 @@ nonisolated public struct EngineError: Error, Equatable, Sendable {
         case unsupportedScheme
         case renderProcessCrashed
         case engineUnavailable
-        /// A real, honest "not built yet" — distinct from `engineUnavailable`,
-        /// which means "retry"; this means "this feature has no implementation
-        /// in the running engine at all".
-        case notImplemented
         case unknown
     }
 
@@ -257,7 +278,6 @@ nonisolated public struct EngineError: Error, Equatable, Sendable {
         case .unsupportedScheme: return "Orbit can't open that kind of link"
         case .renderProcessCrashed: return "This tab crashed"
         case .engineUnavailable: return "The browser engine isn't available"
-        case .notImplemented: return "Orbit doesn't support this yet"
         case .unknown: return "Something went wrong"
         }
     }
@@ -659,8 +679,7 @@ nonisolated public struct BrowsingDataScope: OptionSet, Sendable {
     public static let cookies = BrowsingDataScope(rawValue: 1 << 0)
     public static let cache = BrowsingDataScope(rawValue: 1 << 1)
 
-    // Site storage, passwords and autofill have no removal API on today's
-    // engine; they are cleared from the profile files by ChromiumProfileData instead.
+    // Site storage, passwords and autofill are not cleared through this scope.
     public static let all: BrowsingDataScope = [.cookies, .cache]
 }
 
@@ -669,7 +688,7 @@ nonisolated public struct BrowsingDataScope: OptionSet, Sendable {
 nonisolated public struct EngineCookie: Sendable, Hashable {
 
     public enum SameSite: Sendable, Hashable {
-        /// Not `.lax` — Chromium's unspecified-default has moved between releases.
+        /// Not `.lax`: an unspecified SameSite is its own state, not a default.
         case unspecified
         case none
         case lax

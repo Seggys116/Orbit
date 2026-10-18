@@ -96,11 +96,10 @@ final class ExtensionsSettingsPaneInstallTests: XCTestCase {
     }
 
     func test_installFailureMessage_installFailed() {
-        let path = URL(fileURLWithPath: "/tmp/a,b")
-        let error = ExtensionInstallError.installFailed(.pathContainsComma(path))
+        let error = ExtensionInstallError.installFailed(.notInstalled("abcdefghijklmnopabcdefghijklmnop"))
         let message = ExtensionInstallLogic.installFailureMessage(for: error)
         XCTAssertEqual(message, error.errorDescription)
-        XCTAssertTrue(message.contains("comma"), message)
+        XCTAssertTrue(message.contains("abcdefghijklmnopabcdefghijklmnop"), message)
     }
 
     func test_installFailureMessage_nonLocalizedError_fallsBackToLocalizedDescription() {
@@ -229,7 +228,7 @@ final class ExtensionsSettingsPaneInstallTests: XCTestCase {
             warnings: [],
             isUpdate: isUpdate,
             previousVersion: previousVersion,
-            chromiumVersionWarning: nil
+            minimumChromeVersionWarning: nil
         )
     }
 

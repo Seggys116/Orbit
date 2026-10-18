@@ -170,7 +170,7 @@ final class SidebarResizeHandleNSView: NSView, OrbitClickCatching {
 
     // MARK: - Visual: a white grabber pill while hovering or dragging
 
-    static let grabberWidth: CGFloat = 4
+    static let grabberWidth: CGFloat = OrbitMetrics.sidebarResizeHandleWidth
 
     static let grabberVerticalInset: CGFloat = 10
 

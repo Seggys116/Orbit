@@ -20,15 +20,14 @@ class CorpusLiveTestCase: LiveEnvironmentTestCase {
         unloadWhatThisSuiteLeftBehind()
     }
 
-    /// Empty before the first live test in the process starts an engine; a
-    /// suite that skips on the live-engine gate never reaches one at all.
+    /// Empty before the first live test in the process starts an engine.
     static func loadedExtensionIDs() -> Set<String> {
-        guard let engine = LiveChromiumEngineHost.startedEngine else { return [] }
+        guard let engine = WebKitLiveEngineHost.startedEngine else { return [] }
         return Set(engine.loadedExtensions(session: engine.defaultSession).map(\.id))
     }
 
     private func unloadWhatThisSuiteLeftBehind() {
-        guard let engine = LiveChromiumEngineHost.startedEngine else { return }
+        guard let engine = WebKitLiveEngineHost.startedEngine else { return }
         let leaked = Self.loadedExtensionIDs().subtracting(extensionsAtStart).sorted()
         guard !leaked.isEmpty else { return }
         for id in leaked {

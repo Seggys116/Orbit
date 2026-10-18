@@ -44,7 +44,7 @@ final class CorpusReactDeveloperToolsLiveTests: CorpusLiveTestCase {
         var node = queue.shift();
         seen++;
         var tabs = [];
-        try { tabs = node.querySelectorAll('.tabbed-pane-header-tab'); } catch (e) {}
+        try { tabs = node.querySelectorAll('.tabbed-pane-header-tab, .tab-bar .item'); } catch (e) {}
         for (var t = 0; t < tabs.length; t++) {
           titles.push(String(tabs[t].textContent || '').trim());
         }
@@ -72,10 +72,8 @@ final class CorpusReactDeveloperToolsLiveTests: CorpusLiveTestCase {
         return object
     }
 
-    // Skips only when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testReactDeveloperToolsDevToolsPageIsStillNeverCreated
+    // Fails when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
     func testReactDeveloperToolsDevToolsPageIsStillNeverCreated() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
         try ExtensionCorpus.verifyManifestVersionMatchesPin(for: Self.corpusName)
@@ -90,17 +88,11 @@ final class CorpusReactDeveloperToolsLiveTests: CorpusLiveTestCase {
             "the pinned React Developer Tools no longer declares a devtools_page, so this canary no longer measures anything"
         )
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
 
-            let bridge = OrbitChromiumTabsBridge.shared
-            if !bridge.isWindowRegistered(env) {
-                bridge.windowCreated(owner: env, focused: false)
-            }
-            bridge.windowFocusChanged(owner: env)
             let spaceID = try XCTUnwrap(env.activeSpace?.id)
 
             let server = try self.makeServer()
@@ -114,14 +106,14 @@ final class CorpusReactDeveloperToolsLiveTests: CorpusLiveTestCase {
             )
 
             let tabID = env.openTab(url: server.baseURL, in: spaceID)
-            let contents = try XCTUnwrap(env.webContents[tabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            let contents = try XCTUnwrap(env.webContents[tabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             env.activateTab(tabID)
 
             contents.showDeveloperTools(inspectAt: nil)
             defer { contents.closeDeveloperTools() }
 
-            var frontend: ChromiumWebContents?
+            var frontend: WebKitInspectorFrontend?
             let attachDeadline = ContinuousClock.now + .seconds(30)
             while ContinuousClock.now < attachDeadline {
                 let state = Self.decodeState(contents.devToolsStateJSON())
@@ -154,8 +146,6 @@ final class CorpusReactDeveloperToolsLiveTests: CorpusLiveTestCase {
                 }
                 try await Task.sleep(for: .milliseconds(250))
             }
-            print("ORBIT-REACTDEVTOOLS frontend state = \(observed)")
-
             XCTAssertFalse(
                 observed.panelTabs.isEmpty,
                 "the frontend never built its panel bar, so the absence of a React panel below proves nothing"
@@ -168,7 +158,7 @@ final class CorpusReactDeveloperToolsLiveTests: CorpusLiveTestCase {
                 A DevTools frontend frame now addresses \(loaded.id) (\(extensionFrames)). DevTools \
                 extensions may now work in Orbit: nothing used to send `addExtensions` to the \
                 frontend, so the devtools page iframe was never created. Update this corpus entry's \
-                expectation in Chromium/extension-corpus.json and turn this canary into a positive \
+                expectation in ExtensionCorpus/extension-corpus.json and turn this canary into a positive \
                 test -- do not relax the assertion.
                 """
             )

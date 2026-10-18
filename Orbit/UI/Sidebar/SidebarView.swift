@@ -15,6 +15,10 @@ struct SidebarView: View {
 
     @State private var isHovered = false
 
+    #if DEBUG
+    @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
+    #endif
+
     var body: some View {
         Group {
             if let space = space ?? env.activeSpace {
@@ -91,6 +95,7 @@ struct SidebarView: View {
             SidebarBottomBar(theme: space.theme)
                 .padding(.bottom, OrbitMetrics.sidebarInterSectionGap)
         }
+        .background { chromeDragSurface }
         .background {
             if paintsOwnBackground {
                 WindowSlicedThemeBackground(theme: space.theme, blur: SpaceVisualPrefsStore.shared.blur(for: space.id))
@@ -100,6 +105,21 @@ struct SidebarView: View {
         .gitHubLiveFolderToast(for: space, theme: space.theme, presenter: .shared)
         .persistenceFailureToast(theme: space.theme)
         .onHover { isHovered = $0 }
+    }
+
+    // ImageRenderer paints an NSViewRepresentable as an opaque band, so screenshot
+    // mode leaves this out. Real clicks still reach the drag surface.
+    @ViewBuilder
+    private var chromeDragSurface: some View {
+        #if DEBUG
+        if screenshotModeDragDisabled {
+            Color.clear.allowsHitTesting(false)
+        } else {
+            SidebarChromeDragSurface()
+        }
+        #else
+        SidebarChromeDragSurface()
+        #endif
     }
 
     // MARK: - Self-check (no Screen Recording permission in this environment)

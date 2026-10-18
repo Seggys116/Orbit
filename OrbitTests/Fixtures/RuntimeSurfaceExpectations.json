@@ -1,27 +1,22 @@
 {
   "_readme": [
-    "What the extension process must actually SEE, as opposed to what a schema claims.",
+    "What the extension process must actually SEE, as opposed to what a schema or the wrapper's source claims.",
     "",
-    "A schema diff proves the JSON matches. It does not prove the binding was",
-    "generated, the API feature resolved, or the permission registered -- which is",
-    "exactly how chrome.scripting came to be compiled in, schema and all, and",
-    "undefined in every extension. OrbitAppTests/ChromiumExtensionRuntimeSurfaceReflectionLiveTests",
-    "loads a real MV3 fixture declaring every permission Orbit supports, walks the",
-    "`chrome` object inside its own service worker, and checks the report against",
-    "this file and against Orbit's own schemas.",
+    "A schema diff proves a declared surface matches. It does not prove WebKit bound the namespace,",
+    "the permission gated it correctly, or the wrapper's additions reached the worker. The live reflection",
+    "suite (OrbitAppTests/WebKitExtensionRuntimeSurfaceReflectionLiveTests) loads a real MV3 fixture",
+    "declaring every permission Orbit supports, walks the `chrome` object inside its own service worker,",
+    "and checks the report against this file, against the wrapper inventory",
+    "(Orbit/Engine/WebKit/ChromeAPISurfaceInventory.swift) and against ExpectedAPIGaps.json.",
     "",
-    "mustBeDefined: namespaces an extension holding these permissions must be able",
-    "  to reach. A missing one is the chrome.scripting failure recurring.",
-    "knownUnavailable: namespaces Orbit compiles and that still do not resolve at",
-    "  runtime, each with the reason. Asserted UNDEFINED, so the day one starts",
-    "  working this test fails and the entry has to be deleted -- the same",
-    "  two-directional discipline as ExpectedAPIGaps.json.",
-    "permissionGatedNamespaces: the negative control. With none of these",
-    "  permissions declared, each namespace must be undefined. Orbit already had",
-    "  one of these for webNavigation as a one-off; this is the table version.",
-    "  OrbitTests/ExtensionRuntimeSurfaceExpectationsTests asserts every",
-    "  permission: dependency in Chromium/Embedder/common/api/_api_features.json",
-    "  has a row here, so a newly-gated namespace cannot skip the control."
+    "mustBeDefined: namespaces an extension holding these permissions must be able to reach.",
+    "  Wrapper-provided and WebKit-native namespaces are both listed; a missing one is a binding that never reached the worker.",
+    "knownUnavailable: namespaces nothing provides on WebKit, each with the reason. Asserted UNDEFINED, so the day one starts",
+    "  working the test fails and the entry has to be deleted -- the same two-directional discipline as ExpectedAPIGaps.json.",
+    "  Namespaces WebKit may or may not provide (extension, userScripts, browserAction) are deliberately not listed.",
+    "permissionGatedNamespaces: the negative control. With none of these permissions declared, each namespace must be undefined.",
+    "  OrbitTests/ExtensionRuntimeSurfaceExpectationsTests checks every permission-gated namespace the wrapper creates has a row here.",
+    "partiallyGatedNamespaces: namespaces defined without their permission but with only the members upstream leaves ungated."
   ],
   "fixturePermissions": [
     "alarms",
@@ -41,6 +36,10 @@
     "search",
     "sessions",
     "storage",
+    "system.cpu",
+    "system.display",
+    "system.memory",
+    "system.storage",
     "tabs",
     "unlimitedStorage",
     "webNavigation",
@@ -68,25 +67,39 @@
     "search",
     "sessions",
     "storage",
+    "system.cpu",
+    "system.display",
+    "system.memory",
+    "system.storage",
     "tabs",
     "webNavigation",
     "webRequest",
     "windows"
   ],
   "knownUnavailable": {
-    "userScripts": "No delegated availability check, so the feature never resolves for an ordinary extension even though //extensions compiles the whole API (section 0).",
-    "notifications": "Chrome-layer and not ported.",
-    "identity": "Chrome-layer and not ported; blocks every OAuth-backed extension.",
-    "sidePanel": "Chrome-layer and not ported; the modern MV3 primary UI surface.",
-    "extension": "The legacy chrome.extension namespace is still called by a large amount of shipped MV3 code.",
-    "topSites": "Chrome-layer and not ported.",
-    "tabGroups": "Chrome-layer and not ported; pairs with the missing tabs.group/ungroup.",
-    "contentSettings": "The implementation is already compiled in extensions/browser/api/content_settings; only the chrome-layer schema and feature entry are missing.",
-    "declarativeContent": "Chrome-layer and not ported; the MV3-sanctioned conditional page action.",
-    "browsingData": "Chrome-layer and not ported.",
-    "proxy": "Chrome-layer and not ported.",
-    "debugger": "Chrome-layer and not ported; with devtools.* this is every DevTools extension.",
-    "devtools": "Chrome-layer and not ported: inspectedWindow, network and panels together, so React/Vue/Redux DevTools cannot load."
+    "debugger": "WebKit has no public remote debugging protocol an extension could drive.",
+    "pageCapture": "WebKit can archive a page as .webarchive but has no MHTML writer.",
+    "processes": "WebKit exposes no public per-renderer process information.",
+    "notifications": "WKWebExtension.Permission has no notifications permission, so WebKit does not provide the API and Orbit has not built one.",
+    "sidePanel": "WKWebExtension.Permission has no sidePanel permission and Orbit has no side panel host.",
+    "proxy": "Neither WebKit nor the wrapper provides it; WKWebsiteDataStore proxy configuration could back it but Orbit has not built that.",
+    "identity": "Not provided by WebKit and not built by Orbit; blocks every OAuth-backed extension.",
+    "tabGroups": "WebKit has no tab groups API and Orbit does not map its own groups onto one.",
+    "topSites": "Not provided by WebKit and not built by Orbit.",
+    "browsingData": "Not provided by WebKit; WKWebsiteDataStore could back it but Orbit has not built that.",
+    "contentSettings": "Not provided by WebKit; Orbit's site permissions are not exposed to extensions.",
+    "declarativeContent": "Not provided by WebKit and not built by Orbit.",
+    "tabCapture": "Not provided by WebKit and not built by Orbit.",
+    "desktopCapture": "Not provided by WebKit and not built by Orbit.",
+    "fontSettings": "Not provided by WebKit and not built by Orbit.",
+    "gcm": "Needs Google's push service, which Orbit has no account or transport for.",
+    "instanceID": "Needs Google's push service, which Orbit has no account or transport for.",
+    "omnibox": "Not provided by WebKit and Orbit's command bar does not host extension keywords.",
+    "tts": "Not provided by WebKit and not built by Orbit.",
+    "ttsEngine": "Not provided by WebKit and not built by Orbit.",
+    "readingList": "Not provided by WebKit and not built by Orbit.",
+    "webAuthenticationProxy": "Not provided by WebKit and not built by Orbit.",
+    "accessibilityFeatures": "Not provided by WebKit and not built by Orbit."
   },
   "permissionGatedNamespaces": [
     {
@@ -140,6 +153,38 @@
     {
       "namespace": "downloads",
       "permission": "downloads"
+    },
+    {
+      "namespace": "alarms",
+      "permission": "alarms"
+    },
+    {
+      "namespace": "storage",
+      "permission": "storage"
+    },
+    {
+      "namespace": "idle",
+      "permission": "idle"
+    },
+    {
+      "namespace": "power",
+      "permission": "power"
+    },
+    {
+      "namespace": "system.cpu",
+      "permission": "system.cpu"
+    },
+    {
+      "namespace": "system.memory",
+      "permission": "system.memory"
+    },
+    {
+      "namespace": "system.display",
+      "permission": "system.display"
+    },
+    {
+      "namespace": "system.storage",
+      "permission": "system.storage"
     }
   ],
   "partiallyGatedNamespaces": {
@@ -150,7 +195,7 @@
         "uninstallSelf",
         "getPermissionWarningsByManifest"
       ],
-      "note": "Unlike the fully-gated namespaces, chrome.management is defined without its permission but keeps only its three dependencies:[] members. That partial shape is what made the missing name-to-id registration invisible for so long, so the control asserts the shape rather than absence."
+      "note": "chrome.management is defined without its permission but keeps only its three members that need none. The control asserts that shape rather than absence, because the wrapper's ungated list is what makes getSelf work for an extension that never asked for management."
     }
   }
 }

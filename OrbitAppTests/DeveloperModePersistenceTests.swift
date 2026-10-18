@@ -118,25 +118,24 @@ final class DeveloperModePersistenceTests: XCTestCase {
 
     // MARK: - The popover actually reads the persisted value
 
-    private func renderPopoverPNG() -> Data? {
+    private func renderPopover() -> RenderedImage? {
         guard let tab = env.activeTab else {
-            XCTFail("renderPopoverPNG: expected AppEnvironment.demo's env.activeTab to be non-nil.")
+            XCTFail("renderPopover: expected AppEnvironment.demo's env.activeTab to be non-nil.")
             return nil
         }
         // The flag suppresses tooltip backings ImageRenderer cannot flatten deterministically.
-        let rendered = render(
+        return render(
             SiteControlPopoverView(tab: tab).environment(env)
                 .environment(\.orbitScreenshotModeDragDisabled, true),
             size: CGSize(width: 300, height: 520)
         )
-        return rendered.bitmap.representation(using: .png, properties: [:])
     }
 
     func test_siteControlPopover_rendersTheStoredDeveloperModeValue() throws {
-        let offA = try XCTUnwrap(renderPopoverPNG(), "ImageRenderer produced no image for SiteControlPopoverView.")
-        let offB = try XCTUnwrap(renderPopoverPNG())
+        let offA = try XCTUnwrap(renderPopover(), "ImageRenderer produced no image for SiteControlPopoverView.")
+        let offB = try XCTUnwrap(renderPopover())
         XCTAssertEqual(
-            offA, offB,
+            offA.pixelDigest, offB.pixelDigest,
             "Two renders of the same state differ — this test's own comparison is not a reliable signal."
         )
 
@@ -144,10 +143,10 @@ final class DeveloperModePersistenceTests: XCTestCase {
         DeveloperModeSettings.defaults = reloadedStore()
         XCTAssertTrue(DeveloperModeSettings.isEnabled, "test precondition: Developer Mode is persisted as on")
 
-        let on = try XCTUnwrap(renderPopoverPNG())
+        let on = try XCTUnwrap(renderPopover())
 
         XCTAssertNotEqual(
-            on, offA,
+            on.pixelDigest, offA.pixelDigest,
             """
             The Site Control Center popover renders identically whether Developer Mode is persisted on \
             or off, so its Developer Mode row is not reading the stored value — the reported defect, \

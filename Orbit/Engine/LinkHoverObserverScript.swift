@@ -2,14 +2,14 @@ import Foundation
 
 public enum LinkHoverObserverScript {
 
-    /// Must equal the channel name the Chromium bridge routes on.
+    /// Must equal the channel name the WebKit script-message bridge routes on.
     public static let channelName = "orbitLinkHover"
 
     public static let scriptID = UUID(uuidString: "F2A91C46-7D30-4B58-8E1A-3C6D9B04E7F5")!
 
     // MARK: - Source
 
-    public static let chromiumPostExpression =
+    public static let bridgePostExpression =
         "__orbitPost('\(channelName)', JSON.stringify(payload))"
 
     public static func source(postExpression: String) -> String {
@@ -72,11 +72,11 @@ public enum LinkHoverObserverScript {
     }
 
     /// `allFrames: true`: a hovered link can be inside an iframe.
-    public static var chromiumUserScript: UserScript {
+    public static var userScript: UserScript {
         UserScript(
             id: scriptID,
             kind: .javaScript,
-            source: source(postExpression: chromiumPostExpression),
+            source: source(postExpression: bridgePostExpression),
             injectionTime: .documentStart,
             matchPatterns: ["<all_urls>"],
             allFrames: true

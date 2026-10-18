@@ -45,6 +45,7 @@ struct LittleOrbitAddressBarOverlay: View {
             TextField("Search or Enter URL", text: $model.text)
                 .textFieldStyle(.plain)
                 .font(OrbitFont.commandBarInput)
+                .accessibilityIdentifier(CommandBarFieldFocus.fieldIdentifier)
                 .focused($isFocused)
                 .onSubmit(commit)
             if !model.text.isEmpty {

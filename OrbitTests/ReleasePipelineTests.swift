@@ -70,21 +70,6 @@ final class ReleasePipelineTests: XCTestCase {
 
     // MARK: - Version resolution
 
-    func testVersionDoesNotRequireAChromiumPin() throws {
-        let manifestURL = Self.repoRoot.appendingPathComponent("Chromium/chromium-version.json")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: manifestURL.path))
-
-        let run = try release(["version", "--json", "--manifest-only", "--set", "1.2.3"])
-        XCTAssertTrue(run.succeeded, "version --json failed:\n\(run.output)")
-
-        let reported = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(run.output.utf8)) as? [String: Any],
-            "version --json did not print JSON:\n\(run.output)"
-        )
-        XCTAssertEqual(reported["marketing_version"] as? String, "1.2.3")
-        XCTAssertEqual(reported["chromium_version"] as? String ?? "", "")
-    }
-
     func testVersionNamesTheDiskImageAfterTheRequestedVersion() throws {
         let run = try release(["version", "--json", "--manifest-only", "--set", "9.8.7"])
         XCTAssertTrue(run.succeeded, run.output)
@@ -117,56 +102,25 @@ final class ReleasePipelineTests: XCTestCase {
         )
     }
 
-    func testRendererGetsJITButNotUnsignedExecutableMemory() throws {
-        let granted = try grantedEntitlements(role: "renderer")
-        XCTAssertTrue(granted.contains("com.apple.security.cs.allow-jit"))
-        XCTAssertFalse(
-            granted.contains("com.apple.security.cs.allow-unsigned-executable-memory"),
-            "the renderer must not be granted unsigned executable memory: it is the process that "
-            + "runs untrusted script, and allow-jit already covers V8's MAP_JIT regions"
-        )
-        XCTAssertFalse(
-            granted.contains("com.apple.security.cs.allow-dyld-environment-variables"),
-            "a helper that honours DYLD_INSERT_LIBRARIES is a code-injection surface on the "
-            + "process that parses untrusted web content"
-        )
-    }
-
-    func testAlertsHelperGetsNeitherJITNorExecutableMemory() throws {
-        let granted = try grantedEntitlements(role: "alerts")
-        XCTAssertFalse(granted.contains("com.apple.security.cs.allow-jit"))
-        XCTAssertFalse(granted.contains("com.apple.security.cs.allow-unsigned-executable-memory"))
-    }
-
-    /// No role holds this key: the CDM runs as a kCdm utility process with no entitlements at all.
-    func testNoRoleIsGrantedUnsignedExecutableMemory() throws {
-        for role in ["app", "utility", "renderer", "gpu", "alerts"] {
-            XCTAssertFalse(
-                try grantedEntitlements(role: role)
-                    .contains("com.apple.security.cs.allow-unsigned-executable-memory"),
-                "\(role) must not be granted unsigned executable memory: it lets a process build "
-                + "and run code in ordinary anonymous memory, which is weaker than allow-jit and is "
-                + "what almost every exploit chain wants. Chromium grants it to nothing."
-            )
+    /// WKWebView compiles JavaScript in Apple's WebContent process, so Orbit itself needs no JIT or executable-memory exception.
+    func testBrowserProcessCarriesNoExecutableMemoryExceptions() throws {
+        let granted = try grantedEntitlements(role: "app")
+        for key in [
+            "com.apple.security.cs.allow-jit",
+            "com.apple.security.cs.allow-unsigned-executable-memory",
+            "com.apple.security.cs.disable-executable-page-protection",
+            "com.apple.security.cs.allow-dyld-environment-variables",
+        ] {
+            XCTAssertFalse(granted.contains(key), "the browser process must not be granted \(key)")
         }
-        let run = try release(["entitlements", "--print", "plugin"])
-        XCTAssertFalse(
-            run.succeeded,
-            "the plugin role is back. It exists only to host a third-party CDM, which a direct "
-            + "Chromium embed does not do, and it was the sole holder of "
-            + "allow-unsigned-executable-memory:\n\(run.output)"
-        )
     }
 
-    func testEveryRoleDisablesLibraryValidationBecauseTheFrameworkIsDlopened() throws {
-        for role in ["app", "utility", "renderer", "gpu", "alerts"] {
-            XCTAssertTrue(
-                try grantedEntitlements(role: role)
-                    .contains("com.apple.security.cs.disable-library-validation"),
-                "\(role) dlopens Chromium code at runtime and cannot do so under library "
-                + "validation"
-            )
-        }
+    /// Ad hoc developer and CI builds cannot load the embedded Sparkle.framework without it; see ENTITLEMENT_WAIVERS.
+    func testBrowserProcessDisablesLibraryValidationUnderTheAdHocWaiver() throws {
+        XCTAssertTrue(
+            try grantedEntitlements(role: "app")
+                .contains("com.apple.security.cs.disable-library-validation")
+        )
     }
 
     func testEveryEntitlementsFileIsStrictWellFormedXML() throws {
@@ -381,7 +335,7 @@ final class ReleasePipelineTests: XCTestCase {
         XCTAssertFalse(run.succeeded)
         XCTAssertTrue(run.output.contains("unknown role"), run.output)
         XCTAssertTrue(
-            run.output.contains("renderer"),
+            run.output.contains("app"),
             "an unknown role should list the roles that do exist:\n\(run.output)"
         )
     }
@@ -390,10 +344,6 @@ final class ReleasePipelineTests: XCTestCase {
 
     private static let entitlementFileNames = [
         "Orbit.entitlements",
-        "OrbitHelper.entitlements",
-        "OrbitHelper-Renderer.entitlements",
-        "OrbitHelper-GPU.entitlements",
-        "OrbitHelper-Alerts.entitlements",
     ]
 
     private static let sparklePublicKeyFixture =

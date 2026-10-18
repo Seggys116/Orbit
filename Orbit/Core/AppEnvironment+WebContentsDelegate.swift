@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
+import WebKit
 
 // WebContents.id is NOT Tab.id — every callback below must resolve the
 // actual TabID via AppEnvironment.tabID(for:) instead of trusting contents.id.
@@ -253,7 +255,7 @@ extension AppEnvironment: WebContentsDelegate {
     ) async -> PermissionDecision {
         if let refusal = Self.refusalWithoutPrompting(for: request) { return refusal }
         guard !DebugFlags.isRunningUnderTests else { return .denyAlways }
-        let kinds = request.kinds.subtracting(Self.undeliverablePermissionKinds)
+        let kinds = request.kinds
         let alert = NSAlert()
         alert.messageText = "\(request.origin.host() ?? "This site") wants to \(kinds.map(\.promptDescription).joined(separator: ", "))"
         alert.addButton(withTitle: "Allow")
@@ -262,11 +264,9 @@ extension AppEnvironment: WebContentsDelegate {
         return response == .alertFirstButtonReturn ? .allowAlways : .denyAlways
     }
 
-    // Delete this the day something in Orbit actually posts a UNNotificationRequest — nothing does today.
-    private static let undeliverablePermissionKinds: Set<PermissionKind> = [.notifications]
-
+    // A request naming nothing has nothing to ask the user about.
     static func refusalWithoutPrompting(for request: PermissionRequest) -> PermissionDecision? {
-        request.kinds.subtracting(undeliverablePermissionKinds).isEmpty ? .denyAlways : nil
+        request.kinds.isEmpty ? .denyAlways : nil
     }
 
     // Refusing is the only safe answer with nobody to click; an unattended non-live test run
@@ -318,15 +318,40 @@ extension AppEnvironment: WebContentsDelegate {
     func webContents(
         _ contents: WebContents,
         runOpenPanelAllowingMultiple allowsMultiple: Bool,
+        allowsDirectories: Bool,
         acceptedTypes: [String]
     ) async -> [URL] {
         guard !DebugFlags.isRunningUnderTests else { return [] }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = allowsMultiple
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = allowsDirectories
         panel.canChooseFiles = true
+        if let types = Self.openPanelContentTypes(from: acceptedTypes) { panel.allowedContentTypes = types }
         let response = panel.runModal()
         return response == .OK ? panel.urls : []
+    }
+
+    /// The file input's accept list as content types, or nil when any entry cannot be resolved,
+    /// since a partial filter would hide files the page asked for.
+    static func openPanelContentTypes(from accepted: [String]) -> [UTType]? {
+        var types: [UTType] = []
+        for entry in accepted.map({ $0.trimmingCharacters(in: .whitespaces).lowercased() }) where !entry.isEmpty {
+            let resolved: UTType?
+            switch entry {
+            case "image/*": resolved = .image
+            case "video/*": resolved = .movie
+            case "audio/*": resolved = .audio
+            case "text/*": resolved = .text
+            default:
+                // An unknown MIME type resolves to a dynamic type no file carries, which would hide every file.
+                resolved = entry.hasPrefix(".")
+                    ? UTType(filenameExtension: String(entry.dropFirst()))
+                    : UTType(mimeType: entry).flatMap { $0.isDynamic ? nil : $0 }
+            }
+            guard let resolved else { return nil }
+            types.append(resolved)
+        }
+        return types.isEmpty ? nil : types
     }
 
     // MARK: Extensions
@@ -415,8 +440,15 @@ extension AppEnvironment: WebContentsDelegate {
 
     func webContents(_ contents: WebContents, didChangeMediaState state: MediaState) {
         guard let tabID = tabID(for: contents) else { return }
+        let previous = mediaStates[tabID]
         mediaStates[tabID] = state
         store.setMediaState(state, forTab: tabID)
+        if let tab = contents as? WebKitWebContents {
+            var changed: WKWebExtension.TabChangedProperties = []
+            if previous?.isMuted != state.isMuted { changed.insert(.muted) }
+            if previous?.isAudible != state.isAudible { changed.insert(.playingAudio) }
+            if !changed.isEmpty { (engine as? WebKitEngine)?.noteTabPropertiesChanged(tab, changed) }
+        }
         // isMediaActive, not isPlaying || isAudible: both of those go false
         // on a pause, which used to make pausing indistinguishable from the
         // media ending and tore the tab out of picture-in-picture.
@@ -430,9 +462,8 @@ extension AppEnvironment: WebContentsDelegate {
 
     func webContents(_ contents: WebContents, didChangeFullscreen isFullscreen: Bool) {}
 
-    // The picture-in-picture window's "back to tab" control, not its X --
-    // see ChromiumWebContents.handleActivationRequested. activateTab already
-    // switches Spaces if the tab lives outside the currently active one.
+    // The picture-in-picture window's "back to tab" control, not its X.
+    // activateTab already switches Spaces if the tab lives outside the currently active one.
     func webContentsDidRequestActivation(_ contents: WebContents) {
         guard let tabID = tabID(for: contents) else { return }
         activateTab(tabID)
@@ -444,6 +475,9 @@ extension AppEnvironment: WebContentsDelegate {
     // left on disk would be a record of a site having been visited.
     func webContents(_ contents: WebContents, didChangeZoomFactor factor: Double) {
         guard let tabID = tabID(for: contents), let tab = state.tabs[tabID] else { return }
+        if let page = contents as? WebKitWebContents {
+            (engine as? WebKitEngine)?.noteTabPropertiesChanged(page, .zoomFactor)
+        }
         let isPrivate = space(tab.spaceID).map(isIncognito) ?? false
         store.setZoomFactor(isPrivate ? nil : factor, for: tabID)
         guard !isPrivate else { return }

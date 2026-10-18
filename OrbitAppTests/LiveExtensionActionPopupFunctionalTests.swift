@@ -3,6 +3,7 @@
 
 import AppKit
 import Foundation
+import WebKit
 import XCTest
 @testable import Orbit
 
@@ -58,9 +59,8 @@ final class LiveExtensionActionPopupFunctionalTests: LiveEnvironmentTestCase {
     // MARK: - A real popup renders at exactly its declared size, end-to-end through the real model
 
     func testARealExtensionPopupOfAKnownDeclaredSizeReportsExactlyThatSizeThroughTheRealModel() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        try LiveChromiumEngineHost.runLive {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
+        try WebKitLiveEngineHost.runLive {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let popupHTML = """
             <!doctype html><html><head><meta charset="utf-8"><style>
             html, body { margin: 0; padding: 0; }
@@ -77,9 +77,9 @@ final class LiveExtensionActionPopupFunctionalTests: LiveEnvironmentTestCase {
             defer { model.teardown() }
 
             let contents = try XCTUnwrap(model.contents, "the real engine failed to create the popup's own WebContents")
-            // A zero-sized view makes Blink silently skip auto-resize; give it a real
-            // frame larger than the document so a small report proves it came from the document.
-            contents.view.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+            // Left at the loading size. A frame larger than the document makes the
+            // viewport-height check throw the real report away.
+            contents.setVisible(true)
 
             try await Self.pollUntil { model.hasReportedContentSize }
 
@@ -88,12 +88,74 @@ final class LiveExtensionActionPopupFunctionalTests: LiveEnvironmentTestCase {
         }
     }
 
+    // The suites above enlarge the web view to 900×700 before waiting. The app does not:
+    // start() leaves the popup at the 25×25 loading box, which is the size the user sees
+    // when detection never replaces it.
+    func testARealPopupLeftAtTheLoadingSizeGrowsToTheDocument() throws {
+        try WebKitLiveEngineHost.runLive {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
+            let popupHTML = """
+            <!doctype html><html><head><meta charset="utf-8"><style>
+            html, body { margin: 0; padding: 0; overflow: hidden; }
+            body { min-width: 24rem; }
+            #box { width: 360px; height: 220px; background: #5b4dff; }
+            </style></head><body><div id="box"></div></body></html>
+            """
+            let directory = try self.writeExtension(popupBody: popupHTML)
+            let loaded = try await engine.loadExtension(at: directory, session: engine.defaultSession)
+            defer { engine.unloadExtension(id: loaded.id, session: engine.defaultSession) }
+
+            let popupURL = URL(string: "chrome-extension://\(loaded.id)/popup.html")!
+            let model = ExtensionActionPopupModel(engine: engine, session: engine.defaultSession, url: popupURL)
+            model.start()
+            defer { model.teardown() }
+
+            let contents = try XCTUnwrap(model.contents)
+            let host = NSView(frame: NSRect(origin: .zero, size: ExtensionActionPopupSupport.popupLoadingSize))
+            let window = NSWindow(
+                contentRect: NSRect(origin: .zero, size: ExtensionActionPopupSupport.popupLoadingSize),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            let view = contents.view
+            view.translatesAutoresizingMaskIntoConstraints = false
+            host.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                view.topAnchor.constraint(equalTo: host.topAnchor),
+                view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            ])
+            window.orderFront(nil)
+            contents.setVisible(true)
+            defer { window.close() }
+
+            let deadline = ContinuousClock.now + .seconds(8)
+            while model.contentSize.width < 300, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            let measured = try? await ExtensionActionPopupSupport.measuredContentSize(in: contents)
+            let probe = try? await contents.evaluateJavaScript(
+                "String(!!window.__orbitContentSizing)+' scroll='+document.body.scrollWidth+'x'+document.body.scrollHeight"
+            )
+            let scriptCount = (contents.view as? WKWebView)?.configuration.userContentController.userScripts.count ?? -1
+            XCTAssertEqual(
+                model.contentSize.width, 384, accuracy: 8,
+                "popup stayed \(model.contentSize) reported=\(model.hasReportedContentSize), script measured \(String(describing: measured)), view \(contents.view.bounds.size), probe \(String(describing: probe)), userScripts \(scriptCount)"
+            )
+            XCTAssertEqual(model.contentSize.height, 220, accuracy: 8, "height stayed \(model.contentSize.height)")
+            XCTAssertFalse(model.scrollsHorizontally, "a page that fits its own width must not scroll sideways")
+        }
+    }
+
     // MARK: - The same real popup, oversized: clamps to Chrome's own maximum through the real model
 
     func testARealExtensionPopupLargerThanChromesMaximumClampsThroughTheRealModel() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        try LiveChromiumEngineHost.runLive {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
+        try WebKitLiveEngineHost.runLive {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let popupHTML = """
             <!doctype html><html><head><meta charset="utf-8"><style>
             html, body { margin: 0; padding: 0; }
@@ -110,7 +172,7 @@ final class LiveExtensionActionPopupFunctionalTests: LiveEnvironmentTestCase {
             defer { model.teardown() }
 
             let contents = try XCTUnwrap(model.contents)
-            contents.view.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+            contents.setVisible(true)
 
             try await Self.pollUntil { model.hasReportedContentSize }
 
@@ -121,10 +183,8 @@ final class LiveExtensionActionPopupFunctionalTests: LiveEnvironmentTestCase {
     // MARK: - A real popup runs real extension JS: chrome.storage and chrome.tabs, not just static HTML
 
     func testARealExtensionPopupExecutesRealChromeAPICallsAndWritesTheResultsIntoItsOwnDOM() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let (storageResult, tabCount) = try LiveChromiumEngineHost.runLive { () -> (String?, Int?) in
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        let (storageResult, tabCount) = try WebKitLiveEngineHost.runLive { () -> (String?, Int?) in
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
             let spaceID = try XCTUnwrap(env.activeSpace?.id)
@@ -159,26 +219,27 @@ final class LiveExtensionActionPopupFunctionalTests: LiveEnvironmentTestCase {
             defer { server.stop() }
             let tabID = env.openTab(url: server.baseURL, in: spaceID)
             defer { env.closeTab(tabID) }
-            let tabContents = try XCTUnwrap(env.webContents[tabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(tabContents)
+            let tabContents = try XCTUnwrap(env.webContents[tabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(tabContents)
 
             let popupURL = URL(string: "chrome-extension://\(loaded.id)/popup.html")!
             let model = ExtensionActionPopupModel(engine: engine, session: engine.defaultSession, url: popupURL)
             model.start()
             defer { model.teardown() }
 
-            guard let chromiumContents = model.contents as? ChromiumWebContents else {
-                throw EngineError(code: .engineUnavailable, underlyingDescription: "the popup's WebContents was not a ChromiumWebContents")
+            guard let chromiumContents = model.contents as? WebKitWebContents else {
+                throw EngineError(code: .engineUnavailable, underlyingDescription: "the popup's WebContents was not a WebKitWebContents")
             }
 
+            let probe = "var node = document.getElementById('status'); node ? node.getAttribute('data-orbit-popup-result') : null"
+            var captured: String?
             try await Self.pollUntil {
-                try await chromiumContents.evaluateJavaScript(
-                    "document.getElementById('status').getAttribute('data-orbit-popup-result')"
-                ) != nil
+                let raw = try await chromiumContents.evaluateJavaScript(probe) as? String
+                guard let raw, !raw.isEmpty else { return false }
+                captured = raw
+                return true
             }
-            let raw = try await chromiumContents.evaluateJavaScript(
-                "document.getElementById('status').getAttribute('data-orbit-popup-result')"
-            ) as? String
+            let raw = captured
             let tabCount: Int? = raw.flatMap { data -> Int? in
                 guard let jsonData = data.data(using: .utf8),
                       let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]

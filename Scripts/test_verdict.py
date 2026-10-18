@@ -19,8 +19,6 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
-GATE_MARKER = "ORBIT_LIVE_ENGINE"
-MAY_SKIP_MARKER = "ORBIT-LIVE-ENGINE: MAY-SKIP"
 CANNOT_RUN_MARKER = "ORBIT-HOSTED-RUNNER: CANNOT-RUN"
 SCHEMA_VERSION = "0.1.0"
 
@@ -34,7 +32,6 @@ TEST_FUNC = re.compile(
     r"(?:public\s+|internal\s+|private\s+|fileprivate\s+)?"
     r"func\s+(test[A-Za-z0-9_]*)\s*\(\s*\)"
 )
-MAY_SKIP_LINE = re.compile(r"^\s*//\s*" + re.escape(MAY_SKIP_MARKER) + r"\s+([A-Za-z0-9_]+)\s*$")
 CANNOT_RUN_LINE = re.compile(r"^\s*//\s*" + re.escape(CANNOT_RUN_MARKER) + r"\s+([A-Za-z0-9_]+)\s*$")
 CONDITIONAL = re.compile(r"^\s*#(if|elseif|else|endif)\b\s*(.*)$")
 
@@ -145,41 +142,6 @@ def declared_tests(target_dir: str) -> dict[tuple[str, str], str]:
 def _lines(path: str) -> list[str]:
     with open(path, encoding="utf-8", errors="replace") as handle:
         return handle.read().splitlines()
-
-
-def may_skip_declarations(target_dir: str) -> dict[tuple[str, str], str]:
-    """Tests a live suite declares may legitimately skip, as (class, method) -> file."""
-    root = os.path.join(REPO_ROOT, target_dir)
-    declared = declared_tests(target_dir)
-    by_file: dict[str, set[str]] = {}
-    for (suite, method), path in declared.items():
-        by_file.setdefault(path, set()).add(f"{suite}.{method}")
-
-    allowed: dict[tuple[str, str], str] = {}
-    for directory, _, names in os.walk(root):
-        for name in sorted(names):
-            if not name.endswith(".swift"):
-                continue
-            path = os.path.join(directory, name)
-            relative = os.path.relpath(path, REPO_ROOT)
-            for line in _lines(path):
-                match = MAY_SKIP_LINE.match(line)
-                if not match:
-                    continue
-                method = match.group(1)
-                matches = [
-                    key for key in declared
-                    if key[1] == method and declared[key] == relative
-                ]
-                if not matches:
-                    raise VerdictError(
-                        f"{relative} declares '{MAY_SKIP_MARKER} {method}' but has no test method "
-                        f"of that name. A marker naming a test that does not exist would let a real "
-                        f"skip through unnoticed."
-                    )
-                for key in matches:
-                    allowed[key] = relative
-    return allowed
 
 
 def hosted_runner_exclusions(target_dir: str) -> dict[tuple[str, str], str]:
@@ -338,10 +300,6 @@ def command_check(arguments) -> int:
     if arguments.log:
         reasons, log_counts, log_retries = log_events(arguments.log)
 
-    live_suites = set()
-    if arguments.allow_live_engine_gate_skips:
-        live_suites = {suite for suite, _ in live_engine_tests().keys()}
-
     total_executed = 0
     total_passed = 0
     total_excluded = 0
@@ -421,36 +379,10 @@ def command_check(arguments) -> int:
             if result != "Skipped":
                 continue
             suite, method = key
-            # The log is cheap and already parsed; the result bundle always has it, so fall back to that.
-            # (target, suite, method): the log key carries the module, so a same-named suite+method
-            # skipped in a different target cannot be mistaken for this target's reason.
-            reason = reasons.get((target, suite, method)) or bundle_reasons.get(key)
-            if reason is None:
-                problems.append(
-                    f"{target}: {suite}.{method} was skipped and no reason for it is in the log or the "
-                    "result bundle. Pass --log so a skip can be told apart from a test that never ran."
-                )
-                continue
+            # The log key carries the module, so a same-named suite+method skipped in a different target cannot lend its reason.
+            reason = reasons.get((target, suite, method)) or bundle_reasons.get(key) or "no reason recorded"
             print(f"test-verdict:   skipped {suite}.{method}: {reason}")
-            if GATE_MARKER in reason:
-                if not arguments.allow_live_engine_gate_skips:
-                    problems.append(
-                        f"{target}: {suite}.{method} skipped on the live-engine gate. This run was "
-                        "not told to expect that; pass --allow-live-engine-gate-skips only from a "
-                        "job that deliberately runs without a live engine."
-                    )
-                elif suite not in live_suites:
-                    problems.append(
-                        f"{target}: {suite}.{method} skipped on the live-engine gate, but "
-                        f"{suite} is not a live-engine suite. --allow-live-engine-gate-skips covers "
-                        "the live suites only."
-                    )
-            elif not _source_can_skip(declared.get(key), suite):
-                problems.append(
-                    f"{target}: {suite}.{method} was skipped, and {suite} calls no XCTSkip anywhere "
-                    "in its source. A skip nothing in the test asked for came from the harness or "
-                    f"the host, not from the test. Reason recorded: {reason}"
-                )
+            problems.append(f"{target}: {suite}.{method} was skipped ({reason}). No test may skip.")
 
     if log_counts is not None:
         print(
@@ -498,34 +430,6 @@ def command_check(arguments) -> int:
     return 0
 
 
-_SKIP_CAPABILITY: dict[str, bool] = {}
-
-
-def _source_can_skip(relative_path: str | None, suite: str) -> bool:
-    """Whether the file declaring `suite` calls XCTSkip at all."""
-    if not relative_path:
-        return False
-    key = f"{relative_path}:{suite}"
-    if key not in _SKIP_CAPABILITY:
-        text = "\n".join(_lines(os.path.join(REPO_ROOT, relative_path)))
-        _SKIP_CAPABILITY[key] = "XCTSkip" in text
-    return _SKIP_CAPABILITY[key]
-
-
-def live_engine_tests(target_dir: str = "OrbitAppTests") -> dict[tuple[str, str], str]:
-    """Every test in a suite gated on the live-engine switch, as (class, method) -> file."""
-    declared = declared_tests(target_dir)
-    gated_files = set()
-    for path in {value for value in declared.values()}:
-        text = "\n".join(
-            line for line in _lines(os.path.join(REPO_ROOT, path))
-            if not line.lstrip().startswith("//")
-        )
-        if "LiveChromiumEngineHost.isEnabled" in text or 'environment["ORBIT_LIVE_ENGINE"]' in text:
-            gated_files.add(path)
-    return {key: value for key, value in declared.items() if value in gated_files}
-
-
 def command_live(arguments) -> int:
     rows = []
     with open(arguments.ledger, encoding="utf-8") as handle:
@@ -545,13 +449,11 @@ def command_live(arguments) -> int:
                 "log_path": log_path,
             })
 
-    may_skip = may_skip_declarations(arguments.source_dir)
-
     print()
     print(f"live-engine-tests: {arguments.configuration} results")
 
     problems: list[str] = []
-    passed = failed = skipped = log_passed = log_skipped = accepted_skips = 0
+    passed = failed = skipped = log_passed = log_skipped = 0
 
     for row in rows:
         label = row["label"]
@@ -582,41 +484,19 @@ def command_live(arguments) -> int:
         log_passed += row["log_passed"]
         log_skipped += row["log_skipped"]
 
-        row["accepted_skips"] = 0
-        reasons: dict[tuple[str, str, str], str] = {}
-        if os.path.exists(row["log_path"]):
+        if row["log_skipped"] and os.path.exists(row["log_path"]):
             reasons, _, _ = log_events(row["log_path"])
+            for (_module, suite, method), reason in sorted(reasons.items()):
+                problems.append(f"{label}: {suite}.{method} skipped ({reason}). No live test may skip.")
         elif row["log_skipped"]:
             problems.append(
                 f"{label}: {row['log_skipped']} test(s) skipped and its log {row['log_path']} is "
                 "gone, so why they skipped cannot be established."
             )
-        for (_module, suite, method), reason in sorted(reasons.items()):
-            if GATE_MARKER in reason:
-                problems.append(
-                    f"{label}: {suite}.{method} skipped on the live-engine gate ({reason}). The "
-                    "live engine was never switched on for that process -- the patched environment "
-                    "did not reach the test host -- so this run proves nothing about a real browser. "
-                    "That is the exact failure this check exists to catch, and no in-suite "
-                    f"'{MAY_SKIP_MARKER}' declaration excuses it."
-                )
-            elif (suite, method) in may_skip:
-                row["accepted_skips"] += 1
-                accepted_skips += 1
-                print(f"live-engine-tests:     declared skip           {suite}.{method}: {reason}")
-            else:
-                problems.append(
-                    f"{label}: {suite}.{method} skipped without the engine being off and without "
-                    f"declaring itself: {reason}. A live test that legitimately cannot run under a "
-                    f"live engine says so with a whole-line '// {MAY_SKIP_MARKER} {method}' comment "
-                    "in its own source, next to the reason; anything else is coverage going missing "
-                    "quietly."
-                )
 
     print(f"live-engine-tests:   totals over {len(rows)} test process(es)")
     print(f"live-engine-tests:     result bundles          {passed} passed, {failed} failed, {skipped} skipped")
     print(f"live-engine-tests:     logs                    {log_passed} passed, {log_skipped} skipped")
-    print(f"live-engine-tests:     declared skips accepted {accepted_skips}")
     print(f"live-engine-tests:     expected to execute     {arguments.expected}")
 
     if len(rows) != arguments.expected_passes:
@@ -636,17 +516,15 @@ def command_live(arguments) -> int:
             problems.append(f"{row['label']}: its result bundle says '{row['result']}'.")
         # Attributed to the pass, so a process that died part-way names the suites that were in it
         # rather than showing up only as a total that does not add up.
-        if "passed" in row and row["passed"] + row["accepted_skips"] != row["expected"]:
+        if "passed" in row and row["passed"] != row["expected"]:
             problems.append(
-                f"{row['label']}: {row['passed']} live test(s) executed there and "
-                f"{row['accepted_skips']} declared skip(s) were accepted, against {row['expected']} "
-                "expected. That pass did not run everything it was given -- if its host died "
+                f"{row['label']}: {row['passed']} live test(s) executed and passed there, against "
+                f"{row['expected']} expected. That pass did not run everything it was given -- if its host died "
                 "part-way, the log ends at the test that killed it."
             )
-    if passed + accepted_skips != arguments.expected:
+    if passed != arguments.expected:
         problems.append(
-            f"{passed} live test(s) executed and {accepted_skips} declared skip(s) were accepted, "
-            f"against {arguments.expected} expected. Either a suite did not run, or tests were added "
+            f"{passed} live test(s) executed and passed, against {arguments.expected} expected. Either a suite did not run, or tests were added "
             "or removed without this run seeing them; the expected number is counted from the "
             "sources, so re-run --list to see what it found."
         )
@@ -671,8 +549,6 @@ def command_live(arguments) -> int:
         f"live-engine-tests:   verdict                 {passed}/{arguments.expected} live tests "
         f"executed and passed, over {len(rows)} test process(es)"
     )
-    if accepted_skips:
-        verdict += f", with {accepted_skips} declared skip(s)"
     print(verdict)
     return 0
 
@@ -685,7 +561,6 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--result-bundle", required=True)
     check.add_argument("--log")
     check.add_argument("--target", action="append", default=[], required=True)
-    check.add_argument("--allow-live-engine-gate-skips", action="store_true")
     check.add_argument("--allow-hosted-runner-exclusions", action="store_true")
     check.add_argument("--max-retries-allowed", type=int, default=None)
     check.set_defaults(handler=command_check)

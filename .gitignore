@@ -1,8 +1,6 @@
 # Local checkouts. ThirdParty/extension-corpus stays on disk for tests and is not committed.
 ThirdParty/*
 
-Chromium/Generated/
-
 # Xcode
 build/
 DerivedData/

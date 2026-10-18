@@ -1,63 +1,53 @@
-//  Runtime process-model invariants, proven against synthetic process trees — no engine required.
-//  The last test applies the same evaluator to a real running Orbit and skips loudly until the engine can spawn children.
+//  Process-model invariants for WebKit: web content runs in sandboxed system XPC services, and the browser
+//  process carries no sandbox or hardened-runtime exception. The evaluator is proven against synthetic trees,
+//  then applied to Orbit's real entitlements file, a live WKWebView's services, and a running Orbit if one exists.
 
+import AppKit
+import WebKit
 import XCTest
 
 final class SandboxInvariantTests: XCTestCase {
 
     // MARK: - Synthetic process trees
 
-    private func browser(_ arguments: [String] = []) -> ProbedProcess {
+    private static let serviceDirectory =
+        "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices"
+
+    private func browser(entitlements: Set<String>? = ["com.apple.security.cs.disable-library-validation"]) -> ProbedProcess {
         ProbedProcess(
             pid: 100,
             parentPID: 1,
             executablePath: "/Applications/Orbit.app/Contents/MacOS/Orbit",
-            arguments: ["/Applications/Orbit.app/Contents/MacOS/Orbit"] + arguments,
-            isSandboxed: false
+            isSandboxed: false,
+            grantedEntitlements: entitlements
         )
     }
 
-    /// Shaped on argv measured from shipping Chromium browsers on this machine, including the --seatbelt-client descriptor the browser appends once it has compiled a profile.
-    private func child(
-        pid: pid_t,
-        type: String,
-        bundle: String,
-        sandboxed: Bool = true,
-        seatbeltClient: Bool = true,
-        extra: [String] = []
-    ) -> ProbedProcess {
-        let path = "/Applications/Orbit.app/Contents/Frameworks/Orbit Framework.framework/Helpers/"
-            + "\(bundle).app/Contents/MacOS/\(bundle)"
-        var arguments = [path, "--type=\(type)"] + extra
-        if seatbeltClient { arguments.append("--seatbelt-client=7") }
-        return ProbedProcess(
+    private func service(pid: pid_t, name: String, sandboxed: Bool? = true) -> ProbedProcess {
+        ProbedProcess(
             pid: pid,
-            parentPID: 100,
-            executablePath: path,
-            arguments: arguments,
+            parentPID: 1,
+            executablePath: "\(Self.serviceDirectory)/\(name).xpc/Contents/MacOS/\(name)",
             isSandboxed: sandboxed
         )
     }
 
-    private func healthyChildren() -> [ProbedProcess] {
+    private func healthyServices() -> [ProbedProcess] {
         [
-            child(pid: 101, type: "renderer", bundle: "Orbit Helper (Renderer)"),
-            child(pid: 102, type: "gpu-process", bundle: "Orbit Helper (GPU)"),
-            child(pid: 103, type: "utility", bundle: "Orbit Helper",
-                  extra: ["--utility-sub-type=network.mojom.NetworkService", "--service-sandbox-type=network"]),
-            child(pid: 104, type: "utility", bundle: "Orbit Helper",
-                  extra: ["--utility-sub-type=storage.mojom.StorageService", "--service-sandbox-type=service"]),
+            service(pid: 101, name: "com.apple.WebKit.WebContent"),
+            service(pid: 102, name: "com.apple.WebKit.GPU"),
+            service(pid: 103, name: "com.apple.WebKit.Networking"),
         ]
     }
 
     private func evaluate(
         browser: ProbedProcess? = nil,
-        children: [ProbedProcess],
+        services: [ProbedProcess],
         renderedAPage: Bool = true
     ) -> [ProcessModelViolation] {
         ProcessModelInvariant.violations(
             browser: browser ?? self.browser(),
-            children: children,
+            services: services,
             renderedAPage: renderedAPage
         )
     }
@@ -65,219 +55,292 @@ final class SandboxInvariantTests: XCTestCase {
     // MARK: - The healthy case
 
     func testACorrectlyConfinedProcessTreeProducesNoViolations() {
-        let violations = evaluate(children: healthyChildren())
+        let violations = evaluate(services: healthyServices())
         XCTAssertEqual(
             violations, [],
-            "a process tree matching what a correctly configured Chromium browser really looks like "
-            + "was reported as broken, so these invariants would fire on a healthy build and be "
-            + "deleted the first time they did: \(violations.map(\.description).joined(separator: "\n"))"
+            "a process tree matching a correctly configured WebKit browser was reported as broken, so "
+            + "these invariants would fire on a healthy build and be deleted the first time they did: "
+            + violations.map(\.description).joined(separator: "\n")
         )
     }
 
-    func testABrowserThatHasNotRenderedAnythingIsNotAccusedOfBeingSingleProcess() {
+    func testABrowserThatHasNotRenderedAnythingIsNotAccusedOfRenderingInProcess() {
         XCTAssertEqual(
-            evaluate(children: [], renderedAPage: false), [],
-            "an idle browser with no children yet was reported as single-process. The renderer and GPU "
-            + "presence invariants are conditional on a page having actually rendered, because before "
-            + "that there is legitimately nothing to see."
+            evaluate(services: [], renderedAPage: false), [],
+            "an idle browser with no WebKit services yet was reported as rendering in process. The "
+            + "WebContent presence invariant is conditional on a page having actually rendered."
         )
     }
 
-    // MARK: - Every silent regression from section 2.3 of the design
+    // MARK: - Every silent regression the evaluator exists to catch
 
-    func testSingleProcessIsCaughtByTheAbsenceOfAnyRendererProcess() {
-        let violations = evaluate(children: [], renderedAPage: true)
+    func testRenderingWithNoWebContentProcessIsCaught() {
+        let violations = evaluate(services: [], renderedAPage: true)
         XCTAssertTrue(
-            violations.contains { $0.invariant.contains("separate renderer process") },
-            "a page rendered with no child processes at all and nothing objected. That is exactly what "
-            + "--single-process looks like from outside, and it is the total loss of the security "
-            + "model: \(violations)"
+            violations.contains { $0.invariant.contains("separate WebContent process") },
+            "a page rendered with no WebContent process anywhere and nothing objected: \(violations)"
         )
     }
 
-    func testInProcessGPUIsCaughtByTheAbsenceOfAGPUProcess() {
-        let children = healthyChildren().filter { $0.role != .gpu }
+    func testAWebContentProcessThatIsTheBrowserItselfDoesNotCount() {
+        let impostor = ProbedProcess(
+            pid: 100,
+            parentPID: 1,
+            executablePath: "\(Self.serviceDirectory)/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent",
+            isSandboxed: true
+        )
         XCTAssertTrue(
-            evaluate(children: children).contains { $0.invariant.contains("GPU work runs in its own sandboxed process") },
-            "a page rendered with no --type=gpu-process anywhere and nothing objected."
+            evaluate(services: [impostor]).contains { $0.invariant.contains("separate WebContent process") },
+            "a WebContent role sharing the browser's own pid was accepted as a separate process."
         )
     }
 
-    func testAnUnconfinedRendererIsCaught() {
-        var children = healthyChildren()
-        children[0] = child(pid: 101, type: "renderer", bundle: "Orbit Helper (Renderer)", sandboxed: false)
-        let violations = evaluate(children: children)
+    func testAnUnconfinedWebContentProcessIsCaught() {
+        var services = healthyServices()
+        services[0] = service(pid: 101, name: "com.apple.WebKit.WebContent", sandboxed: false)
         XCTAssertTrue(
-            violations.contains { $0.invariant.contains("inside a Seatbelt sandbox") },
-            "a renderer reporting sandbox_check == 0 was accepted. That is the single most valuable "
-            + "assertion in this file: a renderer executes attacker-controlled JavaScript."
+            evaluate(services: services).contains { $0.invariant.contains("inside a sandbox") },
+            "a WebContent process reporting sandbox_check == 0 was accepted. That is the most valuable "
+            + "assertion in this file: it executes attacker-controlled JavaScript."
         )
     }
 
     func testAnUnconfinedGPUProcessIsCaught() {
-        var children = healthyChildren()
-        children[1] = child(pid: 102, type: "gpu-process", bundle: "Orbit Helper (GPU)", sandboxed: false)
+        var services = healthyServices()
+        services[1] = service(pid: 102, name: "com.apple.WebKit.GPU", sandboxed: false)
+        XCTAssertTrue(evaluate(services: services).contains { $0.invariant.contains("inside a sandbox") })
+    }
+
+    func testAnUnconfinedNetworkingProcessIsCaught() {
+        var services = healthyServices()
+        services[2] = service(pid: 103, name: "com.apple.WebKit.Networking", sandboxed: false)
         XCTAssertTrue(
-            evaluate(children: children).contains { $0.invariant.contains("inside a Seatbelt sandbox") },
-            "--disable-gpu-sandbox leaves exactly this trace and was not caught."
+            evaluate(services: services).contains { $0.invariant.contains("inside a sandbox") },
+            "the networking process, which handles every byte an attacker sends, was accepted unconfined."
         )
     }
 
-    func testAnUnconfinedUtilityProcessIsCaught() {
-        var children = healthyChildren()
-        children[2] = child(pid: 103, type: "utility", bundle: "Orbit Helper", sandboxed: false,
-                            extra: ["--utility-sub-type=network.mojom.NetworkService"])
-        XCTAssertTrue(
-            evaluate(children: children).contains { $0.invariant.contains("inside a Seatbelt sandbox") },
-            "the network service, which handles every byte an attacker sends, was accepted unconfined."
-        )
-    }
-
-    func testAServiceAnnotatedKNoSandboxIsCaught() {
-        var children = healthyChildren()
-        children[3] = child(pid: 104, type: "utility", bundle: "Orbit Helper",
-                            extra: ["--utility-sub-type=orbit.mojom.SomeService", "--service-sandbox-type=none"])
-        let violations = evaluate(children: children)
-        XCTAssertTrue(
-            violations.contains { $0.invariant.contains("annotated kNoSandbox") },
-            "a service running with --service-sandbox-type=none was accepted. That switch is the only "
-            + "outward trace of a kNoSandbox annotation written in a .mojom file."
-        )
-    }
-
-    func testTheUpstreamUnsandboxedServiceExceptionIsNamedAndNarrow() {
-        var children = healthyChildren()
-        children.append(child(pid: 105, type: "utility", bundle: "Orbit Helper", sandboxed: false,
-                              seatbeltClient: false,
-                              extra: ["--utility-sub-type=video_capture.mojom.VideoCaptureService",
-                                      "--service-sandbox-type=none"]))
-        XCTAssertEqual(
-            evaluate(children: children), [],
-            "the one service upstream Chromium itself runs unconfined on macOS was reported as a "
-            + "violation. A guard that fires on a correctly configured build is a guard that gets "
-            + "deleted, and this exception is named with its reason rather than inferred."
-        )
-
-        var impostor = healthyChildren()
-        impostor.append(child(pid: 106, type: "utility", bundle: "Orbit Helper", sandboxed: false,
-                              seatbeltClient: false,
-                              extra: ["--utility-sub-type=orbit.mojom.FastPath",
-                                      "--service-sandbox-type=none"]))
+    func testAnUnreadableSandboxStateIsNotTreatedAsConfined() {
+        var services = healthyServices()
+        services[0] = service(pid: 101, name: "com.apple.WebKit.WebContent", sandboxed: nil)
         XCTAssertFalse(
-            evaluate(children: impostor).isEmpty,
-            "the exception is not narrow: another service also escaped it. Only the services named "
-            + "in ProcessModelInvariant.upstreamUnsandboxedServices may run unconfined."
-        )
-        XCTAssertEqual(
-            ProcessModelInvariant.upstreamUnsandboxedServices.count, 1,
-            "the list of services allowed to run unconfined has grown. Each entry is a process "
-            + "outside the sandbox for the life of the product; adding one is a security decision "
-            + "that needs the reason written next to it, not a test edit."
+            evaluate(services: services).isEmpty,
+            "a service whose sandbox state could not be read passed. A broken detector must fail, not pass."
         )
     }
 
-    func testAConfinedChildThatWasNeverHandedAProfileIsCaught() {
-        var children = healthyChildren()
-        children[0] = child(pid: 101, type: "renderer", bundle: "Orbit Helper (Renderer)",
-                            sandboxed: true, seatbeltClient: false)
-        XCTAssertTrue(
-            evaluate(children: children).contains { $0.invariant.contains("hands a Seatbelt profile") },
-            "the second, independent reading of confinement did not fire. Measured on this machine, "
-            + "every sandboxed Chromium child of seven shipping apps carried --seatbelt-client and "
-            + "every unsandboxed one did not, so a child missing it while claiming to be confined is "
-            + "a contradiction worth failing on."
-        )
+    func testAnUnknownWebKitServiceIsHeldToTheSameStandard() {
+        var services = healthyServices()
+        services.append(service(pid: 104, name: "com.apple.WebKit.Plugin.64", sandboxed: false))
+        XCTAssertFalse(evaluate(services: services).isEmpty)
     }
 
-    func testEverySandboxDisablingSwitchIsCaughtOnTheBrowserProcess() {
-        for dangerous in SandboxDisablingSwitch.allCases {
+    func testEveryBrowserEntitlementExceptionIsCaught() {
+        for key in ProcessModelInvariant.forbiddenBrowserEntitlements.keys.sorted() {
             let violations = evaluate(
-                browser: browser([dangerous.rawValue]),
-                children: healthyChildren()
+                browser: browser(entitlements: ["com.apple.security.cs.disable-library-validation", key]),
+                services: healthyServices()
             )
             XCTAssertTrue(
-                violations.contains { $0.offender.contains(dangerous.rawValue) },
-                "\(dangerous.rawValue) on the browser command line was not caught, and it is silent: "
-                + dangerous.consequence
+                violations.contains { $0.offender.contains(key) },
+                "\(key) on the browser process was not caught, and it is silent."
             )
         }
     }
 
-    func testASwitchWithAValueIsCaughtToo() {
-        let violations = evaluate(
-            browser: browser(["--remote-debugging-port=9222"]),
-            children: healthyChildren()
-        )
+    func testATemporarySandboxExceptionOnTheBrowserIsCaught() {
+        let key = ProcessModelInvariant.temporaryExceptionPrefix + "files.home-relative-path.read-write"
         XCTAssertTrue(
-            violations.contains { $0.offender.contains("--remote-debugging-port") },
-            "a switch written with =value escaped the matcher, which would let any of them through "
-            + "by adding an argument."
+            evaluate(browser: browser(entitlements: [key]), services: healthyServices())
+                .contains { $0.offender.contains(key) }
         )
     }
 
-    func testASwitchOnAChildIsCaughtEvenWhenTheBrowserIsClean() {
-        var children = healthyChildren()
-        children[0] = child(pid: 101, type: "renderer", bundle: "Orbit Helper (Renderer)",
-                            extra: ["--disable-web-security"])
-        XCTAssertTrue(
-            evaluate(children: children).contains { $0.offender.contains("--disable-web-security") },
-            "a switch reaching only the renderer was missed. Children do not always inherit the "
-            + "browser's command line: some switches are appended per launch."
+    func testABrowserWithAnUnreadableSignatureIsNotWaved() {
+        XCTAssertFalse(
+            evaluate(browser: browser(entitlements: nil), services: healthyServices()).isEmpty,
+            "an unreadable signature let the entitlement check pass without checking anything."
         )
     }
 
     func testTheCensusNamesEveryProcessSoAFailureCanBeActedOn() {
-        let census = ProcessModelInvariant.census(browser: browser(), children: healthyChildren())
+        let census = ProcessModelInvariant.census(browser: browser(), services: healthyServices())
         XCTAssertTrue(census.contains("pid 101"), census)
-        XCTAssertTrue(census.contains("NOT SANDBOXED") == false, census)
+        XCTAssertFalse(census.contains("NOT SANDBOXED"), census)
         XCTAssertTrue(
-            ProcessModelInvariant.census(browser: browser(), children: []).contains("no child processes at all"),
-            "an empty tree must say so in words: that is the single-process signature and the reader "
-            + "needs to see it, not infer it from a blank list."
+            ProcessModelInvariant.census(browser: browser(), services: []).contains("no WebKit service processes"),
+            "an empty tree must say so in words rather than print a blank list."
         )
     }
 
-    // MARK: - The same invariants against a real running Orbit
+    // MARK: - The real browser entitlements
 
-    /// Skips while Orbit has no engine. It must never pass by finding nothing: a guard that is green because there was nothing to check is worse than no guard.
-    func testARunningOrbitBrowserSatisfiesEveryProcessInvariant() throws {
+    func testOrbitsSignedEntitlementsFileCarriesNoException() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Orbit/Resources/Orbit.entitlements")
+        let plist = try PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any]
+        let keys = Set(try XCTUnwrap(plist, "Orbit.entitlements is not a property list dictionary").keys)
+
+        let violations = evaluate(browser: browser(entitlements: keys), services: [], renderedAPage: false)
+        XCTAssertEqual(
+            violations, [],
+            "Orbit.entitlements grants an exception the WebKit process model does not need: "
+            + violations.map(\.description).joined(separator: "\n")
+        )
+    }
+
+    // MARK: - A live WKWebView
+
+    /// Impossible to verify from outside WebKit: that the XPC services' own sandbox profiles are what Apple ships.
+    /// What is verified is that the processes actually serving a live web view report as sandboxed to the kernel.
+    func testALiveWebViewsServiceProcessesAreSandboxed() async throws {
         XCTAssertTrue(
             ProcessSandboxProbe.isAvailable,
-            "sandbox_check is unreachable, so nothing below could distinguish a confined helper from "
-            + "an unconfined one."
+            "sandbox_check is unreachable, so nothing below could tell a confined service from an unconfined one."
         )
 
-        let override = ProcessInfo.processInfo.environment["ORBIT_SANDBOX_INVARIANT_PID"].flatMap(pid_t.init)
-        let browsers = override.map { [ProcessSandboxProbe.probe(pid: $0)] }
-            ?? ProcessSandboxProbe.runningOrbitBrowsers()
+        let webView = await loadedProbeWebView()
 
-        let candidates = browsers.map { browser in
-            (browser: browser, children: ProcessSandboxProbe.descendants(of: browser.pid))
-        }
-        guard let subject = candidates.first(where: { !$0.children.filter({ $0.role != .browser }).isEmpty }) else {
-            throw XCTSkip(
-                "PENDING ENGINE. No running Orbit browser process with engine child processes was found"
-                + " (\(browsers.count) Orbit process(es) seen), so the runtime half of the sandbox"
-                + " invariants is unverified on this run. This is not a pass. It becomes one, with no"
-                + " code change here, as soon as the direct-Chromium engine spawns Helper, Helper"
-                + " (Renderer) and Helper (GPU) processes: launch Orbit, load a page, and re-run, or"
-                + " set ORBIT_SANDBOX_INVARIANT_PID to the browser process's pid from a harness. Until"
-                + " then the invariants themselves are held by the synthetic trees above and by"
-                + " Scripts/security-guards."
-            )
-        }
+        let selector = NSSelectorFromString("_webProcessIdentifier")
+        XCTAssertTrue(
+            webView.responds(to: selector),
+            "WKWebView no longer exposes _webProcessIdentifier, so the WebContent process of this web view cannot be identified directly."
+        )
+        let webContentPID = try XCTUnwrap(
+            (webView.value(forKey: "_webProcessIdentifier") as? NSNumber).map { pid_t($0.int32Value) },
+            "WKWebView did not report its WebContent process identifier"
+        )
+        XCTAssertGreaterThan(webContentPID, 0, "no WebContent process is serving a web view that finished loading")
 
-        // Whether a page really rendered cannot be observed from outside the process, so the
-        // renderer and GPU presence checks are asserted only when a harness attests to it.
+        let owner = getpid()
+        let attributed = try XCTUnwrap(
+            ProcessSandboxProbe.webKitServices(responsibleTo: owner),
+            "service attribution is unavailable; see testAttributionOfWebKitServicesIsReachable"
+        )
+        var services = attributed
+        if !services.contains(where: { $0.pid == webContentPID }) {
+            services.append(ProcessSandboxProbe.probe(pid: webContentPID))
+        }
+        withExtendedLifetime(webView) {}
+
+        // Networking and GPU are checked when attribution finds them: WebKit starts the GPU process on demand, so its absence
+        // for a static page proves nothing, while any that does exist must be confined. The test host stands in for the browser;
+        // the entitlement audit applies to Orbit's own signature, which the tests above and below cover.
+        let host = ProcessSandboxProbe.current()
+        let hostWithoutAudit = ProbedProcess(
+            pid: host.pid,
+            parentPID: host.parentPID,
+            executablePath: host.executablePath,
+            isSandboxed: host.isSandboxed,
+            grantedEntitlements: []
+        )
         let violations = ProcessModelInvariant.violations(
-            browser: subject.browser,
-            children: subject.children,
-            renderedAPage: ProcessInfo.processInfo.environment["ORBIT_SANDBOX_INVARIANT_RENDERED"] == "1"
+            browser: hostWithoutAudit,
+            services: services,
+            renderedAPage: true
         )
         XCTAssertEqual(
             violations, [],
             violations.map(\.description).joined(separator: "\n\n")
-            + "\n\n" + ProcessModelInvariant.census(browser: subject.browser, children: subject.children)
+            + "\n\n" + ProcessModelInvariant.census(browser: hostWithoutAudit, services: services)
         )
+        XCTAssertTrue(
+            services.contains { $0.role == .webContent && $0.isSandboxed == true },
+            "no sandboxed WebContent process was observed for a loaded web view"
+        )
+    }
+
+    private func loadedProbeWebView() async -> WKWebView {
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 400, height: 300), configuration: WKWebViewConfiguration())
+        let loaded = expectation(description: "the probe page finished loading")
+        let delegate = LoadWaiter(loaded)
+        webView.navigationDelegate = delegate
+        webView.loadHTMLString("<html><body>sandbox probe</body></html>", baseURL: nil)
+        await fulfillment(of: [loaded], timeout: 60)
+        XCTAssertNil(delegate.failure, "the probe page failed to load: \(String(describing: delegate.failure))")
+        withExtendedLifetime(delegate) {}
+        return webView
+    }
+
+    // MARK: - A running browser
+
+    /// The test process is itself a running browser: it starts a real web view, so WebKit launches real services responsible to it.
+    /// A running Orbit, or the pid in ORBIT_SANDBOX_INVARIANT_PID, is checked as well when there is one.
+    func testARunningBrowserSatisfiesTheProcessInvariants() async throws {
+        XCTAssertTrue(ProcessSandboxProbe.isAvailable)
+
+        let webView = await loadedProbeWebView()
+        let webContentPID = try XCTUnwrap(
+            (webView.value(forKey: "_webProcessIdentifier") as? NSNumber).map { pid_t($0.int32Value) },
+            "WKWebView did not report its WebContent process identifier"
+        )
+        XCTAssertGreaterThan(webContentPID, 0, "no WebContent process is serving a web view that finished loading")
+
+        let host = ProcessSandboxProbe.current()
+        let ownBrowser = ProbedProcess(
+            pid: host.pid,
+            parentPID: host.parentPID,
+            executablePath: host.executablePath,
+            isSandboxed: host.isSandboxed,
+            grantedEntitlements: []
+        )
+        var ownServices = try XCTUnwrap(
+            ProcessSandboxProbe.webKitServices(responsibleTo: ownBrowser.pid),
+            "service attribution is unavailable; see testAttributionOfWebKitServicesIsReachable"
+        )
+        if !ownServices.contains(where: { $0.pid == webContentPID }) {
+            ownServices.append(ProcessSandboxProbe.probe(pid: webContentPID))
+        }
+        assertInvariants(browser: ownBrowser, services: ownServices, renderedAPage: true)
+
+        let override = ProcessInfo.processInfo.environment["ORBIT_SANDBOX_INVARIANT_PID"].flatMap(pid_t.init)
+        let others = override.map { [ProcessSandboxProbe.probe(pid: $0)] } ?? ProcessSandboxProbe.runningOrbitBrowsers()
+        for subject in others where subject.pid != ownBrowser.pid {
+            let services = try XCTUnwrap(
+                ProcessSandboxProbe.webKitServices(responsibleTo: subject.pid),
+                "service attribution is unavailable; see testAttributionOfWebKitServicesIsReachable"
+            )
+            // Whether a page really rendered cannot be observed from outside the process, so WebContent presence is asserted only when a harness attests to it.
+            assertInvariants(
+                browser: subject,
+                services: services,
+                renderedAPage: ProcessInfo.processInfo.environment["ORBIT_SANDBOX_INVARIANT_RENDERED"] == "1"
+            )
+        }
+        withExtendedLifetime(webView) {}
+    }
+
+    private func assertInvariants(browser: ProbedProcess, services: [ProbedProcess], renderedAPage: Bool) {
+        let violations = ProcessModelInvariant.violations(browser: browser, services: services, renderedAPage: renderedAPage)
+        XCTAssertEqual(
+            violations, [],
+            violations.map(\.description).joined(separator: "\n\n")
+            + "\n\n" + ProcessModelInvariant.census(browser: browser, services: services)
+        )
+    }
+}
+
+private final class LoadWaiter: NSObject, WKNavigationDelegate {
+    private let expectation: XCTestExpectation
+    private(set) var failure: Error?
+
+    init(_ expectation: XCTestExpectation) {
+        self.expectation = expectation
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        expectation.fulfill()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        failure = error
+        expectation.fulfill()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        failure = error
+        expectation.fulfill()
     }
 }

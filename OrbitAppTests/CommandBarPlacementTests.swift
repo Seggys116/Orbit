@@ -356,7 +356,7 @@ final class CommandBarPlacementTests: XCTestCase {
             return XCTFail("The real window published no content region. Published: \(anchors.keys.map(String.init(describing:)).sorted()).")
         }
 
-        let expectedLeading = Self.realSidebarWidth + OrbitMetrics.sidebarResizeHandleWidth + OrbitMetrics.cardInset
+        let expectedLeading = Self.realSidebarWidth + OrbitMetrics.sidebarResizeHandleWidth + OrbitMetrics.contentCardLeadingSeam
         XCTAssertEqual(
             content.minX, expectedLeading, accuracy: 2,
             "The content region starts at \(content.minX) — expected \(expectedLeading), i.e. clear of the \(Self.realSidebarWidth)pt sidebar. Anything near 0 means the Command Bar is centring over the sidebar again."
@@ -369,9 +369,9 @@ final class CommandBarPlacementTests: XCTestCase {
 
         XCTAssertEqual(
             content.midX - Self.realWindowSize.width / 2,
-            (Self.realSidebarWidth + OrbitMetrics.sidebarResizeHandleWidth) / 2,
+            Self.realSidebarWidth / 2,
             accuracy: 3,
-            "Centring on the content region should offset the bar from the window's centre by half the sidebar column."
+            "Centring on the content region should offset the bar from the window's centre by half the sidebar. The handle sits inside the card inset, so it does not shift the region further."
         )
     }
 

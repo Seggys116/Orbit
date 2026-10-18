@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Launches the real app bundles and decides whether they survived. See Scripts/app-launch-smoke.
 
-Other suites drive an engine inside an XCTest host, which cannot catch a crash on the
+Other suites drive WebKit inside an XCTest host, which cannot catch a crash on the
 AppKit/window-creation path. Stages/checks are read back from Orbit/Core/AppSmokeProbe.swift,
 so a run cannot silently do less than the app claims.
 """
@@ -50,11 +50,8 @@ a { color: #ffffff; font-size: 20px; padding: 0 24px; }
 # A line matching any of these anywhere in a launch's output fails that launch.
 # Several real defects announced themselves here while every test stayed green.
 FATAL_PATTERNS = [
-    ("FATAL:", "a Chromium FATAL log line"),
-    ("Check failed", "a failed CHECK"),
-    ("NOTREACHED", "a NOTREACHED"),
-    ("Received signal", "Chromium's own crash handler"),
-    ("DanglingPtr", "a dangling raw_ptr"),
+    ("Fatal error:", "a Swift runtime trap"),
+    ("Terminating app due to uncaught exception", "an uncaught Objective-C exception"),
 ]
 
 DIAGNOSTIC_DIRECTORIES = [
@@ -77,9 +74,9 @@ class Scheme:
         self.executable = executable
         self.bundle_id = bundle_id
 
-    # Every process name a crash report from one of these launches can carry.
+    # The process name a crash report from one of these launches carries.
     def crash_report_prefixes(self) -> list[str]:
-        return [self.executable + "-", "Orbit Helper"]
+        return [self.executable + "-"]
 
 
 SCHEMES = {
@@ -769,8 +766,7 @@ def build_parser() -> argparse.ArgumentParser:
                           "intermittent, so one launch proves nothing)")
     run.add_argument("--derived-data", default=os.path.join(REPO_ROOT, "DerivedData"))
     run.add_argument("--destination", default="platform=macOS,arch=arm64")
-    # Release is the only configuration that links the shipping engine, and a
-    # release-only fault there is invisible to every Debug run.
+    # A release-only fault (optimisation, hardened runtime) is invisible to every Debug run.
     run.add_argument("--configuration", default="Debug", choices=["Debug", "Release"])
     run.add_argument("--results-dir")
     run.add_argument("--skip-build", action="store_true")

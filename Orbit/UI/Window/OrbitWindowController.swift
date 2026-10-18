@@ -48,6 +48,15 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
         openControllers.first { $0.session.environment === environment }
     }
 
+    // The key (else main, else first) window among those showing this environment, since standard windows share one.
+    static func window(for environment: AppEnvironment) -> NSWindow? {
+        let windows = openControllers.filter { $0.session.environment === environment }.compactMap(\.window)
+        for candidate in [NSApp.keyWindow, NSApp.mainWindow].compactMap({ $0 }) where windows.contains(where: { $0 === candidate }) {
+            return candidate
+        }
+        return windows.first
+    }
+
     // false whenever neither keyWindow nor mainWindow exists (headless test host, or the app isn't frontmost) — that is not "some unrelated surface is on screen".
     static var keyWindowIsUnrelatedSurface: Bool {
         guard let keyWindow = NSApp.keyWindow ?? NSApp.mainWindow else { return false }
@@ -155,6 +164,12 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
         // shared/standard environment, which can back multiple windows, needs registering here.
         session.environment.startEngineIfNeeded()
         installContentView(window: window)
+        // After the engine start above: the engine is not there to be told before it.
+        webKitEngine?.noteWindowOpened(environment: session.environment)
+    }
+
+    private var webKitEngine: WebKitEngine? {
+        session.environment.engine as? WebKitEngine
     }
 
     // Hidden, not removed: Cmd+W and Mission Control's window menu still need the real
@@ -194,10 +209,25 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
+        // A hosting view left in a closed window keeps running SwiftUI layout.
+        (notification.object as? NSWindow)?.contentView = nil
         OrbitWindowController.openControllers.removeAll { $0 === self }
         // WindowSession.dispose() handles incognito/torn-off's own windowRemoved push; the shared
         // environment is never unregistered here, or its still-registered tabs would be orphaned.
+        let environment = session.environment
+        let engine = webKitEngine
         session.dispose()
+        engine?.noteWindowClosed(environment: environment)
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        webKitEngine?.noteWindowFocused(environment: session.environment)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        let orbitWindows = OrbitWindowController.openControllers.compactMap(\.window)
+        guard !OrbitWindowController.isAttached(NSApp.keyWindow, toOneOf: orbitWindows) else { return }
+        webKitEngine?.noteWindowFocused(environment: nil)
     }
 
     // A popover/sheet child window taking key status is not Orbit losing focus. Extension

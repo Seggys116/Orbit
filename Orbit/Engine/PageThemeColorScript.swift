@@ -48,31 +48,79 @@ public enum PageThemeColorScript {
         "[" + bandSampleColumns.map { String($0) }.joined(separator: ", ") + "]"
     }
 
-    /// `color` is always what the canvas colour serialiser produced
-    /// (`"#rrggbb"` or `"rgba(r, g, b, a)"`). Mutates nothing: no element
-    /// inserted, no style changed, canvas never attached to the document.
+    /// `color` is `"#rrggbb"` or `"rgba(r, g, b, a)"`. WebKit's computed style
+    /// is `rgb()`, so the script rewrites that (and `color(srgb ...)`) into
+    /// those two forms before posting; the decoder does not accept `rgb()`.
+    /// Mutates nothing: no element inserted, no style changed, canvas never
+    /// attached to the document.
     public static let resolverSource: String = #"""
       var __orbitColorContext;
+      // WebKit's getComputedStyle serialises as rgb()/rgba(), and a 2d context is
+      // sometimes unavailable at document start. The host decoder accepts only
+      // #rrggbb and rgba(); posting the raw computed form is decoded as "no
+      // colour" and the address bar stays the neutral gray. Rewrite the forms
+      // WebKit actually emits before anything asks the canvas.
+      function __orbitCanonicalize(serialized) {
+        if (typeof serialized !== 'string') { return null; }
+        var text = serialized.trim();
+        var hex = text.match(/^#([0-9a-f]{6})$/i);
+        if (hex) { return '#' + hex[1].toLowerCase(); }
+        var comma = text.match(/^rgba?\(\s*([\d.]+%?)\s*,\s*([\d.]+%?)\s*,\s*([\d.]+%?)\s*(?:,\s*([\d.]+%?)\s*)?\)$/i);
+        var space = text.match(/^rgba?\(\s*([\d.]+%?)\s+([\d.]+%?)\s+([\d.]+%?)\s*(?:\/\s*([\d.]+%?)\s*)?\)$/i);
+        var match = comma || space;
+        if (!match) {
+          var srgb = text.match(/^color\(\s*srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\s*\)$/i);
+          if (!srgb) { return null; }
+          match = [null, Number(srgb[1]) * 255, Number(srgb[2]) * 255, Number(srgb[3]) * 255, srgb[4]];
+        }
+        function __orbitChannel(text) {
+          var raw = String(text).trim();
+          if (raw.charAt(raw.length - 1) === '%') { return parseFloat(raw) / 100 * 255; }
+          return Number(raw);
+        }
+        function __orbitAlpha(text) {
+          if (text === undefined) { return 1; }
+          var raw = String(text).trim();
+          if (raw.charAt(raw.length - 1) === '%') { return parseFloat(raw) / 100; }
+          return Number(raw);
+        }
+        var red = __orbitChannel(match[1]);
+        var green = __orbitChannel(match[2]);
+        var blue = __orbitChannel(match[3]);
+        var alpha = __orbitAlpha(match[4]);
+        if (!(alpha >= 0) || !(red >= 0) || !(green >= 0) || !(blue >= 0)) { return null; }
+        if (alpha >= 1) {
+          return '#' + __orbitHexComponent(red) + __orbitHexComponent(green) + __orbitHexComponent(blue);
+        }
+        return 'rgba(' + Math.round(red) + ', ' + Math.round(green) + ', ' + Math.round(blue) + ', ' + alpha + ')';
+      }
+
       function __orbitNormalizeColor(value) {
         if (typeof value !== 'string') { return null; }
         var trimmed = value.trim();
         if (!trimmed) { return null; }
+        var direct = __orbitCanonicalize(trimmed);
+        if (direct) { return direct; }
         try {
-          if (__orbitColorContext === undefined) {
+          // A failed getContext must not be cached: the first read often runs
+          // before a 2d context exists, and a stored null would drop every
+          // later theme-color and background for the life of the document.
+          if (!__orbitColorContext) {
             var canvas = document.createElement('canvas');
             canvas.width = 1;
             canvas.height = 1;
-            __orbitColorContext = canvas.getContext('2d') || null;
+            var created = canvas.getContext('2d');
+            if (!created) { return null; }
+            __orbitColorContext = created;
           }
           var ctx = __orbitColorContext;
-          if (!ctx) { return null; }
           ctx.fillStyle = '#000000';
           ctx.fillStyle = trimmed;
           var first = ctx.fillStyle;
           ctx.fillStyle = '#ffffff';
           ctx.fillStyle = trimmed;
           if (ctx.fillStyle !== first) { return null; }
-          return first;
+          return __orbitCanonicalize(first);
         } catch (e) {
           return null;
         }
@@ -130,7 +178,26 @@ public enum PageThemeColorScript {
         return (rounded < 16 ? '0' : '') + rounded.toString(16);
       }
 
-      // Returns null ("unreadable") for a background image/gradient, not "transparent".
+      // A CSS gradient is a real colour. Treating it as unreadable dropped the
+      // bar back to the document's white or black, which reads as light/dark mode.
+      function __orbitGradientColor(image) {
+        if (!image || image === 'none' || image.indexOf('gradient') === -1) { return null; }
+        var hex = image.match(/#([0-9a-f]{3,8})/i);
+        if (hex) {
+          var normalized = __orbitNormalizeColor(hex[0].length === 4
+            ? '#' + hex[1][0] + hex[1][0] + hex[1][1] + hex[1][1] + hex[1][2] + hex[1][2]
+            : hex[0]);
+          if (normalized && __orbitOpaqueEnough(normalized)) { return normalized; }
+        }
+        var rgb = image.match(/rgba?\([^)]+\)/i);
+        if (!rgb) { return null; }
+        var normalizedRGB = __orbitNormalizeColor(rgb[0]);
+        if (normalizedRGB && __orbitOpaqueEnough(normalizedRGB)) { return normalizedRGB; }
+        return null;
+      }
+
+      // Returns null ("unreadable") for a background image, not "transparent".
+      // A gradient contributes its first opaque stop instead.
       function __orbitPaintedColorAt(x, y) {
         var stack;
         try { stack = document.elementsFromPoint(x, y); } catch (e) { return null; }
@@ -141,7 +208,13 @@ public enum PageThemeColorScript {
           try { style = window.getComputedStyle(stack[i]); } catch (e) { continue; }
           if (!style) { continue; }
           var image = style.backgroundImage;
-          if (image && image !== 'none') { return null; }
+          if (image && image !== 'none') {
+            var fromGradient = __orbitGradientColor(image);
+            if (!fromGradient) { return null; }
+            var gradientComponents = __orbitColorComponents(fromGradient);
+            if (!gradientComponents || gradientComponents[3] <= 0) { return null; }
+            return fromGradient;
+          }
           var components = __orbitColorComponents(__orbitNormalizeColor(style.backgroundColor));
           if (!components || components[3] <= 0) { continue; }
           var contribution = components[3] * (1 - a);
@@ -235,10 +308,14 @@ public enum PageThemeColorScript {
 
       function __orbitReadPageColor() {
         var documentColor = __orbitDocumentColor();
-        var color = __orbitDeclaredThemeColor()
-          || __orbitTopBandColor()
-          || documentColor
-          || null;
+        // The painted top of the viewport wins over <meta theme-color>. A fixed
+        // meta stays put while the page scrolls through a different colour, and
+        // a meta of plain white or black is what made the bar look like a
+        // light/dark switch. theme-color is the fallback when the top band is
+        // a photo or otherwise unreadable.
+        var band = __orbitTopBandColor();
+        var declared = __orbitDeclaredThemeColor();
+        var color = band || declared || documentColor || null;
         return {
           color: color,
           document: documentColor,

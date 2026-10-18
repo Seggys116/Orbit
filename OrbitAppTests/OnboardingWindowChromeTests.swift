@@ -161,7 +161,7 @@ final class OnboardingWindowChromeTests: XCTestCase {
 
         for step in 0..<OnboardingStep.allCases.count {
             guard let measured = settledMeasurement(window) else {
-                throw XCTSkip("Could not capture this process's own window pixels on this machine.")
+                throw TestStopped("Could not capture this process's own window pixels on this machine.")
             }
             signatures.append(measured.signature)
             edges.append(measured.edge)
@@ -187,7 +187,7 @@ final class OnboardingWindowChromeTests: XCTestCase {
         let width = 600
         let window = makeOnboardingWindow(width: CGFloat(width), height: 560)
         guard let measured = settledMeasurement(window) else {
-            throw XCTSkip("Could not capture this process's own window pixels on this machine.")
+            throw TestStopped("Could not capture this process's own window pixels on this machine.")
         }
         XCTAssertGreaterThanOrEqual(
             measured.edge, 415,
@@ -199,7 +199,7 @@ final class OnboardingWindowChromeTests: XCTestCase {
     func testOnboardingArtworkPanelStartsAtTheWindowsVeryTopEdge() throws {
         let (window, _) = makeOnboardingWindow()
         guard let image = capture(window) else {
-            throw XCTSkip("Could not capture this process's own window pixels on this machine.")
+            throw TestStopped("Could not capture this process's own window pixels on this machine.")
         }
 
         let background = windowBackground(image)
@@ -229,7 +229,7 @@ final class OnboardingWindowChromeTests: XCTestCase {
         )
 
         guard let image = capture(window) else {
-            throw XCTSkip("Could not capture this process's own window pixels on this machine.")
+            throw TestStopped("Could not capture this process's own window pixels on this machine.")
         }
         // Inset from the window's rounded corner, which captures as transparent.
         let corner = image.color(atX: 856, y: 536)
@@ -250,7 +250,7 @@ final class OnboardingWindowChromeTests: XCTestCase {
 
         // Read from the render, never a hardcoded 420: a copied literal keeps passing after the real column narrows.
         guard let measured = settledMeasurement(window) else {
-            throw XCTSkip("Could not capture this process's own window pixels on this machine.")
+            throw TestStopped("Could not capture this process's own window pixels on this machine.")
         }
 
         let inWindow = close.convert(close.bounds, to: nil)

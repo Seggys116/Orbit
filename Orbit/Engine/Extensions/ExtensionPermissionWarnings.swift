@@ -69,6 +69,25 @@ public enum ExtensionPermissionWarnings {
         return ordered.sorted { $0.severity < $1.severity }
     }
 
+    /// The text for a running extension's chrome.permissions.request: only what it is asking for now.
+    public static func warnings(forPermissions permissions: [String], origins: [String]) -> [String] {
+        var ordered: [ExtensionPermissionWarning] = []
+        var indexByText: [String: Int] = [:]
+        let patterns = Set(origins)
+        if let warning = hostWarning(from: patterns, collapsesToAll: patterns.contains(where: isAllHostsPattern), isGrantedAtInstall: true) {
+            addOrUpgrade(warning, into: &ordered, indexByText: &indexByText)
+        }
+        for permission in permissions {
+            addOrUpgrade(apiPermissionWarning(for: permission, isGrantedAtInstall: true), into: &ordered, indexByText: &indexByText)
+        }
+        return ordered.sorted { $0.severity < $1.severity }.map(\.text)
+    }
+
+    /// Whether `name` is a Chrome permission this table describes.
+    public static func isKnownPermission(_ name: String) -> Bool {
+        apiPermissionCatalog[name] != nil
+    }
+
     // MARK: - De-duplication
 
     private static func addOrUpgrade(

@@ -17,6 +17,27 @@ final class LayoutMetricsTests: XCTestCase {
         )
     }
 
+    func test_sidebarResizeSeam_isAFourPointHandleInsideTheCardInset() {
+        XCTAssertEqual(
+            OrbitMetrics.sidebarResizeHandleWidth, 4,
+            "The resize hit column is 4pt. Wider than that is the invisible padding beside the tab list."
+        )
+        XCTAssertGreaterThanOrEqual(
+            OrbitMetrics.contentCardLeadingSeam, 0,
+            "contentCardLeadingSeam went negative — the handle is wider than cardInset and the page would overlap the sidebar."
+        )
+        XCTAssertEqual(
+            OrbitMetrics.sidebarResizeHandleWidth + OrbitMetrics.contentCardLeadingSeam,
+            OrbitMetrics.cardInset,
+            "The handle sits inside the card inset. Stacking a full cardInset after the handle is the dead gap between the sidebar and the page."
+        )
+        XCTAssertEqual(
+            SidebarResizeHandleNSView.grabberWidth,
+            OrbitMetrics.sidebarResizeHandleWidth,
+            "The hover pill fills the hit column. A thinner pill leaves empty padding on either side of the divider."
+        )
+    }
+
     func test_cardCornerRadius_isPositiveAndModest() {
         XCTAssertGreaterThan(
             OrbitMetrics.cardCornerRadius, 0,

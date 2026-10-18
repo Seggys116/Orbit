@@ -1,5 +1,5 @@
 //  corpus: gppongmhjkpfnbhagpmjfkannfbllamg
-//  Drives the REAL shipped Wappalyzer 6.12.5, pinned by SHA-256 in Chromium/extension-corpus.json,
+//  Drives the REAL shipped Wappalyzer 6.12.5, pinned by SHA-256 in ExtensionCorpus/extension-corpus.json,
 //  not a fixture -- other suites build their own worker and pass while the real extension reports nothing.
 
 import Foundation
@@ -90,7 +90,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
     /// A live engine, a registered window, the real extension loaded, and a subject tab
     /// whose badge Wappalyzer has already written (proof its analysis pipeline ran end to end).
     private struct Harness {
-        var engine: ChromiumEngine
+        var engine: WebKitEngine
         var server: LiveHTTPTestServer
         var loaded: LoadedExtension
         var subjectTabID: TabID
@@ -99,18 +99,12 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
     }
 
     private func startHarness(_ subject: Subject) async throws -> Harness {
-        let engine = await LiveChromiumEngineHost.sharedEngine()
-        ChromiumTabsSetup.installHandlerOnce
+        let engine = await WebKitLiveEngineHost.sharedEngine()
         let env = self.env
         env._test_engineOverride = engine
 
         // The XCTest host has no OrbitWindowController, so nothing has registered this
         // environment as a chrome.windows window -- that's OrbitWindowController.configure's job.
-        let bridge = OrbitChromiumTabsBridge.shared
-        if !bridge.isWindowRegistered(env) {
-            bridge.windowCreated(owner: env, focused: false)
-        }
-        bridge.windowFocusChanged(owner: env)
 
         let spaceID = try XCTUnwrap(env.activeSpace?.id)
         let server = try makeServer()
@@ -122,16 +116,25 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         XCTAssertTrue(loaded.hasToolbarAction)
 
         let subjectTabID = env.openTab(url: server.baseURL, in: spaceID)
-        let contents = try XCTUnwrap(env.webContents[subjectTabID] as? ChromiumWebContents)
-        try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
-        let subjectRegistryID = try XCTUnwrap(bridge.existingTabID(for: subjectTabID))
+        let contents = try XCTUnwrap(env.webContents[subjectTabID] as? WebKitWebContents)
+        try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
+        let subjectRegistryID = try XCTUnwrap(engine.numericID(for: subjectTabID))
 
         try await Self.pollUntil("Wappalyzer to badge the subject tab") {
             !self.badgeText(engine: engine, extensionID: loaded.id, tabID: subjectRegistryID).isEmpty
         }
-        // On first install Wappalyzer opens its own wappalyzer.com/installed tab; let it
-        // land, then go back to the subject tab -- the state a user is in when opening the popup.
-        try await Task.sleep(for: .seconds(3))
+        // Let the install tab settle, then return to the subject once its badge is filled in.
+        let settle = ContinuousClock.now + .seconds(15)
+        while ContinuousClock.now < settle {
+            let others = engine.openTabs.filter {
+                !$0.isExtensionPage && engine.numericID(for: $0) != subjectRegistryID
+            }
+            let badgeCount = Int(self.badgeText(engine: engine, extensionID: loaded.id, tabID: subjectRegistryID)) ?? 0
+            if badgeCount >= 3 && (others.isEmpty || others.allSatisfy { !$0.navigationState.isLoading }) {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
         env.activateTab(subjectTabID)
 
         return Harness(
@@ -140,14 +143,14 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         )
     }
 
-    private func badgeText(engine: ChromiumEngine, extensionID: String, tabID: Int32) -> String {
+    private func badgeText(engine: WebKitEngine, extensionID: String, tabID: Int32) -> String {
         engine.extensionActionStates.state(extensionID: extensionID, tabID: tabID).badgeText
     }
 
     /// The URL the toolbar itself would open, built through the production
     /// path rather than a hand-assembled chrome-extension:// string.
     private func actionEntry(
-        engine: ChromiumEngine, subjectTabID: TabID, subjectRegistryID: Int32, extensionID: String
+        engine: WebKitEngine, subjectTabID: TabID, subjectRegistryID: Int32, extensionID: String
     ) throws -> SiteControlPopoverView.ExtensionActionEntry {
         let session = env.webContents[subjectTabID]?.session ?? engine.defaultSession
         let entries = SiteControlPopoverView.extensionActionEntries(
@@ -159,8 +162,8 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
     }
 
     private func openPopup(
-        engine: ChromiumEngine, subjectTabID: TabID, subjectRegistryID: Int32, extensionID: String
-    ) async throws -> (ExtensionActionPopupModel, ChromiumWebContents) {
+        engine: WebKitEngine, subjectTabID: TabID, subjectRegistryID: Int32, extensionID: String
+    ) async throws -> (ExtensionActionPopupModel, WebKitWebContents) {
         let entry = try actionEntry(
             engine: engine, subjectTabID: subjectTabID,
             subjectRegistryID: subjectRegistryID, extensionID: extensionID
@@ -168,12 +171,12 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         let session = env.webContents[subjectTabID]?.session ?? engine.defaultSession
         let model = ExtensionActionPopupModel(engine: engine, session: session, url: entry.popupURL)
         model.start()
-        let popup = try XCTUnwrap(model.contents as? ChromiumWebContents, model.loadFailure ?? "no popup contents")
-        try await LiveChromiumEngineHost.waitUntilStoppedLoading(popup)
+        let popup = try XCTUnwrap(model.contents as? WebKitWebContents, model.loadFailure ?? "no popup contents")
+        try await WebKitLiveEngineHost.waitUntilStoppedLoading(popup)
         return (model, popup)
     }
 
-    private func openPopup(for harness: Harness) async throws -> (ExtensionActionPopupModel, ChromiumWebContents) {
+    private func openPopup(for harness: Harness) async throws -> (ExtensionActionPopupModel, WebKitWebContents) {
         try await openPopup(
             engine: harness.engine, subjectTabID: harness.subjectTabID,
             subjectRegistryID: harness.subjectRegistryID, extensionID: harness.loaded.id
@@ -198,7 +201,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
     })()
     """
 
-    private func readPopupDOM(_ popup: ChromiumWebContents) async throws -> PopupDOM? {
+    private func readPopupDOM(_ popup: WebKitWebContents) async throws -> PopupDOM? {
         guard let raw = try await popup.evaluateJavaScript(Self.popupDOMProbe) as? String,
               let data = raw.data(using: .utf8)
         else { return nil }
@@ -207,7 +210,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
 
     /// An extension popup is not a tab, so orbit::CurrentWindowIdFor falls through to
     /// GetLastFocusedWindowId -- the same resolution the worker's own Driver.getDetections takes.
-    private func queryTabs(_ popup: ChromiumWebContents, queryInfo: String) async throws -> [QueriedTab] {
+    private func queryTabs(_ popup: WebKitWebContents, queryInfo: String) async throws -> [QueriedTab] {
         let key = "__orbitQuery\(abs(queryInfo.hashValue))"
         _ = try await popup.evaluateJavaScript("""
         window.\(key) = null;
@@ -232,7 +235,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
     /// Driver.onMessage answers a thrown method with a bare callback(), so "undefined" here
     /// means either a clean early return or a throw -- the caller watches the badge to tell them apart.
     private func callDriver(
-        _ popup: ChromiumWebContents, key: String, method: String, args: String
+        _ popup: WebKitWebContents, key: String, method: String, args: String
     ) async throws -> String {
         _ = try await popup.evaluateJavaScript("""
         window.\(key) = null;
@@ -261,7 +264,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         return answer
     }
 
-    private func dumpState(_ popup: ChromiumWebContents, _ label: String) async {
+    private func dumpState(_ popup: WebKitWebContents, _ label: String) async {
         let all = (try? await queryTabs(popup, queryInfo: "{}")) ?? []
         let active = (try? await queryTabs(popup, queryInfo: "{active: true, currentWindow: true}")) ?? []
         print("ORBIT-WAPP [\(label)] chrome.tabs.query({}) = \(all)")
@@ -272,7 +275,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
     }
 
     private func assertPopupListsTechnologies(
-        _ popup: ChromiumWebContents, _ label: String, file: StaticString = #filePath, line: UInt = #line
+        _ popup: WebKitWebContents, _ label: String, file: StaticString = #filePath, line: UInt = #line
     ) async throws -> PopupDOM {
         var dom = PopupDOM(emptyHidden: false, detectionsHidden: true, termsHidden: false, technologies: [])
         try await Self.pollUntil("Wappalyzer's popup to render technologies (\(label))") {
@@ -290,14 +293,12 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
 
     // MARK: - Tests
 
-    // Skippable only if the pinned corpus is not vendored: ExtensionCorpus never downloads
+    // Fails if the pinned corpus is not vendored: ExtensionCorpus never downloads
     // at test time, so a clone without `Scripts/extension-corpus fetch` has no Wappalyzer to drive.
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testRealWappalyzerPopupListsTheSameTechnologiesItsBadgeCounts
     func testRealWappalyzerPopupListsTheSameTechnologiesItsBadgeCounts() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let subject = try pinnedWappalyzer()
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
             let harness = try await self.startHarness(subject)
             defer { harness.server.stop() }
             defer { harness.engine.unloadExtension(id: harness.loaded.id, session: harness.engine.defaultSession) }
@@ -330,12 +331,10 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         }
     }
 
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testRealWappalyzerPopupStillResolvesTheActiveTabAfterTheActiveTabIsClosed
     func testRealWappalyzerPopupStillResolvesTheActiveTabAfterTheActiveTabIsClosed() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let subject = try pinnedWappalyzer()
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
             let harness = try await self.startHarness(subject)
             defer { harness.server.stop() }
             defer { harness.engine.unloadExtension(id: harness.loaded.id, session: harness.engine.defaultSession) }
@@ -344,8 +343,8 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
             // A second tab takes over active, then closes: BrowserStore reassigns activeTabBySpace,
             // but nothing tells OrbitTabRegistry, so chrome.tabs may believe otherwise.
             let decoyTabID = env.openTab(url: harness.server.baseURL.appendingPathComponent("decoy"), in: harness.spaceID)
-            let decoyContents = try XCTUnwrap(env.webContents[decoyTabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(decoyContents)
+            let decoyContents = try XCTUnwrap(env.webContents[decoyTabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(decoyContents)
             env.closeTab(decoyTabID)
             XCTAssertEqual(env.activeTabID, harness.subjectTabID, "Orbit itself shows the subject tab again")
 
@@ -363,21 +362,13 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         }
     }
 
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testRealWappalyzerPopupResolvesTheActiveTabAfterASpaceSwitch
     func testRealWappalyzerPopupResolvesTheActiveTabAfterASpaceSwitch() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let subject = try pinnedWappalyzer()
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
-            let bridge = OrbitChromiumTabsBridge.shared
-            if !bridge.isWindowRegistered(env) {
-                bridge.windowCreated(owner: env, focused: false)
-            }
-            bridge.windowFocusChanged(owner: env)
 
             let firstSpaceID = try XCTUnwrap(env.activeSpace?.id)
             let server = try self.makeServer()
@@ -390,8 +381,8 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
             )
 
             let decoyTabID = env.openTab(url: server.baseURL.appendingPathComponent("decoy"), in: firstSpaceID)
-            let decoyContents = try XCTUnwrap(env.webContents[decoyTabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(decoyContents)
+            let decoyContents = try XCTUnwrap(env.webContents[decoyTabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(decoyContents)
 
             let profileID = try XCTUnwrap(env.state.profiles.first?.id)
             let secondSpaceID = env.createSpace(
@@ -400,9 +391,9 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
             env.selectSpace(secondSpaceID)
 
             let subjectTabID = env.openTab(url: server.baseURL, in: secondSpaceID)
-            let subjectContents = try XCTUnwrap(env.webContents[subjectTabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(subjectContents)
-            let subjectRegistryID = try XCTUnwrap(bridge.existingTabID(for: subjectTabID))
+            let subjectContents = try XCTUnwrap(env.webContents[subjectTabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(subjectContents)
+            let subjectRegistryID = try XCTUnwrap(engine.numericID(for: subjectTabID))
 
             try await Self.pollUntil("Wappalyzer to badge the subject tab") {
                 !self.badgeText(engine: engine, extensionID: loaded.id, tabID: subjectRegistryID).isEmpty
@@ -545,12 +536,10 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
     })();
     """
 
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testRealWappalyzerWorkerReportsDetectionsForTheTabItResolves
     func testRealWappalyzerWorkerReportsDetectionsForTheTabItResolves() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let subject = try pinnedWappalyzer()
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
             let harness = try await self.startHarness(subject)
             defer { harness.server.stop() }
             defer { harness.engine.unloadExtension(id: harness.loaded.id, session: harness.engine.defaultSession) }
@@ -558,7 +547,7 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
             let badgeBefore = self.badgeText(
                 engine: harness.engine, extensionID: harness.loaded.id, tabID: harness.subjectRegistryID
             )
-            let subject = try XCTUnwrap(self.env.webContents[harness.subjectTabID] as? ChromiumWebContents)
+            let subject = try XCTUnwrap(self.env.webContents[harness.subjectTabID] as? WebKitWebContents)
             let pageURL = try await subject.evaluateJavaScript("location.href") as? String
 
             let (model, popup) = try await self.openPopup(for: harness)
@@ -630,12 +619,10 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
 
     // Loopback is always transient to Wappalyzer (IP-literal host, and isPrivateIpAddress() calls
     // 127.x private); "transient" only moves where results cache, it never suppresses reporting.
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testWappalyzerTreatsLoopbackAsTransientAndStillReportsItsDetections
     func testWappalyzerTreatsLoopbackAsTransientAndStillReportsItsDetections() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let subject = try pinnedWappalyzer()
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
             let harness = try await self.startHarness(subject)
             defer { harness.server.stop() }
             defer { harness.engine.unloadExtension(id: harness.loaded.id, session: harness.engine.defaultSession) }
@@ -668,12 +655,10 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
 
     // A rejected chrome.action.setIcon path throws out of Driver.getDetections, leaving the popup
     // showing "No technologies detected" while the badge still shows the count. Hermetic on purpose.
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testActionSetIconAcceptsTheAbsoluteURLsRuntimeGetURLReturns
     func testActionSetIconAcceptsTheAbsoluteURLsRuntimeGetURLReturns() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let subject = try pinnedWappalyzer()
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
             let harness = try await self.startHarness(subject)
             defer { harness.server.stop() }
             defer { harness.engine.unloadExtension(id: harness.loaded.id, session: harness.engine.defaultSession) }
@@ -797,27 +782,20 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         return (response as? HTTPURLResponse) != nil
     }
 
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testRealWappalyzerOnThePublicSiteReportsEachChannel
     // Also needs the real network: no local fixture carries Cloudflare's headers or a real Next.js bundle.
     func testRealWappalyzerOnThePublicSiteReportsEachChannel() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let subject = try pinnedWappalyzer()
         let siteURL = URL(string: "https://zaknobleclarke.com")!
 
-        try LiveChromiumEngineHost.runLive(timeout: 300) {
+        try WebKitLiveEngineHost.runLive(timeout: 300) {
             guard await Self.isReachable(siteURL) else {
-                throw XCTSkip("\(siteURL.absoluteString) is not reachable from this machine")
+                XCTFail("\(siteURL.absoluteString) is not reachable from this machine")
+                return
             }
 
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
-            let bridge = OrbitChromiumTabsBridge.shared
-            if !bridge.isWindowRegistered(env) {
-                bridge.windowCreated(owner: env, focused: false)
-            }
-            bridge.windowFocusChanged(owner: env)
 
             let spaceID = try XCTUnwrap(env.activeSpace?.id)
             let loaded = try await engine.loadExtension(at: subject.directory, session: engine.defaultSession)
@@ -828,12 +806,12 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
             )
 
             let tabID = env.openTab(url: siteURL, in: spaceID)
-            let contents = try XCTUnwrap(env.webContents[tabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            let contents = try XCTUnwrap(env.webContents[tabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             // Next.js hydrates after load; its globals and Wappalyzer's own
             // document_idle content script both need that to have happened.
             try await Task.sleep(for: .seconds(10))
-            let registryID = try XCTUnwrap(bridge.existingTabID(for: tabID))
+            let registryID = try XCTUnwrap(engine.numericID(for: tabID))
             env.activateTab(tabID)
 
             let pageURL = try await contents.evaluateJavaScript("location.href") as? String
@@ -973,12 +951,10 @@ final class RealWappalyzerLiveTests: CorpusLiveTestCase {
         }
     }
 
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testRealWappalyzerPopupReloadLinkReloadsTheActiveTab
     func testRealWappalyzerPopupReloadLinkReloadsTheActiveTab() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let subject = try pinnedWappalyzer()
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
             let harness = try await self.startHarness(subject)
             defer { harness.server.stop() }
             defer { harness.engine.unloadExtension(id: harness.loaded.id, session: harness.engine.defaultSession) }

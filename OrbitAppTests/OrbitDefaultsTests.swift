@@ -148,7 +148,10 @@ final class OrbitDefaultsTests: XCTestCase {
     }
 
     func testAbandonedTestSuitesAreRemovedAndEverythingElseIsKept() throws {
-        try XCTSkipIf(OrbitProcessLiveness.isAlive(Self.unusableProcessID), "pid \(Self.unusableProcessID) is alive")
+        if OrbitProcessLiveness.isAlive(Self.unusableProcessID) {
+            XCTFail("pid \(Self.unusableProcessID) is alive")
+            return
+        }
 
         let fileManager = FileManager.default
         let uuid = UUID().uuidString

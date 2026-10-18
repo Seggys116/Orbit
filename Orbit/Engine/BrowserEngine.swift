@@ -383,6 +383,15 @@ public protocol WebContentsDelegate: AnyObject {
         acceptedTypes: [String]
     ) async -> [URL]
 
+    /// Distinct from the overload above for an input that takes folders (`webkitdirectory`);
+    /// the default forwards there for a delegate that never chooses directories.
+    func webContents(
+        _ contents: WebContents,
+        runOpenPanelAllowingMultiple allowsMultiple: Bool,
+        allowsDirectories: Bool,
+        acceptedTypes: [String]
+    ) async -> [URL]
+
     // MARK: Extensions
 
     func webContents(
@@ -508,6 +517,15 @@ public extension WebContentsDelegate {
         runOpenPanelAllowingMultiple allowsMultiple: Bool,
         acceptedTypes: [String]
     ) async -> [URL] { [] }
+
+    func webContents(
+        _ contents: WebContents,
+        runOpenPanelAllowingMultiple allowsMultiple: Bool,
+        allowsDirectories: Bool,
+        acceptedTypes: [String]
+    ) async -> [URL] {
+        await webContents(contents, runOpenPanelAllowingMultiple: allowsMultiple, acceptedTypes: acceptedTypes)
+    }
 
     func webContents(
         _ contents: WebContents,

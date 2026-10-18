@@ -125,6 +125,36 @@ nonisolated public struct ContentBlockingCompileStats: Equatable, Sendable {
     }
 }
 
+// MARK: - Engine translation report
+
+// What a platform engine did with the parsed rules: what it enforces, what it had to skip, and why.
+nonisolated public struct ContentBlockingEngineReport: Equatable, Sendable {
+    public var networkRules = 0
+    public var cosmeticRules = 0
+    public var ruleLists = 0
+    public var failedRuleLists = 0
+    public var rulesDroppedAtCompile = 0
+    public var skippedRegexRules = 0
+    public var skippedUnsupportedRules = 0
+    public var redirectStubs = 0
+    public var redirectsBlockedInstead = 0
+    public var parserUnsupportedRules = 0
+    public var parserInvalidRegexRules = 0
+    public var messages: [String] = []
+
+    public static let maximumMessages = 40
+
+    public init() {}
+
+    public mutating func note(_ message: String) {
+        if messages.count < Self.maximumMessages { messages.append(message) }
+    }
+}
+
+extension Notification.Name {
+    public static let contentBlockingEngineReportDidChange = Notification.Name("ContentBlockingEngineReportDidChange")
+}
+
 // MARK: - URL helpers
 
 nonisolated public enum ContentBlockingURL {

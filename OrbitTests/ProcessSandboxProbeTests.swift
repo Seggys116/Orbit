@@ -43,11 +43,13 @@ final class ProcessSandboxProbeTests: XCTestCase {
     }
 
     func testTheProbeTellsAConfinedProcessFromAnUnconfinedOne() throws {
-        try XCTSkipUnless(
-            FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec"),
-            "/usr/bin/sandbox-exec is absent, so this machine cannot produce a known-confined "
-            + "process to calibrate the probe against."
-        )
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec") else {
+            XCTFail(
+                "/usr/bin/sandbox-exec is absent, so this machine cannot produce a known-confined "
+                    + "process to calibrate the probe against."
+            )
+            return
+        }
 
         let confined = try launch(
             "/usr/bin/sandbox-exec",
@@ -64,67 +66,66 @@ final class ProcessSandboxProbeTests: XCTestCase {
         XCTAssertEqual(
             ProcessSandboxProbe.isSandboxed(pid: unconfined.processIdentifier), false,
             "sandbox_check reported a plain /bin/sleep as sandboxed. A probe that answers yes to "
-            + "everything would make SandboxInvariantTests pass on a browser whose "
-            + "renderers run with --no-sandbox."
+            + "everything would make SandboxInvariantTests pass on a WebContent process "
+            + "that is not confined."
         )
     }
 
-    func testTheProbeReadsTheRealArgumentsOfARunningProcess() throws {
-        let process = try launch("/bin/sh", ["-c", "sleep 30", "orbit-probe", "--no-sandbox"], settledImage: "/sh")
-        let arguments = ProcessSandboxProbe.arguments(of: process.processIdentifier)
-
+    func testAttributionOfWebKitServicesIsReachable() {
         XCTAssertTrue(
-            arguments.contains("--no-sandbox"),
-            "KERN_PROCARGS2 did not hand back the arguments a process was launched with (got "
-            + "\(arguments)). The dangerous-switch invariant reads argv this way precisely so it "
-            + "sees what was really passed rather than what the source appears to pass; without it "
-            + "that check silently inspects nothing."
+            ProcessSandboxProbe.canAttributeServices,
+            "libSystem no longer exports responsibility_get_pid_responsible_for_pid, so WebKit's "
+            + "WebContent, Networking and GPU services can no longer be tied to the browser that owns "
+            + "them. Without that, the live sandbox invariant has nothing to inspect."
+        )
+    }
+
+    func testTheProbeReadsTheEntitlementsOfARunningProcess() {
+        XCTAssertNotNil(
+            ProcessSandboxProbe.entitlements(of: getpid()),
+            "the code signature of this test host could not be read, so the browser process's "
+            + "entitlements cannot be audited either."
+        )
+    }
+
+    func testRolesAreReadFromTheXPCServiceExecutableName() {
+        let services = "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices"
+        XCTAssertEqual(WebKitProcessRole(executablePath: "/Applications/Orbit.app/Contents/MacOS/Orbit"), .browser)
+        XCTAssertEqual(
+            WebKitProcessRole(executablePath: "\(services)/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent"),
+            .webContent
         )
         XCTAssertEqual(
-            SandboxDisablingSwitch.found(in: arguments), [.noSandbox],
-            "the switch matcher did not recognise --no-sandbox in a real process's argv."
+            WebKitProcessRole(executablePath: "\(services)/com.apple.WebKit.WebContent.Development.xpc/Contents/MacOS/com.apple.WebKit.WebContent.Development"),
+            .webContent
         )
-    }
-
-    func testEveryDescendantProcessIsFound() throws {
-        let child = try launch("/bin/sleep", ["30"], settledImage: "/sleep")
-        let descendants = ProcessSandboxProbe.descendants(of: getpid())
-
-        XCTAssertTrue(
-            descendants.contains { $0.pid == child.processIdentifier },
-            "a process this test host started itself did not appear in the descendant census. The "
-            + "live invariant enumerates helper processes the same way, so a census that misses "
-            + "children would report an unsandboxed renderer as 'no renderers to check'."
-        )
-    }
-
-    func testTheBrowserProcessRoleIsReadFromTheTypeSwitchNotTheBundleName() {
-        XCTAssertEqual(EngineProcessRole(arguments: ["/path/Orbit"]), .browser)
-        XCTAssertEqual(EngineProcessRole(arguments: ["/path/Helper", "--type=renderer"]), .renderer)
-        XCTAssertEqual(EngineProcessRole(arguments: ["/path/Helper", "--type=gpu-process"]), .gpu)
         XCTAssertEqual(
-            EngineProcessRole(arguments: ["/path/Helper", "--type=utility", "--utility-sub-type=network.mojom.NetworkService"]),
-            .utility(service: "network.mojom.NetworkService"),
-            "roles are classified from Chromium's own --type= switch, so this classification keeps "
-            + "working without being taught new bundle names."
+            WebKitProcessRole(executablePath: "\(services)/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking"),
+            .networking
+        )
+        XCTAssertEqual(
+            WebKitProcessRole(executablePath: "\(services)/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU"),
+            .gpu
+        )
+        XCTAssertEqual(
+            WebKitProcessRole(executablePath: "\(services)/com.apple.WebKit.Plugin.64.xpc/Contents/MacOS/com.apple.WebKit.Plugin.64"),
+            .other("com.apple.WebKit.Plugin.64"),
+            "an unknown WebKit service must still be classified as one so it is checked for confinement"
         )
         XCTAssertFalse(
-            EngineProcessRole.browser.mustBeSandboxed,
-            "the browser process is deliberately unconfined in every Chromium browser: it owns the "
-            + "profile and the window server connection, and its protection is that it renders no "
-            + "untrusted content."
+            WebKitProcessRole.browser.mustBeSandboxed,
+            "the browser process is not App Sandboxed: it owns the profile and the window server "
+            + "connection, and its protection is that it renders no untrusted content."
         )
-        for role in [EngineProcessRole.renderer, .gpu, .utility(service: nil), .other("zygote")] {
+        for role in [WebKitProcessRole.webContent, .networking, .gpu, .other("x")] {
             XCTAssertTrue(role.mustBeSandboxed, "\(role.description) must be confined")
         }
     }
 
-    func testTheHostProcessSeesItsOwnCommandLine() {
+    func testTheHostProcessIsAProbeableBrowserProcess() {
         let current = ProcessSandboxProbe.current()
         XCTAssertEqual(current.pid, getpid())
-        XCTAssertFalse(
-            current.arguments.isEmpty,
-            "the probe could not read its own argv, so it cannot read the browser process's either."
-        )
+        XCTAssertEqual(current.role, .browser)
+        XCTAssertFalse(current.executablePath.isEmpty, "the probe could not resolve its own executable path")
     }
 }

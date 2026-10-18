@@ -39,27 +39,31 @@ final class PreferredColorSchemeLiveTests: XCTestCase {
     }
 
     func testEngineExposesTheColorSchemeEntryPoint() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        try LiveChromiumEngineHost.runLive {
-            _ = await LiveChromiumEngineHost.sharedEngine()
-            XCTAssertTrue(
-                OrbitChromiumBridge.shared.supportsColorScheme,
-                "the framework exports no OrbitSetColorSchemeIsDark — every page's prefers-color-scheme is pinned to blink's light default"
+        try WebKitLiveEngineHost.runLive {
+            let contents = try await WebKitLiveEngineHost.makeContents()
+            defer { contents.close() }
+            contents.setPreferredColorScheme(.dark)
+            contents.loadHTML("<!doctype html><html><body>scheme</body></html>", baseURL: nil)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
+            contents.setPreferredColorScheme(.dark)
+            let matches = try await contents.evaluateJavaScript("matchMedia('(prefers-color-scheme: dark)').matches") as? Bool
+            XCTAssertEqual(
+                matches, true,
+                "setPreferredColorScheme(.dark) left prefers-color-scheme light"
             )
         }
     }
 
     func testDarkAppearanceMakesPagesResolvePrefersColorSchemeToDark() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let result = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> (matches: Bool, pixel: (Int, Int, Int)?) in
+        let result = try WebKitLiveEngineHost.runLive(timeout: 60) { () -> (matches: Bool, pixel: (Int, Int, Int)?) in
             AppearanceSettings.shared.selection = .dark
             EngineAppearance.apply()
 
-            let contents = try await LiveChromiumEngineHost.makeContents()
+            let contents = try await WebKitLiveEngineHost.makeContents()
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 320, height: 240)
             contents.loadHTML(PreferredColorSchemeLiveTests.page, baseURL: nil)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             let matches = try await PreferredColorSchemeLiveTests.prefersDark(contents)
             return (matches, await PreferredColorSchemeLiveTests.centrePixel(of: contents))
@@ -76,16 +80,15 @@ final class PreferredColorSchemeLiveTests: XCTestCase {
     }
 
     func testAppearanceChangeRethemesAPageThatIsAlreadyLoaded() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let result = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> (dark: Bool, light: Bool, pixel: (Int, Int, Int)?) in
+        let result = try WebKitLiveEngineHost.runLive(timeout: 60) { () -> (dark: Bool, light: Bool, pixel: (Int, Int, Int)?) in
             AppearanceSettings.shared.selection = .dark
             EngineAppearance.apply()
 
-            let contents = try await LiveChromiumEngineHost.makeContents()
+            let contents = try await WebKitLiveEngineHost.makeContents()
             defer { contents.close() }
             contents.view.frame = NSRect(x: 0, y: 0, width: 320, height: 240)
             contents.loadHTML(PreferredColorSchemeLiveTests.page, baseURL: nil)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             let dark = try await PreferredColorSchemeLiveTests.prefersDark(contents)
 
             // No reload: the point is that changing the preference re-pushes to
@@ -116,7 +119,7 @@ final class PreferredColorSchemeLiveTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private static func prefersDark(_ contents: ChromiumWebContents) async throws -> Bool {
+    private static func prefersDark(_ contents: WebKitWebContents) async throws -> Bool {
         let raw = try await contents.evaluateJavaScript(
             "matchMedia('(prefers-color-scheme: dark)').matches"
         )
@@ -128,18 +131,11 @@ final class PreferredColorSchemeLiveTests: XCTestCase {
         )
     }
 
-    private static func centrePixel(of contents: ChromiumWebContents) async -> (Int, Int, Int)? {
+    private static func centrePixel(of contents: WebKitWebContents) async -> (Int, Int, Int)? {
         try? await Task.sleep(for: .milliseconds(400))
         guard let image = await contents.capturePreview(rect: nil, size: CGSize(width: 320, height: 240)),
-              let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let colour = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?
-                  .usingColorSpace(.deviceRGB)
+              let sample = ImagePixelSampler.sample(image)
         else { return nil }
-        return (
-            Int((colour.redComponent * 255).rounded()),
-            Int((colour.greenComponent * 255).rounded()),
-            Int((colour.blueComponent * 255).rounded())
-        )
+        return (sample.pixel.red, sample.pixel.green, sample.pixel.blue)
     }
 }

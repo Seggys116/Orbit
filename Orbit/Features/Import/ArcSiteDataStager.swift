@@ -58,6 +58,29 @@ enum LocalStorageKey {
     static func isWebOrigin(_ storageKey: String) -> Bool {
         storageKey.hasPrefix("https://") || storageKey.hasPrefix("http://")
     }
+
+    /// The item name after the origin and the 0x00 0x01 separator. META keys have none.
+    static func itemName(of key: Data) -> String? {
+        let bytes = [UInt8](key)
+        guard bytes.first == UInt8(ascii: "_"),
+              let separator = bytes.firstIndex(of: 0),
+              separator + 2 < bytes.count,
+              bytes[separator + 1] == 1
+        else { return nil }
+        return String(decoding: bytes[(separator + 2)...], as: UTF8.self)
+    }
+
+    /// Chromium stores the value after a one-byte encoding tag.
+    static func stringValue(of value: Data) -> String? {
+        let bytes = [UInt8](value)
+        guard let tag = bytes.first, bytes.count > 1 else { return nil }
+        let payload = Data(bytes.dropFirst())
+        switch tag {
+        case 0x00: return String(data: payload, encoding: .utf16LittleEndian)
+        case 0x01: return String(data: payload, encoding: .isoLatin1)
+        default: return nil
+        }
+    }
 }
 
 enum ArcSiteDataStager {

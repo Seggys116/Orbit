@@ -173,7 +173,7 @@ private final class OrderingTestFakeSession: EngineSession {
 
 @MainActor
 private final class OrderingTestFakeEngine: BrowserEngine {
-    static let kind: EngineKind = .chromium
+    static let kind: EngineKind = .webkit
     let capabilities: EngineCapabilities
     let manageableContentSettings: Set<PermissionKind> = []
     let extensionActivation: ExtensionActivation = .unsupported

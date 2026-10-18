@@ -16,50 +16,34 @@
   it inside a comment, and although `plutil -lint` accepts such a file,
   codesign rejects it and the build fails.
 
-  The browser process: the only process with a user interface, the one
-  that owns the window, the profile on disk and the network stack, and
-  the one that launches all five helper roles below. It renders no web
-  content itself. Chrome's browser process is signed with no hardened
-  runtime exceptions at all; Orbit keeps allow-jit here because it is
-  the configuration this app has actually been run under, and dropping
-  it is a change no test in this repository can prove safe (nothing here
-  ever starts the engine). See refs/RELEASING.md, 'Entitlements we could
-  not narrow'.
+  The browser process: the only process Orbit signs. It owns the window,
+  the profile on disk and the embedded Sparkle updater. Web content runs
+  in WebKit's system WebContent, Networking and GPU processes, which
+  carry their own entitlements, so this role holds no JIT or executable-
+  memory exception.
 
-  App Sandbox is intentionally absent: Chromium's multi-process
-  architecture (shared memory, Mach IPC between the browser and its
-  renderer/GPU helpers, direct GPU access) is incompatible with it. The
-  key is omitted rather than set to false, because ENABLE_APP_SANDBOX =
-  NO already keeps it out of the signed entitlements. Chromium's own
-  Seatbelt sandbox still confines every subprocess it launches; how
-  Orbit's own engine bridge wires that in is undecided, since the bridge
-  itself does not exist yet.
+  App Sandbox is intentionally absent: Orbit reads other browsers'
+  profiles for import and manages its own data root, which the sandbox
+  would block. The key is omitted rather than set to false, because
+  ENABLE_APP_SANDBOX = NO already keeps it out of the signed
+  entitlements. WebKit's own WebContent, Networking and GPU processes
+  are sandboxed by the system.
 -->
 <plist version="1.0">
 <dict>
 	<!--
-	     V8 compiles JavaScript to native code at runtime
-	     (Ignition/TurboFan), and ANGLE/Metal compiles shaders the
-	     same way. Under the hardened runtime that requires an
-	     explicitly MAP_JIT-mapped region, which is what this
-	     entitlement permits - and only that: it does not allow
-	     arbitrary writable-executable memory. Chromium grants it to
-	     exactly the renderer and the GPU process.
-	-->
-	<key>com.apple.security.cs.allow-jit</key>
-	<true/>
-
-	<!--
 	     Turns off the hardened runtime's requirement that every
 	     loaded library be signed by the same Team ID as the
-	     executable loading it. Every role here carries it only
-	     under the ad hoc signing waiver recorded below
-	     (ENTITLEMENT_WAIVERS): two separately ad hoc signed Mach-O
-	     images are treated by AMFI as having different Team IDs, so
-	     a local or CI build (CODE_SIGN_IDENTITY = '-') cannot load
-	     its own code under the hardened runtime without it. A
+	     executable loading it. Orbit carries it only under the ad
+	     hoc signing waiver recorded below (ENTITLEMENT_WAIVERS):
+	     two separately ad hoc signed Mach-O images are treated by
+	     AMFI as having different Team IDs, so a local or CI build
+	     (CODE_SIGN_IDENTITY = '-') cannot load the embedded
+	     Sparkle.framework under the hardened runtime without it. A
 	     Developer ID build signs every part with one real Team ID
-	     and needs none of it.
+	     and needs none of it. JIT needs no entitlement here:
+	     WKWebView compiles JavaScript in Apple's own WebContent
+	     process, not in Orbit.
 	-->
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>

@@ -72,8 +72,8 @@ final class SidebarResizeHandleTests: XCTestCase {
         let outsidePoints: [NSPoint] = [
             NSPoint(x: -1, y: 200),
             NSPoint(x: OrbitMetrics.sidebarResizeHandleWidth + 1, y: 200),
-            NSPoint(x: 4, y: -1),
-            NSPoint(x: 4, y: 401),
+            NSPoint(x: OrbitMetrics.sidebarResizeHandleWidth / 2, y: -1),
+            NSPoint(x: OrbitMetrics.sidebarResizeHandleWidth / 2, y: 401),
         ]
         for point in outsidePoints {
             XCTAssertNil(view.hitTest(point), "A point outside \(view.bounds) must never resolve to the handle.")
@@ -81,12 +81,12 @@ final class SidebarResizeHandleTests: XCTestCase {
     }
 
     func test_acceptsFirstMouse_isTrue() {
-        let view = SidebarResizeHandleNSView(frame: NSRect(x: 0, y: 0, width: 8, height: 400))
+        let view = SidebarResizeHandleNSView(frame: NSRect(x: 0, y: 0, width: OrbitMetrics.sidebarResizeHandleWidth, height: 400))
         XCTAssertTrue(view.acceptsFirstMouse(for: nil), "The very first click on the handle must be able to both activate the window and start the drag, not just the former.")
     }
 
     func test_neverAWindowDragHandle() {
-        let view = SidebarResizeHandleNSView(frame: NSRect(x: 0, y: 0, width: 8, height: 400))
+        let view = SidebarResizeHandleNSView(frame: NSRect(x: 0, y: 0, width: OrbitMetrics.sidebarResizeHandleWidth, height: 400))
         XCTAssertFalse(
             view.mouseDownCanMoveWindow,
             "SidebarResizeHandleNSView must never report itself as a window-drag handle — its own mouseDown/mouseDragged/mouseUp mechanism must own every drag that starts on it, including the sliver of it that sits inside the window's titlebar band."

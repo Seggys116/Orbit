@@ -1,5 +1,5 @@
 //  Real keyDown NSEvents for the accelerators extensions bind, built the way
-//  AppKit builds them so ChromiumAccelerator resolves them exactly as it would
+//  AppKit builds them so ExtensionCommandAccelerator resolves them exactly as it would
 //  a typed key.
 
 import AppKit

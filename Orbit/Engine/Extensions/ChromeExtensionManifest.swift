@@ -97,6 +97,11 @@ public struct ChromeExtensionManifest: Equatable, Sendable {
             throw ExtensionStoreError.manifestInvalid(manifestURL, error.localizedDescription)
         }
 
+        return try parse(json, directory: directory, manifestURL: manifestURL)
+    }
+
+    /// A manifest already decoded, as chrome.management.getPermissionWarningsByManifest receives one.
+    public static func parse(_ json: [String: Any], directory: URL, manifestURL: URL) throws -> ChromeExtensionManifest {
         guard let name = json["name"] as? String, !name.isEmpty else {
             throw ExtensionStoreError.manifestInvalid(manifestURL, "Missing or empty \"name\".")
         }

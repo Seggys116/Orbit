@@ -29,6 +29,10 @@ nonisolated public struct ContentBlockerRuleSet: Sendable {
 
     private var genericCosmeticDefault: [String] = []
     private var cosmeticCache = CosmeticSelectorCache()
+    private var parsedCosmeticRules: [CosmeticFilterRule] = []
+
+    // Changes whenever rules are added, so engine translations can be cached against it.
+    public private(set) var revision = UUID()
 
     public private(set) var stats = ContentBlockingCompileStats()
     public private(set) var listIDs: [String] = []
@@ -43,6 +47,8 @@ nonisolated public struct ContentBlockerRuleSet: Sendable {
 
     mutating func add(parsed: FilterListParser.Output, listID: String) {
         stats = stats + parsed.stats
+        revision = UUID()
+        parsedCosmeticRules.append(contentsOf: parsed.cosmetic)
         if !listIDs.contains(listID) { listIDs.append(listID) }
 
         for rule in parsed.network {
@@ -125,6 +131,28 @@ nonisolated public struct ContentBlockerRuleSet: Sendable {
     public var networkRuleCount: Int { distinctNetworkRuleCount }
     public var cosmeticRuleCount: Int { stats.cosmeticRules }
     public var untokenizedRuleCount: Int { blockingUntokenized.count + exceptionUntokenized.count }
+
+    // MARK: - Engine translation
+
+    // Every parsed network rule once: a $redirect rule is stored in both blocking and redirects.
+    // Walk the buckets in place. Concatenating them first copies every rule before translation starts.
+    func forEachNetworkRuleForTranslation(_ body: (NetworkFilterRule) -> Void) {
+        for rule in blocking { body(rule) }
+        for rule in exceptions { body(rule) }
+        for rule in redirects where rule.redirect?.isRuleOnly == true { body(rule) }
+        for rule in redirectExceptions { body(rule) }
+        for rule in cosmeticUnblockRules { body(rule) }
+        for rule in genericBlockRules where rule.unblockModifiers.intersection(.allCosmetic).isEmpty { body(rule) }
+    }
+
+    var networkRulesForTranslation: [NetworkFilterRule] {
+        var rules: [NetworkFilterRule] = []
+        rules.reserveCapacity(distinctNetworkRuleCount)
+        forEachNetworkRuleForTranslation { rules.append($0) }
+        return rules
+    }
+
+    var cosmeticRulesForTranslation: [CosmeticFilterRule] { parsedCosmeticRules }
 
     // MARK: - Matching
 

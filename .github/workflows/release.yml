@@ -142,9 +142,6 @@ jobs:
           path: DerivedData/SourcePackages
           key: ${{ steps.swiftpm.outputs.cache-primary-key }}
 
-      - name: The archive does not embed a Chromium framework
-        run: test ! -d "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app/Contents/Frameworks/Orbit Framework.framework"
-
       # Rejects a placeholder SUPublicEDKey, a plain-HTTP feed and a broken
       # Sparkle framework, before the notary submission rather than after.
       - name: The archive can actually take an update
@@ -160,9 +157,8 @@ jobs:
           ditto "$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app" "$APP"
           Scripts/sign-app.sh "$APP" "$IDENTITY"
 
-      # The signed bundle, not a fresh Release build: the hardened runtime and
-      # the helper entitlements only exist here, and 1.0.1 shipped with every
-      # renderer dying on JIT because nothing ever launched what was signed.
+      # Launch the signed bundle, not a fresh Release build: the hardened
+      # runtime and entitlements only exist here.
       - name: The signed app actually launches
         run: |
           PRODUCTS="$RUNNER_TEMP/SmokeRelease/Build/Products/Release"

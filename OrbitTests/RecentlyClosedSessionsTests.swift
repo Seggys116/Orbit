@@ -218,19 +218,47 @@ final class RecentlyClosedSessionsTests: XCTestCase {
     // MARK: - MAX_SESSION_RESULTS
 
     func test_maxSessionResults_inTheSchemaMatchesOrbitsOwnCapacity() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Orbit/Models/BrowserStore.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        XCTAssertTrue(source.contains("recentlyClosedCapacity = \(store.recentlyClosedCapacity)"))
+        typealias Schema = ExtensionAPISchemaSurface
+        let schemaURL = Schema.vendoredUpstreamDirectory.appendingPathComponent("sessions.json")
+        let namespaces = try XCTUnwrap(
+            Schema.readJSON(schemaURL) as? [[String: Any]],
+            "sessions.json did not parse as a schema array"
+        )
+        let sessions = try XCTUnwrap(namespaces.first { $0["namespace"] as? String == "sessions" })
+
+        let properties = try XCTUnwrap(sessions["properties"] as? [String: Any])
+        let maxResults = try XCTUnwrap(properties["MAX_SESSION_RESULTS"] as? [String: Any])
         XCTAssertEqual(
-            store.recentlyClosedCapacity, 25,
+            maxResults["value"] as? Int, store.recentlyClosedCapacity,
             """
             sessions.MAX_SESSION_RESULTS is the number extensions size their own lists by, and \
             recentlyClosedCapacity is the number Orbit actually keeps. Two copies that disagree \
             promise entries that were already dropped.
             """
+        )
+
+        let types = try XCTUnwrap(sessions["types"] as? [[String: Any]])
+        let filter = try XCTUnwrap(types.first { $0["id"] as? String == "Filter" })
+        let filterProperties = try XCTUnwrap(filter["properties"] as? [String: Any])
+        let filterMax = try XCTUnwrap(filterProperties["maxResults"] as? [String: Any])
+        XCTAssertEqual(
+            filterMax["maximum"] as? Int, store.recentlyClosedCapacity,
+            "Filter.maxResults' ceiling is the third copy of the same number and has to move with it"
+        )
+    }
+
+    func test_maxSessionResults_theWrapperServesTheStoresCapacityToExtensions() throws {
+        let configured = try ChromeWrapperRuntime.start(
+            manifestPermissions: ["sessions"], maxSessionResults: store.recentlyClosedCapacity
+        )
+        XCTAssertEqual(
+            configured.value(of: "chrome.sessions.MAX_SESSION_RESULTS") as? Int, store.recentlyClosedCapacity,
+            "the number an extension reads from chrome.sessions is not the number the store keeps"
+        )
+        let defaulted = try ChromeWrapperRuntime.start(manifestPermissions: ["sessions"])
+        XCTAssertEqual(
+            defaulted.value(of: "chrome.sessions.MAX_SESSION_RESULTS") as? Int, store.recentlyClosedCapacity,
+            "the wrapper's own default has drifted from the store's capacity; a caller that forgets to configure it would promise the wrong list length"
         )
     }
 }

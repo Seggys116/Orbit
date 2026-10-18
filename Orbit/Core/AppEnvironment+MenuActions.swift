@@ -28,15 +28,23 @@ extension AppEnvironment {
         return true
     }
 
-    // ignoringCache as well: the renderer keeps its own copy.
+    // `reload(ignoringCache:)` loads the URL already on screen. WebKit treats that as the
+    // same document and can paint the cached page again, so the wipe has to be followed
+    // by reloadFromOrigin on every pane actually visible with this tab.
     func clearCacheAndRefreshActiveTab() -> Bool {
-        guard let tabID = activeTabID, let contents = webContents[tabID], let engine else { return false }
-        let session = contents.session
+        guard let tabID = activeTabID, let engine else { return false }
+        let pages = visiblePagesForCacheReload(around: tabID)
+        guard !pages.isEmpty else { return false }
         Task { @MainActor in
-            await engine.clearBrowsingData(.cache, session: session, since: nil)
-            contents.reload(ignoringCache: true)
+            await engine.clearCacheAndReloadVisiblePages(pages)
         }
         return true
+    }
+
+    /// The active tab, plus the other panes of its split. Those are the pages on screen.
+    func visiblePagesForCacheReload(around tabID: TabID) -> [any WebContents] {
+        let ids = CacheReloadPlan.visibleTabIDs(around: tabID, splitTabIDs: splitGroup(for: tabID)?.tabIDs ?? [])
+        return ids.compactMap { webContents[$0] }.filter { !$0.isClosed }
     }
 
     // MARK: - Pinned section

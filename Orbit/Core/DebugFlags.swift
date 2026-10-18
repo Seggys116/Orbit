@@ -8,10 +8,11 @@ enum DebugFlags {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
-    // Drives the real Chromium browser, so a decision the engine genuinely blocks on must be
-    // taken, not short-circuited — the suite plays the user, and must answer it or close the tab.
+    // A live WebKit suite plays the user. Decisions the engine blocks on must be
+    // answered, not short-circuited. getenv sees a flag set after launch.
     static var isRunningUnderLiveEngine: Bool {
         ProcessInfo.processInfo.environment["ORBIT_LIVE_ENGINE"] != nil
+            || getenv("ORBIT_LIVE_ENGINE") != nil
     }
 
     // Launches the real, signed app bundle — indistinguishable from the browser the user runs.

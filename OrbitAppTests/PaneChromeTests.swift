@@ -472,7 +472,7 @@ final class PaneChromeTests: XCTestCase {
         )
     }
 
-    // MARK: - 6. Content card inset is uniform on all four edges, both sidebar states
+    // MARK: - 6. Content card inset: window edges stay cardInset; the docked leading seam includes the handle
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_contentCard_insetIsUniformOnAllFourEdges_bothSidebarStates
 
@@ -490,7 +490,6 @@ final class PaneChromeTests: XCTestCase {
         }
         env.state.activeSpaceID = spaceID
 
-        let backgroundReference = RGBA(r: spaceColor.red, g: spaceColor.green, b: spaceColor.blue, a: 1)
         let size = CGSize(width: 900, height: 600)
         let tolerance = 0.12
 
@@ -503,6 +502,9 @@ final class PaneChromeTests: XCTestCase {
             let rendered = render(windowView, size: size)
 
             let contentColumnLeadingX = sidebarVisible ? Int((env.sidebarWidth + OrbitMetrics.sidebarResizeHandleWidth).rounded()) : 0
+            // The space colour is drawn at windowTintOpacity, so the flat theme colour is not a pixel in the image.
+            let backgroundSampleX = min(contentColumnLeadingX + 2, Int(size.width) - 1)
+            let backgroundReference = rendered.color(atX: backgroundSampleX, y: 2)
             let verticalScanX = (contentColumnLeadingX + Int(size.width)) / 2
             let horizontalScanY = Int(size.height) / 2
 
@@ -533,16 +535,40 @@ final class PaneChromeTests: XCTestCase {
             let leadingInset = CGFloat(cardLeadingX - contentColumnLeadingX)
             let trailingInset = size.width - CGFloat(cardTrailingXFromEnd) - 1
 
-            let insets = [topInset, bottomInset, leadingInset, trailingInset]
-            let maxDelta = (insets.max() ?? 0) - (insets.min() ?? 0)
-
-            if maxDelta > 2 {
+            let windowEdges = [topInset, bottomInset, trailingInset]
+            let windowSpread = (windowEdges.max() ?? 0) - (windowEdges.min() ?? 0)
+            if windowSpread > 2 {
                 rendered.writeDiagnosticPNG(named: "cardInset-uniform-FAILED-sidebarVisible-\(sidebarVisible)")
             }
             XCTAssertLessThanOrEqual(
-                maxDelta, 2,
-                "refs/ARC_PANE_CHROME.md: expected the content card's inset to be uniform on all four edges (sidebarVisible: \(sidebarVisible)) — measured top=\(topInset) bottom=\(bottomInset) leading=\(leadingInset) trailing=\(trailingInset), a spread of \(maxDelta)pt. The old defect was specifically a zero-inset leading edge while docked; any one edge drifting from the other three should fail here."
+                windowSpread, 2,
+                "Top, bottom, and trailing insets stay the card's window-edge margin (sidebarVisible: \(sidebarVisible)) — measured top=\(topInset) bottom=\(bottomInset) trailing=\(trailingInset), a spread of \(windowSpread)pt."
             )
+
+            if sidebarVisible {
+                let sidebarToCard = CGFloat(cardLeadingX) - env.sidebarWidth
+                let windowEdge = windowEdges.reduce(0, +) / CGFloat(windowEdges.count)
+                if abs(sidebarToCard - windowEdge) > 2 || abs(leadingInset - OrbitMetrics.contentCardLeadingSeam) > 2 {
+                    rendered.writeDiagnosticPNG(named: "cardInset-uniform-FAILED-sidebarVisible-\(sidebarVisible)")
+                }
+                XCTAssertEqual(
+                    sidebarToCard, windowEdge, accuracy: 2,
+                    "The gap from the sidebar to the page card must equal the card's own inset, with the resize handle inside that inset. Measured sidebar-to-card=\(sidebarToCard) window-edge=\(windowEdge) content-leading=\(leadingInset)."
+                )
+                XCTAssertEqual(
+                    leadingInset, OrbitMetrics.contentCardLeadingSeam, accuracy: 2,
+                    "The content column's leading padding is the seam left beside the handle (\(OrbitMetrics.contentCardLeadingSeam)pt). Measured \(leadingInset)."
+                )
+            } else {
+                let hiddenSpread = max(windowSpread, abs(leadingInset - topInset), abs(leadingInset - bottomInset), abs(leadingInset - trailingInset))
+                if hiddenSpread > 2 {
+                    rendered.writeDiagnosticPNG(named: "cardInset-uniform-FAILED-sidebarVisible-\(sidebarVisible)")
+                }
+                XCTAssertEqual(
+                    leadingInset, topInset, accuracy: 2,
+                    "With the sidebar hidden the leading edge is a window edge and keeps the same inset as the top (\(topInset)pt). Measured leading=\(leadingInset)."
+                )
+            }
         }
     }
 
@@ -624,13 +650,22 @@ final class PaneChromeTests: XCTestCase {
         let seam = CGFloat(backgroundRuns[1].end - backgroundRuns[1].start + 1)
         let trailingMargin = CGFloat(backgroundRuns[2].end - backgroundRuns[2].start + 1)
 
-        let outerMargin = (leadingMargin + trailingMargin) / 2
-        if abs(seam - outerMargin) > 2 {
+        if abs(leadingMargin - OrbitMetrics.contentCardLeadingSeam) > 2
+            || abs(trailingMargin - OrbitMetrics.cardInset) > 2
+            || abs(seam - trailingMargin) > 2 {
             rendered.writeDiagnosticPNG(named: "splitPaneGap-FAILED-doubled")
         }
         XCTAssertEqual(
-            seam, outerMargin, accuracy: 2,
-            "The seam between two split panes measured \(seam)pt against an outer margin of \(outerMargin)pt (leading \(leadingMargin), trailing \(trailingMargin)). The reported defect was exactly this: each pane applying a full gap on its facing edge, so the two add up (plus OrbitMetrics.splitDividerThickness) to about twice the border every other edge in the window gets. OrbitSplitPaneMetrics.paneGap must stay derived from a single total (interPaneGap), split across the two facing edges."
+            leadingMargin, OrbitMetrics.contentCardLeadingSeam, accuracy: 2,
+            "The leading margin inside the content column is the seam beside the handle (\(OrbitMetrics.contentCardLeadingSeam)pt). Measured \(leadingMargin)."
+        )
+        XCTAssertEqual(
+            trailingMargin, OrbitMetrics.cardInset, accuracy: 2,
+            "The trailing margin stays the card inset that separates the page from the window edge. Measured \(trailingMargin)."
+        )
+        XCTAssertEqual(
+            seam, trailingMargin, accuracy: 2,
+            "The seam between two split panes measured \(seam)pt against the trailing card inset of \(trailingMargin)pt (leading margin \(leadingMargin)pt). Each pane applying a full gap on its facing edge would about double this. OrbitSplitPaneMetrics.paneGap must stay derived from a single total (interPaneGap), split across the two facing edges."
         )
 
         XCTAssertEqual(

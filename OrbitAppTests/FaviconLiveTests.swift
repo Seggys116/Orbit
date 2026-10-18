@@ -34,7 +34,6 @@ final class FaviconLiveTests: XCTestCase {
     // MARK: - Declared icon formats
 
     func testPNGFaviconReachesTheDelegateAsADecodedImage() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         try runFaviconCase(
             routes: [
                 "/": FaviconLiveTests.htmlRoute(head: "<link rel=\"icon\" type=\"image/png\" href=\"/icon.png\">"),
@@ -46,7 +45,6 @@ final class FaviconLiveTests: XCTestCase {
     }
 
     func testICOFaviconReachesTheDelegateAsADecodedImage() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         try runFaviconCase(
             routes: [
                 "/": FaviconLiveTests.htmlRoute(head: "<link rel=\"icon\" type=\"image/x-icon\" href=\"/site.ico\">"),
@@ -58,7 +56,6 @@ final class FaviconLiveTests: XCTestCase {
     }
 
     func testSVGFaviconReachesTheDelegateAsADecodedImage() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         try runFaviconCase(
             routes: [
                 "/": FaviconLiveTests.htmlRoute(head: "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/icon.svg\">"),
@@ -72,7 +69,6 @@ final class FaviconLiveTests: XCTestCase {
     /// The implicit /favicon.ico a document that declares nothing still gets:
     /// blink synthesises the candidate, and only blink knows about it.
     func testUndeclaredFaviconIcoIsStillFound() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         try runFaviconCase(
             routes: [
                 "/": FaviconLiveTests.htmlRoute(head: ""),
@@ -86,7 +82,6 @@ final class FaviconLiveTests: XCTestCase {
     /// The valid icon is deliberately declared in the middle of three: Blink
     /// hands candidates back last-declared-first, so only a middle icon is reached by a step that isn't the first or last.
     func testAnUndecodableIconFallsBackThroughTheRemainingCandidates() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let broken = LiveHTTPTestServer.Route(contentType: "image/png", data: Data("not an image at all".utf8))
         try runFaviconCase(
             routes: [
@@ -107,7 +102,6 @@ final class FaviconLiveTests: XCTestCase {
     /// The shape a framework-built site actually ships: a `<link rel="icon">`
     /// data: URL appended by script after parse, which re-fetching/scraping the markup never finds.
     func testScriptInjectedDataURLFaviconReachesTheDelegate() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let dataURL = "data:image/png;base64,\(FaviconLiveTests.solidPNG.base64EncodedString())"
         let injector = """
         <script>
@@ -118,16 +112,16 @@ final class FaviconLiveTests: XCTestCase {
         document.head.appendChild(link);
         </script>
         """
-        let recorded = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> (NSImage?, URL?) in
+        let recorded = try WebKitLiveEngineHost.runLive(timeout: 60) { () -> (NSImage?, URL?) in
             let server = try LiveHTTPTestServer(routes: ["/": FaviconLiveTests.htmlRoute(head: injector)])
             defer { server.stop() }
 
-            let contents = try await LiveChromiumEngineHost.makeContents()
+            let contents = try await WebKitLiveEngineHost.makeContents()
             defer { contents.close() }
             let delegate = FaviconRecordingDelegate()
             contents.delegate = delegate
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             let image = await delegate.waitForImage()
             return (image, delegate.lastURL)
         }
@@ -144,15 +138,14 @@ final class FaviconLiveTests: XCTestCase {
     // MARK: - Reaching the tab model
 
     func testFaviconReachesTheTabAndTheFaviconCache() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
-        let outcome = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> (faviconURL: URL?, cached: NSImage?, host: String) in
+        let outcome = try WebKitLiveEngineHost.runLive(timeout: 60) { () -> (faviconURL: URL?, cached: NSImage?, host: String) in
             let server = try LiveHTTPTestServer(routes: [
                 "/": FaviconLiveTests.htmlRoute(head: "<link rel=\"icon\" type=\"image/png\" href=\"/icon.png\">"),
                 "/icon.png": LiveHTTPTestServer.Route(contentType: "image/png", data: FaviconLiveTests.solidPNG),
             ])
             defer { server.stop() }
 
-            let contents = try await LiveChromiumEngineHost.makeContents()
+            let contents = try await WebKitLiveEngineHost.makeContents()
             defer { contents.close() }
 
             let env = AppEnvironment.demo
@@ -171,7 +164,7 @@ final class FaviconLiveTests: XCTestCase {
             }
 
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
             let host = server.baseURL.host() ?? ""
             let deadline = ContinuousClock.now + .seconds(15)
@@ -201,16 +194,16 @@ final class FaviconLiveTests: XCTestCase {
         expectedPathSuffix: String,
         what: String
     ) throws {
-        let recorded = try LiveChromiumEngineHost.runLive(timeout: 60) { () -> (NSImage?, URL?) in
+        let recorded = try WebKitLiveEngineHost.runLive(timeout: 60) { () -> (NSImage?, URL?) in
             let server = try LiveHTTPTestServer(routes: routes)
             defer { server.stop() }
 
-            let contents = try await LiveChromiumEngineHost.makeContents()
+            let contents = try await WebKitLiveEngineHost.makeContents()
             defer { contents.close() }
             let delegate = FaviconRecordingDelegate()
             contents.delegate = delegate
             contents.load(server.baseURL)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             let image = await delegate.waitForImage()
             return (image, delegate.lastURL)
         }
@@ -291,17 +284,11 @@ final class FaviconLiveTests: XCTestCase {
         line: UInt = #line
     ) {
         XCTAssertGreaterThan(image.size.width, 0, "\(context): decoded to a zero-sized image", file: file, line: line)
-        guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let colour = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?
-                  .usingColorSpace(.deviceRGB)
-        else {
+        guard let sample = ImagePixelSampler.sample(image) else {
             XCTFail("\(context): decoded image could not be read back as a bitmap", file: file, line: line)
             return
         }
-        let red = Int((colour.redComponent * 255).rounded())
-        let green = Int((colour.greenComponent * 255).rounded())
-        let blue = Int((colour.blueComponent * 255).rounded())
+        let (red, green, blue) = (sample.pixel.red, sample.pixel.green, sample.pixel.blue)
         // Tolerance covers one colour-space hop (device space -> sRGB -> this
         // display's CGImage read, ~20 max drift), still far from a different colour.
         XCTAssertEqual(red, fixtureColour.red, accuracy: 30, "\(context): red channel", file: file, line: line)

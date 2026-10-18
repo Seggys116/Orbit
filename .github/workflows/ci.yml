@@ -65,4 +65,3 @@ jobs:
         run: |
           APP="$RUNNER_TEMP/Orbit.xcarchive/Products/Applications/Orbit.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
-          test ! -d "$APP/Contents/Frameworks/Orbit Framework.framework"

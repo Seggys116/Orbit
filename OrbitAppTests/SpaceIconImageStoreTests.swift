@@ -39,7 +39,7 @@ final class SpaceIconImageStoreTests: XCTestCase {
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:])
         else {
-            throw XCTSkip("could not synthesize a PNG fixture on this machine")
+            throw TestStopped("could not synthesize a PNG fixture on this machine")
         }
         return png
     }

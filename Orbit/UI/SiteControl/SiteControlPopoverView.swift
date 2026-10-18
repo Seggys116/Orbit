@@ -284,6 +284,9 @@ struct SiteControlPopoverView: View {
         var manifest: ChromeExtensionManifest
         var popupURL: URL
         var actionIconFileURL: URL?
+        // Decoded when the row is built. The popover body re-evaluates on navigation ticks; reading the files there repeats the same decode.
+        var actionIconImage: NSImage?
+        var extensionIconImage: NSImage?
         var optionsURL: URL?
         var optionsPresentation: ExtensionActionPopupSupport.OptionsPagePresentation
         var isPendingActivation: Bool
@@ -340,7 +343,8 @@ struct SiteControlPopoverView: View {
             let popupPath = ExtensionActionPopupSupport.effectiveActionPopupPath(
                 extensionID: extensionInfo.id,
                 manifestPopupPath: manifest.actionPopupPath,
-                engineReportedPopupURL: actionState.popupURLString
+                engineReportedPopupURL: actionState.popupURLString,
+                popupOverride: ChromeExtensionAPI.actionPopupOverride(for: extensionInfo.id)
             )
             guard let popupURL = ExtensionActionPopupSupport.actionPopupURL(
                 extensionID: extensionInfo.id,
@@ -361,20 +365,39 @@ struct SiteControlPopoverView: View {
                 directory: extensionInfo.directory,
                 idIsEngineAssigned: extensionInfo.idIsEngineAssigned
             )
+            let actionIconFileURL = ExtensionActionPopupSupport.actionIconFileURL(
+                extensionDirectory: extensionInfo.directory,
+                relativePath: manifest.actionIconRelativePath
+            )
+            let icons = resolvedExtensionIcons(
+                iconPNG: actionState.iconPNG,
+                actionIconFileURL: actionIconFileURL,
+                extensionIconURL: extensionInfo.iconURL
+            )
             return ExtensionActionEntry(
                 extensionInfo: extensionInfo,
                 manifest: manifest,
                 popupURL: popupURL,
-                actionIconFileURL: ExtensionActionPopupSupport.actionIconFileURL(
-                    extensionDirectory: extensionInfo.directory,
-                    relativePath: manifest.actionIconRelativePath
-                ),
+                actionIconFileURL: actionIconFileURL,
+                actionIconImage: icons.action,
+                extensionIconImage: icons.fallback,
                 optionsURL: optionsURL,
                 optionsPresentation: ExtensionActionPopupSupport.optionsPagePresentation(optionsOpenInTab: manifest.optionsOpenInTab),
                 isPendingActivation: ExtensionActionPopupSupport.requiresRestartToActivate(isActivatedInRunningEngine: extensionInfo.isActivated),
                 actionState: actionState
             )
         }
+    }
+
+    // Action icon wins, including a chrome.action.setIcon payload. The extension icon is read only when that icon is absent, matching actionIconChoice.
+    private static func resolvedExtensionIcons(
+        iconPNG: Data?,
+        actionIconFileURL: URL?,
+        extensionIconURL: URL?
+    ) -> (action: NSImage?, fallback: NSImage?) {
+        let action = iconPNG.flatMap { NSImage(data: $0) } ?? actionIconFileURL.flatMap { NSImage(contentsOf: $0) }
+        guard action == nil else { return (action, nil) }
+        return (nil, extensionIconURL.flatMap { NSImage(contentsOf: $0) })
     }
 
     private func reloadExtensionActionEntries() {
@@ -463,17 +486,17 @@ struct SiteControlPopoverView: View {
     private func extensionActionIconImage(_ entry: ExtensionActionEntry) -> some View {
         // chrome.action.setIcon wins over anything on disk: the extension set
         // it for this exact tab, and the manifest icon is only the fallback.
-        let dynamicImage = entry.actionState.iconPNG.flatMap { NSImage(data: $0) }
-        let actionImage = dynamicImage ?? entry.actionIconFileURL.flatMap { NSImage(contentsOf: $0) }
-        let extensionImage = entry.extensionInfo.iconURL.flatMap { NSImage(contentsOf: $0) }
-        switch ExtensionActionPopupSupport.actionIconChoice(hasActionIcon: actionImage != nil, hasExtensionIcon: extensionImage != nil) {
+        switch ExtensionActionPopupSupport.actionIconChoice(
+            hasActionIcon: entry.actionIconImage != nil,
+            hasExtensionIcon: entry.extensionIconImage != nil
+        ) {
         case .actionIcon:
-            Image(nsImage: actionImage!)
+            Image(nsImage: entry.actionIconImage!)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .padding(7)
         case .extensionIcon:
-            Image(nsImage: extensionImage!)
+            Image(nsImage: entry.extensionIconImage!)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .padding(7)
@@ -656,7 +679,7 @@ struct SiteControlPopoverView: View {
 
     // MARK: - Developer Tools row
 
-    // Gate and effect must agree: checking only the engine capability while the action reaches through env.webContents[tab.id] would let a Chromium engine with no active tab look enabled while pressing it silently does nothing.
+    // Gate and effect must agree: checking only the engine capability while the action reaches through env.webContents[tab.id] would let an engine with no active tab look enabled while pressing it silently does nothing.
     private var isDeveloperToolsAvailable: Bool {
         Self.isDeveloperToolsAvailable(capabilities: env.engineCapabilities) && env.webContents[tab.id] != nil
     }
@@ -746,12 +769,12 @@ struct SiteControlPopoverView: View {
     }
 
     private func clearCacheForEntireSession() {
-        guard let engine = env.engine, let contents = env.webContents[tab.id] else { return }
-        let session = contents.session
+        guard let engine = env.engine else { return }
+        let pages = env.visiblePagesForCacheReload(around: tab.id)
+        guard !pages.isEmpty else { return }
         cacheClearState = .clearing
         Task { @MainActor in
-            await engine.clearBrowsingData(.cache, session: session, since: nil)
-            contents.reload(ignoringCache: true)
+            await engine.clearCacheAndReloadVisiblePages(pages)
             cacheClearState = .done
             try? await Task.sleep(for: Self.clearActionFeedbackDuration)
             if cacheClearState == .done { cacheClearState = .idle }
@@ -760,7 +783,7 @@ struct SiteControlPopoverView: View {
 
     // MARK: - Permission rows
 
-    // EngineSession.contentSetting(_:for:)/setContentSetting(_:for:url:) read and write Chromium's OrbitPermissionStore directly — the same store an allowAlways/denyAlways prompt answer is recorded in. One store, not a shadow copy.
+    // EngineSession.contentSetting(_:for:)/setContentSetting(_:for:url:) read and write the session's persisted per-site decisions (WebKitSession's ContentSettings file) — one store, not a shadow copy.
 
     struct PermissionRow: Identifiable, Equatable {
         var kind: PermissionKind

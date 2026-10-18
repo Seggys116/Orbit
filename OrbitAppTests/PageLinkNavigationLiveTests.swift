@@ -104,7 +104,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     // Mirrors OrbitWindowController.installContentView(window:) exactly: -shouldIgnoreMouseEvent:
     // re-runs the hit test from window.contentView, so a plainer container would test a different tree.
     private func hostRealContentCard(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         url: URL
     ) throws -> (window: NSWindow, environment: AppEnvironment, tabID: TabID) {
         let environment = AppEnvironment.demo
@@ -138,7 +138,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     }
 
     private func waitUntilEngineViewIsMounted(
-        _ contents: ChromiumWebContents,
+        _ contents: WebKitWebContents,
         in window: NSWindow,
         timeout: Duration = .seconds(10)
     ) async throws {
@@ -176,7 +176,8 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     private func click(
         at pointInWindow: NSPoint,
         in window: NSWindow,
-        modifiers: NSEvent.ModifierFlags = []
+        modifiers: NSEvent.ModifierFlags = [],
+        middleButton: Bool = false
     ) -> ClickOutcome {
         guard let themeFrame = window.contentView?.superview else {
             return ClickOutcome(resolvedView: nil, pointInWindow: pointInWindow)
@@ -200,12 +201,28 @@ final class PageLinkNavigationLiveTests: XCTestCase {
             )
         }
 
-        if let down = event(.leftMouseDown, pressure: 1) { resolved.mouseDown(with: down) }
-        if let up = event(.leftMouseUp, pressure: 0) { resolved.mouseUp(with: up) }
+        if middleButton {
+            // mouseEvent(with: .otherMouseDown) reports buttonNumber 0, so WebKit treats it as a left click.
+            if let down = middleEvent(.otherMouseDown, location: pointInWindow, window: window) { resolved.otherMouseDown(with: down) }
+            if let up = middleEvent(.otherMouseUp, location: pointInWindow, window: window) { resolved.otherMouseUp(with: up) }
+        } else {
+            if let down = event(.leftMouseDown, pressure: 1) { resolved.mouseDown(with: down) }
+            if let up = event(.leftMouseUp, pressure: 0) { resolved.mouseUp(with: up) }
+        }
         return ClickOutcome(resolvedView: resolved, pointInWindow: pointInWindow)
     }
 
-    private func engineCentre(of contents: ChromiumWebContents) -> NSPoint {
+    private func middleEvent(_ type: NSEvent.EventType, location: NSPoint, window: NSWindow) -> NSEvent? {
+        guard let base = NSEvent.mouseEvent(
+            with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: type == .otherMouseDown ? 1 : 0
+        ), let cg = base.cgEvent else { return nil }
+        // The stock event is located correctly and reports buttonNumber 0. WebKit then treats it as a left click.
+        cg.setIntegerValueField(.mouseEventButtonNumber, value: Int64(NewContentDisposition.webKitMiddleButtonNumber))
+        return NSEvent(cgEvent: cg)
+    }
+
+    private func engineCentre(of contents: WebKitWebContents) -> NSPoint {
         let frame = contents.view.convert(contents.view.bounds, to: nil)
         return NSPoint(x: frame.midX, y: frame.midY)
     }
@@ -259,13 +276,12 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testARealClickOnAPlainLinkReachesTheEngineAndFollowsIt
 
     func testARealClickOnAPlainLinkReachesTheEngineAndFollowsIt() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")
-        try LiveChromiumEngineHost.runLive(timeout: 90) {
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
             let server = try self.makeServer()
             defer { server.stop() }
             let start = server.baseURL.appendingPathComponent("link")
 
-            let contents = try await LiveChromiumEngineHost.makeContents()
+            let contents = try await WebKitLiveEngineHost.makeContents()
             defer { contents.close() }
 
             let hosted = try self.hostRealContentCard(contents, url: start)
@@ -275,7 +291,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
             }
 
             contents.load(start)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             try await self.waitUntilEngineViewIsMounted(contents, in: hosted.window)
             // The compositor needs a frame before the renderer will hit-test
             // the click against a laid-out document.
@@ -308,13 +324,12 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testACmdClickAsksSwiftForANewBackgroundTabInsteadOfDoingNothing
 
     func testACmdClickAsksSwiftForANewBackgroundTabInsteadOfDoingNothing() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")
-        try LiveChromiumEngineHost.runLive(timeout: 90) {
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
             let server = try self.makeServer()
             defer { server.stop() }
             let start = server.baseURL.appendingPathComponent("link")
 
-            let contents = try await LiveChromiumEngineHost.makeContents()
+            let contents = try await WebKitLiveEngineHost.makeContents()
             defer { contents.close() }
             let recorder = NewContentRecorder()
             contents.delegate = recorder
@@ -327,7 +342,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
             }
 
             contents.load(start)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             try await self.waitUntilEngineViewIsMounted(contents, in: hosted.window)
             try await Task.sleep(for: .milliseconds(400))
 
@@ -360,13 +375,89 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         }
     }
 
+    // MARK: - 2b. The other click gestures
+
+    // Every gesture is checked against the link the page's own mousedown listener
+    // rewrote, so a navigation that was not this click cannot satisfy it.
+    private func assertClickRequests(
+        _ expected: NewContentDisposition,
+        modifiers: NSEvent.ModifierFlags,
+        middleButton: Bool = false
+    ) async throws {
+        let server = try makeServer()
+        defer { server.stop() }
+        let start = server.baseURL.appendingPathComponent("link")
+
+        let contents = try await WebKitLiveEngineHost.makeContents()
+        defer { contents.close() }
+        let recorder = NewContentRecorder()
+        contents.delegate = recorder
+        defer { recorder.closeAll() }
+
+        let hosted = try hostRealContentCard(contents, url: start)
+        defer {
+            hosted.environment._test_detachWebContents(for: hosted.tabID)
+            hosted.window.orderOut(nil)
+        }
+
+        contents.load(start)
+        try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
+        try await waitUntilEngineViewIsMounted(contents, in: hosted.window)
+        try await Task.sleep(for: .milliseconds(400))
+
+        click(at: engineCentre(of: contents), in: hosted.window, modifiers: modifiers, middleButton: middleButton)
+
+        try await waitUntil("The click produced no new-content request at all.") { !recorder.requested.isEmpty }
+        let request = try XCTUnwrap(recorder.requested.first)
+        XCTAssertEqual(request.url.path, ClickDestination.onLink, Self.diagnosis(forLandedPath: request.url.path))
+        XCTAssertEqual(request.disposition, expected)
+        XCTAssertEqual(contents.navigationState.url?.path, "/link", "The click must not navigate the tab it was made in.")
+        XCTAssertTrue(recorder.adopted.isEmpty, "Nothing is built for a click: the delegate opens the tab itself.")
+    }
+
+    func testACmdShiftClickAsksForAForegroundTab() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
+            try await self.assertClickRequests(.newForegroundTab, modifiers: [.command, .shift])
+        }
+    }
+
+    func testAShiftClickAsksForANewWindow() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
+            try await self.assertClickRequests(.newWindow, modifiers: [.shift])
+        }
+    }
+
+    func testAMiddleClickAsksForABackgroundTab() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
+            try await self.assertClickRequests(.newBackgroundTab, modifiers: [], middleButton: true)
+        }
+    }
+
+    func testWindowOpenWithFeaturesIsAdoptedAsAPopup() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
+            let server = try self.makeServer()
+            defer { server.stop() }
+            let contents = try await WebKitLiveEngineHost.makeContents()
+            defer { contents.close() }
+            let recorder = NewContentRecorder()
+            contents.delegate = recorder
+            defer { recorder.closeAll() }
+
+            contents.load(server.baseURL.appendingPathComponent("link"))
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
+            _ = try await contents.evaluateJavaScript("window.open('/opened', '_blank', 'width=320,height=240')", userGesture: true)
+
+            try await self.waitUntil("window.open with features produced no new WebContents.") { !recorder.adopted.isEmpty }
+            XCTAssertEqual(recorder.adopted.first?.request.disposition, .popup)
+        }
+    }
+
     // MARK: - 3. The route the engine already built: target="_blank"
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testATargetBlankLinkOpensARealSecondTabAtTheLinkedURL
 
     func testATargetBlankLinkOpensARealSecondTabAtTheLinkedURL() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")
-        try LiveChromiumEngineHost.runLive(timeout: 90) {
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
             try await self.assertNewWindowLands(
                 on: "/opened",
                 startingAt: "blank",
@@ -380,8 +471,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testWindowOpenOpensARealSecondTabAtTheRequestedURL
 
     func testWindowOpenOpensARealSecondTabAtTheRequestedURL() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")
-        try LiveChromiumEngineHost.runLive(timeout: 90) {
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
             try await self.assertNewWindowLands(
                 on: "/opened",
                 startingAt: "link",
@@ -397,14 +487,14 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         defer { server.stop() }
         let start = server.baseURL.appendingPathComponent(route)
 
-        let contents = try await LiveChromiumEngineHost.makeContents()
+        let contents = try await WebKitLiveEngineHost.makeContents()
         defer { contents.close() }
         let recorder = NewContentRecorder()
         contents.delegate = recorder
         defer { recorder.closeAll() }
 
         contents.load(start)
-        try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+        try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
         _ = try await contents.evaluateJavaScript(script, userGesture: true)
 
@@ -422,7 +512,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         XCTAssertEqual(entry.request.url.path, path)
         XCTAssertEqual(entry.request.disposition, .newForegroundTab)
 
-        let opened = try XCTUnwrap(entry.contents as? ChromiumWebContents, "The adopted contents is not a live engine tab.")
+        let opened = try XCTUnwrap(entry.contents as? WebKitWebContents, "The adopted contents is not a live engine tab.")
         try await waitUntil(
             """
             The adopted WebContents never landed on \(path) (it is at \
@@ -435,24 +525,5 @@ final class PageLinkNavigationLiveTests: XCTestCase {
             contents.navigationState.url?.path, "/\(route)",
             "Opening a second tab must leave the tab that opened it where it was."
         )
-    }
-
-    // MARK: - 5. The C ABI both routes answer through
-
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTheLoadedFrameworkExportsTheNewContentCallback
-
-    func testTheLoadedFrameworkExportsTheNewContentCallback() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE is not set")
-        try LiveChromiumEngineHost.runLive {
-            _ = await LiveChromiumEngineHost.sharedEngine()
-            XCTAssertTrue(
-                OrbitChromiumBridge.shared.hasNewContentRequestCallback,
-                """
-                The loaded Chromium framework has no OrbitSetNewContentRequestCallback, \
-                so nothing a page opens in a second tab can reach Swift however \
-                correct the Swift side is. Rebuild Chromium/Embedder.
-                """
-            )
-        }
     }
 }

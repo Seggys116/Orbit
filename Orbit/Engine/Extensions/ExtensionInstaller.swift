@@ -29,7 +29,7 @@ nonisolated public final class ExtensionInstaller {
         public let warnings: [ExtensionPermissionWarning]
         public let isUpdate: Bool
         public let previousVersion: String?
-        public let chromiumVersionWarning: String?
+        public let minimumChromeVersionWarning: String?
 
         public init(
             id: String,
@@ -40,7 +40,7 @@ nonisolated public final class ExtensionInstaller {
             warnings: [ExtensionPermissionWarning],
             isUpdate: Bool,
             previousVersion: String?,
-            chromiumVersionWarning: String?
+            minimumChromeVersionWarning: String?
         ) {
             self.id = id
             self.name = name
@@ -50,7 +50,7 @@ nonisolated public final class ExtensionInstaller {
             self.warnings = warnings
             self.isUpdate = isUpdate
             self.previousVersion = previousVersion
-            self.chromiumVersionWarning = chromiumVersionWarning
+            self.minimumChromeVersionWarning = minimumChromeVersionWarning
         }
     }
 
@@ -181,7 +181,7 @@ nonisolated public final class ExtensionInstaller {
 
         let warnings = ExtensionPermissionWarnings.warnings(for: manifest)
         let iconURL = manifest.iconRelativePath.map { stagingRoot.appendingPathComponent($0) }
-        let chromiumVersionWarning = Self.chromiumVersionWarning(for: manifest.minimumChromeVersion)
+        let minimumChromeVersionWarning = Self.minimumChromeVersionWarning(for: manifest.minimumChromeVersion)
 
         let pending = PendingInstall(
             id: id,
@@ -192,7 +192,7 @@ nonisolated public final class ExtensionInstaller {
             warnings: warnings,
             isUpdate: existing != nil,
             previousVersion: existing?.version,
-            chromiumVersionWarning: chromiumVersionWarning
+            minimumChromeVersionWarning: minimumChromeVersionWarning
         )
 
         try Task.checkCancellation()
@@ -251,9 +251,9 @@ nonisolated public final class ExtensionInstaller {
             .appendingPathComponent("Orbit-ExtensionInstall-\(UUID().uuidString)", isDirectory: true)
     }
 
-    // MARK: - Chromium version warning
+    // MARK: - Minimum Chrome version warning
 
-    private static func chromiumVersionWarning(for minimumChromeVersion: String?) -> String? {
+    private static func minimumChromeVersionWarning(for minimumChromeVersion: String?) -> String? {
         guard let minimumChromeVersion, !minimumChromeVersion.isEmpty else { return nil }
         return "This extension declares that it requires Chrome \(minimumChromeVersion) or later. "
             + "Orbit runs \(WebKitProduct.versionDescription), so some Chrome-only features may not work correctly."

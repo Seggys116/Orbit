@@ -13,7 +13,7 @@ final class SiteControlPopoverVisualTests: XCTestCase {
     // MARK: - A minimal, mutable BrowserEngine stand-in (capabilities toggled after construction)
 
     private final class FakeEngine: BrowserEngine {
-        static let kind: EngineKind = .chromium
+        static let kind: EngineKind = .webkit
         var capabilities: EngineCapabilities = [.extensions]
         var manageableContentSettings: Set<PermissionKind> = Set(PermissionKind.allCases)
         var extensionActivation: ExtensionActivation = .nextLaunch

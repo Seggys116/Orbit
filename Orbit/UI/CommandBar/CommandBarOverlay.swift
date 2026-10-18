@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum CommandBarAnchorID: Hashable, Sendable {
@@ -65,24 +66,32 @@ enum CommandBarPlacement {
 struct CommandBarOverlayLayout<Content: View>: View {
     var targetRect: CGRect?
     var scrimOpacity: Double = 0.18
-    var onScrimTap: () -> Void = {}
+    /// Leading width that stays clickable. The sidebar lives there; a scrim
+    /// across it turned a tab click into "dismiss the new-tab bar" and left
+    /// the blank page on screen.
+    var passthroughLeadingWidth: CGFloat = 0
+    /// SwiftUI-only tap; the main window uses CommandBarScrimClickCatcher instead.
+    var onScrimTap: (() -> Void)?
     @ViewBuilder var content: (CGFloat) -> Content
 
     var body: some View {
         GeometryReader { proxy in
             let region = resolvedRegion(in: proxy.size)
             ZStack {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: onScrimTap)
-                    .ignoresSafeArea()
+                if let onScrimTap {
+                    Color.clear
+                        .contentShape(CommandBarScrimShape(leadingInset: passthroughLeadingWidth))
+                        .onTapGesture(perform: onScrimTap)
+                }
 
                 dim(over: region)
 
                 content(CommandBarPlacement.width(forAvailableWidth: region.width))
+                    .fixedSize()
                     .position(x: region.midX, y: region.midY)
             }
         }
+        .contentShape(CommandBarScrimShape(leadingInset: passthroughLeadingWidth))
     }
 
     private func dim(over region: CGRect) -> some View {
@@ -101,10 +110,71 @@ struct CommandBarOverlayLayout<Content: View>: View {
     }
 }
 
+/// Clicks on the page dismiss the bar. Clicks on the sidebar fall through
+/// to the tab rows, which both select the tab and take the bar down.
+struct CommandBarScrimClickCatcher: NSViewRepresentable {
+    var leadingInset: CGFloat
+    var onTap: () -> Void
+
+    func makeNSView(context: Context) -> CommandBarScrimClickView {
+        let view = CommandBarScrimClickView()
+        view.leadingInset = leadingInset
+        view.onTap = onTap
+        return view
+    }
+
+    func updateNSView(_ nsView: CommandBarScrimClickView, context: Context) {
+        nsView.leadingInset = leadingInset
+        nsView.onTap = onTap
+    }
+}
+
+final class CommandBarScrimClickView: NSView {
+    var leadingInset: CGFloat = 0
+    var onTap: () -> Void = {}
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let superview else { return nil }
+        let local = convert(point, from: superview)
+        guard bounds.contains(local), local.x >= leadingInset else { return nil }
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onTap()
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
+/// The scrim covers the page and leaves the sidebar strip alone.
+struct CommandBarScrimShape: Shape {
+    var leadingInset: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let inset = min(max(leadingInset, 0), rect.width)
+        return Path(CGRect(x: rect.minX + inset, y: rect.minY, width: rect.width - inset, height: rect.height))
+    }
+}
+
 struct CommandBarOverlay: View {
     @Environment(AppEnvironment.self) private var env
 
     var anchors: [CommandBarAnchorID: CGRect] = [:]
+    var passthroughLeadingWidth: CGFloat = 0
+
+    #if DEBUG
+    // ImageRenderer paints an NSViewRepresentable as an opaque block over the whole overlay.
+    @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeRepresentableDisabled
+    #endif
+
+    private var showsScrimClickCatcher: Bool {
+        #if DEBUG
+        !screenshotModeRepresentableDisabled
+        #else
+        true
+        #endif
+    }
 
     var body: some View {
         CommandBarOverlayLayout(
@@ -113,9 +183,16 @@ struct CommandBarOverlay: View {
                 activeTabID: env.activeTabID,
                 anchors: anchors
             ),
-            onScrimTap: { env.dismissCommandBar() }
+            passthroughLeadingWidth: passthroughLeadingWidth
         ) { width in
             CommandBarView(width: width, seededFrom: env)
+        }
+        // ImageRenderer fills an NSViewRepresentable with an opaque placeholder the size of
+        // the overlay. The live window still needs the catcher; a flattened render must not include it.
+        .background {
+            if showsScrimClickCatcher {
+                CommandBarScrimClickCatcher(leadingInset: passthroughLeadingWidth, onTap: { env.dismissCommandBar() })
+            }
         }
         .transition(.opacity.animation(.easeOut(duration: 0.13)))
         .zIndex(10)

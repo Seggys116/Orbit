@@ -19,14 +19,10 @@ class LiveEnvironmentTestCase: XCTestCase {
         blocker.isEnabled = false
     }
 
-    // No engine means no test in this process opened a tab, so `env` stays unbuilt for the whole skipped run.
+    // No engine means no test in this process opened a tab, so `env` stays unbuilt.
     override func tearDown() {
-        if LiveChromiumEngineHost.startedEngine != nil {
+        if WebKitLiveEngineHost.startedEngine != nil {
             closeEveryLiveTab()
-            // Windows register per test method; skip this and each test leaves another window in chrome.windows for the rest of the process.
-            if OrbitChromiumTabsBridge.shared.isWindowRegistered(env) {
-                OrbitChromiumTabsBridge.shared.windowRemoved(owner: env)
-            }
             failIfAnyTabIsStillRegistered()
         }
         if let contentBlockingWasEnabled {
@@ -71,14 +67,13 @@ class LiveEnvironmentTestCase: XCTestCase {
     }
 
     private func failIfAnyTabIsStillRegistered() {
-        let stranded = OrbitChromiumTabsBridge.shared._test_registeredTabIDs(ownedBy: env)
+        let stranded = Array(env.webContents.keys)
         XCTAssertEqual(
             stranded, [],
             """
-            \(Self.self) left tab id(s) \(stranded.map { "\($0)" }.joined(separator: ", ")) in \
-            OrbitTabRegistry, which is process-wide and only forgets a tab when its WebContents is \
-            released. Every later suite's chrome.tabs.query counts them, so the failure lands on one of \
-            those suites instead of this one. Close or release every tab this environment materialised.
+            \(Self.self) left live WebKit tabs \(stranded.map(\.uuidString).joined(separator: ", ")). \
+            The engine is process-wide and chrome.tabs.query counts every tab still open. \
+            Close or release every tab this environment materialised.
             """
         )
     }

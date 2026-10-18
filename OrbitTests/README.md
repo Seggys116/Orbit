@@ -35,26 +35,36 @@ most of this suite avoids the question entirely. `Scripts/app-launch-smoke`
 is the one thing here that does launch it, and only it can catch a defect on
 the real launch path.
 
-### The live-engine suites are not in that run
+### The live-engine suites are in that run
 
-`OrbitAppTests/Chromium*LiveTests.swift` start a real Chromium — a real browser
-process, its helper processes, a window on screen — and skip themselves in the
-command above. They have their own:
+The `OrbitAppTests` files that start a real `WebKitEngine` through
+`OrbitAppTests/Support/WebKitLiveEngineHost.swift` (`WebKit*LiveTests`,
+`WebPlatform*LiveTests`, `Corpus*LiveTests` and others) load real pages inside the
+hosted test process. There is no environment gate: they run in the command above,
+all sharing one process and one engine. Only tests marked
+`// ORBIT-HOSTED-RUNNER: CANNOT-RUN <test>` are excluded in CI.
+
+`Scripts/live-engine-tests` is the strict way to run them:
 
 ```
 Scripts/live-engine-tests
-Scripts/live-engine-tests --suite ChromiumMediaLiveTests
+Scripts/live-engine-tests --list
+Scripts/live-engine-tests --suite WebKitEngineSurfaceLiveTests
 ```
 
-They are the only tests here that can observe real page behaviour, so a green
-run of everything else is not evidence about the browser. Do not try to enable
-them with `ORBIT_LIVE_ENGINE=1 xcodebuild test`: `xcodebuild` does not pass its
-environment to a hosted test host, so that command skips them and still reports
-success. The script writes the variable into the `.xctestrun` and then checks
-that the expected number of tests actually executed;
-`.github/workflows/live-engine.yml` runs it nightly, on demand, and on any pull
-request labelled `live-engine`. `Scripts/live-engine-tests`' header has the
-whole account.
+It discovers the suites from the sources (files with a non-comment reference to
+`WebKitLiveEngineHost`), runs them together in one test process, and fails on
+any skip and unless the expected number of tests actually executed and passed. It has one
+configuration, `baseline`. It sets `ORBIT_LIVE_ENGINE=1` in the `.xctestrun`
+(`WebKitLiveEngineHost.sharedEngine()` sets it too; `Orbit/Core/DebugFlags.swift`
+reads it as `isRunningUnderLiveEngine`), but nothing skips without it.
+`.github/workflows/live-engine.yml` runs the script nightly. Its header has the
+whole account, including `--skip-build`, `--expect`, `--test-timeout`,
+`--results-dir`, `--derived-data` and `--destination`.
+
+These are the only tests here that can observe real page behaviour, and a
+skipped XCTest still reports success to `xcodebuild`, so check the log for
+`Test skipped` or use the script, which counts what ran.
 
 ### Nothing above launches the app a user launches
 
@@ -63,7 +73,7 @@ principal class, a different `applicationDidFinishLaunching` order, and no
 window-server session of its own. A crash on the AppKit window-creation path is
 invisible to all of them, which is how
 `[FATAL:allocator_shim_apple.cc(61)] Check failed: false. Oops! No zone found`
-reached a user while 1722 unit tests and 155 live tests were green.
+(from the since-removed Chromium engine) reached a user while 1722 unit tests and 155 live tests were green.
 
 ```
 Scripts/app-launch-smoke                      both schemes, 5 launches each
@@ -215,7 +225,7 @@ the entire reason `OrbitAppTests` is safe to run in this project.
 | `AppEnvironmentWebContentsDelegateTests.swift` | Exercises `AppEnvironment`'s `WebContentsDelegate` callbacks (D4/D5) via the `#if DEBUG`-only `_test_attachWebContents` seam. |
 | `SidebarRenderTests.swift` | Renders the real `SidebarBottomBar`/`TabRowView`/`SidebarTopRow`/`FavoritesGridView` (already compiled into `Orbit.app`, no reuse needed) against real `AppEnvironment.demo` (D5/D6/D8/D9). |
 | `Support/MockWebContents.swift` | A `WebContents`/`EngineSession` test double (never a real engine backend) used by `AppEnvironmentWebContentsDelegateTests.swift`. |
-| `ChromiumEngineTests.swift` | Tests the real `ChromiumEngine` — see "The Chromium backend in tests" below. |
+| `WebKitEngineLaunchTests.swift`, `WebKitChromeExtensionTests.swift` | Start the real `WebKitEngine` — see "The WebKit engine in tests" below. |
 | `RenderHarness.swift` | Symlink to `../OrbitTests/RenderHarness.swift` — one canonical copy, used by both targets. |
 
 `AppEnvironment.demo` is a **factory**: every access builds a fresh instance
@@ -275,7 +285,7 @@ until AppKit exceeded its per-window pass limit and threw an **uncaught**
 `NSGenericException`. An uncaught exception terminates the `xctest` process,
 and XCTest attributes the termination to whichever test was executing at that
 instant — so the reported failure named a different, innocent test every run
-(`ScreenshotGenerationTests`, `SidebarMiniPlayerTests`, `ChromiumEngineTests`,
+(`ScreenshotGenerationTests`, `SidebarMiniPlayerTests`, `WebKitEngineLaunchTests`,
 `PaneHeaderColorResolverTests` and `BrowserImportCoordinatorTests` were each
 blamed at least once). It read as flakiness; it was one leaked object.
 
@@ -326,7 +336,9 @@ The shipped engine is system WebKit. Nothing downloads or links a Chromium frame
 
 **`OrbitTests` must stay host-less.** It compiles a curated set of real sources (see the two tables above). A host-less `xctest` process has already produced a `SIGSEGV` when given real windows — see `../OrbitAppTests/WindowControllerResizeRegressionTests.swift`'s header.
 
-**No ordinary `OrbitTests` run starts a browser.** `OrbitAppDelegate` bails out under `XCTestConfigurationFilePath` so `xcodebuild test` does not open a window. Navigation through the shipped engine is covered by `OrbitAppTests`.
+**One host-less test does start WebKit.** `SandboxInvariantTests` (with `Support/ProcessSandboxProbe.swift` and `ProcessSandboxProbeTests`) creates a bare `WKWebView` with no Orbit code and checks, through `sandbox_check`, that its WebContent, Networking and GPU XPC services are sandboxed. It also checks that `Orbit/Resources/Orbit.entitlements` grants no sandbox or hardened-runtime exception to the browser process. `testARunningBrowserSatisfiesTheProcessInvariants` always audits the test process as a running browser with a live web view, and also audits a running Orbit (or `ORBIT_SANDBOX_INVARIANT_PID`) when there is one. `Scripts/security-guards` is its static counterpart.
+
+**Otherwise no `OrbitTests` run starts a browser.** `OrbitAppDelegate` bails out under `XCTestConfigurationFilePath` so `xcodebuild test` does not open a window. Navigation through the shipped engine is covered by `OrbitAppTests`.
 
 ## Reused Orbit sources (PBXFileReference mechanism)
 

@@ -2,8 +2,8 @@ import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
-import MachO
 import UniformTypeIdentifiers
+import WebKit
 
 @MainActor
 enum DemoEngineProbe {
@@ -58,7 +58,6 @@ enum DemoEngineProbe {
         }
 
         checkEngineType(env)
-        checkEmbeddedChromium()
         await checkPageLoads(env)
         await checkRendererSurface()
         await checkHoveredLinkReadout(env)
@@ -110,37 +109,6 @@ enum DemoEngineProbe {
         emit("OK   engine capabilities: extensions, contentBlocking, backgroundSnapshots, developerTools")
     }
 
-    // MARK: - 2. What is inside this bundle, and what is actually loaded
-
-    private static func checkEmbeddedChromium() {
-        let frameworks = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Frameworks", isDirectory: true)
-        let framework = frameworks
-            .appendingPathComponent("Orbit Framework.framework", isDirectory: true)
-        if FileManager.default.fileExists(atPath: framework.path) {
-            fail("Orbit Framework.framework is still in the app bundle at \(framework.path)")
-        } else {
-            emit("OK   no Chromium framework in the app bundle")
-        }
-        if let loadedPath = loadedFrameworkPath() {
-            fail("Orbit Framework is loaded from \(loadedPath)")
-        } else {
-            emit("OK   no Orbit Framework image is loaded")
-        }
-    }
-
-    private static func loadedFrameworkPath() -> String? {
-        for index in 0..<_dyld_image_count() {
-            guard let raw = _dyld_get_image_name(index) else { continue }
-            let path = String(cString: raw)
-            if path.hasSuffix("/Orbit Framework.framework/Versions/A/Orbit Framework")
-                || path.hasSuffix("/Orbit Framework.framework/Orbit Framework") {
-                return path
-            }
-        }
-        return nil
-    }
-
     // MARK: - 3 and 4. A real tab, a real page, a real renderer
 
     private static var probedTab: TabID?
@@ -168,10 +136,10 @@ enum DemoEngineProbe {
         probedContents = contents
 
         let contentsType = String(describing: type(of: contents))
-        if contents is ChromiumWebContents {
+        if contents is WebKitWebContents {
             emit("OK   tab renderer type: \(contentsType)")
         } else {
-            fail("the demo's tab is backed by \(contentsType), not ChromiumWebContents.")
+            fail("the demo's tab is backed by \(contentsType), not WebKitWebContents.")
         }
 
         // loadInTab, not contents.load: a bare load bypasses the navigation-generation bump that
@@ -666,10 +634,10 @@ enum DemoEngineProbe {
         }
 
         guard let storageURL = session.storageURL else {
-            fail("the engine session reports no storageURL — OrbitBrowserContextPath answered nothing, so there is no way to tell where Chromium is writing.")
+            fail("the engine session reports no storageURL, so there is no way to tell where the engine's own files are.")
             return
         }
-        emit("     engine browser-context path: \(storageURL.path)")
+        emit("     engine directory: \(storageURL.path)")
 
         // The other half of EngineStorage.isolated: a private per-process directory. Both sides come
         // from EngineStorageDirectory rather than being spelled out here, so a redirected home moves
@@ -679,18 +647,36 @@ enum DemoEngineProbe {
         let resolvedStorage = storageURL.resolvingSymlinksInPath().path
         let resolvedProduction = productionProfile.resolvingSymlinksInPath().path
         if resolvedStorage == resolvedProduction || resolvedStorage.hasPrefix(resolvedProduction + "/") {
-            fail("the demo's Chromium browser context is \(storageURL.path), which is the production profile directory (\(productionProfile.path)). EngineStorage.isolated promises a private per-process directory, so running the demo is writing cookies, cache, Preferences and extension state straight into the real browser's profile.")
+            fail("the demo's engine directory is \(storageURL.path), which is the production profile directory (\(productionProfile.path)). EngineStorage.isolated promises a private per-process directory, so running the demo is writing content settings and imported state straight into the real browser's profile.")
         } else if !resolvedStorage.hasPrefix(privateRoot.resolvingSymlinksInPath().path + "/") {
-            fail("the demo's Chromium browser context is \(storageURL.path), which is neither the production profile nor under EngineStorageDirectory's private root (\(privateRoot.path)) — nothing knows to sweep it, so every demo run leaks a profile.")
+            fail("the demo's engine directory is \(storageURL.path), which is neither the production profile nor under EngineStorageDirectory's private root (\(privateRoot.path)), so nothing knows to sweep it and every demo run leaks a profile.")
         } else {
-            emit("OK   engine browser-context path is a private per-process directory under \(privateRoot.path), isolated from the production profile at \(productionProfile.path)")
+            emit("OK   engine directory is a private per-process directory under \(privateRoot.path), isolated from the production profile at \(productionProfile.path)")
         }
 
-        let contents = (try? FileManager.default.contentsOfDirectory(atPath: storageURL.path)) ?? []
+        checkWebKitWebsiteData(session)
+    }
+
+    // WebKit writes website data under ~/Library/WebKit/<bundle id>/WebsiteDataStore/<store uuid>, keyed by bundle id, so the
+    // demo's own bundle id is what keeps it out of the installed browser's store.
+    private static func checkWebKitWebsiteData(_ session: any EngineSession) {
+        guard let webKitSession = session as? WebKitSession,
+              let storeIdentifier = webKitSession.dataStore.identifier,
+              let bundleIdentifier = Bundle.main.bundleIdentifier else {
+            fail("engine session \"\(session.identifier)\" has no identified WKWebsiteDataStore, so WebKit's website data location cannot be determined.")
+            return
+        }
+        if bundleIdentifier == OrbitRuntimeScope.productionBundleIdentifier {
+            fail("the demo is running under the production bundle identifier \(bundleIdentifier), so its WebKit website data is the installed browser's.")
+            return
+        }
+        let websiteData = URL(fileURLWithPath: realHomeDirectory, isDirectory: true)
+            .appendingPathComponent("Library/WebKit/\(bundleIdentifier)/WebsiteDataStore/\(storeIdentifier.uuidString)", isDirectory: true)
+        let contents = (try? FileManager.default.contentsOfDirectory(atPath: websiteData.path)) ?? []
         if contents.isEmpty {
-            fail("the engine's browser-context directory is empty — Chromium wrote its browser-process state somewhere else entirely.")
+            fail("\(websiteData.path) is missing or empty after a page loaded, so WebKit wrote this session's website data somewhere else.")
         } else {
-            emit("OK   Chromium wrote into its browser-context directory: \(contents.sorted().prefix(12).joined(separator: ", "))\(contents.count > 12 ? ", … (\(contents.count) entries)" : "")")
+            emit("OK   WebKit wrote into its website data store under its own bundle id: \(contents.sorted().prefix(12).joined(separator: ", "))\(contents.count > 12 ? ", … (\(contents.count) entries)" : "")")
         }
     }
 
@@ -758,14 +744,18 @@ enum DemoEngineProbe {
     }
 
     // Resolved from the password database, not from the environment: CFFIXED_USER_HOME/HOME move
-    // every Foundation and Chromium path lookup at once, so reading this the ordinary way would let
-    // a redirected run pass this check without ever looking at the directory it is about.
-    static var realProfileDirectory: URL {
+    // every Foundation path lookup at once, so reading this the ordinary way would let a redirected
+    // run pass this check without ever looking at the directory it is about.
+    static var realHomeDirectory: String {
         var home = NSHomeDirectory()
         if let entry = getpwuid(getuid()), let raw = entry.pointee.pw_dir {
             home = String(cString: raw)
         }
-        return URL(fileURLWithPath: home, isDirectory: true)
+        return home
+    }
+
+    static var realProfileDirectory: URL {
+        URL(fileURLWithPath: realHomeDirectory, isDirectory: true)
             .appendingPathComponent("Library/Application Support/Orbit", isDirectory: true)
     }
 

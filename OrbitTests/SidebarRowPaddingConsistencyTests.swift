@@ -11,10 +11,11 @@ final class SidebarRowPaddingConsistencyTests: XCTestCase {
 
         let tab = Tab(spaceID: SpaceID(), url: URL(string: "https://example.com")!)
         env.activeTabID = tab.id
-        let tabRowRender = render(TabRowView(tab: tab, theme: theme).environment(env), size: CGSize(width: width, height: OrbitMetrics.sidebarRowHeight))
+        // ImageRenderer paints OrbitNSActionButton's click catcher as an opaque block.
+        let tabRowRender = render(TabRowView(tab: tab, theme: theme).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: CGSize(width: width, height: OrbitMetrics.sidebarRowHeight))
 
         let folder = Folder(name: "Reading")
-        let folderRowRender = render(PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 0).environment(env), size: CGSize(width: width, height: OrbitMetrics.sidebarRowHeight))
+        let folderRowRender = render(PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 0).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: CGSize(width: width, height: OrbitMetrics.sidebarRowHeight))
 
         var leadingXs: [String: CGFloat] = [:]
         let renders: [(String, RenderedImage)] = [
@@ -71,7 +72,7 @@ final class SidebarRowPaddingConsistencyTests: XCTestCase {
         let tab = Tab(spaceID: SpaceID(), url: URL(string: "https://example.com")!)
         env.activeTabID = tab.id
         let rendered = render(
-            TabRowView(tab: tab, theme: theme).environment(env),
+            TabRowView(tab: tab, theme: theme).environment(env).environment(\.orbitScreenshotModeDragDisabled, true),
             size: CGSize(width: width, height: OrbitMetrics.sidebarRowHeight)
         )
 
@@ -91,7 +92,7 @@ final class SidebarRowPaddingConsistencyTests: XCTestCase {
         let inactiveTab = Tab(spaceID: SpaceID(), url: URL(string: "https://example.com")!)
         let folder = Folder(name: "Reading")
         let contentRender = render(
-            PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 0).environment(inactiveEnv),
+            PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 0).environment(inactiveEnv).environment(\.orbitScreenshotModeDragDisabled, true),
             size: CGSize(width: width, height: OrbitMetrics.sidebarRowHeight)
         )
         _ = inactiveTab
@@ -134,6 +135,7 @@ final class SidebarRowPaddingConsistencyTests: XCTestCase {
             HStack(spacing: 0) {
                 TabRowView(tab: tab, theme: theme)
                     .environment(env)
+                    .environment(\.orbitScreenshotModeDragDisabled, true)
                     .frame(width: rowWidth)
                 Color.clear
             },
@@ -158,5 +160,83 @@ final class SidebarRowPaddingConsistencyTests: XCTestCase {
             "(expected \(expectedTrailingX)pt). An edge-to-edge highlight pill would measure " +
             "\(rowWidth)pt here instead."
         )
+    }
+
+    // The activation catcher is the content box. The drawn pill hangs past it; the row pitch hangs past the pill.
+    func test_tabRowHitTargetMatchesTheDrawnPillNotTheTextLineOrTheRowPitch() {
+        let contentHeight = OrbitMetrics.faviconSize
+        let contentWidth: CGFloat = 180
+        let content = CGRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
+        let leading = OrbitMetrics.sidebarRowContentInset
+        let trailing = OrbitMetrics.sidebarRowContentInset
+        let pill = SidebarRowPillHitTarget.rect(
+            contentBounds: content,
+            leadingOutset: leading,
+            trailingOutset: trailing
+        )
+
+        let rowSlack = (OrbitMetrics.sidebarRowHeight - contentHeight) / 2
+        let pillOutset = rowSlack - OrbitMetrics.sidebarRowPillVerticalInset
+        XCTAssertGreaterThan(pillOutset, 0, "The pill must extend past a favicon-tall content line, or this fixture no longer describes the miss.")
+        XCTAssertEqual(
+            pill.height,
+            OrbitMetrics.sidebarRowHeight - 2 * OrbitMetrics.sidebarRowPillVerticalInset,
+            accuracy: 0.001
+        )
+        XCTAssertLessThan(pill.height, OrbitMetrics.sidebarRowHeight, "The gap between pills is not part of the hit target.")
+        XCTAssertEqual(pill.minY, -pillOutset, accuracy: 0.001)
+        XCTAssertEqual(pill.maxY, contentHeight + pillOutset, accuracy: 0.001)
+        XCTAssertEqual(pill.minX, -leading, accuracy: 0.001)
+        XCTAssertEqual(pill.width, contentWidth + leading + trailing, accuracy: 0.001)
+
+        let midX = contentWidth / 2
+        let midY = contentHeight / 2
+        XCTAssertTrue(
+            SidebarRowPillHitTarget.tabRowContains(CGPoint(x: midX, y: midY), contentBounds: content, leadingOutset: leading, trailingOutset: trailing),
+            "The title line is part of the pill."
+        )
+        XCTAssertTrue(
+            SidebarRowPillHitTarget.tabRowContains(CGPoint(x: midX, y: contentHeight + pillOutset / 2), contentBounds: content, leadingOutset: leading, trailingOutset: trailing),
+            "The band between the text line and the pill's top edge must activate."
+        )
+        XCTAssertFalse(
+            SidebarRowPillHitTarget.tabRowContains(CGPoint(x: midX, y: contentHeight + pillOutset + 0.5), contentBounds: content, leadingOutset: leading, trailingOutset: trailing),
+            "The gap above the pill, still inside the row pitch, must not activate."
+        )
+        XCTAssertFalse(
+            SidebarRowPillHitTarget.tabRowContains(CGPoint(x: midX, y: -pillOutset - 0.5), contentBounds: content, leadingOutset: leading, trailingOutset: trailing),
+            "The gap below the pill must not activate."
+        )
+        XCTAssertTrue(
+            SidebarRowPillHitTarget.tabRowContains(CGPoint(x: -leading / 2, y: midY), contentBounds: content, leadingOutset: leading, trailingOutset: trailing),
+            "The pill's internal margin, sidebarRowContentInset past the content box, must activate."
+        )
+        XCTAssertFalse(
+            SidebarRowPillHitTarget.tabRowContains(CGPoint(x: -leading - 0.5, y: midY), contentBounds: content, leadingOutset: leading, trailingOutset: trailing),
+            "Past the pill's leading edge is the sidebar gutter, not the tab."
+        )
+
+        let corner = CGPoint(x: pill.minX, y: pill.maxY)
+        XCTAssertFalse(
+            SidebarRowPillHitTarget.contains(corner, in: pill, cornerRadius: OrbitMetrics.sidebarRowCornerRadius),
+            "The pill's square bounding corner is outside the drawn rounded rect."
+        )
+        XCTAssertTrue(
+            SidebarRowPillHitTarget.contains(
+                CGPoint(x: pill.minX + OrbitMetrics.sidebarRowCornerRadius, y: pill.maxY - OrbitMetrics.sidebarRowCornerRadius),
+                in: pill,
+                cornerRadius: OrbitMetrics.sidebarRowCornerRadius
+            ),
+            "The center of the corner curve is on the pill."
+        )
+
+        let indentedLeading = leading + OrbitMetrics.sidebarIndentPerDepth
+        let indented = SidebarRowPillHitTarget.rect(
+            contentBounds: content,
+            leadingOutset: indentedLeading,
+            trailingOutset: trailing
+        )
+        XCTAssertEqual(indented.minX, -indentedLeading, accuracy: 0.001)
+        XCTAssertEqual(indented.maxX, pill.maxX, accuracy: 0.001, "Indent grows the leading side of the pill only.")
     }
 }

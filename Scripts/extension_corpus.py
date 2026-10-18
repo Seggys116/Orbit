@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Orbit extension corpus manager: the only reader and writer of Chromium/extension-corpus.json.
+"""Orbit extension corpus manager: the only reader and writer of ExtensionCorpus/extension-corpus.json.
 
 Vendors a pinned corpus of real Chrome Web Store extensions under ThirdParty/extension-corpus
 (gitignored) so the live-engine suite can assert behaviour a half-implemented browser cannot
 fake -- see refs/EXTENSION_CONFORMANCE.md section 7.5. Downloads are SHA-256 verified and fail
 closed. Unpacking drops the CRX3 signing key an extension's id derives from, so each vendored
 manifest.json records it and every step re-asserts the id against both crx_id and the pinned
-store id. The download request matches ChromeWebStoreClient.swift byte-for-byte.
+store id. The app installs through Omaha protocol 3.0 (ChromeWebStoreClient.swift). This
+script keeps the legacy GET, which Google still answers when prodversion is a current Chrome.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ import zipfile
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
-MANIFEST_PATH = os.path.join(REPO_ROOT, "Chromium", "extension-corpus.json")
+MANIFEST_PATH = os.path.join(REPO_ROOT, "ExtensionCorpus", "extension-corpus.json")
 
 DEFAULT_UNPACK_ROOT = "ThirdParty/extension-corpus"
 DEFAULT_UPDATE_SERVICE_URL = "https://clients2.google.com/service/update2/crx"
@@ -179,10 +180,11 @@ def select_entries(manifest: dict, selectors: list) -> list:
 ##
 
 def download_request_url(update_service_url: str, extension_id: str, prodversion: str) -> str:
-    """The URL ChromeWebStoreClient.downloadRequestURL(forExtensionID:) builds.
+    """Legacy GET the store still answers when prodversion is a current Chrome.
 
     The `x` value is the unencoded `id=<id>&uc`, percent-encoded whole -- encoding it any
     other way makes the service ignore the id and answer for no application at all.
+    The app itself POSTs Omaha 3.0; do not point this back at ChromeWebStoreClient.
     """
     query = [
         ("response", "redirect"),

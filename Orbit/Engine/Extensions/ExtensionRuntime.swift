@@ -4,7 +4,7 @@ import OSLog
 
 /// The one place `ExtensionStore` (what is installed on disk) is joined to the
 /// running engine (what is actually loaded). Without this, an install only ever
-/// wrote files and a JSON record and nothing ever reached Chromium.
+/// wrote files and a JSON record and nothing ever reached WebKit.
 @MainActor
 @Observable
 public final class ExtensionRuntime {

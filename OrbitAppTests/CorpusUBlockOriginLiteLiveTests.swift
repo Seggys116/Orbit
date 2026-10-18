@@ -82,8 +82,8 @@ final class CorpusUBlockOriginLiteLiveTests: CorpusLiveTestCase {
 
         let tabID = env.openTab(url: server.baseURL, in: spaceID)
         defer { env.closeTab(tabID) }
-        let contents = try XCTUnwrap(env.webContents[tabID] as? ChromiumWebContents)
-        try await LiveChromiumEngineHost.waitUntilStoppedLoading(contents)
+        let contents = try XCTUnwrap(env.webContents[tabID] as? WebKitWebContents)
+        try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
         // Only once the control request arrives is "the other one never
         // arrived" a statement about blocking rather than timing.
@@ -119,7 +119,7 @@ final class CorpusUBlockOriginLiteLiveTests: CorpusLiveTestCase {
     }
 
     private func assertNothingButTheSubjectCanBlock(
-        _ visit: Visit, expectedExtensions: [String], engine: ChromiumEngine, phase: String
+        _ visit: Visit, expectedExtensions: [String], engine: WebKitEngine, phase: String
     ) {
         XCTAssertFalse(
             visit.orbitOwnBlockerWouldHaveBlocked,
@@ -140,26 +140,18 @@ final class CorpusUBlockOriginLiteLiveTests: CorpusLiveTestCase {
         )
     }
 
-    // Skips only when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testUBlockOriginLiteStopsARuleMatchedRequestFromEverReachingTheServer
+    // Fails when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
     func testUBlockOriginLiteStopsARuleMatchedRequestFromEverReachingTheServer() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
         let manifestVersion = try ExtensionCorpus.verifyManifestVersionMatchesPin(for: Self.corpusName)
         XCTAssertEqual(manifestVersion, 3, "uBlock Origin Lite is the MV3 declarativeNetRequest entry in this corpus")
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
 
-            let bridge = OrbitChromiumTabsBridge.shared
-            if !bridge.isWindowRegistered(env) {
-                bridge.windowCreated(owner: env, focused: false)
-            }
-            bridge.windowFocusChanged(owner: env)
             let spaceID = try XCTUnwrap(env.activeSpace?.id)
 
             // Negative control, run first with nothing loaded: separates
@@ -231,16 +223,13 @@ final class CorpusUBlockOriginLiteLiveTests: CorpusLiveTestCase {
 
     // Separates "declarativeNetRequest blocks nothing" from "the ruleset was
     // never enabled" -- two different bugs with the same symptom above.
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testUBlockOriginLiteReportsItsDefaultRulesetsEnabled
     func testUBlockOriginLiteReportsItsDefaultRulesetsEnabled() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
         try ExtensionCorpus.verifyManifestVersionMatchesPin(for: Self.corpusName)
 
-        try LiveChromiumEngineHost.runLive(timeout: 180) {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        try WebKitLiveEngineHost.runLive(timeout: 180) {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
 
@@ -269,7 +258,7 @@ final class CorpusUBlockOriginLiteLiveTests: CorpusLiveTestCase {
 
     /// Hosts uBOL's popup via the production ExtensionActionPopupModel and asks
     /// which rulesets are enabled. Empty on no answer, so the caller's assertion decides.
-    private func readEnabledRulesets(engine: ChromiumEngine, extensionID: String) async -> [String] {
+    private func readEnabledRulesets(engine: WebKitEngine, extensionID: String) async -> [String] {
         let session = engine.defaultSession
         let entries = SiteControlPopoverView.extensionActionEntries(engine: engine, session: session)
         guard let action = entries.first(where: { $0.extensionInfo.id == extensionID }) else { return [] }
@@ -277,8 +266,8 @@ final class CorpusUBlockOriginLiteLiveTests: CorpusLiveTestCase {
         let model = ExtensionActionPopupModel(engine: engine, session: session, url: action.popupURL)
         model.start()
         defer { model.teardown() }
-        guard let popup = model.contents as? ChromiumWebContents else { return [] }
-        try? await LiveChromiumEngineHost.waitUntilStoppedLoading(popup)
+        guard let popup = model.contents as? WebKitWebContents else { return [] }
+        try? await WebKitLiveEngineHost.waitUntilStoppedLoading(popup)
 
         _ = try? await popup.evaluateJavaScript("""
         window.__orbitRulesets = null;

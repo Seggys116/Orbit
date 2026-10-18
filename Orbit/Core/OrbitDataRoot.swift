@@ -37,8 +37,8 @@ struct OrbitDataRoot: Sendable, Equatable {
             .appendingPathComponent("OrbitDev", isDirectory: true)
     }
 
-    /// The last component of the bundle identifier, not the whole thing: Chromium puts sockets
-    /// in its user data directory and `sun_path` is 104 bytes, which $TMPDIR already half spends.
+    /// The last component of the bundle identifier, not the whole thing: keeps the directory name
+    /// short, since $TMPDIR already spends much of a Unix socket path's 104 bytes.
     static func developmentName(for bundleIdentifier: String?) -> String {
         let identifier = bundleIdentifier ?? productionBundleIdentifier
         let last = identifier.split(separator: ".").last.map(String.init) ?? ""
@@ -91,8 +91,23 @@ struct OrbitDataRoot: Sendable, Equatable {
     var extensions: URL { directory("Extensions") }
     var contentBlocking: URL { directory("ContentBlocking") }
     var sync: URL { directory("Sync") }
-    var chromiumProfile: URL { directory("Chromium") }
+    var contentSettings: URL { directory("ContentSettings") }
     var pendingSiteData: URL { directory("PendingSiteData") }
+
+    /// Host manifests: this process first, then Chrome, Chromium, and the machine-wide directory.
+    static var nativeMessagingHostDirectories: [URL] {
+        let name = "NativeMessagingHosts"
+        let user = applicationSupportBase
+        let machine = URL(fileURLWithPath: "/Library", isDirectory: true)
+        return [
+            processDefault.url.appendingPathComponent(name, isDirectory: true),
+            user.appendingPathComponent("Google/Chrome/\(name)", isDirectory: true),
+            user.appendingPathComponent("Chromium/\(name)", isDirectory: true),
+            machine.appendingPathComponent("Application Support/Orbit/\(name)", isDirectory: true),
+            machine.appendingPathComponent("Google/Chrome/\(name)", isDirectory: true),
+            machine.appendingPathComponent("Application Support/Chromium/\(name)", isDirectory: true),
+        ]
+    }
 
     var downloadsFile: URL { directory("Downloads").appendingPathComponent("downloads.json", isDirectory: false) }
     var boostsFile: URL { directory("Boosts").appendingPathComponent("boosts.json", isDirectory: false) }

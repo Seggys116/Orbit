@@ -8,12 +8,12 @@ extension AppEnvironment {
     func adoptWebContents(for id: TabID, from source: AppEnvironment) {
         guard source !== self else { return }
 
+        // The engine records the old window and index while `source` still lists the tab, and
+        // reports the move once registerExtensionTab below runs for the new owner.
+        if let moving = source.webContents[id] as? WebKitWebContents {
+            (source.engine as? WebKitEngine)?.noteTabWillMove(moving)
+        }
         if let contents = source.detachWebContents(for: id) {
-            // No cross-window "move" primitive exists, so this is remove-then-recreate. Must run
-            // before installTransferredWebContents, while `source` can still resolve this tab as its own.
-            if contents is WebKitWebContents {
-                (source.engine as? WebKitEngine)?.noteTabClosed(contents as! WebKitWebContents)
-            }
             installTransferredWebContents(contents, for: id)
         }
 
@@ -36,7 +36,7 @@ extension AppEnvironment {
         moveMirrorMembership(id, from: source, keyPath: \.unresponsiveTabs)
         moveMirrorMembership(id, from: source, keyPath: \.dismissedMiniPlayerTabIDs)
 
-        registerChromiumTab(id)
+        registerExtensionTab(id)
     }
 
     // Bumps rather than deletes: deleting would fall back to the

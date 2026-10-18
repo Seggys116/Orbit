@@ -28,6 +28,14 @@ enum EngineAppearance {
     /// to track whether anything changed.
     static func apply() {
         AppEnvironment.applyContentAppearanceEverywhere()
+        let scheme = AppearanceSettings.shared.engineColorScheme
+        for contents in WebKitLiveContents.all {
+            contents.setPreferredColorScheme(scheme)
+        }
+        let appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+        for window in NSApp.windows where window.title.hasPrefix("Web Inspector") {
+            window.appearance = appearance
+        }
     }
 
     /// One process-wide observer, deliberately not one per surface: the value

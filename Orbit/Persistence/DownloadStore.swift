@@ -43,6 +43,10 @@ public final class DownloadStore {
 
     private var nextAPIID: Int = 1
 
+    /// Positions in `downloads`. Not observed: it is a cache of the array, rebuilt when the array's order changes.
+    @ObservationIgnored
+    private var indexByID: [UUID: Int] = [:]
+
     public init(fileURL: URL = DownloadStore.defaultFileURL) {
         self.writer = AtomicJSONFileWriter(fileURL: fileURL)
         let file = writer.loadNow(default: DownloadsFile())
@@ -53,6 +57,7 @@ public final class DownloadStore {
             saveNowIgnoringFailure()
         }
         verifyFilesExistOnLoad()
+        reindex()
     }
 
     public nonisolated static var defaultFileURL: URL { OrbitDataRoot.processDefault.downloadsFile }
@@ -80,7 +85,9 @@ public final class DownloadStore {
             apiID: allocateAPIID()
         )
         downloads.insert(item, at: 0)
+        reindex()
         persist()
+        NotificationCenter.default.post(name: .orbitDownloadCreated, object: self, userInfo: ["item": item])
         return item
     }
 
@@ -107,29 +114,65 @@ public final class DownloadStore {
     }
 
     public func updateProgress(id: UUID, progress: DownloadProgress) {
-        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = indexOfDownload(id) else { return }
+        let nextTotal = progress.totalBytes > 0 ? progress.totalBytes : downloads[index].totalBytes
+        // Byte ticks that change nothing still copied the whole list into the debounced snapshot.
+        switch progress.state {
+        case .pending, .inProgress, .paused:
+            if downloads[index].receivedBytes == progress.receivedBytes,
+               downloads[index].totalBytes == nextTotal,
+               downloads[index].state == progress.state,
+               downloads[index].finishedAt == nil {
+                return
+            }
+        case .completed, .cancelled, .interrupted:
+            break
+        }
         downloads[index].receivedBytes = progress.receivedBytes
-        if progress.totalBytes > 0 { downloads[index].totalBytes = progress.totalBytes }
+        downloads[index].totalBytes = nextTotal
+        let previous = downloads[index].state
         downloads[index].state = progress.state
         switch progress.state {
         case .completed, .cancelled, .interrupted:
             downloads[index].finishedAt = Date()
         case .pending, .inProgress, .paused:
-            break
+            downloads[index].finishedAt = nil
         }
         persist()
+        if previous != downloads[index].state, let apiID = downloads[index].apiID {
+            let chromeState = DownloadItemProjection.chromeState(for: downloads[index].state)
+            NotificationCenter.default.post(
+                name: .orbitDownloadChanged,
+                object: self,
+                userInfo: ["delta": ["id": apiID, "state": ["current": chromeState]] as [String: Any]]
+            )
+        }
     }
 
     public func cancel(_ id: UUID) {
-        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = indexOfDownload(id) else { return }
+        let previous = downloads[index].state
         downloads[index].state = .cancelled
         downloads[index].finishedAt = Date()
         persist()
+        if previous != .cancelled, let apiID = downloads[index].apiID {
+            let chromeState = DownloadItemProjection.chromeState(for: .cancelled)
+            NotificationCenter.default.post(
+                name: .orbitDownloadChanged,
+                object: self,
+                userInfo: ["delta": ["id": apiID, "state": ["current": chromeState]] as [String: Any]]
+            )
+        }
     }
 
     public func remove(_ id: UUID) {
+        let apiID = indexOfDownload(id).flatMap { downloads[$0].apiID }
         downloads.removeAll { $0.id == id }
+        reindex()
         persist()
+        if let apiID {
+            NotificationCenter.default.post(name: .orbitDownloadErased, object: self, userInfo: ["id": apiID])
+        }
     }
 
     public func clearList() {
@@ -139,6 +182,7 @@ public final class DownloadStore {
             case .pending, .inProgress, .paused: return false
             }
         }
+        reindex()
         persist()
     }
 
@@ -146,6 +190,7 @@ public final class DownloadStore {
     public func removeAllRecords() {
         guard !downloads.isEmpty else { return }
         downloads.removeAll()
+        indexByID.removeAll()
         persist()
     }
 
@@ -153,7 +198,7 @@ public final class DownloadStore {
 
     @discardableResult
     public func renameFile(id: UUID, to newFileName: String) -> URL? {
-        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return nil }
+        guard let index = indexOfDownload(id) else { return nil }
         guard downloads[index].state == .completed else { return nil }
 
         let current = downloads[index].destinationURL
@@ -181,7 +226,7 @@ public final class DownloadStore {
     /// Deletes the file only: a completed download whose file is gone stays completed, exactly as it does after a Finder delete.
     @discardableResult
     public func removeFile(_ id: UUID) -> Bool {
-        guard let index = downloads.firstIndex(where: { $0.id == id }) else { return false }
+        guard let index = indexOfDownload(id) else { return false }
         guard downloads[index].state == .completed else { return false }
         do {
             try FileManager.default.removeItem(at: downloads[index].destinationURL)
@@ -225,7 +270,8 @@ public final class DownloadStore {
     // MARK: - Finder integration
 
     public func revealInFinder(_ id: UUID) {
-        guard let item = downloads.first(where: { $0.id == id }) else { return }
+        guard let index = indexOfDownload(id) else { return }
+        let item = downloads[index]
         if FileManager.default.fileExists(atPath: item.destinationURL.path) {
             NSWorkspace.shared.activateFileViewerSelecting([item.destinationURL])
         } else {
@@ -234,8 +280,30 @@ public final class DownloadStore {
     }
 
     public func fileStillExists(_ id: UUID) -> Bool {
-        guard let item = downloads.first(where: { $0.id == id }) else { return false }
-        return FileManager.default.fileExists(atPath: item.destinationURL.path)
+        guard let index = indexOfDownload(id) else { return false }
+        return FileManager.default.fileExists(atPath: downloads[index].destinationURL.path)
+    }
+
+    private func indexOfDownload(_ id: UUID) -> Int? {
+        if let index = indexByID[id], downloads.indices.contains(index), downloads[index].id == id {
+            return index
+        }
+        guard let index = downloads.firstIndex(where: { $0.id == id }) else {
+            indexByID[id] = nil
+            return nil
+        }
+        indexByID[id] = index
+        return index
+    }
+
+    /// First match wins, matching `firstIndex`.
+    private func reindex() {
+        var index: [UUID: Int] = [:]
+        index.reserveCapacity(downloads.count)
+        for (offset, item) in downloads.enumerated() where index[item.id] == nil {
+            index[item.id] = offset
+        }
+        indexByID = index
     }
 
     private func verifyFilesExistOnLoad() {
@@ -264,4 +332,10 @@ public final class DownloadStore {
     private func persist() {
         writer.scheduleSave(currentFile)
     }
+}
+
+extension Notification.Name {
+    static let orbitDownloadCreated = Notification.Name("orbit.download.created")
+    static let orbitDownloadChanged = Notification.Name("orbit.download.changed")
+    static let orbitDownloadErased = Notification.Name("orbit.download.erased")
 }

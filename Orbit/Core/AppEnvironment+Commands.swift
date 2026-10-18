@@ -6,6 +6,9 @@ extension AppEnvironment {
 
     func presentCommandBar(mode: CommandBarMode) {
         commandBarMode = mode
+        // Before the bar exists. WebKit otherwise becomes first responder again
+        // on the turn after Cmd-T, and the field's own claim has already given up.
+        setWebContentsFocusSuppressed(true)
         commandBarPresentationSerial &+= 1
         isCommandBarPresented = true
     }
@@ -251,6 +254,12 @@ extension AppEnvironment {
         activeWebContents?.focus()
     }
 
+    func setWebContentsFocusSuppressed(_ suppressed: Bool) {
+        for contents in webContents.values {
+            (contents as? WebKitWebContents)?.setFocusSuppressed(suppressed)
+        }
+    }
+
     /// _execute_action's landing point. Opens the Site Control popover that hosts
     /// the extension's icon and names which extension's own popup it must then
     /// open, which is the whole difference from the plain .siteControls command.
@@ -269,9 +278,19 @@ extension AppEnvironment {
         return true
     }
 
+    /// A sidebar click both selects the tab and takes the Command Bar down.
+    /// `activateTab` itself must leave the bar up: the bar's own result row
+    /// activates first and dismisses second, and focusing in between would
+    /// pull the keyboard out of the field mid-keystroke.
+    func activateTabDismissingCommandBar(_ id: TabID) {
+        activateTab(id)
+        if isCommandBarPresented { dismissCommandBar() }
+    }
+
     // Must clear isCommandBarPresented before handing focus back here, since CommandBarView.activate(_:) navigates before dismissing and activateTab(_:) refuses to focus the page while the flag is still set.
     func dismissCommandBar() {
         withAnimation(OrbitMotion.standard) { isCommandBarPresented = false }
+        setWebContentsFocusSuppressed(false)
         focusActivePage()
     }
 
@@ -400,19 +419,19 @@ extension AppEnvironment {
         let order = combinedSidebarOrder(in: spaceID)
         guard !order.isEmpty else { return }
         guard let currentIndex = activeTabID.flatMap({ order.firstIndex(of: $0) }) else {
-            activateTab(order[0])
+            activateTabDismissingCommandBar(order[0])
             return
         }
         let count = order.count
         let newIndex = ((currentIndex + offset) % count + count) % count
-        activateTab(order[newIndex])
+        activateTabDismissingCommandBar(order[newIndex])
     }
 
     private func jumpToSidebarItem(_ index: Int) {
         guard let spaceID = activeSpace?.id else { return }
         let order = combinedSidebarOrder(in: spaceID)
         guard index < order.count else { return }
-        activateTab(order[index])
+        activateTabDismissingCommandBar(order[index])
     }
 
     private func cycleRecentTabs() {
@@ -421,11 +440,11 @@ extension AppEnvironment {
             .sorted { $0.lastAccessedAt > $1.lastAccessedAt }
             .prefix(5)
         guard let currentIndex = activeTabID.flatMap({ id in recent.firstIndex { $0.id == id } }) else {
-            if let first = recent.first { activateTab(first.id) }
+            if let first = recent.first { activateTabDismissingCommandBar(first.id) }
             return
         }
         let next = recent[(currentIndex + 1) % recent.count]
-        activateTab(next.id)
+        activateTabDismissingCommandBar(next.id)
     }
 
     private func pasteClipboardAsNewTab() {

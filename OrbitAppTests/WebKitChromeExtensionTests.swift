@@ -45,7 +45,7 @@ final class WebKitChromeExtensionTests: XCTestCase {
         let built = try CRX3AppTestFixture.build(zipPayload: zip)
         let id = try XCTUnwrap(ChromeExtensionID.id(fromPublicKeyBase64: built.publicKeyBase64))
         OrbitExtensionDownloadStub.bytes = built.bytes
-        let installer = ExtensionInstaller(store: store(), client: ChromeWebStoreClient(session: OrbitExtensionDownloadStub.makeSession(), prodVersion: "120.0.0.0")) { _ in true }
+        let installer = ExtensionInstaller(store: store(), client: ChromeWebStoreClient(session: OrbitExtensionDownloadStub.makeSession())) { _ in true }
         let result = try await installer.install(id)
         guard case .installed(let installed, _, _) = result else {
             return XCTFail("CRX install did not install")
@@ -346,14 +346,34 @@ final class OrbitExtensionDownloadStub: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        let url = request.url ?? ChromeWebStoreClient.updateServiceEndpoint
+        // The client first POSTs an Omaha update check, then GETs the package it names.
+        let isUpdateCheck = url.host == "update.googleapis.com"
+        let body: Data
+        let contentType: String
+        if isUpdateCheck {
+            contentType = "text/xml"
+            body = Data(
+                """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <response protocol="3.0" server="prod"><app appid="fixture" status="ok"><updatecheck status="ok">\
+                <urls><url codebase="https://clients2.googleusercontent.com/crx/blobs/"/></urls>\
+                <manifest version="1.0"><packages><package name="fixture.crx" required="true"/></packages></manifest>\
+                </updatecheck></app></response>
+                """.utf8
+            )
+        } else {
+            contentType = "application/x-chrome-extension"
+            body = Self.bytes
+        }
         let response = HTTPURLResponse(
-            url: request.url ?? URL(string: "https://clients2.google.com/service/update2/crx")!,
+            url: url,
             statusCode: 200,
             httpVersion: "HTTP/1.1",
-            headerFields: ["Content-Type": "application/x-chrome-extension"]
+            headerFields: ["Content-Type": contentType]
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Self.bytes)
+        client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)
     }
 

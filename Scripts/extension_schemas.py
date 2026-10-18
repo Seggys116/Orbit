@@ -12,7 +12,7 @@ import re
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WRAPPER_PATH = os.path.join(REPO_ROOT, "Orbit", "Engine", "WebKit", "ChromeAPIWrapperScript.swift")
+INVENTORY_PATH = os.path.join(REPO_ROOT, "Orbit", "Engine", "WebKit", "ChromeAPISurfaceInventory.swift")
 VENDOR_DIR = os.path.join(REPO_ROOT, "OrbitTests", "Fixtures", "UpstreamAPISchemas")
 EXPECTATIONS_PATH = os.path.join(REPO_ROOT, "OrbitTests", "Fixtures", "ExpectedAPIGaps.json")
 
@@ -240,36 +240,26 @@ def surface_of(path):
     return result
 
 
+def _inventory_source():
+    with open(INVENTORY_PATH, encoding="utf-8") as handle:
+        return handle.read()
+
+
 def wrapper_namespaces():
-    """namespace -> method names from the WebKit chrome wrapper."""
-    with open(WRAPPER_PATH, encoding="utf-8") as handle:
-        source = handle.read()
-    start = source.find("var NAMESPACES = {")
-    end = source.find("};", start)
-    if start < 0 or end < 0:
-        sys.exit("error: %s has no NAMESPACES table" % WRAPPER_PATH)
+    """namespace -> method names from the chrome wrapper's surface inventory."""
     found = {}
-    for line in source[start:end].splitlines():
-        stripped = line.strip()
-        if ":" not in stripped or stripped.startswith("/"):
-            continue
-        name, rest = stripped.split(":", 1)
-        name = name.strip()
-        methods = re.findall(r'"([A-Za-z_]+)"', rest)
-        if name.isidentifier() and methods:
-            found[name] = methods
+    for match in re.finditer(r'Namespace\(\s*"([^"]+)",\s*methods:\s*\[([^\]]*)\]', _inventory_source()):
+        found[match.group(1)] = re.findall(r'"([^"]+)"', match.group(2))
     if not found:
-        sys.exit("error: %s NAMESPACES table is empty" % WRAPPER_PATH)
+        sys.exit("error: %s declares no wrapper namespaces" % INVENTORY_PATH)
     return found
 
 
 def wrapped_permissions():
-    with open(WRAPPER_PATH, encoding="utf-8") as handle:
-        source = handle.read()
-    match = re.search(r"let wrapped: Set<String> = \[([^\]]+)\]", source)
+    match = re.search(r"static let additionalWrappedPermissions = \[([^\]]*)\]", _inventory_source())
     if not match:
-        sys.exit("error: %s has no wrapped permission set" % WRAPPER_PATH)
-    return set(re.findall(r'"([^"]+)"', match.group(1)))
+        sys.exit("error: %s has no additional wrapped permissions" % INVENTORY_PATH)
+    return set(wrapper_namespaces()) | set(re.findall(r'"([^"]+)"', match.group(1)))
 
 
 def vendored_functions(namespace):

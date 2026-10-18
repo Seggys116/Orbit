@@ -1,8 +1,8 @@
 import Foundation
 
 /// Shims `chrome.webstorePrivate`/`chrome.management` at document start. Also exposed
-/// as `window.__orbitWebStorePrivate`/`__orbitManagement`, since Chromium's own native
-/// accessor silently ignores writes to `chrome.webstorePrivate` on the real store origin.
+/// as `window.__orbitWebStorePrivate`/`__orbitManagement`, so the store page can reach them
+/// even if it ignores writes to `chrome.webstorePrivate` on the real store origin.
 public enum WebStorePrivateBridgeScript {
 
     /// Must match the engine's own script channel name exactly.
@@ -10,7 +10,7 @@ public enum WebStorePrivateBridgeScript {
 
     public static let scriptID = UUID(uuidString: "8F3C2E71-4A5D-4B9E-9C1A-2D6E8F0B3C77")!
 
-    public static let chromiumPostExpression =
+    public static let bridgePostExpression =
         "__orbitPost('\(channelName)', JSON.stringify(message))"
 
     public static func source(postExpression: String) -> String {
@@ -211,11 +211,11 @@ public enum WebStorePrivateBridgeScript {
     }
 
     /// Installed once per session, not per-tab: must keep working across navigations.
-    public static var chromiumUserScript: UserScript {
+    public static var userScript: UserScript {
         UserScript(
             id: scriptID,
             kind: .javaScript,
-            source: source(postExpression: chromiumPostExpression),
+            source: source(postExpression: bridgePostExpression),
             injectionTime: .documentStart,
             matchPatterns: [
                 "https://chromewebstore.google.com/*",

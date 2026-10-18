@@ -22,7 +22,7 @@ nonisolated public struct GitHubLiveFolderSource: Sendable {
     )
 
     // userAgent is a parameter, not a constant: this file also compiles into the host-less
-    // OrbitTests bundle, which cannot see the generated ChromiumBuild.userAgent.
+    // OrbitTests bundle, which does not start the engine that publishes WebKitProduct.userAgent.
     @MainActor
     public static func live(
         session: any EngineSession,

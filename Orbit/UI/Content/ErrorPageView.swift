@@ -45,7 +45,6 @@ struct ErrorPageView: View {
         case .renderProcessCrashed: return "exclamationmark.triangle"
         case .engineUnavailable: return "gearshape.2"
         case .tooManyRedirects: return "arrow.triangle.2.circlepath"
-        case .notImplemented: return "wrench.and.screwdriver"
         case .cancelled, .unknown: return "exclamationmark.circle"
         }
     }

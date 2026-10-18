@@ -1,8 +1,13 @@
-//  Reads Chromium/extension-corpus.json and resolves pinned real extensions
+//  Reads ExtensionCorpus/extension-corpus.json and resolves pinned real extensions
 //  under ThirdParty/extension-corpus, vendored by `Scripts/extension-corpus fetch`.
 
 import Foundation
 import XCTest
+
+struct TestStopped: Error, CustomStringConvertible {
+    let description: String
+    init(_ description: String) { self.description = description }
+}
 
 enum ExtensionCorpus {
 
@@ -37,19 +42,25 @@ enum ExtensionCorpus {
         case manifestUnreadable(URL, String)
         case unknownEntry(String, [String])
         case stale(CorpusEntry, URL, String)
+        case unavailable(CorpusEntry, String)
+        case notVendored(CorpusEntry, URL)
 
         var errorDescription: String? {
             switch self {
             case .manifestUnreadable(let url, let reason):
                 return "Could not read the extension corpus manifest at \(url.path): \(reason)"
             case .unknownEntry(let name, let known):
-                return "\"\(name)\" is not in Chromium/extension-corpus.json. Pinned entries: \(known.joined(separator: ", "))"
+                return "\"\(name)\" is not in ExtensionCorpus/extension-corpus.json. Pinned entries: \(known.joined(separator: ", "))"
             case .stale(let entry, let directory, let reason):
                 return """
-                \(entry.name) at \(directory.path) does not match the pin in Chromium/extension-corpus.json: \(reason).
+                \(entry.name) at \(directory.path) does not match the pin in ExtensionCorpus/extension-corpus.json: \(reason).
                 This directory is a leftover from a different build, so the test would be measuring the wrong extension.
                 Re-vendor it: Scripts/extension-corpus fetch \(entry.id) --force
                 """
+            case .unavailable(let entry, let reason):
+                return "\(entry.name) (\(entry.id)) is recorded unavailable: \(reason)."
+            case .notVendored(let entry, let directory):
+                return "\(entry.name) is not vendored at \(directory.path)."
             }
         }
     }
@@ -59,7 +70,7 @@ enum ExtensionCorpus {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
-    static let manifestURL: URL = repositoryRoot.appendingPathComponent("Chromium/extension-corpus.json")
+    static let manifestURL: URL = repositoryRoot.appendingPathComponent("ExtensionCorpus/extension-corpus.json")
 
     private static func loadManifest() throws -> CorpusManifest {
         let data: Data
@@ -98,29 +109,17 @@ enum ExtensionCorpus {
     }
 
     /// The unpacked `ThirdParty/extension-corpus/<id>-<version>/` directory.
-    /// Throws `XCTSkip` when not vendored, a hard `CorpusError` when present
+    /// Throws `CorpusError` when the entry is unavailable or not vendored, and a hard `CorpusError` when present
     /// but unpacked from a different build than pinned. Never downloads.
     static func directory(for name: String) throws -> URL {
         let entry = try self.entry(for: name)
 
         if let unavailable = entry.unavailable, entry.version == nil {
-            throw XCTSkip(
-                """
-                \(entry.name) (\(entry.id)) is recorded unavailable in Chromium/extension-corpus.json: \(unavailable).
-                The Chrome Web Store will not serve it, so there is nothing to vendor.
-                """
-            )
+            throw CorpusError.unavailable(entry, unavailable)
         }
 
         guard let version = entry.version, let sha256 = entry.sha256 else {
-            throw XCTSkip(
-                """
-                \(entry.name) (\(entry.id)) has no pinned version in Chromium/extension-corpus.json.
-                Pin it deliberately, then vendor it:
-                  Scripts/extension-corpus pin \(entry.id)
-                  Scripts/extension-corpus fetch \(entry.id)
-                """
-            )
+            throw CorpusError.notVendored(entry, repositoryRoot)
         }
 
         let root = try loadManifest().unpackRoot
@@ -130,13 +129,7 @@ enum ExtensionCorpus {
 
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw XCTSkip(
-                """
-                \(entry.name) \(version) is not vendored on this machine. Nothing downloads at test time, on purpose.
-                Run: Scripts/extension-corpus fetch \(entry.id)
-                Expected at: \(directory.path)
-                """
-            )
+            throw CorpusError.notVendored(entry, directory)
         }
 
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("manifest.json").path) else {
@@ -182,7 +175,7 @@ enum ExtensionCorpus {
             entry.version,
             """
             \(entry.name)'s unpacked manifest.json at \(manifestURL.path) declares version \(unpacked.version), \
-            but Chromium/extension-corpus.json pins \(entry.version ?? "nothing"). This directory is a different \
+            but ExtensionCorpus/extension-corpus.json pins \(entry.version ?? "nothing"). This directory is a different \
             build than the one the expectation was written against - "\(entry.expectation)" - so any result here \
             is meaningless. Re-vendor it: Scripts/extension-corpus fetch \(entry.id) --force
             """,

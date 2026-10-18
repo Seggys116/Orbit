@@ -453,6 +453,31 @@ final class PageThemeColorScriptTests: XCTestCase {
         XCTAssertNil(PageThemeColorScript.decode(["color": NSNull(), "ready": true])?.color)
     }
 
+    // WebKit's getComputedStyle and, on some documents, canvas fillStyle emit
+    // rgb()/rgba(). The decoder above refuses that on purpose. The page script
+    // has to rewrite it into #rrggbb before the post, or didChangeThemeColor
+    // is handed nil and the address bar stays the neutral gray.
+    func test_resolverRewritesWebKitRGBIntoTheFormTheHeaderDecoderAccepts() {
+        let source = PageThemeColorScript.resolverSource
+        XCTAssertTrue(source.contains("function __orbitCanonicalize"))
+        XCTAssertTrue(
+            source.contains("var direct = __orbitCanonicalize(trimmed);"),
+            "rgb() must be rewritten before the canvas path, so a missing 2d context cannot drop a theme-color or a solid background."
+        )
+        XCTAssertTrue(
+            source.contains("if (direct) { return direct; }"),
+            "A value that is already #rrggbb or rgb() must be returned without asking the canvas."
+        )
+        XCTAssertFalse(
+            source.contains("getContext('2d') || null"),
+            "Caching a null 2d context makes every later read colourless for the life of the document."
+        )
+        XCTAssertTrue(
+            source.contains("return __orbitCanonicalize(first);"),
+            "Whatever fillStyle hands back still has to be the decoder's #rrggbb or rgba() form."
+        )
+    }
+
     func test_decode_treatsAMissingReadyFlagAsNotReady() {
         XCTAssertEqual(PageThemeColorScript.decode(["color": NSNull()])?.isReady, false)
         XCTAssertNil(PageThemeColorScript.decode("not a payload at all"))
@@ -461,7 +486,12 @@ final class PageThemeColorScriptTests: XCTestCase {
 
     func test_source_readsTheStandardMechanismsAndMutatesNothing() {
         let source = PageThemeColorScript.source
-        XCTAssertTrue(source.contains("meta[name=\"theme-color\"]"), "The declared theme colour is the standard input and must be read first.")
+        XCTAssertTrue(source.contains("meta[name=\"theme-color\"]"), "The declared theme colour is still read, as the fallback when the top of the page is not a flat colour.")
+        XCTAssertTrue(
+            source.contains("var color = band || declared || documentColor || null"),
+            "The painted top band has to win over theme-color, or a fixed meta (often plain white or black) keeps the bar from following the page as it scrolls."
+        )
+        XCTAssertTrue(source.contains("function __orbitGradientColor"), "A CSS gradient is a colour; dropping it leaves the bar on the document's white or black.")
         XCTAssertTrue(source.contains("getComputedStyle"), "The computed background of body/html is the documented fallback.")
         XCTAssertTrue(source.contains("document.readyState"), "The payload must report readiness so the resolver can tell 'no colour' from 'not yet'.")
         XCTAssertFalse(source.contains("appendChild"), "The probe must not insert anything into the page it is measuring.")
@@ -595,7 +625,7 @@ final class PageColorSchemeScriptTests: XCTestCase {
 final class PageColorObserverScriptTests: XCTestCase {
 
     private var observerSource: String {
-        PageColorObserverScript.source(postExpression: PageColorObserverScript.chromiumPostExpression)
+        PageColorObserverScript.source(postExpression: PageColorObserverScript.bridgePostExpression)
     }
 
     /// Strips `//` comments, or a "must NOT appear" assertion below would false-positive on the script's own commentary about what it avoids.
@@ -638,6 +668,10 @@ final class PageColorObserverScriptTests: XCTestCase {
         XCTAssertTrue(
             observerSource.contains("document.addEventListener('scroll', scheduleAfterScrollSettles, { passive: true, capture: true })"),
             "Scroll must be watched, with capture:true (scroll does not bubble, so a page whose top region is its own scrolling container would otherwise never report) and passive:true (it must never be able to delay a scroll)."
+        )
+        XCTAssertTrue(
+            observerSource.contains("window.addEventListener('scroll', scheduleAfterScrollSettles, { passive: true, capture: true })"),
+            "The viewport itself scrolls on window, not only on document."
         )
     }
 
@@ -739,7 +773,7 @@ final class PageColorObserverScriptTests: XCTestCase {
     // MARK: - It runs inside somebody else's page
 
     func test_source_touchesNothingAboutTheDocumentItWatches() {
-        for expression in [PageColorObserverScript.chromiumPostExpression, "someOtherTransport(payload)"] {
+        for expression in [PageColorObserverScript.bridgePostExpression, "someOtherTransport(payload)"] {
             let source = PageColorObserverScript.source(postExpression: expression)
                 .split(separator: "\n", omittingEmptySubsequences: false)
                 .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
@@ -763,7 +797,7 @@ final class PageColorObserverScriptTests: XCTestCase {
     // MARK: - Transport
 
     func test_source_postsThroughTheTransportItIsGiven() {
-        let chromium = PageColorObserverScript.source(postExpression: PageColorObserverScript.chromiumPostExpression)
+        let chromium = PageColorObserverScript.source(postExpression: PageColorObserverScript.bridgePostExpression)
         XCTAssertTrue(chromium.contains("__orbitPost('\(PageColorObserverScript.channelName)', JSON.stringify(payload))"))
         // The captured local, not the global a second time: window.__orbitPostMessage
         // is deleted by the engine before any page script runs.
@@ -781,8 +815,8 @@ final class PageColorObserverScriptTests: XCTestCase {
         )
     }
 
-    func test_chromiumUserScript_runsAtDocumentStartOnEveryPageAndOnlyTheMainFrame() {
-        let script = PageColorObserverScript.chromiumUserScript
+    func test_userScript_runsAtDocumentStartOnEveryPageAndOnlyTheMainFrame() {
+        let script = PageColorObserverScript.userScript
         XCTAssertEqual(script.injectionTime, .documentStart, "It has to be watching before the page's own scripts run.")
         XCTAssertEqual(script.matchPatterns, ["<all_urls>"])
         XCTAssertFalse(script.allFrames, "A pane's chrome follows the page; an iframe's background is not the page's colour.")

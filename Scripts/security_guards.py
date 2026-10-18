@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Static security invariants for Orbit's process model and engine build. See Scripts/security-guards.
+"""Static security invariants for Orbit's entitlements, WebKit configuration and data scoping. See Scripts/security-guards.
 
-Runtime counterpart: OrbitTests/SandboxInvariantTests.swift, checking a real process tree.
+Runtime counterpart: OrbitTests/SandboxInvariantTests.swift, checking a live WKWebView's processes.
 """
 
 from __future__ import annotations
@@ -15,71 +15,27 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
-# Roots that may not all exist during the engine rewrite; MINIMUM_SCANNED_FILES
-# stops this guard quietly scanning nothing and reporting success.
-SOURCE_ROOTS = ("Orbit", "OrbitHelper", "OrbitDemo", "OrbitEngine")
+# MINIMUM_SCANNED_FILES stops this guard quietly scanning nothing and reporting success.
+SOURCE_ROOTS = ("Orbit", "OrbitDemo")
 MINIMUM_SCANNED_FILES = 50
 SOURCE_SUFFIXES = (".swift", ".m", ".mm", ".h", ".hpp", ".cpp", ".c")
 SCHEME_DIR = os.path.join("Orbit.xcodeproj", "xcshareddata", "xcschemes")
 
-# Every switch here is silent -- the app behaves identically with or without it,
-# which is why it needs a machine to notice. See design doc section 2.3.
-DANGEROUS_SWITCHES = {
-    "no-sandbox": (
-        "Turns the Seatbelt sandbox off for every child process. The browser "
-        "skips profile compilation entirely (ChildProcessLauncherHelper::"
-        "BeforeLaunchOnLauncherThread), so a compromised renderer running "
-        "attacker-controlled JavaScript gets the browser's own access to the "
-        "disk, the keychain and the network."
+# Private WebKit preference keys that weaken the web security model. Setting one is silent:
+# nothing in the UI changes, which is why it needs a machine to notice.
+DANGEROUS_PREFERENCES = {
+    "allowFileAccessFromFileURLs": (
+        "Gives file: documents access to other local files through XHR and fetch, so "
+        "one downloaded HTML file can read the user's home directory."
     ),
-    "disable-gpu-sandbox": (
-        "Leaves the GPU process unconfined. The GPU process parses "
-        "attacker-influenced shader and image data and talks to the kernel "
-        "graphics drivers; it is the second most attacked process after the "
-        "renderer."
+    "allowUniversalAccessFromFileURLs": (
+        "Lets a file: document read any origin, which removes the same-origin policy for "
+        "everything opened from disk."
     ),
-    "single-process": (
-        "Runs web content inside the browser process. There is then no renderer "
-        "to sandbox, no site isolation, and no process boundary between a page "
-        "and the user's profile. This is the total loss of the security model "
-        "and it is invisible from the UI."
+    "webSecurityEnabled": (
+        "Switches off the same-origin policy. Any page can then read any other origin's data."
     ),
-    "in-process-gpu": (
-        "Runs GPU work in the browser process, so GPU driver bugs become "
-        "browser-process bugs and the GPU sandbox stops existing."
-    ),
-    "disable-web-security": (
-        "Switches off the same-origin policy. Any page can then read any other "
-        "origin's data."
-    ),
-    "allow-running-insecure-content": (
-        "Lets https pages load and execute http subresources, which hands any "
-        "network attacker script execution in a secure origin."
-    ),
-    "ignore-certificate-errors": (
-        "Accepts any TLS certificate, valid or not, which makes every https "
-        "connection interceptable."
-    ),
-    "disable-site-isolation-trials": (
-        "Disables site isolation, the mitigation that keeps a compromised or "
-        "speculating renderer from reading another site's data."
-    ),
-    "disable-site-isolation-for-policy": ("Same effect as disable-site-isolation-trials."),
-    "allow-file-access-from-files": (
-        "Gives file: documents access to the whole filesystem through XHR and "
-        "fetch, so one downloaded HTML file can read the user's home directory."
-    ),
-    "disable-features=IsolateOrigins": ("Removes origin isolation, half of site isolation."),
-    "disable-features=SitePerProcess": ("Removes site isolation."),
-    "remote-debugging-port": (
-        "Opens an unauthenticated DevTools protocol socket. Anything on the "
-        "machine that can reach the port drives the browser as the user."
-    ),
-    "remote-allow-origins": ("Only meaningful alongside remote debugging; see remote-debugging-port."),
 }
-
-# Feature names that are site isolation, whatever switch disables them.
-SITE_ISOLATION_FEATURES = ("SitePerProcess", "IsolateOrigins")
 
 COMMENT_PATTERNS = (
     re.compile(r"/\*.*?\*/", re.DOTALL),
@@ -90,7 +46,7 @@ STRING_LITERAL = re.compile(r'"([^"\\\n]|\\.)*"')
 
 
 def strip_comments(text: str) -> str:
-    """A switch named in prose is not a switch. Only whole-line // comments go, so trailing code before a comment is still scanned."""
+    """A preference named in prose is not a preference. Only whole-line // comments go, so trailing code before a comment is still scanned."""
     for pattern in COMMENT_PATTERNS:
         text = pattern.sub("", text)
     return text
@@ -121,7 +77,7 @@ class Finding:
         self.why = why
 
 
-def scan_switches() -> list:
+def scan_web_security_preferences() -> list:
     findings = []
     scanned = source_files()
     if len(scanned) < MINIMUM_SCANNED_FILES:
@@ -138,60 +94,22 @@ def scan_switches() -> list:
     for path in scanned:
         with open(path, "r", encoding="utf-8", errors="replace") as handle:
             raw = handle.read()
-        is_scheme = path.endswith(".xcscheme")
-        body = raw if is_scheme else strip_comments(raw)
-        lines = body.splitlines()
-
+        lines = strip_comments(raw).splitlines()
         for index, line in enumerate(lines, start=1):
-            literals = [line] if is_scheme else [m.group(0) for m in STRING_LITERAL.finditer(line)]
-            haystack = " ".join(literals)
+            haystack = " ".join(m.group(0) for m in STRING_LITERAL.finditer(line))
             if not haystack:
                 continue
-            for switch, why in DANGEROUS_SWITCHES.items():
-                if switch in haystack:
+            for preference, why in DANGEROUS_PREFERENCES.items():
+                if preference in haystack:
                     findings.append(Finding(
                         path, index, line,
-                        f"no shipped code path may pass --{switch} to the engine",
+                        f"no shipped code path may set the WebKit preference {preference}",
                         why,
                     ))
-            for feature in SITE_ISOLATION_FEATURES:
-                if feature in haystack and "disable" in haystack.lower():
-                    findings.append(Finding(
-                        path, index, line,
-                        f"site isolation feature {feature} may not be disabled",
-                        "Site isolation is what makes a renderer compromise, and a "
-                        "Spectre-class cross-origin read, containable. It is on by "
-                        "default; the only way to lose it is to ask.",
-                    ))
-
-        for match in re.finditer(r"no_sandbox\s*=\s*([A-Za-z0-9_]+)", body):
-            if match.group(1) not in ("false", "NO", "0"):
-                line = body[: match.start()].count("\n") + 1
-                findings.append(Finding(
-                    path, line, match.group(0),
-                    "no_sandbox must be assigned false and nothing else",
-                    "no_sandbox = true is the embedder-side spelling of --no-sandbox: "
-                    "every helper launches unconfined and nothing in the UI changes.",
-                ))
     return findings
 
 
-DCHECK_WHY = (
-    "dcheck_always_on is true by default in every non-official Chromium build "
-    "(build/config/dcheck_always_on.gni: build_with_chromium && !is_official_build), so a "
-    "shipping engine that does not set it false compiles every DCHECK in Blink, net and "
-    "content into the binary and makes each one a fatal abort. One upstream QUIC assertion "
-    "aborted Orbit's network service process mid-request and every request in flight was "
-    "lost; the same check is a no-op in Chrome stable. It has to be written down explicitly, "
-    "because the value that shipped the defect was the one nobody wrote."
-)
-
-
-def scan_dcheck() -> list:
-    return []
-
-
-SWIFT_ROOTS = ("Orbit", "OrbitDemo", "OrbitHelper")
+SWIFT_ROOTS = ("Orbit", "OrbitDemo")
 SWIFT_TEST_ROOTS = ("OrbitTests", "OrbitAppTests")
 MINIMUM_SWIFT_FILES = 100
 
@@ -439,7 +357,7 @@ def scan_bundle_identifier() -> list:
 
 PERSISTENT_GATE_WHY = (
     "EngineStorageDirectory.directory(for:) is the last thing between a launch and the real "
-    "user's Chromium profile: `.persistent` answers nil -- meaning 'leave the engine on its "
+    "user's profile: `.persistent` answers nil -- meaning 'leave the engine on its "
     "own default', which is that profile -- and it may only do so in the production scope. "
     "Returning nil unconditionally, or dropping the scope argument, hands a development run "
     "and every test the real cookies, history and logged-in sessions. Nothing about that "
@@ -557,34 +475,19 @@ def _wrap(text: str, width: int = 58) -> list:
     return lines
 
 
-def guard_switches(_args) -> int:
+def guard_web_security_preferences(_args) -> int:
     return report(
-        "sandbox-disabling switches",
-        scan_switches(),
-        "OrbitTests/SandboxInvariantTests.swift reads the real argv of every process in a "
-        "running Orbit's tree, which catches a switch this static scan cannot see",
+        "WebKit security preferences",
+        scan_web_security_preferences(),
+        "OrbitTests/SandboxInvariantTests.swift checks the sandboxing of a live WKWebView's "
+        "processes; this static scan covers the preferences that sandbox cannot see",
         [
-            "This guard exists because every switch it looks for is SILENT: the app",
-            "looks and behaves exactly the same with it and without it, so a build",
-            "that has lost its sandbox is indistinguishable from one that has not",
-            "until someone attacks it. If you believe a hit is legitimate, it is not:",
-            "take it out. If the code genuinely never reaches the engine, move the",
-            "string out of a string literal or out of the shipped targets.",
-        ],
-    )
-
-
-def guard_dcheck(_args) -> int:
-    return report(
-        "engine DCHECK configuration",
-        scan_dcheck(),
-        "Scripts/release verify fails when Orbit Framework.framework is inside the built app",
-        [
-            "A DCHECK is a development assertion. Compiled in, it aborts the process",
-            "that trips it; compiled out, it is not there at all. Which one a build",
-            "got is invisible from the outside until an assertion fires in front of a",
-            "user, so it is written down in the gn args, in the binary's own marker,",
-            "and checked here rather than remembered.",
+            "Every preference this guard looks for is SILENT: the app looks and",
+            "behaves the same with it and without it, so a build that lost the",
+            "same-origin policy is indistinguishable from one that has not until",
+            "someone attacks it. If you believe a hit is legitimate, it is not:",
+            "take it out. If the string never reaches WebKit, move it out of a",
+            "string literal or out of the shipped targets.",
         ],
     )
 
@@ -598,9 +501,8 @@ def guard_entitlements(_args) -> int:
     print("SECURITY GUARD FAILED: entitlement invariants", file=sys.stderr)
     print("  The failing checks are listed above, each with the reason the", file=sys.stderr)
     print("  entitlement matters. An entitlement is a hole in the hardened runtime", file=sys.stderr)
-    print("  for the life of the product and is granted per process role, so the", file=sys.stderr)
-    print("  renderer -- the one process that executes attacker-controlled code --", file=sys.stderr)
-    print("  is the one whose set has to stay smallest.", file=sys.stderr)
+    print("  for the life of the product, so the browser process's set has to stay", file=sys.stderr)
+    print("  as small as it can be.", file=sys.stderr)
     print("  Fix by changing the role table in Scripts/release_manager.py and", file=sys.stderr)
     print("  running `Scripts/release entitlements --write`, never by editing a", file=sys.stderr)
     print("  .entitlements plist: those files are generated.", file=sys.stderr)
@@ -675,9 +577,8 @@ def guard_engine_profile(_args) -> int:
 
 
 GUARDS = {
-    "switches": guard_switches,
+    "web-security-preferences": guard_web_security_preferences,
     "entitlements": guard_entitlements,
-    "dcheck": guard_dcheck,
     "defaults": guard_defaults,
     "data-root": guard_data_root,
     "bundle-identifier": guard_bundle_identifier,

@@ -91,25 +91,9 @@ jobs:
           path: DerivedData/SourcePackages
           key: swiftpm-${{ runner.os }}-${{ hashFiles('Orbit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
-      # The live-engine suites skip in this job, by design and not by accident:
-      # they start a real browser, fork five helper processes and put a window
-      # on screen, which does not belong on the critical path of every pull
-      # request. They are covered by .github/workflows/live-engine.yml --
-      # nightly, on demand, and on any pull request labelled `live-engine` --
-      # which runs them through Scripts/live-engine-tests and fails if they
-      # skip. That is a claim worth checking rather than repeating: it was
-      # written while that workflow was disabled, and 129 live tests were
-      # consequently running in no job at all. Adding ORBIT_LIVE_ENGINE=1 to the
-      # line below would achieve nothing anyway: xcodebuild does not hand its
-      # environment to a hosted test target's process. Scripts/live-engine-tests
-      # has the measured evidence.
-      #
-      # Exactly one test per run pays a one-off start-up cost on this runner and hit
-      # the old 120s wall; it is whichever suite's first test lands on that worker.
-      #
-      # Those gate skips are the only skips this job declares as expected, via
-      # --allow-live-engine-gate-skips below; a gate skip anywhere else, or a
-      # skip in a suite whose source never calls XCTSkip, fails the job.
+      # This job runs every hosted test, the live WebKit suites included, in one shared test process; only tests declared
+      # CANNOT-RUN are excluded. .github/workflows/live-engine.yml re-runs the live suites nightly through
+      # Scripts/live-engine-tests.
       - name: Test
         run: |
           set -o pipefail
@@ -162,7 +146,6 @@ jobs:
             --log TestResults.log \
             --target OrbitTests \
             --target OrbitAppTests \
-            --allow-live-engine-gate-skips \
             --allow-hosted-runner-exclusions \
             --max-retries-allowed 5
 

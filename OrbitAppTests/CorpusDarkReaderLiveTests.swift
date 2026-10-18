@@ -57,32 +57,24 @@ final class CorpusDarkReaderLiveTests: CorpusLiveTestCase {
         [luminance(of: colours.html), luminance(of: colours.body)].compactMap { $0 }.min()
     }
 
-    private func readColours(_ contents: ChromiumWebContents) async throws -> PageColours? {
+    private func readColours(_ contents: WebKitWebContents) async throws -> PageColours? {
         guard let raw = try await contents.evaluateJavaScript(Self.colourProbe) as? String,
               let data = raw.data(using: .utf8)
         else { return nil }
         return try? JSONDecoder().decode(PageColours.self, from: data)
     }
 
-    // Skips only when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
-    // ORBIT-LIVE-ENGINE: MAY-SKIP testDarkReaderTurnsAWhitePageDarkWithoutBeingSwitchedOn
+    // Fails when the corpus has not been vendored (`Scripts/extension-corpus fetch`).
     func testDarkReaderTurnsAWhitePageDarkWithoutBeingSwitchedOn() throws {
-        try XCTSkipUnless(LiveChromiumEngineHost.isEnabled, "ORBIT_LIVE_ENGINE not set")
         let directory = try ExtensionCorpus.directory(for: Self.corpusName)
         let entry = try ExtensionCorpus.entry(for: Self.corpusName)
         try ExtensionCorpus.verifyManifestVersionMatchesPin(for: Self.corpusName)
 
-        try LiveChromiumEngineHost.runLive(timeout: 240) {
-            let engine = await LiveChromiumEngineHost.sharedEngine()
-            ChromiumTabsSetup.installHandlerOnce
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            let engine = await WebKitLiveEngineHost.sharedEngine()
             let env = self.env
             env._test_engineOverride = engine
 
-            let bridge = OrbitChromiumTabsBridge.shared
-            if !bridge.isWindowRegistered(env) {
-                bridge.windowCreated(owner: env, focused: false)
-            }
-            bridge.windowFocusChanged(owner: env)
             let spaceID = try XCTUnwrap(env.activeSpace?.id)
 
             let server = try self.makeServer()
@@ -91,8 +83,8 @@ final class CorpusDarkReaderLiveTests: CorpusLiveTestCase {
             // Control run, with nothing loaded: the fixture has to be white
             // before "it went dark" means anything.
             let controlTabID = env.openTab(url: server.baseURL, in: spaceID)
-            let controlContents = try XCTUnwrap(env.webContents[controlTabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(controlContents)
+            let controlContents = try XCTUnwrap(env.webContents[controlTabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(controlContents)
             let controlReading = try await self.readColours(controlContents)
             let control = try XCTUnwrap(controlReading, "the control page reported no computed colours at all")
             let controlLuminance = try XCTUnwrap(
@@ -115,8 +107,8 @@ final class CorpusDarkReaderLiveTests: CorpusLiveTestCase {
             )
 
             let subjectTabID = env.openTab(url: server.baseURL, in: spaceID)
-            let subject = try XCTUnwrap(env.webContents[subjectTabID] as? ChromiumWebContents)
-            try await LiveChromiumEngineHost.waitUntilStoppedLoading(subject)
+            let subject = try XCTUnwrap(env.webContents[subjectTabID] as? WebKitWebContents)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(subject)
             env.activateTab(subjectTabID)
 
             // The content script reaches its worker and rebuilds stylesheets,
