@@ -22,7 +22,8 @@ final class ChromeExtensionIDTests: XCTestCase {
 
     // MARK: - Verified against a real Arc profile, 2026-08-05
 
-    /// Skips (does not fail) when Arc is not installed.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_derivesTheExactIDArcAssignedForEveryRealSignedExtension
+    // The hosted runner has no Arc profile. The derivation itself is the hardcoded-key test above.
     func test_derivesTheExactIDArcAssignedForEveryRealSignedExtension() throws {
         let securePreferencesURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Arc/User Data/Default/Secure Preferences")

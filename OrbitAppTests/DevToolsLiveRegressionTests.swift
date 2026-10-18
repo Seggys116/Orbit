@@ -118,7 +118,11 @@ final class DevToolsLiveRegressionTests: XCTestCase {
         while ContinuousClock.now < deadline {
             if let frontend = inspected.developerToolsFrontend {
                 last = (try? await probeFrontend(frontend)) ?? [:]
-                if (last["tabs"] as? Int ?? 0) > 0, last["hasMainTarget"] as? Bool == true { return (frontend, last) }
+                if (last["tabs"] as? Int ?? 0) > 0,
+                   last["hasMainTarget"] as? Bool == true,
+                   last["readyState"] as? String == "complete" {
+                    return (frontend, last)
+                }
             }
             try await Task.sleep(for: .milliseconds(250))
         }

@@ -63,6 +63,11 @@ final class DevToolsDockingLiveTests: XCTestCase {
         return Pane(window: window, host: host)
     }
 
+    // The window server can clamp the requested content size. Full height is the pane it actually laid out.
+    private static func paneHeight(_ pane: Pane) -> CGFloat {
+        pane.window.contentView?.bounds.height ?? pane.host.bounds.height
+    }
+
     private static func settle(_ pane: Pane, turns: Int = 6) async {
         for _ in 0..<turns {
             pane.window.layoutIfNeeded()
@@ -205,7 +210,7 @@ final class DevToolsDockingLiveTests: XCTestCase {
             XCTAssertFalse(frontend.view.isHidden)
             XCTAssertGreaterThan(frontend.view.frame.width, 100, "the docked frontend has no room: \(frontend.view.frame)")
             XCTAssertEqual(
-                frontend.view.frame.height, Self.paneSize.height, accuracy: 2,
+                frontend.view.frame.height, Self.paneHeight(pane), accuracy: 2,
                 "a right-docked frontend runs the full height of the pane: \(frontend.view.frame)"
             )
 
@@ -214,7 +219,7 @@ final class DevToolsDockingLiveTests: XCTestCase {
             }
             XCTAssertLessThan(reported.width, Self.paneSize.width - 40, "a right dock must leave the page narrower than the pane; \(reported)")
             XCTAssertEqual(reported.minX, 0, accuracy: 1, "a right dock leaves the page at the pane's left edge; \(reported)")
-            XCTAssertEqual(reported.height, Self.paneSize.height, accuracy: 2, "a right dock must leave the page full height; \(reported)")
+            XCTAssertEqual(reported.height, Self.paneHeight(pane), accuracy: 2, "a right dock must leave the page full height; \(reported)")
             XCTAssertEqual(
                 page.view.frame.width, reported.width, accuracy: 2,
                 "the page's engine view is not the rectangle that was reported -- \(reported), view \(page.view.frame)"
@@ -249,7 +254,7 @@ final class DevToolsDockingLiveTests: XCTestCase {
             }
             XCTAssertEqual(bottom["dockSide"] as? String, "bottom", "state \(bottom)")
             XCTAssertEqual(bottomRect.width, Self.paneSize.width, accuracy: 2, "a bottom dock leaves the page full width; \(bottomRect)")
-            XCTAssertLessThan(bottomRect.height, Self.paneSize.height - 40, "a bottom dock must take height from the page; \(bottomRect)")
+            XCTAssertLessThan(bottomRect.height, Self.paneHeight(pane) - 40, "a bottom dock must take height from the page; \(bottomRect)")
             XCTAssertEqual(bottomRect.minY, 0, accuracy: 1, "a bottom dock keeps the page at the top of the pane; \(bottomRect)")
             XCTAssertEqual(
                 page.view.frame.height, bottomRect.height, accuracy: 2,
@@ -270,7 +275,7 @@ final class DevToolsDockingLiveTests: XCTestCase {
             }
             XCTAssertEqual(left["dockSide"] as? String, "left", "state \(left)")
             XCTAssertGreaterThan(leftRect.minX, 40, "a left dock must inset the page from the pane's left edge; \(leftRect)")
-            XCTAssertEqual(leftRect.height, Self.paneSize.height, accuracy: 2, "a left dock leaves the page full height; \(leftRect)")
+            XCTAssertEqual(leftRect.height, Self.paneHeight(pane), accuracy: 2, "a left dock leaves the page full height; \(leftRect)")
             XCTAssertEqual(
                 page.view.frame.width, leftRect.width, accuracy: 2,
                 "the page's engine view did not follow the left dock; \(leftRect), view \(page.view.frame)"
@@ -325,7 +330,7 @@ final class DevToolsDockingLiveTests: XCTestCase {
                 page.view.frame.size.width, Self.paneSize.width, accuracy: 2,
                 "undocking must give the page the whole pane back; view \(page.view.frame)"
             )
-            XCTAssertEqual(page.view.frame.size.height, Self.paneSize.height, accuracy: 2)
+            XCTAssertEqual(page.view.frame.size.height, Self.paneHeight(pane), accuracy: 2)
             XCTAssertTrue(Self.isInside(page.view, pane), "undocking took the page out of its own pane")
             XCTAssertEqual(page.developerToolsDockSide, .undocked)
 
@@ -513,7 +518,7 @@ final class DevToolsDockingLiveTests: XCTestCase {
             XCTAssertNil(Self.detachedInspectorWindow())
             XCTAssertNil(frontend.view.superview, "the closed inspector's view is still parented in the pane")
             XCTAssertEqual(page.view.frame.size.width, Self.paneSize.width, accuracy: 2, "the page did not get the whole pane back: \(page.view.frame)")
-            XCTAssertEqual(page.view.frame.size.height, Self.paneSize.height, accuracy: 2)
+            XCTAssertEqual(page.view.frame.size.height, Self.paneHeight(pane), accuracy: 2)
             XCTAssertEqual(page.view.frame.minX, 0, accuracy: 1)
             XCTAssertTrue(Self.isInside(page.view, pane))
             try await Self.assertPageAlive(page)

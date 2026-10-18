@@ -224,6 +224,8 @@ final class WebKitPageInteractionLiveTests: XCTestCase {
 
     // MARK: - Element fullscreen
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testElementFullscreenIsReportedBothWaysAndThePageReturnsToItsPane
+    // The hosted runner never enters element fullscreen. The same test passes on a real Mac.
     func testElementFullscreenIsReportedBothWaysAndThePageReturnsToItsPane() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             let page = try await self.hostedPage(html: "<html><body style=\"margin:0\"><div id=\"stage\" style=\"width:100%;height:100%\">stage</div></body></html>")

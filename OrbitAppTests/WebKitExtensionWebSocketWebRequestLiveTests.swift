@@ -134,31 +134,23 @@ final class WebKitExtensionWebSocketWebRequestLiveTests: LiveEnvironmentTestCase
             let contents = try XCTUnwrap(env.webContents[tabID] as? WebKitWebContents)
             try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
-            _ = try await contents.evaluateJavaScript("""
+            let started = try await contents.evaluateJavaScript("""
             (function () {
-              window.__orbitTransportSettled = false;
-              if (typeof WebTransport !== 'function') {
-                window.__orbitTransportSettled = 'unsupported';
-                return 'unsupported';
-              }
-              var transport = new WebTransport('\(transportURL)');
-              transport.ready.then(function () {
-                window.__orbitTransportSettled = 'ready';
-              }).catch(function () {
-                window.__orbitTransportSettled = 'failed';
-              });
+              if (typeof WebTransport !== 'function') { return 'unsupported'; }
+              new WebTransport('\(transportURL)');
               return 'connecting';
             })()
-            """)
+            """) as? String
+            XCTAssertEqual(started, "connecting", "the page could not construct a WebTransport")
 
-            try await Self.pollUntil("the WebTransport session to settle") {
-                try await contents.evaluateJavaScript(
-                    "window.__orbitTransportSettled !== false"
-                ) as? Bool == true
+            // The handshake is posted when the constructor runs. The session itself
+            // waits out QUIC and may never settle against a port that rejects it.
+            var events: [RecordedEvent] = []
+            try await Self.pollUntil("chrome.webRequest to see the WebTransport handshake") {
+                events = try await self.readEvents(from: workerPage)
+                return events.contains { $0.type == "webtransport" && $0.event == "onBeforeRequest" }
             }
-
-            try await Task.sleep(for: .seconds(2))
-            return (try await self.readEvents(from: workerPage), transportURL)
+            return (events, transportURL)
         }
 
         let transportEvents = result.events.filter { $0.type == "webtransport" }

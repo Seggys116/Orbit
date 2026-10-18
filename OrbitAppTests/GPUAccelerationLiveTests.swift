@@ -85,6 +85,8 @@ final class GPUAccelerationLiveTests: XCTestCase {
 
     // MARK: - WebGPU
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testWebGPUExposesAnAdapterAndDeviceOnTheRealGPU
+    // requestAdapter() resolves null on the hosted runner. WebGL on that same machine still runs.
     func testWebGPUExposesAnAdapterAndDeviceOnTheRealGPU() async throws {
         let contents = try await load(Self.webGPUPage)
         let report = try await Self.pageProbeResult(contents)
@@ -117,6 +119,8 @@ final class GPUAccelerationLiveTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testWebGPUCanvasReachesTheCompositorAsNonBlankPixels
+    // No WebGPU adapter on the hosted runner, so the canvas stays the page's blank background.
     func testWebGPUCanvasReachesTheCompositorAsNonBlankPixels() async throws {
         let contents = try await load(Self.webGPUPage)
         _ = try await Self.pageProbeResult(contents)

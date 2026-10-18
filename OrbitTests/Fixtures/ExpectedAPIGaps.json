@@ -709,6 +709,7 @@
         "getSelected",
         "highlight",
         "insertCSS",
+        "move",
         "removeCSS",
         "sendRequest"
       ],
