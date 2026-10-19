@@ -234,6 +234,7 @@ public enum ArcImportCoordinator {
             let forest = pinnedForest(
                 arcSpace.pinned,
                 spaceID: spaceID,
+                expandedFolderIDs: appPreferences?.expandedFolderIDs,
                 tabs: &pinnedTabs,
                 foldersCreated: &summary.foldersCreated
             )
@@ -266,6 +267,10 @@ public enum ArcImportCoordinator {
             env.store.mutateSpace(spaceID) { space in
                 space.pinned = forest
                 space.today = todayIDs
+                // Arc's own fold state for the Pinned section, so an imported Space opens the way the user left it.
+                if appPreferences?.collapsedPinnedSpaceIDs.contains(arcSpace.arcID) == true {
+                    space.isPinnedSectionCollapsed = true
+                }
             }
         }
 
@@ -430,9 +435,11 @@ public enum ArcImportCoordinator {
 
     // MARK: Trees
 
+    // A folder is open only if Arc had it open. Arc's ids missing entirely (expandedFolderIDs nil) leaves every folder closed rather than guessing: an import that blows every folder open is what this replaced, and Arc's own default for a folder it has no state for is closed.
     private static func pinnedForest(
         _ items: [ArcSidebarItem],
         spaceID: SpaceID,
+        expandedFolderIDs: Set<UUID>? = nil,
         tabs: inout [TabID: Tab],
         foldersCreated: inout Int
     ) -> [SidebarNode] {
@@ -448,13 +455,14 @@ public enum ArcImportCoordinator {
                 let children = pinnedForest(
                     arcFolder.children,
                     spaceID: spaceID,
+                    expandedFolderIDs: expandedFolderIDs,
                     tabs: &tabs,
                     foldersCreated: &foldersCreated
                 )
                 let iconPair = icon(for: arcFolder.icon)
                 nodes.append(.folder(Folder(
                     name: arcFolder.name,
-                    isExpanded: true,
+                    isExpanded: expandedFolderIDs?.contains(arcFolder.arcID) ?? false,
                     children: children,
                     icon: iconPair.isEmoji ? iconPair.name : nil,
                     iconIsEmoji: iconPair.isEmoji

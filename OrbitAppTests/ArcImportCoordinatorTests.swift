@@ -99,7 +99,7 @@ final class ArcImportCoordinatorTests: XCTestCase {
 
         guard case .folder(let folder) = nodes[1] else { return XCTFail("Expected a folder second.") }
         XCTAssertEqual(folder.name, "Good Sleep")
-        XCTAssertTrue(folder.isExpanded, "An import that arrived fully collapsed would look like it imported nothing.")
+        XCTAssertFalse(folder.isExpanded, "With no record of Arc having it open, a folder must arrive closed, as it was.")
         XCTAssertEqual(folder.children.count, 2)
 
         guard case .tab(let hotelID) = folder.children[0] else { return XCTFail("Expected a tab inside Good Sleep.") }
@@ -109,6 +109,46 @@ final class ArcImportCoordinatorTests: XCTestCase {
         XCTAssertEqual(nested.name, "Cheap")
         XCTAssertEqual(nested.allTabIDs.count, 1, "Third-level nesting was flattened away.")
         XCTAssertEqual(env.store.tab(nested.allTabIDs[0])?.title, "Skiplagged")
+    }
+
+    func testFoldersKeepArcsOpenAndClosedState() throws {
+        let payload = try readFixture(sidebar: Self.twoSpaceSidebarJSON)
+        // Good Sleep open, its nested Cheap closed.
+        let preferences = ArcAppPreferences(expandedFolderIDs: [UUID(uuidString: "F0000000-0000-0000-0000-000000000001")!])
+        ArcImportCoordinator.apply(payload, appPreferences: preferences, env: env, defaults: testDefaults)
+
+        let japan = try XCTUnwrap(env.store.spaces.first { $0.name == "Japan" })
+        guard case .folder(let folder) = env.store.pinnedNodes(in: japan.id)[1] else { return XCTFail("Expected a folder second.") }
+        XCTAssertTrue(folder.isExpanded, "Arc had Good Sleep open.")
+        guard case .folder(let nested) = folder.children[1] else { return XCTFail("Expected a nested folder.") }
+        XCTAssertFalse(nested.isExpanded, "Arc did not have Cheap open, and opening its parent must not open it.")
+    }
+
+    func testEveryFolderArrivesClosedWhenArcHadNoneOpen() throws {
+        let payload = try readFixture(sidebar: Self.twoSpaceSidebarJSON)
+        ArcImportCoordinator.apply(payload, appPreferences: ArcAppPreferences(expandedFolderIDs: []), env: env, defaults: testDefaults)
+
+        let japan = try XCTUnwrap(env.store.spaces.first { $0.name == "Japan" })
+        let folders = env.store.pinnedNodes(in: japan.id).flatMap { node -> [Folder] in
+            guard case .folder(let folder) = node else { return [] }
+            return [folder] + folder.children.compactMap { child in
+                if case .folder(let nested) = child { return nested }
+                return nil
+            }
+        }
+        XCTAssertEqual(folders.count, 2)
+        XCTAssertTrue(folders.allSatisfy { !$0.isExpanded }, "Folders that were closed in Arc were left open by the import.")
+    }
+
+    func testASpaceWhosePinnedSectionArcHadFoldedAwayStaysFolded() throws {
+        let payload = try readFixture(sidebar: Self.twoSpaceSidebarJSON)
+        let preferences = ArcAppPreferences(collapsedPinnedSpaceIDs: [UUID(uuidString: "768D7694-71D7-41BD-AD09-0A2C153493C0")!])
+        ArcImportCoordinator.apply(payload, appPreferences: preferences, env: env, defaults: testDefaults)
+
+        let japan = try XCTUnwrap(env.store.spaces.first { $0.name == "Japan" })
+        let dev = try XCTUnwrap(env.store.spaces.first { $0.name == "Dev" })
+        XCTAssertTrue(japan.isPinnedSectionCollapsed)
+        XCTAssertFalse(dev.isPinnedSectionCollapsed, "Only the Space Arc folded may arrive folded.")
     }
 
     func testPinnedTabsCarryArcsTimestampsAndPinnedURLNotDateNow() throws {

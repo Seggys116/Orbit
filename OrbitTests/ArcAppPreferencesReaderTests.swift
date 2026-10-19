@@ -137,6 +137,32 @@ final class ArcAppPreferencesReaderTests: XCTestCase {
         XCTAssertEqual(preferences.lastFocusedSpaceID, UUID(uuidString: "D96A6D70-4987-443B-B90C-A3F199D8CC50"))
     }
 
+    func testOpenFoldersAndFoldedPinnedSectionsComeOutOfEveryWindow() throws {
+        try writeArcJSON("StorableWindows.json", """
+        { "version": 1,
+          "windows": [
+            { "id": "W1",
+              "expandedItems": ["F0000000-0000-0000-0000-000000000001", "not-a-uuid"],
+              "spacesWithCollapsedPinnedSections": ["768D7694-71D7-41BD-AD09-0A2C153493C0"] },
+            { "id": "W2", "expandedItems": ["f0000000-0000-0000-0000-000000000002"] },
+            { "id": "W3" }
+          ] }
+        """)
+
+        let preferences = try ArcAppPreferencesReader.read(homeDirectory: home)
+
+        XCTAssertEqual(
+            preferences.expandedFolderIDs,
+            [UUID(uuidString: "F0000000-0000-0000-0000-000000000001")!, UUID(uuidString: "F0000000-0000-0000-0000-000000000002")!],
+            "A folder open in any window is open, ids are case-insensitive, and a malformed id is skipped."
+        )
+        XCTAssertEqual(preferences.collapsedPinnedSpaceIDs, [UUID(uuidString: "768D7694-71D7-41BD-AD09-0A2C153493C0")!])
+    }
+
+    func testNoWindowStateMeansTheOpenFoldersAreUnknownNotEmpty() throws {
+        XCTAssertNil(try ArcAppPreferencesReader.read(homeDirectory: home).expandedFolderIDs)
+    }
+
     // MARK: - Link routing
 
     func testArcsGoogleMeetRuleIsReadInItsRealNestedShape() throws {

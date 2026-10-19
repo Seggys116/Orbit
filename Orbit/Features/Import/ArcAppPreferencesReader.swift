@@ -78,6 +78,10 @@ public struct ArcAppPreferences: Sendable, Hashable {
     public var instantLinksEnabled: Bool?
     public var sidebarWidth: Double?
     public var lastFocusedSpaceID: UUID?
+    /// The folders Arc had open, from every window's expandedItems. Nil means Arc's window state could not be read, which is not the same as "none were open".
+    public var expandedFolderIDs: Set<UUID>?
+    /// Spaces whose Pinned section Arc had folded away, from every window's spacesWithCollapsedPinnedSections.
+    public var collapsedPinnedSpaceIDs: Set<UUID>
     public var routingRules: [ArcRoutingRule]
     public var defaultRoutingDestination: ArcRoutingRule.Destination?
 
@@ -91,6 +95,8 @@ public struct ArcAppPreferences: Sendable, Hashable {
         instantLinksEnabled: Bool? = nil,
         sidebarWidth: Double? = nil,
         lastFocusedSpaceID: UUID? = nil,
+        expandedFolderIDs: Set<UUID>? = nil,
+        collapsedPinnedSpaceIDs: Set<UUID> = [],
         routingRules: [ArcRoutingRule] = [],
         defaultRoutingDestination: ArcRoutingRule.Destination? = nil
     ) {
@@ -103,6 +109,8 @@ public struct ArcAppPreferences: Sendable, Hashable {
         self.instantLinksEnabled = instantLinksEnabled
         self.sidebarWidth = sidebarWidth
         self.lastFocusedSpaceID = lastFocusedSpaceID
+        self.expandedFolderIDs = expandedFolderIDs
+        self.collapsedPinnedSpaceIDs = collapsedPinnedSpaceIDs
         self.routingRules = routingRules
         self.defaultRoutingDestination = defaultRoutingDestination
     }
@@ -150,6 +158,9 @@ public enum ArcAppPreferencesReader {
             if let id = windows["lastFocusedSpaceID"] as? String {
                 preferences.lastFocusedSpaceID = UUID(uuidString: id)
             }
+            let state = sidebarOpenState(from: windows["windows"])
+            preferences.expandedFolderIDs = state.expandedFolderIDs
+            preferences.collapsedPinnedSpaceIDs = state.collapsedPinnedSpaceIDs
         }
 
         if let routing = try json(at: root.appendingPathComponent("StorableLinkRouting.json"), browser: browser) {
@@ -158,6 +169,24 @@ public enum ArcAppPreferencesReader {
         }
 
         return preferences
+    }
+
+    // MARK: Sidebar open state
+
+    /// StorableWindows.json keeps one object per window, each with `expandedItems` (the ids of the folders that window had open) and `spacesWithCollapsedPinnedSections`. A folder open in any window counts as open, since Orbit has a single sidebar.
+    /// Ids are collected from any string element that parses as a UUID rather than from an assumed array shape, so a differently wrapped list still imports.
+    static func sidebarOpenState(from windows: Any?) -> (expandedFolderIDs: Set<UUID>, collapsedPinnedSpaceIDs: Set<UUID>) {
+        var expanded = Set<UUID>()
+        var collapsed = Set<UUID>()
+        for case let window as [String: Any] in (windows as? [Any] ?? []) {
+            for case let id as String in (window["expandedItems"] as? [Any] ?? []) {
+                if let uuid = UUID(uuidString: id) { expanded.insert(uuid) }
+            }
+            for case let id as String in (window["spacesWithCollapsedPinnedSections"] as? [Any] ?? []) {
+                if let uuid = UUID(uuidString: id) { collapsed.insert(uuid) }
+            }
+        }
+        return (expanded, collapsed)
     }
 
     // MARK: Link routing
