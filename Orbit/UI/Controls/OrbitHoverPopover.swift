@@ -4,10 +4,14 @@ import SwiftUI
 struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
     @Binding var isPresented: Bool
     var preferredEdge: NSRectEdge = .maxX
+    /// A popover the user can move into and click inside (a folder's list of tabs). The pointer leaving the anchor then no longer closes it by itself: the popover closes once the pointer has been outside the anchor, the popover and the strip between them for `OrbitHoverPopoverPointerZone.grace`.
+    var keepsOpenWhilePointerInside: Bool = false
     @ViewBuilder var content: () -> Content
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(isPresented: $isPresented, preferredEdge: preferredEdge)
+        let coordinator = Coordinator(isPresented: $isPresented, preferredEdge: preferredEdge)
+        coordinator.keepsOpenWhilePointerInside = keepsOpenWhilePointerInside
+        return coordinator
     }
 
     func makeNSView(context: Context) -> OrbitHoverPopoverAnchorView {
@@ -20,6 +24,7 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
 
     func updateNSView(_ nsView: OrbitHoverPopoverAnchorView, context: Context) {
         context.coordinator.preferredEdge = preferredEdge
+        context.coordinator.keepsOpenWhilePointerInside = keepsOpenWhilePointerInside
         context.coordinator.update(
             isPresented: isPresented,
             anchor: nsView,
@@ -40,6 +45,13 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
 
         private var isPresented: Binding<Bool>
         var preferredEdge: NSRectEdge
+        var keepsOpenWhilePointerInside = false
+
+        private var pointerTimer: Timer?
+        private var pointerLastInside = Date()
+        private var appResignObserver: NSObjectProtocol?
+        /// Replaced in tests: the real pointer is not scriptable.
+        var pointerLocation: () -> NSPoint = { NSEvent.mouseLocation }
 
         private var popover: NSPopover?
         private var hostingController: NSHostingController<HostedContent>?
@@ -131,10 +143,12 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
 
             popover.show(relativeTo: positioningRect, of: anchor, preferredEdge: preferredEdge)
             installDismissalMonitors(window: window)
+            startPointerTracking()
         }
 
         func dismiss() {
             pendingContent = nil
+            stopPointerTracking()
             guard let popover else { return }
             // An animating close outlives this object and releases the popover again from the animation.
             popover.animates = false
@@ -143,6 +157,41 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
             hostingController = nil
             currentAnchor = nil
             removeDismissalMonitors()
+        }
+
+        // MARK: Pointer tracking (keepsOpenWhilePointerInside)
+
+        private func startPointerTracking() {
+            stopPointerTracking()
+            guard keepsOpenWhilePointerInside else { return }
+            pointerLastInside = Date()
+            let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.evaluatePointer(now: Date()) }
+            }
+            // .common, not the default mode: the timer must keep running while the user scrolls the popover's list.
+            RunLoop.main.add(timer, forMode: .common)
+            pointerTimer = timer
+        }
+
+        private func stopPointerTracking() {
+            pointerTimer?.invalidate()
+            pointerTimer = nil
+        }
+
+        /// One sample of the pointer. Internal so a test can drive it with a scripted pointer and clock.
+        func evaluatePointer(now: Date) {
+            guard let popover, let anchor = currentAnchor,
+                  let anchorWindow = anchor.window,
+                  let popoverWindow = popover.contentViewController?.view.window
+            else { return }
+            let anchorRect = anchorWindow.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+            if OrbitHoverPopoverPointerZone.contains(pointerLocation(), anchor: anchorRect, popover: popoverWindow.frame) {
+                pointerLastInside = now
+                return
+            }
+            if OrbitHoverPopoverPointerZone.hasLapsed(lastInside: pointerLastInside, now: now) {
+                close()
+            }
         }
 
         private func installDismissalMonitors(window: NSWindow) {
@@ -155,6 +204,14 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
             resignKeyObserver = NotificationCenter.default.addObserver(
                 forName: NSWindow.didResignKeyNotification,
                 object: window,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.closeUnlessThePopoverTookFocus() }
+            }
+            // The whole app going to the background closes it too, including when the popover's own window was the key one (which the observer above no longer treats as "focus left").
+            appResignObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didResignActiveNotification,
+                object: nil,
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.close() }
@@ -183,6 +240,17 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
             close()
         }
 
+        // The popover's own window becoming key is what happens when the user clicks into it (a text field in an extension popup, a row in a folder preview). That resigns the anchor's window, and treating it as "focus left" closed the popover on the very mouse-down that was meant for it.
+        // Looked at one turn later, because AppKit has not finished moving key status when didResignKey is posted.
+        private func closeUnlessThePopoverTookFocus() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.popover != nil else { return }
+                let popoverWindow = self.popover?.contentViewController?.view.window
+                if OrbitHoverPopoverPointerZone.holdsFocus(popoverWindowIsKey: popoverWindow?.isKeyWindow ?? false) { return }
+                self.close()
+            }
+        }
+
         private func removeDismissalMonitors() {
             if let escapeMonitor {
                 NSEvent.removeMonitor(escapeMonitor)
@@ -200,6 +268,10 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
                 NSEvent.removeMonitor(globalOutsideClickMonitor)
             }
             globalOutsideClickMonitor = nil
+            if let appResignObserver {
+                NotificationCenter.default.removeObserver(appResignObserver)
+            }
+            appResignObserver = nil
         }
 
         private func close() {
@@ -220,8 +292,33 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
             if let globalOutsideClickMonitor {
                 NSEvent.removeMonitor(globalOutsideClickMonitor)
             }
+            if let appResignObserver {
+                NotificationCenter.default.removeObserver(appResignObserver)
+            }
+            pointerTimer?.invalidate()
         }
     }
+}
+
+/// Where the pointer may rest without closing a popover that keeps itself open, in screen coordinates.
+enum OrbitHoverPopoverPointerZone {
+    /// Long enough to cross the gap and to forgive a pointer clipping a corner on the way; short enough that moving off feels like leaving.
+    static let grace: TimeInterval = 0.25
+
+    /// The anchor, the popover, and the strip between them across the anchor's own height. The strip is what lets the pointer cross a popover's arrow without passing through either rectangle.
+    static func contains(_ point: NSPoint, anchor: NSRect, popover: NSRect) -> Bool {
+        if anchor.contains(point) || popover.contains(point) { return true }
+        let minX = min(anchor.minX, popover.minX)
+        let maxX = max(anchor.maxX, popover.maxX)
+        let corridor = NSRect(x: minX, y: anchor.minY, width: maxX - minX, height: anchor.height)
+        return corridor.contains(point)
+    }
+
+    static func hasLapsed(lastInside: Date, now: Date) -> Bool {
+        now.timeIntervalSince(lastInside) > grace
+    }
+
+    static func holdsFocus(popoverWindowIsKey: Bool) -> Bool { popoverWindowIsKey }
 }
 
 enum OrbitHoverPopoverContentSize {
@@ -282,11 +379,17 @@ extension View {
     func orbitHoverPopover<Content: View>(
         isPresented: Binding<Bool>,
         preferredEdge: NSRectEdge = .maxX,
+        keepsOpenWhilePointerInside: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         background {
             if isPresented.wrappedValue {
-                OrbitHoverPopover(isPresented: isPresented, preferredEdge: preferredEdge, content: content)
+                OrbitHoverPopover(
+                    isPresented: isPresented,
+                    preferredEdge: preferredEdge,
+                    keepsOpenWhilePointerInside: keepsOpenWhilePointerInside,
+                    content: content
+                )
             }
         }
     }

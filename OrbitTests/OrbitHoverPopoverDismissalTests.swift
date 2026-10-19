@@ -199,5 +199,61 @@ final class OrbitHoverPopoverDismissalTests: XCTestCase {
         XCTAssertTrue(presented)
         coordinator.dismiss()
     }
-}
 
+    // MARK: - keepsOpenWhilePointerInside: the pointer may travel from the anchor into the popover
+
+    func test_pointerZone_coversTheAnchorThePopoverAndTheStripBetweenThem() {
+        let anchor = NSRect(x: 0, y: 100, width: 200, height: 30)
+        let popover = NSRect(x: 214, y: 20, width: 240, height: 200)
+
+        XCTAssertTrue(OrbitHoverPopoverPointerZone.contains(NSPoint(x: 100, y: 115), anchor: anchor, popover: popover), "On the anchor.")
+        XCTAssertTrue(OrbitHoverPopoverPointerZone.contains(NSPoint(x: 300, y: 50), anchor: anchor, popover: popover), "Inside the popover, even below the anchor's own height.")
+        XCTAssertTrue(OrbitHoverPopoverPointerZone.contains(NSPoint(x: 207, y: 110), anchor: anchor, popover: popover), "In the gap between them, level with the anchor: the crossing the user makes.")
+        XCTAssertFalse(OrbitHoverPopoverPointerZone.contains(NSPoint(x: 207, y: 60), anchor: anchor, popover: popover), "The gap lower down belongs to neither.")
+        XCTAssertFalse(OrbitHoverPopoverPointerZone.contains(NSPoint(x: 100, y: 60), anchor: anchor, popover: popover), "The row below the anchor is another row.")
+        XCTAssertFalse(OrbitHoverPopoverPointerZone.contains(NSPoint(x: 600, y: 115), anchor: anchor, popover: popover), "Beyond the popover.")
+    }
+
+    func test_pointerGrace_lapsesOnlyAfterTheGracePeriod() {
+        let start = Date()
+        XCTAssertFalse(OrbitHoverPopoverPointerZone.hasLapsed(lastInside: start, now: start.addingTimeInterval(OrbitHoverPopoverPointerZone.grace * 0.5)))
+        XCTAssertTrue(OrbitHoverPopoverPointerZone.hasLapsed(lastInside: start, now: start.addingTimeInterval(OrbitHoverPopoverPointerZone.grace + 0.01)))
+    }
+
+    // The reported defect: the preview closed the instant the pointer left the row, so a tab in it could never be reached.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aPopoverThatKeepsItselfOpen_staysWhileThePointerIsOnItAndClosesAfterTheGraceOnceItLeaves
+
+    func test_aPopoverThatKeepsItselfOpen_staysWhileThePointerIsOnItAndClosesAfterTheGraceOnceItLeaves() throws {
+        presented = true
+        let anchor = OrbitHoverPopoverAnchorView(frame: NSRect(x: 20, y: 20, width: 220, height: OrbitMetrics.sidebarRowHeight))
+        window.contentView?.addSubview(anchor)
+        let coordinator = makeCoordinator()
+        coordinator.keepsOpenWhilePointerInside = true
+
+        let before = visiblePopoverWindowCount
+        coordinator.update(isPresented: true, anchor: anchor, content: previewContent)
+        XCTAssertEqual(visiblePopoverWindowCount, before + 1, "Fixture setup: the popover must actually be showing first.")
+        let popoverWindow = try XCTUnwrap(popoverWindow)
+
+        let start = Date()
+        coordinator.pointerLocation = { NSPoint(x: popoverWindow.frame.midX, y: popoverWindow.frame.midY) }
+        coordinator.evaluatePointer(now: start)
+        coordinator.evaluatePointer(now: start.addingTimeInterval(5))
+        XCTAssertEqual(visiblePopoverWindowCount, before + 1, "A pointer resting on the popover must keep it open however long it rests.")
+        XCTAssertTrue(presented)
+
+        coordinator.pointerLocation = { NSPoint(x: popoverWindow.frame.maxX + 400, y: popoverWindow.frame.maxY + 400) }
+        coordinator.evaluatePointer(now: start.addingTimeInterval(5.05))
+        XCTAssertEqual(visiblePopoverWindowCount, before + 1, "Leaving is forgiven for the grace period, so a pointer clipping a corner does not lose the popover.")
+
+        coordinator.evaluatePointer(now: start.addingTimeInterval(5.05 + OrbitHoverPopoverPointerZone.grace + 0.05))
+        XCTAssertEqual(visiblePopoverWindowCount, before, "Once the pointer has been away for the grace period the popover must close.")
+        XCTAssertFalse(presented, "Closing must clear isPresented, or the caller's own state disagrees with what is on screen.")
+    }
+
+    // The popover's own window taking key status is the user clicking into it, not Orbit losing focus.
+    func test_resignKey_isNotFocusLostWhenThePopoverWindowIsTheKeyOne() {
+        XCTAssertTrue(OrbitHoverPopoverPointerZone.holdsFocus(popoverWindowIsKey: true))
+        XCTAssertFalse(OrbitHoverPopoverPointerZone.holdsFocus(popoverWindowIsKey: false))
+    }
+}
