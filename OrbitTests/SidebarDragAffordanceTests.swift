@@ -39,6 +39,34 @@ final class SidebarDragAffordanceTests: XCTestCase {
         )
     }
 
+    // MARK: - Drag activity decay
+
+    // dropUpdated pings on every pointer move; the decay must fire once, after the last ping, not once per ping and not early.
+    func test_dragActivityDecay_firesOnceAfterTheLastPingNotAfterTheFirst() async throws {
+        let decay = SidebarDragActivityDecay()
+        var fired = 0
+        let nanoseconds: UInt64 = 120_000_000
+
+        // Pings every 40ms for 200ms: the first ping's own deadline (120ms) passes mid-stream, and must not fire.
+        for _ in 0..<5 {
+            decay.ping(decayNanoseconds: nanoseconds) { fired += 1 }
+            try await Task.sleep(nanoseconds: 40_000_000)
+        }
+        XCTAssertEqual(fired, 0, "A decay that fires while pings are still arriving drops the insertion caret mid-hover.")
+
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertEqual(fired, 1, "A decay that never fires leaves a stuck caret after a cancelled drag; one that fires per ping is the per-event Task churn it replaced.")
+    }
+
+    func test_dragActivityDecay_cancelStopsItFiring() async throws {
+        let decay = SidebarDragActivityDecay()
+        var fired = 0
+        decay.ping(decayNanoseconds: 60_000_000) { fired += 1 }
+        decay.cancel()
+        try await Task.sleep(nanoseconds: 250_000_000)
+        XCTAssertEqual(fired, 0)
+    }
+
     // MARK: - "a circle on the left with a line coming out"
 
     func test_insertionIndicator_isARingAtTheLeadingEndWithALineRunningOutOfIt() throws {

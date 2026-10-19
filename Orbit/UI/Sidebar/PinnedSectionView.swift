@@ -38,8 +38,9 @@ struct PinnedSectionView: View {
         }
     }
 
+    // OrbitMotion.quick, not .interactive: interactiveSpring is tuned for tracking a pointer that is still moving, and a drop is a settle. It left rows lagging behind the release.
     private func handleInsertion(_ payload: SidebarDragPayload, _ insertion: DropInsertion) {
-        withAnimation(OrbitMotion.interactive) {
+        withAnimation(OrbitMotion.quick) {
             // A .favorite payload's nodeID is a Favorite.id, never a TabID; resolvedTab(forFavorite:in:) resolves it.
             let resolvedNodeID: UUID
             var needsPin = false

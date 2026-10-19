@@ -125,6 +125,36 @@ enum SidebarReorderMath {
 
 let sidebarDragActivityDecayNanoseconds: UInt64 = 300_000_000
 
+// One sleeping task per row for the whole of a drag, not one created and cancelled per drop update. dropUpdated fires on every pointer move, so the per-event version allocated and tore down a Task for every row the pointer touched, dozens of times a second, for a deadline that only ever moves forward.
+@MainActor
+final class SidebarDragActivityDecay {
+    private var deadline = ContinuousClock.now
+    private var task: Task<Void, Never>?
+
+    /// Pushes the deadline out. `onExpire` runs once, after the deadline has passed without another ping.
+    func ping(decayNanoseconds: UInt64 = sidebarDragActivityDecayNanoseconds, onExpire: @escaping @MainActor () -> Void) {
+        deadline = ContinuousClock.now + .nanoseconds(Int64(decayNanoseconds))
+        guard task == nil else { return }
+        task = Task { @MainActor [weak self] in
+            while let self {
+                let remaining = self.deadline - ContinuousClock.now
+                guard remaining > .zero else { break }
+                try? await Task.sleep(for: remaining)
+                if Task.isCancelled { return }
+            }
+            self?.task = nil
+            onExpire()
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+    }
+
+    deinit { task?.cancel() }
+}
+
 struct InsertionIndicatorLine: View {
     var color: Color
 
@@ -272,15 +302,13 @@ struct SidebarDropTarget<Content: View>: View {
 
     // The two strips default to .allowsHitTesting(false): SwiftUI hit-tests a ZStack front-to-back, so an unconditionally hit-testable strip would swallow every ordinary click/drag-start in its band before content() ever sees it.
     @State private var isDragActivityNearby = false
-    @State private var dragActivityDecayTask: Task<Void, Never>?
+    @State private var dragActivityDecay = SidebarDragActivityDecay()
 
     // Debounced "a drag is near this row" flag, driven by every zone's dropEntered/dropUpdated ping; without the decay's force-clear, a dwelling drag or an Esc-cancelled one (no dropExited) leaves a stuck caret/highlight.
+    // Only writes state that actually changed: dropUpdated lands here on every pointer move, and an unchanged assignment still invalidates the row.
     private func noteDragActivity() {
-        isDragActivityNearby = true
-        dragActivityDecayTask?.cancel()
-        dragActivityDecayTask = Task {
-            try? await Task.sleep(nanoseconds: sidebarDragActivityDecayNanoseconds)
-            guard !Task.isCancelled else { return }
+        if !isDragActivityNearby { isDragActivityNearby = true }
+        dragActivityDecay.ping {
             isDragActivityNearby = false
             topTargeted = false
             bottomTargeted = false
@@ -413,7 +441,7 @@ struct SidebarDropTarget<Content: View>: View {
             }
         }
         // Elevated only while showing an indicator: .offset does not affect layout, so the bottom caret's offset puts roughly half its height into the next row's band, which would otherwise paint over it.
-        .zIndex(topTargeted || bottomTargeted || insideTargeted ? 1 : 0)
+        .zIndex(dropIndicatorState == .none ? 0 : 1)
         .background(
             RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius)
                 .fill(insideTargeted && showsBodyHighlight ? accentColor.opacity(0.18) : .clear)
@@ -422,8 +450,16 @@ struct SidebarDropTarget<Content: View>: View {
                         .strokeBorder(accentColor.opacity(insideTargeted && showsBodyHighlight ? 0.9 : 0), lineWidth: 1.5)
                 )
         )
-        .animation(OrbitMotion.quick, value: topTargeted)
-        .animation(OrbitMotion.quick, value: bottomTargeted)
-        .animation(OrbitMotion.quick, value: insideTargeted)
+        .animation(OrbitMotion.quick, value: dropIndicatorState)
+    }
+
+    // One animation keyed on the single indicator that can be showing, instead of three modifiers each re-evaluated on every flag change. clearOtherZones keeps at most one of the three true, so this loses no transition.
+    private enum DropIndicatorState: Equatable { case none, top, bottom, inside }
+
+    private var dropIndicatorState: DropIndicatorState {
+        if insideTargeted { return .inside }
+        if topTargeted { return .top }
+        if bottomTargeted { return .bottom }
+        return .none
     }
 }
