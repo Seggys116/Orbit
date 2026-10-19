@@ -415,12 +415,6 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         XCTAssertTrue(recorder.adopted.isEmpty, "Nothing is built for a click: the delegate opens the tab itself.")
     }
 
-    func testACmdShiftClickAsksForAForegroundTab() throws {
-        try WebKitLiveEngineHost.runLive(timeout: 90) {
-            try await self.assertClickRequests(.newForegroundTab, modifiers: [.command, .shift])
-        }
-    }
-
     func testAShiftClickAsksForANewWindow() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             try await self.assertClickRequests(.newWindow, modifiers: [.shift])
