@@ -373,11 +373,15 @@ final class GitHubLiveFolderSidebarTests: XCTestCase {
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarRowHeight)
 
         let depth0 = render(
-            GitHubLiveFolderRowView(spaceID: space.id, theme: space.theme, depth: 0, store: store).environment(env),
+            GitHubLiveFolderRowView(spaceID: space.id, theme: space.theme, depth: 0, store: store)
+                .environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true),
             size: size
         )
         let depth2 = render(
-            GitHubLiveFolderRowView(spaceID: space.id, theme: space.theme, depth: 2, store: store).environment(env),
+            GitHubLiveFolderRowView(spaceID: space.id, theme: space.theme, depth: 2, store: store)
+                .environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true),
             size: size
         )
 

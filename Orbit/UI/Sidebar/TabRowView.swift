@@ -673,15 +673,15 @@ struct PinnedFolderRowView: View {
                 .orbitTooltip("Click to collapse/expand — double-click to rename")
             }
 
-            OrbitNSActionButton(action: { env.toggleFolderExpanded(folder.id, in: spaceID) }) {
-                Spacer(minLength: 4)
-            }
+            Spacer(minLength: 4)
 
             trailingControls
         }
         .padding(.leading, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset + CGFloat(depth) * OrbitMetrics.sidebarIndentPerDepth)
         .padding(.trailing, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
         .frame(height: OrbitMetrics.sidebarRowHeight)
+        // Behind the row, filling its whole pitch, the way a tab row does it. The glyph, the name and the "+" sit later in the tree and keep their own clicks. The catcher that used to answer for the space after the name was an OrbitNSActionButton around a Spacer, which never received a click: everything to the right of the name was dead.
+        .background(rowActivationCatcher)
         .background(
             RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius)
                 .fill(isHovering ? theme.readableForeground.opacity(OrbitMetrics.sidebarHoverRowOpacity) : .clear)
@@ -693,13 +693,18 @@ struct PinnedFolderRowView: View {
             isHovering = hovering
             handleHoverPreview(hovering)
         }
-        .orbitHoverPopover(isPresented: $showPreview, preferredEdge: .maxX) {
+        // keepsOpenWhilePointerInside: the preview lists the folder's tabs to be clicked, so the pointer has to be able to travel from the row into it.
+        .orbitHoverPopover(isPresented: $showPreview, preferredEdge: .maxX, keepsOpenWhilePointerInside: true) {
             if let previewState {
                 FolderHoverPreviewView(state: previewState) { tabID in
                     env.activateTab(tabID)
                     showPreview = false
                 }
             }
+        }
+        // An expanded folder shows its tabs in the sidebar already, so a preview of them has no business staying up beside it.
+        .onChange(of: folder.isExpanded) { _, expanded in
+            if expanded { showPreview = false }
         }
         .contextMenu {
             Button("Change Icon…") { promptToChangeIcon() }
@@ -741,6 +746,16 @@ struct PinnedFolderRowView: View {
         .clipped()
     }
 
+    // Immediate, unlike the name: there is no double click to wait for out here, since renaming belongs to the name.
+    private var rowActivationCatcher: some View {
+        OrbitNSActionButton(action: {
+            guard !isRenaming else { return }
+            env.toggleFolderExpanded(folder.id, in: spaceID)
+        }) {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
     private var trailingControls: some View {
         HStack(spacing: 4) {
             OrbitNSActionButton(action: {
@@ -764,6 +779,8 @@ struct PinnedFolderRowView: View {
     private func beginRename() {
         pendingNameLabelToggleTask?.cancel()
         pendingNameLabelToggleTask = nil
+        previewTask?.cancel()
+        showPreview = false
         draftName = folder.name
         isRenaming = true
         DispatchQueue.main.async { focused = true }
@@ -832,10 +849,9 @@ struct PinnedFolderRowView: View {
 
     private func handleHoverPreview(_ hovering: Bool) {
         previewTask?.cancel()
-        guard hovering else {
-            showPreview = false
-            return
-        }
+        // Leaving the row does not close an open preview: OrbitHoverPopover watches the pointer and closes it once the pointer has left the row, the preview and the strip between them. Closing here is what made the preview vanish the moment the pointer started toward it.
+        guard hovering else { return }
+        guard !showPreview else { return }
         previewTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(OrbitMetrics.folderPreviewHoverDelay * 1_000_000_000))
             guard !Task.isCancelled else { return }

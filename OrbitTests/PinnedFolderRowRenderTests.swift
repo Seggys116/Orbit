@@ -17,7 +17,7 @@ final class PinnedFolderRowRenderTests: XCTestCase {
         let size = CGSize(width: 200, height: OrbitMetrics.sidebarRowHeight)
 
         let rendered = render(
-            PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 0).environment(env),
+            PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 0).environment(env).environment(\.orbitScreenshotModeDragDisabled, true),
             size: size
         )
 
@@ -50,12 +50,14 @@ final class PinnedFolderRowRenderTests: XCTestCase {
 
         let shortRender = render(
             PinnedFolderRowView(folder: makeFolder(name: "A"), spaceID: SpaceID(), theme: theme, depth: 0)
-                .environment(env),
+                .environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true),
             size: size
         )
         let longRender = render(
             PinnedFolderRowView(folder: makeFolder(name: "Imported From Chrome"), spaceID: SpaceID(), theme: theme, depth: 0)
-                .environment(env),
+                .environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true),
             size: size
         )
 
@@ -87,8 +89,8 @@ final class PinnedFolderRowRenderTests: XCTestCase {
         let folder = makeFolder(name: "Inner")
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarRowHeight)
 
-        let depth0 = render(PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 0).environment(env), size: size)
-        let depth2 = render(PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 2).environment(env), size: size)
+        let depth0 = render(PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 0).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
+        let depth2 = render(PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: 2).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
 
         guard let box0 = depth0.boundingBoxOfContent(tolerance: 0.03),
               let box2 = depth2.boundingBoxOfContent(tolerance: 0.03) else {
@@ -119,7 +121,7 @@ final class PinnedFolderRowRenderTests: XCTestCase {
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarRowHeight)
 
         let leadingXs: [CGFloat] = (0...3).map { depth in
-            let rendered = render(PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: depth).environment(env), size: size)
+            let rendered = render(PinnedFolderRowView(folder: folder, spaceID: SpaceID(), theme: theme, depth: depth).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
             guard let box = rendered.boundingBoxOfContent(tolerance: 0.03) else {
                 rendered.writeDiagnosticPNG(named: "R1-folderRow-depth\(depth)-FAILED-empty")
                 XCTFail("Expected content at depth \(depth).")

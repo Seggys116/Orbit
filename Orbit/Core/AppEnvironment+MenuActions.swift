@@ -110,8 +110,10 @@ extension AppEnvironment {
         guard let spaceID = activeSpace?.id else { return false }
         let roots = store.pinnedNodes(in: spaceID)
         guard roots.contains(where: { if case .folder = $0 { return true } else { return false } }) else { return false }
-        store.mutateSpace(spaceID) { space in
-            space.pinned = AppEnvironment.settingFoldersExpanded(expanded, in: space.pinned)
+        withAnimation(OrbitMotion.standard) {
+            store.mutateSpace(spaceID) { space in
+                space.pinned = AppEnvironment.settingFoldersExpanded(expanded, in: space.pinned)
+            }
         }
         return true
     }

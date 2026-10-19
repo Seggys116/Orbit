@@ -133,6 +133,7 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         return nil
     }
 
+    // The catchers, leading to trailing: [0] the row-wide one behind everything, which answers for the empty space and the row's own padding; [1] the glyph; [2] the name; [3] the trailing "+".
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_liveRow_exposesExactlyFourClickCatchersInLeadingToTrailingOrder
 
     func test_liveRow_exposesExactlyFourClickCatchersInLeadingToTrailingOrder() {
@@ -144,7 +145,11 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
 
         XCTAssertEqual(
             catchers.count, 4,
-            "Expected exactly 4 click catchers (glyph, name label, empty space, trailing +) on a non-renaming folder row; found \(catchers.count)."
+            "Expected exactly 4 click catchers (row-wide, glyph, name label, trailing +) on a non-renaming folder row; found \(catchers.count)."
+        )
+        XCTAssertEqual(
+            catchers[0].frame.width, 260, accuracy: 1,
+            "The first catcher must be the row-wide one, spanning the whole row: a click anywhere the others do not cover has to land on it, or that part of the row is dead."
         )
         for index in 1..<catchers.count {
             XCTAssertGreaterThan(
@@ -161,7 +166,8 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         let (env, spaceID) = makeSpace(pinned: [.folder(folder)])
         let hostingView = hostLiveRow(folder: folder, env: env, spaceID: spaceID)
 
-        let catchers = collectClickCatchersLeadingToTrailing(in: hostingView)
+        // The row-wide catcher is excluded on purpose: like a tab row's it fills the whole pitch, and it is the compact controls that must leave a margin.
+        let catchers = collectClickCatchersLeadingToTrailing(in: hostingView).filter { $0.frame.width < 200 }
         XCTAssertFalse(catchers.isEmpty, "Expected at least one click catcher to measure against.")
 
         let minY = catchers.map(\.frame.minY).min()!
@@ -189,7 +195,7 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         let (env, spaceID) = makeSpace(pinned: [.folder(folder)])
         let hostingView = hostLiveRow(folder: folder, env: env, spaceID: spaceID)
         let catchers = collectClickCatchersLeadingToTrailing(in: hostingView)
-        let nameLabelCatcher = try XCTUnwrap(catchers[safe: 1]?.view, "Could not find the name label's own click catcher (expected at leading-to-trailing index 1).")
+        let nameLabelCatcher = try XCTUnwrap(catchers[safe: 2]?.view, "Could not find the name label's own click catcher (expected at leading-to-trailing index 2).")
 
         XCTAssertEqual(isExpanded(folder.id, env: env, spaceID: spaceID), false, "Precondition: the folder starts collapsed.")
 
@@ -211,7 +217,7 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         let (env, spaceID) = makeSpace(pinned: [.folder(folder)])
         let hostingView = hostLiveRow(folder: folder, env: env, spaceID: spaceID)
         let catchers = collectClickCatchersLeadingToTrailing(in: hostingView)
-        let emptySpaceCatcher = try XCTUnwrap(catchers[safe: 2]?.view, "Could not find the empty-space click catcher (expected at leading-to-trailing index 2).")
+        let emptySpaceCatcher = try XCTUnwrap(catchers[safe: 0]?.view, "Could not find the row-wide click catcher (expected at leading-to-trailing index 0).")
 
         emptySpaceCatcher.mouseDown(with: mouseDownEvent(clickCount: 1))
 
@@ -228,7 +234,7 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         let (env, spaceID) = makeSpace(pinned: [.folder(folder)])
         let hostingView = hostLiveRow(folder: folder, env: env, spaceID: spaceID)
         let catchers = collectClickCatchersLeadingToTrailing(in: hostingView)
-        let nameLabelCatcher = try XCTUnwrap(catchers[safe: 1]?.view, "Could not find the name label's own click catcher (expected at leading-to-trailing index 1).")
+        let nameLabelCatcher = try XCTUnwrap(catchers[safe: 2]?.view, "Could not find the name label's own click catcher (expected at leading-to-trailing index 2).")
 
         XCTAssertEqual(isExpanded(folder.id, env: env, spaceID: spaceID), false, "Precondition: the folder starts collapsed.")
 
@@ -265,7 +271,7 @@ final class PinnedFolderRowClickBehaviorTests: XCTestCase {
         )
 
         let catchers = collectClickCatchersLeadingToTrailing(in: hostingView)
-        let nameLabelCatcher = try XCTUnwrap(catchers[safe: 1]?.view, "Could not find the name label's own click catcher (expected at leading-to-trailing index 1).")
+        let nameLabelCatcher = try XCTUnwrap(catchers[safe: 2]?.view, "Could not find the name label's own click catcher (expected at leading-to-trailing index 2).")
 
         nameLabelCatcher.mouseDown(with: mouseDownEvent(clickCount: 1))
         nameLabelCatcher.mouseDown(with: mouseDownEvent(clickCount: 2))

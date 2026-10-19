@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 extension AppEnvironment {
 
@@ -55,8 +56,11 @@ extension AppEnvironment {
         store.setFolderIcon(icon, isEmoji: isEmoji, forFolder: id, in: spaceID)
     }
 
+    // Animated here, at the one place every caller (the row, its context menu, "New Folder Inside") funnels through, so a folder opens and closes the same way however it was asked to.
     func toggleFolderExpanded(_ id: FolderID, in spaceID: SpaceID) {
-        store.toggleFolderExpanded(id, in: spaceID)
+        withAnimation(OrbitMotion.standard) {
+            store.toggleFolderExpanded(id, in: spaceID)
+        }
     }
 
     func deleteFolder(_ id: FolderID, in spaceID: SpaceID, keepingChildren: Bool) {

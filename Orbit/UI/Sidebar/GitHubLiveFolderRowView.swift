@@ -133,6 +133,8 @@ struct GitHubLiveFolderRowView: View {
     @State private var isRenaming = false
     @State private var draftName = ""
     @FocusState private var focused: Bool
+    // The first click on the name waits out the double-click interval before it collapses, exactly as PinnedFolderRowView's does, so a rename does not flash the folder shut and open.
+    @State private var pendingNameToggleTask: Task<Void, Never>?
 
     private var config: GitHubLiveFolderConfig? {
         env.space(spaceID)?.githubLiveFolder
@@ -182,11 +184,12 @@ struct GitHubLiveFolderRowView: View {
                     .onSubmit(commitRename)
                     .onExitCommand { isRenaming = false }
             } else {
-                Text(config.displayName)
-                    .font(OrbitFont.sidebarRow)
-                    .foregroundStyle(theme.readableForeground)
-                    .lineLimit(1)
-                    .onTapGesture(count: 2) { beginRename() }
+                OrbitNSActionButton(onClickCount: { handleNameClick(clickCount: $0) }) {
+                    Text(config.displayName)
+                        .font(OrbitFont.sidebarRow)
+                        .foregroundStyle(theme.readableForeground)
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: OrbitMetrics.sidebarPinnedSlashSpacing)
@@ -198,6 +201,8 @@ struct GitHubLiveFolderRowView: View {
         .padding(.leading, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset + CGFloat(depth) * OrbitMetrics.sidebarIndentPerDepth)
         .padding(.trailing, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
         .frame(height: OrbitMetrics.sidebarRowHeight)
+        // Behind the whole row, as a tab row's is: only the glyph used to respond, so a click anywhere to the right of it did nothing. The name keeps its own catcher, for double-click to rename.
+        .background(rowActivationCatcher)
         .background(
             RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius)
                 .fill(isHovering ? theme.readableForeground.opacity(OrbitMetrics.sidebarHoverRowOpacity) : .clear)
@@ -207,6 +212,30 @@ struct GitHubLiveFolderRowView: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .contextMenu { folderContextMenu(config) }
+    }
+
+    private var rowActivationCatcher: some View {
+        OrbitNSActionButton(action: {
+            guard !isRenaming else { return }
+            toggleExpanded()
+        }) {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func handleNameClick(clickCount: Int) {
+        pendingNameToggleTask?.cancel()
+        pendingNameToggleTask = nil
+        if clickCount >= 2 {
+            guard !isRenaming else { return }
+            beginRename()
+            return
+        }
+        pendingNameToggleTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(NSEvent.doubleClickInterval * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            toggleExpanded()
+        }
     }
 
     private func badgedFolderGlyph(_ config: GitHubLiveFolderConfig) -> some View {
@@ -322,6 +351,8 @@ struct GitHubLiveFolderRowView: View {
     }
 
     private func beginRename() {
+        pendingNameToggleTask?.cancel()
+        pendingNameToggleTask = nil
         draftName = config?.displayName ?? GitHubLiveFolderCopy.defaultFolderName
         isRenaming = true
         DispatchQueue.main.async { focused = true }
