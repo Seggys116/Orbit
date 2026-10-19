@@ -22,6 +22,12 @@ enum CommandBarMode: Equatable {
         case .newTab, .chatGPT, .editURL: return nil
         }
     }
+
+    /// True when the bar was opened by clicking a tab's own address: the user is rewriting that tab's URL, so what they typed is the answer to Enter. Every other row (an open tab, a favourite, an action) is a suggestion they must arrow or click to, never the default.
+    var editsCurrentPage: Bool {
+        if case .editURL = self { return true }
+        return false
+    }
 }
 
 enum CommandResultKind {
@@ -384,7 +390,7 @@ enum CommandBarEngine {
             items.append(CommandResult(id: "suggest-\(suggestion)", kind: .searchSuggestion(suggestion), title: suggestion, subtitle: "Search \(searchEngine.displayName)", symbolName: "magnifyingglass", score: PriorityScore.networkSuggestion))
         }
 
-        return pinningVerbatimRows(in: items.sorted { $0.score > $1.score }, query: trimmed)
+        return pinningVerbatimRows(in: items.sorted { $0.score > $1.score }, query: trimmed, atTop: mode.editsCurrentPage)
     }
 
     // MARK: The verbatim row
@@ -402,7 +408,8 @@ enum CommandBarEngine {
 
     // Verbatim row gets a reserved slot, not a raised score (which would re-break
     // CommandBarRankingTests): literalSearchFallback is low enough that history alone can sink it off-screen. min(_,1) makes this a reservation, not a promotion.
-    private static func pinningVerbatimRows(in results: [CommandResult], query: String) -> [CommandResult] {
+    // atTop: editing a tab's own URL. There the verbatim row leads unconditionally, so Enter can never "switch to" an open tab that merely matches what was typed.
+    private static func pinningVerbatimRows(in results: [CommandResult], query: String, atTop: Bool = false) -> [CommandResult] {
         guard let verbatimIndex = results.firstIndex(where: { isVerbatimRow($0, query: query) }) else { return results }
         var remaining = results
         var block = [remaining.remove(at: verbatimIndex)]
@@ -411,7 +418,7 @@ enum CommandBarEngine {
         }
         // A cross-Space row must never hold the default selection, or Enter on typed text would move the user Spaces.
         let leadsWithCrossSpaceRow = remaining.first.map { if case .tabInOtherSpace = $0.kind { return true } else { return false } } ?? false
-        remaining.insert(contentsOf: block, at: leadsWithCrossSpaceRow ? 0 : min(verbatimIndex, 1))
+        remaining.insert(contentsOf: block, at: atTop || leadsWithCrossSpaceRow ? 0 : min(verbatimIndex, 1))
         return remaining
     }
 

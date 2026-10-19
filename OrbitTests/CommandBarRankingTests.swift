@@ -176,6 +176,60 @@ final class CommandBarRankingTests: XCTestCase {
         XCTAssertFalse(stillOffersSelfSwitch, "In .editURL mode, the tab currently being edited must not appear as a \"switch to it\" result.")
     }
 
+    // Clicking a tab's address and pressing Enter must navigate that tab, never switch to another one that happens to match what was typed.
+    func test_results_editURLMode_leadsWithWhatWasTypedEvenWhenAnotherOpenTabMatches() {
+        let env = AppEnvironment()
+        let profile = Profile(name: "Personal")
+        env.state.profiles = [profile]
+        var space = Space(name: "Personal", profileID: profile.id)
+        space.favorites = [Favorite(url: URL(string: "https://github.com/notifications")!, title: "GitHub Notifications")]
+        env.state.spaces = [space]
+        env.state.activeSpaceID = space.id
+
+        let current = Tab(spaceID: space.id, section: .today, url: URL(string: "https://example.com")!, title: "Example")
+        let other = Tab(spaceID: space.id, section: .today, url: URL(string: "https://github.com/pulls")!, title: "GitHub Pull Requests")
+        env.state.tabs[current.id] = current
+        env.state.tabs[other.id] = other
+        env.activeTabID = current.id
+
+        let query = "github pull requests"
+        let editing = CommandBarEngine.results(query: query, mode: .editURL(current.url), env: env, suggestions: [])
+        guard case .searchSuggestion(let typed)? = editing.first?.kind else {
+            return XCTFail("The first row while editing a URL must be what was typed, got \(String(describing: editing.first?.kind)).")
+        }
+        XCTAssertEqual(typed, query)
+        XCTAssertTrue(
+            editing.contains { if case .openTab(let id) = $0.kind { return id == other.id }; return false },
+            "The matching tab is still offered, just never as the default."
+        )
+
+        let newTab = CommandBarEngine.results(query: query, mode: .newTab, env: env, suggestions: [])
+        if case .openTab(let id)? = newTab.first?.kind {
+            XCTAssertEqual(id, other.id, "Control: ⌘T keeps switching to a matching open tab first.")
+        } else {
+            XCTFail("Control: ⌘T should still lead with the matching open tab, got \(String(describing: newTab.first?.kind)).")
+        }
+    }
+
+    func test_results_editURLMode_aTypedAddressLeadsOverAMatchingFavourite() {
+        let env = AppEnvironment()
+        let profile = Profile(name: "Personal")
+        env.state.profiles = [profile]
+        var space = Space(name: "Personal", profileID: profile.id)
+        space.favorites = [Favorite(url: URL(string: "https://github.com/notifications")!, title: "github.com notifications")]
+        env.state.spaces = [space]
+        env.state.activeSpaceID = space.id
+        let current = Tab(spaceID: space.id, section: .today, url: URL(string: "https://example.com")!, title: "Example")
+        env.state.tabs[current.id] = current
+        env.activeTabID = current.id
+
+        let results = CommandBarEngine.results(query: "github.com/notifications", mode: .editURL(current.url), env: env, suggestions: [])
+        guard case .typedURL(let url)? = results.first?.kind else {
+            return XCTFail("The first row must be the typed address, got \(String(describing: results.first?.kind)).")
+        }
+        XCTAssertEqual(url.absoluteString, "https://github.com/notifications")
+    }
+
     func test_results_newTabMode_stillOffersAllOpenTabs() {
         let env = AppEnvironment()
         let profile = Profile(name: "Personal")

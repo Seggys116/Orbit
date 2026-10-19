@@ -432,6 +432,11 @@ struct CommandBarView: View {
     }
 
     private func commit(instant: Bool) {
+        // Enter on an emptied address field leaves the page alone. With nothing typed the list is only recents and favourites, and committing the top one would navigate the tab somewhere the user never asked for.
+        if env.commandBarMode.editsCurrentPage, activeSiteEngine == nil, query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            dismiss()
+            return
+        }
         if selectedIndex < results.count {
             activate(results[selectedIndex], instant: instant)
             return

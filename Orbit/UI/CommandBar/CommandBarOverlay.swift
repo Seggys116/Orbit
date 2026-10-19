@@ -14,6 +14,16 @@ struct CommandBarAnchorsKey: PreferenceKey {
     }
 }
 
+/// The Command Bar panel's own frame, in CommandBarOverlayLayout.coordinateSpaceName. The scrim's AppKit click catcher needs it to stay out of the panel's way: a catcher that claimed the whole overlay would dismiss the bar on every click inside it.
+struct CommandBarPanelFrameKey: PreferenceKey {
+    static let defaultValue: CGRect = .null
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if !next.isNull { value = next }
+    }
+}
+
 extension View {
     func commandBarAnchor(_ id: CommandBarAnchorID) -> some View {
         background(
@@ -64,6 +74,8 @@ enum CommandBarPlacement {
 }
 
 struct CommandBarOverlayLayout<Content: View>: View {
+    static var coordinateSpaceName: String { "OrbitCommandBarOverlay" }
+
     var targetRect: CGRect?
     var scrimOpacity: Double = 0.18
     /// Leading width that stays clickable. The sidebar lives there; a scrim
@@ -88,8 +100,18 @@ struct CommandBarOverlayLayout<Content: View>: View {
 
                 content(CommandBarPlacement.width(forAvailableWidth: region.width))
                     .fixedSize()
+                    .background(
+                        GeometryReader { panel in
+                            Color.clear.preference(
+                                key: CommandBarPanelFrameKey.self,
+                                value: panel.frame(in: .named(Self.coordinateSpaceName))
+                            )
+                        }
+                        .allowsHitTesting(false)
+                    )
                     .position(x: region.midX, y: region.midY)
             }
+            .coordinateSpace(.named(Self.coordinateSpaceName))
         }
         .contentShape(CommandBarScrimShape(leadingInset: passthroughLeadingWidth))
     }
@@ -114,31 +136,49 @@ struct CommandBarOverlayLayout<Content: View>: View {
 /// to the tab rows, which both select the tab and take the bar down.
 struct CommandBarScrimClickCatcher: NSViewRepresentable {
     var leadingInset: CGFloat
+    /// The panel's frame in this view's own top-left-origin space. Nil until the panel has laid out; the catcher claims nothing until then.
+    var excludedRect: CGRect?
     var onTap: () -> Void
 
     func makeNSView(context: Context) -> CommandBarScrimClickView {
         let view = CommandBarScrimClickView()
         view.leadingInset = leadingInset
+        view.excludedRect = excludedRect
         view.onTap = onTap
         return view
     }
 
     func updateNSView(_ nsView: CommandBarScrimClickView, context: Context) {
         nsView.leadingInset = leadingInset
+        nsView.excludedRect = excludedRect
         nsView.onTap = onTap
     }
 }
 
-final class CommandBarScrimClickView: NSView {
+// OrbitClickCatching, so OrbitWindowContentView's click recovery can find it: over the page, NSHostingView.hitTest resolves to the hosting view itself rather than to an NSView representable beneath the SwiftUI overlay, and recovery is the only path that then reaches this view.
+// Flipped so its bounds share SwiftUI's top-left origin with excludedRect.
+final class CommandBarScrimClickView: NSView, OrbitClickCatching {
     var leadingInset: CGFloat = 0
+    var excludedRect: CGRect?
     var onTap: () -> Void = {}
+
+    override var isFlipped: Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let superview else { return nil }
         let local = convert(point, from: superview)
-        guard bounds.contains(local), local.x >= leadingInset else { return nil }
+        guard Self.claims(local, in: bounds, leadingInset: leadingInset, excluding: excludedRect) else { return nil }
         return self
     }
+
+    static func claims(_ point: CGPoint, in bounds: CGRect, leadingInset: CGFloat, excluding panel: CGRect?) -> Bool {
+        guard bounds.contains(point), point.x >= leadingInset else { return false }
+        // No panel frame yet means the layout has not run; claiming everything then would swallow clicks meant for the bar.
+        guard let panel, !panel.isNull, !panel.isEmpty else { return false }
+        return !panel.contains(point)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         onTap()
@@ -159,6 +199,8 @@ struct CommandBarScrimShape: Shape {
 
 struct CommandBarOverlay: View {
     @Environment(AppEnvironment.self) private var env
+
+    @State private var panelFrame: CGRect?
 
     var anchors: [CommandBarAnchorID: CGRect] = [:]
     var passthroughLeadingWidth: CGFloat = 0
@@ -183,15 +225,20 @@ struct CommandBarOverlay: View {
                 activeTabID: env.activeTabID,
                 anchors: anchors
             ),
-            passthroughLeadingWidth: passthroughLeadingWidth
+            passthroughLeadingWidth: passthroughLeadingWidth,
+            // Both paths dismiss, because AppKit resolves a click over the page two different ways. When the walk lands on the hosting view itself (the normal case, SwiftUI having claimed the dimmed region) only this tap sees the click; the AppKit catcher below is for the walks that resolve to it directly. dismissCommandBar() is idempotent, so a click that somehow reached both is harmless.
+            onScrimTap: { env.dismissCommandBar() }
         ) { width in
             CommandBarView(width: width, seededFrom: env)
+        }
+        .onPreferenceChange(CommandBarPanelFrameKey.self) { frame in
+            panelFrame = frame.isNull ? nil : frame
         }
         // ImageRenderer fills an NSViewRepresentable with an opaque placeholder the size of
         // the overlay. The live window still needs the catcher; a flattened render must not include it.
         .background {
             if showsScrimClickCatcher {
-                CommandBarScrimClickCatcher(leadingInset: passthroughLeadingWidth, onTap: { env.dismissCommandBar() })
+                CommandBarScrimClickCatcher(leadingInset: passthroughLeadingWidth, excludedRect: panelFrame, onTap: { env.dismissCommandBar() })
             }
         }
         .transition(.opacity.animation(.easeOut(duration: 0.13)))
