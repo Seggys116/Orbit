@@ -275,14 +275,14 @@ public enum ExtensionActionPopupSupport {
         return false
     }
 
-    /// Body border box plus margins, with both axes at max-content. The root's border box is
-    /// the viewport whenever the web view is taller than the page; this is not.
+    /// The root's own border box, with the root at max-content on both axes: it contains the body's margins, which the body's border box does not. Only the root is widened. The body keeps any width the author declared; widening it as well measured the longest unwrapped row instead of the popup the author designed.
     public static let contentMeasureScript = """
     (function () {
       var root = document.documentElement, body = document.body;
       if (!root || !body) return "";
-      var names = ["width", "height", "min-height", "max-height", "overflow"];
-      function save(element) {
+      var rootNames = ["width", "height", "min-height", "max-height", "overflow"];
+      var bodyNames = ["min-height", "max-height", "overflow"];
+      function save(element, names) {
         var saved = {};
         names.forEach(function (name) {
           saved[name] = [element.style.getPropertyValue(name), element.style.getPropertyPriority(name)];
@@ -290,12 +290,12 @@ public enum ExtensionActionPopupSupport {
         return saved;
       }
       function restore(element, saved) {
-        names.forEach(function (name) {
+        Object.keys(saved).forEach(function (name) {
           if (saved[name][0]) element.style.setProperty(name, saved[name][0], saved[name][1]);
           else element.style.removeProperty(name);
         });
       }
-      var rootSaved = save(root), bodySaved = save(body);
+      var rootSaved = save(root, rootNames), bodySaved = save(body, bodyNames);
       var width = 0, height = 0;
       try {
         root.style.setProperty("width", "max-content", "important");
@@ -303,15 +303,16 @@ public enum ExtensionActionPopupSupport {
         root.style.setProperty("min-height", "0", "important");
         root.style.setProperty("max-height", "none", "important");
         root.style.setProperty("overflow", "visible", "important");
-        body.style.setProperty("width", "max-content", "important");
-        body.style.setProperty("height", "max-content", "important");
         body.style.setProperty("min-height", "0", "important");
         body.style.setProperty("max-height", "none", "important");
         body.style.setProperty("overflow", "visible", "important");
-        var box = body.getBoundingClientRect();
         var style = getComputedStyle(body);
-        width = Math.ceil(Math.max(box.width, body.scrollWidth, root.scrollWidth) + (parseFloat(style.marginLeft) || 0) + (parseFloat(style.marginRight) || 0));
-        height = Math.ceil(Math.max(box.height, body.scrollHeight, root.scrollHeight) + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0));
+        var marginLeft = parseFloat(style.marginLeft) || 0;
+        var marginTop = parseFloat(style.marginTop) || 0;
+        var box = root.getBoundingClientRect();
+        // scrollWidth/Height are measured from the body's padding edge, so only the leading margin is added.
+        width = Math.ceil(Math.max(box.width, body.scrollWidth + marginLeft));
+        height = Math.ceil(Math.max(box.height, body.scrollHeight + marginTop));
       } finally {
         restore(root, rootSaved);
         restore(body, bodySaved);

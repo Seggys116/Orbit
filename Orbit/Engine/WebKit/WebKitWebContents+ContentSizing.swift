@@ -141,6 +141,10 @@ final class WebKitContentSizing: NSObject, WKScriptMessageHandler {
           }
           // The natural width is the root's max-content width; the height is read at the width
           // that will be used, with viewport-relative heights set aside so a roomy host cannot hold the size up.
+          // Only the root is made max-content. The body keeps whatever width the author gave it: forcing the body to
+          // max-content as well replaced a declared width with the longest unwrapped row, so a popup that asks for 344px
+          // came out as wide as the maximum. The root's border box also contains the body's own margins, which the body's
+          // border box does not, so measuring the root is what stops the last few points being clipped.
           // The observer is disconnected across the write: otherwise the style edits schedule another measure.
           function measure() {
             timer = 0;
@@ -149,7 +153,7 @@ final class WebKitContentSizing: NSObject, WKScriptMessageHandler {
             if (!root || !body || !box) { return; }
             if (mutations) { mutations.disconnect(); }
             var rootSaved = save(root, ["width", "height", "overflow", "min-height", "max-height"]);
-            var bodySaved = save(body, ["width", "height", "overflow", "min-height", "max-height"]);
+            var bodySaved = save(body, ["overflow", "min-height", "max-height"]);
             var width = 0, height = 0;
             try {
               // overflow:hidden on the root keeps the border box at the 25×25 host, so a
@@ -161,15 +165,16 @@ final class WebKitContentSizing: NSObject, WKScriptMessageHandler {
               root.style.setProperty("max-height", "none", "important");
               body.style.setProperty("max-height", "none", "important");
               root.style.setProperty("width", "max-content", "important");
-              body.style.setProperty("width", "max-content", "important");
               root.style.setProperty("height", "max-content", "important");
-              body.style.setProperty("height", "max-content", "important");
+              var bodyStyle = getComputedStyle(body);
+              var marginLeft = parseFloat(bodyStyle.marginLeft) || 0;
+              var marginTop = parseFloat(bodyStyle.marginTop) || 0;
               // root.scrollWidth stays the viewport: the initial containing block will not shrink.
-              var natural = Math.ceil(Math.max(body.getBoundingClientRect().width, body.scrollWidth));
+              // body.scrollWidth is measured from the body's padding edge, so the leading margin is the only one to add; it reaches the far edge of a child that overflows the body (a negative-margin list that bleeds past its padding), which still has to fit.
+              var natural = Math.ceil(Math.max(root.getBoundingClientRect().width, body.scrollWidth + marginLeft));
               width = Math.max(natural, box.minW);
               root.style.setProperty("width", width + "px", "important");
-              body.style.setProperty("width", width + "px", "important");
-              height = Math.max(Math.ceil(Math.max(body.getBoundingClientRect().height, body.scrollHeight)), box.minH);
+              height = Math.max(Math.ceil(Math.max(root.getBoundingClientRect().height, body.scrollHeight + marginTop)), box.minH);
             } finally {
               restore(root, rootSaved);
               restore(body, bodySaved);

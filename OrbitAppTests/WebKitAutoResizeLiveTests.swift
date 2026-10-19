@@ -90,6 +90,60 @@ final class WebKitAutoResizeLiveTests: XCTestCase {
         }
     }
 
+    // The shape of iCloud Passwords' popup: an author-declared body width, a margin on the body, padding, and nowrap rows whose text is far wider than the body. The popup must be as wide as the author asked (the body's margin box), not as wide as its longest unwrapped row, and as tall as the whole document including the body's margins.
+    private static let declaredWidthDocument = """
+    <!doctype html><html><head><meta charset="utf-8"><style>
+    body { position: relative; margin: 8px 8px 0 8px; padding: 32px 8px 0 8px; min-height: 100px; font: 15px -apple-system, sans-serif; }
+    body.popup { width: 344px; }
+    ul { list-style: none; margin: 10px -16px 0 -16px; padding: 0; }
+    li { height: 44px; padding: 2px 24px; }
+    li p { margin: 0; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; display: inherit; }
+    #tall { height: 200px; }
+    </style></head><body class="popup">
+    <div id="tall"></div>
+    <ul><li><p>an-extremely-long-address-that-would-never-fit-on-one-line-of-this-popup@some-very-long-domain-name.example.com and then a good deal more text after it</p></li></ul>
+    </body></html>
+    """
+
+    func testAutoResizeHonoursAnAuthorDeclaredBodyWidthAndKeepsTheBodysMargins() throws {
+        try WebKitLiveEngineHost.runLive {
+            let contents = try await WebKitLiveEngineHost.makeContents()
+            defer { contents.close() }
+
+            let recorder = SizeRecorder()
+            contents.delegate = recorder
+            contents.view.frame = NSRect(origin: .zero, size: ExtensionActionPopupSupport.popupLoadingSize)
+            contents.enableContentSizing(
+                minimum: ExtensionActionPopupSupport.popupMinimumSize,
+                maximum: ExtensionActionPopupSupport.popupMaximumSize
+            )
+            contents.loadHTML(Self.declaredWidthDocument, baseURL: nil)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
+
+            let size = try await self.waitForPreferredSize(recorder)
+            // 344 declared + 16 padding + 16 margin.
+            XCTAssertEqual(size.width, 376, accuracy: 2, "A body that declares its width must keep it, not widen to its longest nowrap row. Reported \(size).")
+            // 8 margin + 32 padding + 200 + 10 list margin + 48 row (44 + 2 + 2 padding).
+            XCTAssertEqual(size.height, 298, accuracy: 2, "The body's own margins are part of the document and must not be clipped. Reported \(size).")
+        }
+    }
+
+    func testTheFallbackMeasurementAgreesWithTheLiveObserver() throws {
+        try WebKitLiveEngineHost.runLive {
+            let contents = try await WebKitLiveEngineHost.makeContents()
+            defer { contents.close() }
+
+            contents.view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+            contents.loadHTML(Self.declaredWidthDocument, baseURL: nil)
+            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
+
+            let measured = await ExtensionActionPopupSupport.measuredContentSize(in: contents)
+            let size = try XCTUnwrap(measured, "The measuring script returned nothing.")
+            XCTAssertEqual(size.width, 376, accuracy: 2, "Reported \(size).")
+            XCTAssertEqual(size.height, 298, accuracy: 2, "Reported \(size).")
+        }
+    }
+
     func testAWebContentsWithoutContentSizingNeverReportsAPreferredSize() throws {
         try WebKitLiveEngineHost.runLive {
             let contents = try await WebKitLiveEngineHost.makeContents()

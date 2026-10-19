@@ -233,6 +233,36 @@ final class ExtensionActionPopupSizingTests: XCTestCase {
         XCTAssertNil(model.contents)
     }
 
+    // window.close() is how a popup dismisses itself after a pick, and what its Escape handler calls. It used to go nowhere, so the popup stayed up.
+    func test_aPageThatClosesItself_asksTheOwnerToCloseThePopup() async throws {
+        let (model, engine) = makeModel()
+        var closeRequests = 0
+        model.onCloseRequested = { closeRequests += 1 }
+        model.start()
+        let contents = try XCTUnwrap(engine.lastCreatedContents)
+
+        contents.delegate?.webContentsDidRequestClose(contents)
+        XCTAssertEqual(closeRequests, 0, "Not inline: the request arrives inside WebKit's own callback for the web view the owner is about to tear down.")
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(closeRequests, 1)
+    }
+
+    func test_aCloseRequestArrivingAfterTeardownIsIgnored() async throws {
+        let (model, engine) = makeModel()
+        var closeRequests = 0
+        model.onCloseRequested = { closeRequests += 1 }
+        model.start()
+        let contents = try XCTUnwrap(engine.lastCreatedContents)
+        let observer = try XCTUnwrap(contents.delegate)
+
+        observer.webContentsDidRequestClose(contents)
+        model.teardown()
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(closeRequests, 0, "A popup that is already gone must not ask to be closed again.")
+    }
+
     func test_aFailingEngineSurfacesAFailureInsteadOfAnEmptyPopup() {
         let engine = PopupTestEngine()
         engine.failsToCreateContents = true

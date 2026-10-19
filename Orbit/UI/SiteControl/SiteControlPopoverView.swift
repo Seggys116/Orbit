@@ -566,6 +566,7 @@ struct SiteControlPopoverView: View {
         case .live(let url):
             guard let engine = env.engine, let session = env.webContents[tab.id]?.session else { return }
             let model = ExtensionActionPopupModel(engine: engine, session: session, url: url)
+            model.onCloseRequested = { closeExtensionPopup() }
             model.start()
             activeExtensionPopupModel = model
             openExtensionPopup = target

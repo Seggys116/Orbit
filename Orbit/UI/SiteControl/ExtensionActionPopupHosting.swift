@@ -17,6 +17,9 @@ public final class ExtensionActionPopupModel {
     public private(set) var scrollsHorizontally = false
     public private(set) var scrollsVertically = false
 
+    /// Called when the popup's own page asks to close (`window.close()`, which is how an extension popup dismisses itself after the user picks something, and what its Escape handler does). Chrome closes the popup; without this the page's request went nowhere and the popup stayed up.
+    public var onCloseRequested: (() -> Void)?
+
     private let engine: any BrowserEngine
     private let session: any EngineSession
     private let url: URL
@@ -59,12 +62,21 @@ public final class ExtensionActionPopupModel {
     // Safe to call more than once: SiteControlPopoverView calls this from more than one dismissal path, uncoordinated about which runs first.
     public func teardown() {
         sizeCorrectionGeneration += 1
+        onCloseRequested = nil
         let held = contents
         // Drop the model's reference before close. A re-entrant view update must not observe a live popup, and this object must not keep the web view.
         contents = nil
         held?.delegate = nil
         observer = nil
         held?.close()
+    }
+
+    // One turn later, not inline: the request arrives from inside WebKit's own callback for this very web view, and the owner's answer is to tear that web view down.
+    fileprivate func handleCloseRequest() {
+        Task { @MainActor [weak self] in
+            guard let self, self.contents != nil else { return }
+            self.onCloseRequested?()
+        }
     }
 
     fileprivate func handleFailure(_ error: EngineError) {
@@ -127,6 +139,10 @@ public final class ExtensionActionPopupModel {
 
         func webContents(_ contents: WebContents, didChangePreferredSize size: CGSize) {
             model?.applyPreferredSize(size)
+        }
+
+        func webContentsDidRequestClose(_ contents: WebContents) {
+            model?.handleCloseRequest()
         }
     }
 }
