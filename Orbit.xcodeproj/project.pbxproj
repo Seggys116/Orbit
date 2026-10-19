@@ -511,6 +511,8 @@
 		5DD51EB453D21EACE724B970 /* LibraryDownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F8C07DAEB71548843A8FAB6 /* LibraryDownloadsView.swift */; };
 		5E1055E33ACFA6786C9A8A0E /* LibraryPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DB8761F8571C6ABCABC6DDC /* LibraryPalette.swift */; };
 		5E2538EFBDEB88866A0F0633 /* CommandBarPlacementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D9374598B0578EC14F1C280 /* CommandBarPlacementTests.swift */; };
+		6B9CF34878DB654DC93DB019 /* CommandBarScrimClickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95455626DCE2A7A566132C9B /* CommandBarScrimClickTests.swift */; };
+		A8B61AA013A2438C86E86B0F /* FolderRowClickAreaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CC35742264C6CFF360810B7 /* FolderRowClickAreaTests.swift */; };
 		5E2688C0FB801CF1C92129C0 /* SidebarRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B716DF424603066B439E9D18 /* SidebarRenderTests.swift */; };
 		5E97F20C34C107949E8AB3C4 /* WebKitExtensionSystemAPIs.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65E595BFD42A24C191637C0 /* WebKitExtensionSystemAPIs.swift */; };
 		5EC7FBF80775E6F0D80227E6 /* BoostsEditorWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FED4E487686B9FA2E6A02CD /* BoostsEditorWindowController.swift */; };
@@ -1829,6 +1831,8 @@
 		6D04ECA5121449A0DD5C31F5 /* CollapsedSidebarChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollapsedSidebarChromeTests.swift; sourceTree = "<group>"; };
 		6D1B11DF6D41A6DC59E3EC55 /* GPUAccelerationLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPUAccelerationLiveTests.swift; sourceTree = "<group>"; };
 		6D9374598B0578EC14F1C280 /* CommandBarPlacementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandBarPlacementTests.swift; sourceTree = "<group>"; };
+		95455626DCE2A7A566132C9B /* CommandBarScrimClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandBarScrimClickTests.swift; sourceTree = "<group>"; };
+		4CC35742264C6CFF360810B7 /* FolderRowClickAreaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRowClickAreaTests.swift; sourceTree = "<group>"; };
 		6D973B5D8D01DA37F667A61E /* ArcKeyBindingsReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcKeyBindingsReaderTests.swift; sourceTree = "<group>"; };
 		6E765995195CE6B426DF58A8 /* ExtensionsSettingsPaneInstallTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionsSettingsPaneInstallTests.swift; sourceTree = "<group>"; };
 		6EC2F598A750F1AB3A1396E3 /* LiveSuiteTabIsolationGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSuiteTabIsolationGuardTests.swift; sourceTree = "<group>"; };
@@ -3304,6 +3308,8 @@
 				70505D1F2F8751D5BB6B0971 /* CommandBarLiveTypingTests.swift */,
 				08C309E554BC037E15ACBEB3 /* CommandBarOpeningFocusTests.swift */,
 				6D9374598B0578EC14F1C280 /* CommandBarPlacementTests.swift */,
+				95455626DCE2A7A566132C9B /* CommandBarScrimClickTests.swift */,
+				4CC35742264C6CFF360810B7 /* FolderRowClickAreaTests.swift */,
 				84AB1721E7A20EC7809AF252 /* CommandBarPointerHoverTests.swift */,
 				DFA996B89FA8EFA881C04129 /* CommandBarQueryTests.swift */,
 				C06B360BC5E7C6381F578959 /* CommandBarSpaceRoutingTests.swift */,
@@ -4854,6 +4860,8 @@
 				3366325FEAFE5F694F4752E5 /* CommandBarLiveTypingTests.swift in Sources */,
 				EEB3722D29E60BA8CC36ACAD /* CommandBarOpeningFocusTests.swift in Sources */,
 				5E2538EFBDEB88866A0F0633 /* CommandBarPlacementTests.swift in Sources */,
+				6B9CF34878DB654DC93DB019 /* CommandBarScrimClickTests.swift in Sources */,
+				A8B61AA013A2438C86E86B0F /* FolderRowClickAreaTests.swift in Sources */,
 				7178E58B07A5BF3C4A4E5384 /* CommandBarPointerHoverTests.swift in Sources */,
 				350287007ABA36755D52FDEE /* CommandBarQueryTests.swift in Sources */,
 				72828DC769D47639D29AA1EA /* CommandBarSpaceRoutingTests.swift in Sources */,
