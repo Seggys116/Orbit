@@ -65,6 +65,7 @@ ORBIT_TESTS_REUSED_SOURCES = [
     "Orbit/Persistence/SchemaMigration.swift",
     "Orbit/Persistence/StateStore.swift",
     "Orbit/UI/Controls/OrbitContextMenuModel.swift",
+    "Orbit/UI/Controls/OrbitContextMenuPresenter.swift",
     "Orbit/UI/Controls/OrbitContextMenuView.swift",
     "Orbit/UI/Controls/OrbitMenuPanel.swift",
     "Orbit/UI/Controls/OrbitMenuPanelAnchor.swift",

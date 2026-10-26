@@ -680,7 +680,7 @@ extension WebKitWebContents: InspectorDockableContents {
                 backing: .buffered,
                 defer: false
             )
-            if reused == nil { window.title = "Web Inspector — \(navigationState.title)" }
+            if reused == nil { window.title = "Web Inspector: \(navigationState.title)" }
             window.contentView = frontend
             window.isReleasedWhenClosed = false
             InspectorDockSteering.windows[ObjectIdentifier(self)] = window

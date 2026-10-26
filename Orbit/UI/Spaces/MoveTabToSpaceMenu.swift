@@ -1,20 +1,24 @@
-import SwiftUI
+import Foundation
 
-struct MoveTabToSpaceMenu: View {
-    @Environment(AppEnvironment.self) private var env
-    var tabID: TabID
-    var currentSection: TabSection
-
-    var body: some View {
-        Menu("Move to Space") {
-            ForEach(env.spaces) { space in
-                if space.id != env.tab(tabID)?.spaceID {
-                    Menu(space.name) {
-                        Button("Pinned") { env.moveTab(tabID, toSpace: space.id, section: .pinned) }
-                        Button("Today") { env.moveTab(tabID, toSpace: space.id, section: .today) }
-                    }
-                }
+enum MoveTabToSpaceMenu {
+    @MainActor
+    static func entry(tabID: TabID, in env: AppEnvironment) -> OrbitContextMenuEntry {
+        let currentSpaceID = env.tab(tabID)?.spaceID
+        let targets = env.spaces.filter { $0.id != currentSpaceID }
+        return .item(OrbitContextMenuItem(
+            title: "Move to Space",
+            systemImage: "arrow.right.square",
+            isEnabled: !targets.isEmpty,
+            submenu: targets.map { space -> OrbitContextMenuEntry in
+                .item(OrbitContextMenuItem(title: space.name, submenu: [
+                    .item(OrbitContextMenuItem(title: "Pinned", systemImage: "pin") {
+                        env.moveTab(tabID, toSpace: space.id, section: .pinned)
+                    }),
+                    .item(OrbitContextMenuItem(title: "Today", systemImage: "sun.max") {
+                        env.moveTab(tabID, toSpace: space.id, section: .today)
+                    }),
+                ]))
             }
-        }
+        ))
     }
 }

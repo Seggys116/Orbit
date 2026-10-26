@@ -77,7 +77,7 @@ final class DevToolsWindowController: NSWindowController, NSWindowDelegate {
     func updateTitle(inspectedTitle: String) {
         window?.title = inspectedTitle.isEmpty
             ? "Developer Tools"
-            : "Developer Tools — \(inspectedTitle)"
+            : "Developer Tools: \(inspectedTitle)"
     }
 
     /// Closes the window but leaves the inspector open, having first taken the

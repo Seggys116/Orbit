@@ -24,7 +24,7 @@ extension AppEnvironment {
 
         switch command {
         case .newTabCommandBar:
-            presentCommandBar(mode: .newTab)
+            presentCommandBar(mode: newTabCommandBarMode())
         case .addressBarCommandBar:
             // A Little Orbit window's address field fires this exact command
             // too, but every case below targets the shared activeTabID,
@@ -40,7 +40,11 @@ extension AppEnvironment {
             openIncognitoWindow()
         case .closeTabOrWindow:
             if let activeTabID {
-                closeTabPreservingBookmark(activeTabID)
+                if let active = tab(activeTabID), NewTabPageModel.isUnlisted(active) {
+                    discardNewTabPage(activeTabID)
+                } else {
+                    closeTabPreservingBookmark(activeTabID)
+                }
             } else {
                 NSApp.keyWindow?.performClose(nil)
             }
@@ -191,8 +195,8 @@ extension AppEnvironment {
             promote(source, into: nil)
             return true
         case .openInSpacePicker:
-            guard let menu = spacePickerMenuForFrontmostDetachedTab() else { return false }
-            presentSpacePicker(menu)
+            guard let entries = spacePickerEntriesForFrontmostDetachedTab() else { return false }
+            presentSpacePicker(entries)
             return true
 
         case .newNote: createAndOpenNote()
@@ -302,6 +306,68 @@ extension AppEnvironment {
         }
     }
 
+    // MARK: - New Tab page
+
+    private func newTabCommandBarMode() -> CommandBarMode {
+        guard let activeTabID, let active = tab(activeTabID), NewTabPageModel.isUnlisted(active) else { return .newTab }
+        return .blankPane(activeTabID)
+    }
+
+    func openNewTabPage() {
+        guard let spaceID = activeSpace?.id else {
+            presentCommandBar(mode: .newTab)
+            return
+        }
+        if isCommandBarPresented { dismissCommandBar() }
+        if isNewTabPageActive(in: spaceID) { return }
+        openTab(url: NewTabPageModel.url, in: spaceID)
+    }
+
+    func isNewTabPageActive(in spaceID: SpaceID) -> Bool {
+        store.activeTab(in: spaceID).map(NewTabPageModel.isUnlisted) ?? false
+    }
+
+    func listedTodayTabs(in spaceID: SpaceID) -> [Tab] {
+        NewTabPageModel.listed(todayTabs(in: spaceID))
+    }
+
+    // Removes outright: a page the user never filled in is not worth an archive entry or a Cmd+Shift+T.
+    func discardNewTabPage(_ id: TabID) {
+        guard let page = store.tab(id), NewTabPageModel.isUnlisted(page) else { return }
+        let spaceID = page.spaceID
+        let wasActive = store.activeTab(in: spaceID)?.id == id
+        releaseWebContents(for: id)
+        PaneHeaderColorResolver.shared.forget(tab: id)
+        store.discardTab(id)
+        guard wasActive else { return }
+        if let successor = store.activeTab(in: spaceID)?.id {
+            activateTab(successor)
+        } else {
+            syncExtensionActiveTab()
+        }
+    }
+
+    // An unlisted page has no row, so once it stops being its Space's active tab nothing could ever reach it again.
+    func discardNewTabPageIfAbandoned(_ id: TabID) {
+        guard let page = store.tab(id), NewTabPageModel.isUnlisted(page),
+              store.activeTab(in: page.spaceID)?.id != id else { return }
+        discardNewTabPage(id)
+    }
+
+    func discardNewTabPageIfLeft() {
+        let current = activeTabID
+        let previous = lastObservedActiveTabID
+        lastObservedActiveTabID = current
+        guard let previous, previous != current else { return }
+        discardNewTabPageIfAbandoned(previous)
+    }
+
+    func sweepAbandonedNewTabPages(in spaceID: SpaceID) {
+        for page in todayTabs(in: spaceID) {
+            discardNewTabPageIfAbandoned(page.id)
+        }
+    }
+
     // Refuses while a bar is already up: a split created from the Command
     // Bar mounts its blank pane mid-dismissal, and re-presenting here would reset the user's query.
     func presentBlankPaneCommandBar(_ tabID: TabID) {
@@ -387,22 +453,19 @@ extension AppEnvironment {
         }
     }
 
-    func spacePickerMenuForFrontmostDetachedTab() -> NSMenu? {
+    func spacePickerEntriesForFrontmostDetachedTab() -> [OrbitContextMenuEntry]? {
         guard let source = frontmostDetachedTabSource, !state.spaces.isEmpty else { return nil }
-        let menu = NSMenu(title: "Open In…")
-        menu.autoenablesItems = false
-        for space in state.spaces {
-            menu.addItem(ClosureMenuItem(title: space.name) { [weak self] in
+        return state.spaces.map { space -> OrbitContextMenuEntry in
+            .item(OrbitContextMenuItem(title: space.name, action: { [weak self] in
                 self?.promote(source, into: space.id)
-            })
+            }))
         }
-        return menu
     }
 
-    private func presentSpacePicker(_ menu: NSMenu) {
+    private func presentSpacePicker(_ entries: [OrbitContextMenuEntry]) {
         guard let window = NSApp.keyWindow, let contentView = window.contentView else { return }
         let anchor = NSPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
-        menu.popUp(positioning: nil, at: anchor, in: contentView)
+        OrbitContextMenuPresenter.shared.present(entries: entries, anchorView: contentView, at: anchor)
     }
 
     // MARK: - Helpers

@@ -201,8 +201,7 @@ final class GlobalKeyEventMonitorDispatchTests: XCTestCase {
 
     // MARK: - ⌘⇧O Space picker
 
-    // Menu built and its item invoked exactly as NSMenu's tracking loop would,
-    // so the picking path is proven without a modal tracking loop.
+    // Entries built and the item's action invoked as the menu panel would on a click, without presenting a panel.
     func testSpacePickerMenuItemPromotesThePreviewIntoTheChosenSpace() {
         let spaceID = scratchSpaceID!
         let destinationID = env.createSpace(
@@ -217,21 +216,22 @@ final class GlobalKeyEventMonitorDispatchTests: XCTestCase {
         let source = env.openTab(url: URL(string: "https://example.com/source")!, in: spaceID, section: .pinned, activate: true)
         let previewTabID = presentPeek(over: source)
 
-        guard let menu = env.spacePickerMenuForFrontmostDetachedTab() else {
+        guard let entries = env.spacePickerEntriesForFrontmostDetachedTab() else {
             return XCTFail("⌘⇧O built no Space picker even though a Peek with a preview tab is presented.")
         }
+        let items = entries.flattenedItems
         XCTAssertEqual(
-            menu.items.count, env.state.spaces.count,
-            "The picker must offer every Space. Offered: \(menu.items.map(\.title))"
+            items.count, env.state.spaces.count,
+            "The picker must offer every Space. Offered: \(items.map(\.title))"
         )
-        guard let item = menu.items.first(where: { $0.title == "Picker Destination" }) else {
-            return XCTFail("No item for the destination Space. Offered: \(menu.items.map(\.title))")
+        guard let item = items.first(where: { $0.title == "Picker Destination" }) else {
+            return XCTFail("No item for the destination Space. Offered: \(items.map(\.title))")
         }
-        guard let target = item.target, let action = item.action else {
-            return XCTFail("The picker item has no target/action wired, so a real click could never invoke it.")
+        guard let action = item.action else {
+            return XCTFail("The picker item has no action wired, so a real click could never invoke it.")
         }
 
-        _ = target.perform(action, with: item)
+        action()
 
         XCTAssertNil(PeekState.shared.activePreview, "Picking a Space must dismiss the Peek.")
         XCTAssertNil(PeekState.shared.previewTabID, "Ownership of the preview tab must be released on promotion.")
@@ -249,7 +249,7 @@ final class GlobalKeyEventMonitorDispatchTests: XCTestCase {
 
     func testSpacePickerIsAbsentAndKeyPassesThroughWithNothingDetached() {
         XCTAssertNil(env.frontmostDetachedTabSource, "Test precondition: no Peek and no Little Orbit window.")
-        XCTAssertNil(env.spacePickerMenuForFrontmostDetachedTab())
+        XCTAssertNil(env.spacePickerEntriesForFrontmostDetachedTab())
 
         let event = keyDown(for: .openInSpacePicker)
         XCTAssertEqual(ShortcutRegistry.shared.command(matching: event), .openInSpacePicker, "Test precondition")

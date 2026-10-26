@@ -11,7 +11,7 @@ struct SpaceGradientBlendView: View {
         ZStack {
             ThemePaintView(theme: theme, colorScheme: colorScheme)
                 .blur(radius: CGFloat(blur * 46))
-            GrainOverlay(opacity: theme.grain)
+            GrainOverlay(opacity: theme.grain, isDarkSurface: theme.isDarkSurface(for: colorScheme))
         }
         .opacity(opacity)
         .allowsHitTesting(false)

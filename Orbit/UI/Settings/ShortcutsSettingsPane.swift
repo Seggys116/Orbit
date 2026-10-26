@@ -282,7 +282,7 @@ private struct KeybindRow: View {
                 recordingConflictNotice = nil
             } else {
                 let names = collisions.map(\.title).joined(separator: ", ")
-                recordingConflictNotice = "\(newBinding.displayString) is also used by \(names) — both will resolve to whichever is listed first until one is changed."
+                recordingConflictNotice = "\(newBinding.displayString) is also used by \(names). Only the first listed will work until one is changed."
             }
             recordingCommandID = nil
         }

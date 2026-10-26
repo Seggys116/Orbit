@@ -8,24 +8,23 @@ struct OrbitSettingsRow<Control: View>: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: OrbitControlMetrics.settingsRowLabelSpacing) {
-            HStack(alignment: .firstTextBaseline, spacing: OrbitControlMetrics.settingsRowContentSpacing) {
+        HStack(alignment: .center, spacing: OrbitControlMetrics.settingsRowContentSpacing) {
+            VStack(alignment: .leading, spacing: OrbitControlMetrics.settingsRowLabelSpacing) {
                 Text(title)
                     .font(.system(size: OrbitControlMetrics.settingsRowTitleFontSize, weight: .medium))
                     .foregroundStyle(OrbitControlColor.primaryForeground(for: colorScheme))
-                    // Without this, a wide control starves the title's proposed width and it wraps
-                    // one character per line instead of eliding.
-                    .layoutPriority(1)
-                Spacer(minLength: OrbitControlMetrics.settingsRowContentSpacing)
-                control()
+                if let description {
+                    Text(description)
+                        .font(.system(size: OrbitControlMetrics.settingsRowDescriptionFontSize))
+                        .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
+                        // Without this, a multi-line description clips to one ellipsized line.
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            if let description {
-                Text(description)
-                    .font(.system(size: OrbitControlMetrics.settingsRowDescriptionFontSize))
-                    .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
-                    // Without this, a multi-line description clips to one ellipsized line.
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            // Without this, a wide control starves the label's width and it wraps one character per line.
+            .layoutPriority(1)
+            Spacer(minLength: 0)
+            control()
         }
         .frame(minHeight: SettingsMetrics.rowMinHeight)
         .padding(.vertical, SettingsMetrics.rowVerticalPadding)
@@ -94,6 +93,7 @@ struct OrbitSettingsSection<Content: View>: View {
                 RoundedRectangle(cornerRadius: OrbitControlMetrics.sectionCornerRadius, style: .continuous)
                     .fill(OrbitControlColor.fill(for: colorScheme))
             )
+            .clipShape(RoundedRectangle(cornerRadius: OrbitControlMetrics.sectionCornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: OrbitControlMetrics.sectionCornerRadius, style: .continuous)
                     .strokeBorder(OrbitControlColor.border(for: colorScheme))

@@ -236,15 +236,7 @@ struct FavoritesGridView: View {
         }
 
         return reorderDropDestination(interactiveTile, favorite: favorite)
-            .contextMenu {
-                Button("Open") { env.activateFavorite(favorite, in: spaceID) }
-                if CalendarSiteMatcher.isCalendar(favorite.url) {
-                    Divider()
-                    liveCalendarMenuItems
-                    Divider()
-                }
-                Button("Remove from Favorites", role: .destructive) { env.removeFavorite(favorite.id, from: spaceID) }
-            }
+            .orbitRightClickMenu { favoriteMenuEntries(for: favorite) }
             .orbitTooltip(favorite.title)
     }
 
@@ -274,35 +266,49 @@ struct FavoritesGridView: View {
         .onAppear { beginDragging(favorite.id) }
     }
 
-    @ViewBuilder
-    private var liveCalendarMenuItems: some View {
-        if LiveCalendarSettings.isEnabled {
-            Toggle("Show Time to Next Meeting", isOn: Binding(
-                get: { LiveCalendarSettings.showsCountdown },
-                set: { LiveCalendarSettings.showsCountdown = $0 }
-            ))
-            Toggle("Show Next Meeting Link", isOn: Binding(
-                get: { LiveCalendarSettings.showsJoinRow },
-                set: { LiveCalendarSettings.showsJoinRow = $0 }
-            ))
-            Menu("Notify Me") {
-                ForEach(LiveCalendarLeadTime.allCases, id: \.rawValue) { option in
-                    Toggle(option.title, isOn: Binding(
-                        get: { LiveCalendarSettings.leadTime == option },
-                        set: { if $0 { LiveCalendarSettings.leadTime = option } }
-                    ))
-                }
-            }
-            Button("Disable Live Calendar") {
+    private func favoriteMenuEntries(for favorite: Favorite) -> [OrbitContextMenuEntry] {
+        var entries: [OrbitContextMenuEntry] = [
+            .item(OrbitContextMenuItem(title: "Open", systemImage: "arrow.up.forward.square") {
+                env.activateFavorite(favorite, in: spaceID)
+            }),
+        ]
+        if CalendarSiteMatcher.isCalendar(favorite.url) {
+            entries.append(.divider())
+            entries.append(contentsOf: liveCalendarMenuEntries)
+            entries.append(.divider())
+        }
+        entries.append(.item(OrbitContextMenuItem(title: "Remove from Favorites", systemImage: "star.slash", isDestructive: true) {
+            env.removeFavorite(favorite.id, from: spaceID)
+        }))
+        return entries
+    }
+
+    private var liveCalendarMenuEntries: [OrbitContextMenuEntry] {
+        guard LiveCalendarSettings.isEnabled else {
+            return [
+                .item(OrbitContextMenuItem(title: "Enable Live Calendar", systemImage: "calendar.badge.plus") {
+                    LiveCalendarSettings.isEnabled = true
+                    Task { await LiveCalendarStore.shared.connect() }
+                }),
+            ]
+        }
+        return [
+            .item(OrbitContextMenuItem(title: "Show Time to Next Meeting", isChecked: LiveCalendarSettings.showsCountdown) {
+                LiveCalendarSettings.showsCountdown.toggle()
+            }),
+            .item(OrbitContextMenuItem(title: "Show Next Meeting Link", isChecked: LiveCalendarSettings.showsJoinRow) {
+                LiveCalendarSettings.showsJoinRow.toggle()
+            }),
+            .item(OrbitContextMenuItem(title: "Notify Me", submenu: LiveCalendarLeadTime.allCases.map { option -> OrbitContextMenuEntry in
+                .item(OrbitContextMenuItem(title: option.title, isChecked: LiveCalendarSettings.leadTime == option) {
+                    LiveCalendarSettings.leadTime = option
+                })
+            })),
+            .item(OrbitContextMenuItem(title: "Disable Live Calendar", systemImage: "calendar.badge.minus") {
                 LiveCalendarSettings.isEnabled = false
                 LiveCalendarStore.shared.stopRefreshing()
-            }
-        } else {
-            Button("Enable Live Calendar") {
-                LiveCalendarSettings.isEnabled = true
-                Task { await LiveCalendarStore.shared.connect() }
-            }
-        }
+            }),
+        ]
     }
 
     private func calendarCountdown(for favorite: Favorite) -> String? {

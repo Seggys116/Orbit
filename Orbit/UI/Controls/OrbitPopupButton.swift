@@ -31,10 +31,10 @@ struct OrbitPopupButton<Option: Hashable>: View {
     private var menuCatcher: some View {
         #if DEBUG
         if !screenshotModeRepresentableDisabled {
-            OrbitPopupButtonMenuCatcher(menuProvider: buildMenu)
+            OrbitPopupButtonMenuCatcher(entriesProvider: buildEntries)
         }
         #else
-        OrbitPopupButtonMenuCatcher(menuProvider: buildMenu)
+        OrbitPopupButtonMenuCatcher(entriesProvider: buildEntries)
         #endif
     }
 
@@ -62,15 +62,14 @@ struct OrbitPopupButton<Option: Hashable>: View {
         .contentShape(RoundedRectangle(cornerRadius: OrbitControlMetrics.popupCornerRadius, style: .continuous))
     }
 
-    func buildMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        for option in options {
-            let item = ClosureMenuItem(title: label(option)) { selection = option }
-            item.state = option == selection ? .on : .off
-            menu.addItem(item)
+    func buildEntries() -> [OrbitContextMenuEntry] {
+        options.map { option -> OrbitContextMenuEntry in
+            .item(OrbitContextMenuItem(
+                title: label(option),
+                isChecked: option == selection,
+                action: { selection = option }
+            ))
         }
-        return menu
     }
 }
 
@@ -86,11 +85,21 @@ private struct OrbitPopupSizing: ViewModifier {
     }
 }
 
-final class OrbitPopupButtonMenuHostView: OrbitMenuButtonClickCatchingView {
+@MainActor
+final class OrbitPopupButtonMenuHostView: NSView, OrbitClickCatching {
+    var entriesProvider: (() -> [OrbitContextMenuEntry])?
+    var presentEntries: (([OrbitContextMenuEntry], NSView) -> Void)?
+
+    private let controller = OrbitMenuPanelController()
 
     override var acceptsFirstResponder: Bool { true }
 
     override var canBecomeKeyView: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        if OrbitMenuClickGuard.wasDismissedThisTurn { return }
+        presentMenu()
+    }
 
     override func keyDown(with event: NSEvent) {
         guard let characters = event.charactersIgnoringModifiers,
@@ -98,22 +107,48 @@ final class OrbitPopupButtonMenuHostView: OrbitMenuButtonClickCatchingView {
             super.keyDown(with: event)
             return
         }
-        guard let menu = menuProvider?() else { return }
-        presentMenu(menu, self)
+        presentMenu()
+    }
+
+    private func presentMenu() {
+        guard let entries = entriesProvider?() else { return }
+        if let presentEntries {
+            presentEntries(entries, self)
+            return
+        }
+        guard let window else { return }
+        controller.present(
+            entries: entries,
+            anchorRect: window.convertToScreen(convert(bounds, to: nil)),
+            anchorView: self,
+            ownerWindow: window,
+            mode: .anchored,
+            preferredDirection: .down,
+            showsArrow: false
+        )
+    }
+
+    // Otherwise the transparent titlebar band turns the click into a window drag.
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        orbitContainsHitTestPoint(point) ? self : nil
     }
 }
 
 private struct OrbitPopupButtonMenuCatcher: NSViewRepresentable {
-    var menuProvider: () -> NSMenu
+    var entriesProvider: () -> [OrbitContextMenuEntry]
 
     func makeNSView(context: Context) -> OrbitPopupButtonMenuHostView {
         let view = OrbitPopupButtonMenuHostView()
-        view.menuProvider = menuProvider
+        view.entriesProvider = entriesProvider
         return view
     }
 
     func updateNSView(_ nsView: OrbitPopupButtonMenuHostView, context: Context) {
-        nsView.menuProvider = menuProvider
+        nsView.entriesProvider = entriesProvider
     }
 }
 

@@ -38,7 +38,7 @@ struct TodayDividerRow: View {
     }
 
     private var hasTodayTabs: Bool {
-        !env.todayTabs(in: spaceID).isEmpty
+        !env.listedTodayTabs(in: spaceID).isEmpty
     }
 
     private var hasTidyableTodayTabs: Bool {
@@ -86,8 +86,8 @@ struct TodayDividerRow: View {
 
     private var tidyTabsHelp: String {
         TidyTabsCoordinator.shouldUseModel(todayTabCount: env.todayTabs(in: spaceID).count)
-            ? "Tidy Tabs — group Today tabs by subject, using your AI provider"
-            : "Tidy Tabs — group Today tabs by site"
+            ? "Tidy Tabs: group Today tabs by subject with your AI provider"
+            : "Tidy Tabs: group Today tabs by site"
     }
 
     private var clearControl: some View {

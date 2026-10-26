@@ -83,10 +83,9 @@ final class DataSettingsModel {
     static let everythingConfirmationTitle = "Reset Orbit to a fresh install?"
 
     static var everythingConfirmationMessage: String {
-        "This permanently removes everything Orbit has stored on this Mac — "
+        "This permanently removes everything Orbit has stored on this Mac: "
             + sentenceList(orderedTitles(Set(DataResetCategory.allCases)))
-            + " — and leaves Orbit exactly as it was before you first opened it. "
-            + "It cannot be undone, and Orbit has to restart to finish."
+            + ". It cannot be undone, and Orbit has to restart to finish."
     }
 
     static func outcomeTitle(_ outcome: DataResetOutcome) -> String {
@@ -102,7 +101,7 @@ final class DataSettingsModel {
             parts.append("Removed \(sentenceList(orderedTitles(outcome.clearedCategories))).")
         }
         if !outcome.failedCategories.isEmpty {
-            parts.append("Could not remove \(sentenceList(orderedTitles(outcome.failedCategories))) — that data is still on this Mac.")
+            parts.append("Could not remove \(sentenceList(orderedTitles(outcome.failedCategories))). That data is still on this Mac.")
         }
         if parts.isEmpty {
             parts.append("Nothing matched what you selected, so nothing changed.")
@@ -111,7 +110,7 @@ final class DataSettingsModel {
     }
 
     static let relaunchTitle = "Restart Orbit now?"
-    static let relaunchMessage = "Orbit has to restart before the data it has already loaded is gone from this session too."
+    static let relaunchMessage = "Orbit has to restart to finish removing loaded data."
 
     private static func presentOutcome(_ outcome: DataResetOutcome) {
         DataResetPrompt.report(title: outcomeTitle(outcome), message: outcomeMessage(outcome))
@@ -194,15 +193,13 @@ struct DataSettingsPane: View {
 
     private var selectionSummary: String {
         if model.isRunning { return "Removing data…" }
-        guard !model.selection.isEmpty else { return "Pick what to remove. Nothing is removed until you confirm." }
+        guard !model.selection.isEmpty else { return "Pick what to remove. You'll confirm first." }
         return "Removes \(DataSettingsModel.sentenceList(DataSettingsModel.orderedTitles(model.selection)))."
     }
 
     private var everythingSummary: String {
         if model.isRunning { return "Resetting Orbit…" }
-        return "Removes every category above at once — "
-            + DataSettingsModel.sentenceList(DataSettingsModel.orderedTitles(Set(DataResetCategory.allCases)))
-            + " — and returns Orbit to a fresh install. It cannot be undone."
+        return "Removes every category above and returns Orbit to a fresh install. It cannot be undone."
     }
 
     private var resetEverythingSection: some View {
@@ -224,7 +221,7 @@ struct DataSettingsPane: View {
     private var onboardingSection: some View {
         OrbitSettingsSection(title: "Onboarding") {
             OrbitSettingsActionRow {
-                Text("Reopens the welcome flow you saw the first time you launched Orbit. Nothing is removed.")
+                Text("Reopens the welcome flow. Nothing is removed.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

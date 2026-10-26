@@ -36,12 +36,12 @@ struct RestoreDataView: View {
 
     private var restoreDisabledHelp: String {
         if model.backups.isEmpty {
-            return "No backups have been saved yet. Orbit writes one each time it saves your Spaces and tabs."
+            return "No backups yet. One is saved whenever your Spaces and tabs are."
         }
         if model.selectedBackup == nil {
             return "Choose a backup to restore."
         }
-        return "Replaces your Spaces, tabs and split views with the ones saved at this time."
+        return "Replaces your Spaces, tabs and split views with this backup."
     }
 
     private enum Layout {

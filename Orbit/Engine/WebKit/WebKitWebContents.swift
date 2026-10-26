@@ -1040,6 +1040,23 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         continueOriginReloadIfNeeded()
     }
 
+    // WebKit's loading flag retires the progress bar, including when didFinish never arrives.
+    func noteEngineLoading(isLoading: Bool, progress: Double) {
+        if isLoading {
+            let displayed = min(max(progress, 0.08), 0.99)
+            let started = !navigationState.isLoading
+            guard started || abs(displayed - navigationState.progress) >= 0.01 else { return }
+            navigationState.isLoading = true
+            navigationState.progress = displayed
+            publishNavigation()
+            return
+        }
+        guard navigationState.isLoading else { return }
+        navigationState.isLoading = false
+        navigationState.progress = 1
+        publishNavigation()
+    }
+
     func noteDocumentTitle() {
         let title = webView.title ?? ""
         guard title != navigationState.title else { return }

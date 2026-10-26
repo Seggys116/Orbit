@@ -21,38 +21,53 @@ final class SidebarNewTabRowTests: XCTestCase {
         )!
     }
 
+    private func prepareSpace() -> SpaceID {
+        let profileID = env.createDefaultProfileIfNeeded()
+        let spaceID = env.createSpace(
+            name: "New Tab Row",
+            icon: "circle",
+            iconIsEmoji: false,
+            theme: SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.1, green: 0.1, blue: 0.12)], grain: 0),
+            profileID: profileID
+        )
+        env.state.activeSpaceID = spaceID
+        env._test_webContentsFactory = { _, url in
+            let contents = MockWebContents()
+            contents.navigationState = NavigationState(url: url)
+            return contents
+        }
+        return spaceID
+    }
+
     // MARK: - The action really does something
 
-    func test_newTabRowAction_opensTheCommandBarInNewTabMode() {
-        XCTAssertFalse(env.isCommandBarPresented, "Precondition: the Command Bar starts closed.")
+    func test_newTabRowAction_opensTheNewTabPage_notTheCommandBar() throws {
+        let spaceID = prepareSpace()
+        env.isCommandBarPresented = false
 
         SidebarNewTabRowAction.perform(in: env)
 
-        XCTAssertTrue(
-            env.isCommandBarPresented,
-            "The sidebar's '+ New Tab' row must present the Command Bar — this is the state BrowserWindowView reads to show it."
-        )
-        XCTAssertEqual(
-            env.commandBarMode, CommandBarMode.newTab,
-            "The Command Bar must open in new-tab mode, not editing the current URL."
-        )
+        XCTAssertFalse(env.isCommandBarPresented, "Cmd+T is the Command Bar; the '+ New Tab' row opens the page.")
+        let active = try XCTUnwrap(env.activeTab)
+        XCTAssertEqual(active.url, NewTabPageModel.url)
+        XCTAssertEqual(active.spaceID, spaceID)
     }
 
     // MARK: - A real click really reaches the action
 
-    func test_mouseDown_onTheRowsClickCatcher_opensTheCommandBar() {
+    func test_mouseDown_onTheRowsClickCatcher_opensTheNewTabPage() throws {
+        _ = prepareSpace()
         let view = OrbitActionButtonClickCatchingView(frame: NSRect(x: 0, y: 0, width: 200, height: OrbitMetrics.sidebarRowHeight))
         view.action = { [env] in SidebarNewTabRowAction.perform(in: env) }
-
-        XCTAssertFalse(env.isCommandBarPresented, "Precondition: the Command Bar starts closed.")
+        let before = env.state.tabs.count
 
         view.mouseDown(with: mouseDownEvent())
 
-        XCTAssertTrue(
-            env.isCommandBarPresented,
-            "A click on the '+ New Tab' row must open the Command Bar. If this fails the control is dead, which is the user's exact report."
+        XCTAssertEqual(
+            env.state.tabs.count, before + 1,
+            "A click on the '+ New Tab' row must open the page. If this fails the control is dead, which is the user's exact report."
         )
-        XCTAssertEqual(env.commandBarMode, CommandBarMode.newTab)
+        XCTAssertEqual(try XCTUnwrap(env.activeTab).url, NewTabPageModel.url)
     }
 
     func test_clickCatcher_isTheHitTestTargetForItsOwnBoundsAndNothingOutsideThem() {

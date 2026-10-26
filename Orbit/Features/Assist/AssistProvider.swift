@@ -47,9 +47,9 @@ enum AssistProviderKind: String, CaseIterable, Sendable {
     var baseURLDescription: String {
         switch self {
         case .anthropic:
-            return "Anthropic's API host, or any host that speaks the same Messages API. Orbit posts to \(requestPath) beneath it."
+            return "Anthropic's API host, or any compatible host. Requests go to \(requestPath)."
         case .openAICompatible:
-            return "The base URL of any OpenAI-compatible API — OpenAI, OpenRouter, Groq, together.ai, Ollama, LM Studio, or your own. Include the version path; Orbit posts to \(requestPath) beneath it."
+            return "Any OpenAI-compatible API, including the version path. Requests go to \(requestPath)."
         }
     }
 

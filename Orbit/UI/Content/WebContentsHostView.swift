@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 #if DEBUG
 import OSLog
 #endif
@@ -160,6 +161,7 @@ struct LiveWebContentsHostView: NSViewRepresentable {
             // Only while this container has no window: that's the one state WebContentsViewCocoa
             // reads as hidden despite the pane holding the view to show it. Once there's a window, content::'s own answer is the true one.
             if container.window == nil { contents.setVisible(true) }
+            installDropCatcherIfNeeded(in: container)
             installOverlayIfNeeded(in: container)
             return
         }
@@ -167,7 +169,25 @@ struct LiveWebContentsHostView: NSViewRepresentable {
             subview.removeFromSuperview()
         }
         embed(contents.view, in: container)
+        installDropCatcherIfNeeded(in: container)
         installOverlayIfNeeded(in: container)
+    }
+
+    // Above the web view, under the click-through page overlay; SwiftUI's drop destination sits behind WebKit.
+    private func installDropCatcherIfNeeded(in container: NSView) {
+        let catcher = container.subviews.compactMap { $0 as? SplitPaneDropCatcherView }.first
+            ?? SplitPaneDropCatcherView(frame: container.bounds)
+        catcher.environment = environment
+        catcher.targetTabID = environment?.tabID(for: contents)
+        guard catcher.superview !== container else { return }
+        catcher.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(catcher)
+        NSLayoutConstraint.activate([
+            catcher.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            catcher.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            catcher.topAnchor.constraint(equalTo: container.topAnchor),
+            catcher.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
     }
 
     // positioned: .above — embed(_:in:) re-adds the engine view above it otherwise.
@@ -266,4 +286,106 @@ struct LiveWebContentsHostView: NSViewRepresentable {
         """)
     }
     #endif
+}
+
+// Hit-tests only while a sidebar drag is over the page, so ordinary clicks still reach WebKit.
+final class SplitPaneDropCatcherView: NSView {
+    var environment: AppEnvironment?
+    var targetTabID: TabID?
+
+    private var dragType: NSPasteboard.PasteboardType {
+        NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        registerForDraggedTypes([dragType])
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point), sidebarDragIsActive else { return nil }
+        return self
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    private var sidebarDragIsActive: Bool {
+        SidebarDragSession.hasInFlightDrag
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard refreshHighlight(with: sender) else { return [] }
+        return .move
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard refreshHighlight(with: sender) else { return [] }
+        return .move
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        clearHighlightIfMine()
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        clearHighlightIfMine()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { clearHighlightIfMine() }
+        guard let environment, let targetTabID, let payload = payload(),
+              let dragged = draggedTabID(payload, in: environment),
+              accepts(dragged, onto: targetTabID, in: environment) else { return false }
+        environment.createSplit(existingTabID: targetTabID, newTabID: dragged, edge: edge(for: sender))
+        SidebarDragSession.end()
+        return true
+    }
+
+    private func refreshHighlight(with sender: NSDraggingInfo) -> Bool {
+        guard let environment, let targetTabID, let payload = payload(),
+              let dragged = draggedTabID(payload, in: environment),
+              accepts(dragged, onto: targetTabID, in: environment) else {
+            clearHighlightIfMine()
+            return false
+        }
+        let zone = SplitDropZone(edge: edge(for: sender), targetTabID: targetTabID)
+        guard environment.activeSplitDropZone != zone else { return true }
+        environment.activeSplitDropZone = zone
+        return true
+    }
+
+    private func accepts(_ dragged: TabID, onto target: TabID, in environment: AppEnvironment) -> Bool {
+        guard dragged != target else { return false }
+        if let group = environment.splitGroup(for: target) {
+            if group.tabIDs.contains(dragged) { return false }
+            if group.tabIDs.count >= SplitGroup.maximumPanes { return false }
+        }
+        return environment.tab(dragged) != nil
+    }
+
+    private func edge(for sender: NSDraggingInfo) -> SplitEdge {
+        let point = convert(sender.draggingLocation, from: nil)
+        let location = CGPoint(x: point.x, y: bounds.height - point.y)
+        let axis = targetTabID.flatMap { environment?.splitGroup(for: $0)?.axis }
+        return SplitDropZoneGeometry.edge(at: location, in: bounds.size, allowedOrientation: axis)
+    }
+
+    private func payload() -> SidebarDragPayload? {
+        if let current = SidebarDragSession.current { return current }
+        return SidebarDragPayload.decodeSynchronously().first
+    }
+
+    private func draggedTabID(_ payload: SidebarDragPayload, in environment: AppEnvironment) -> TabID? {
+        switch payload.kind {
+        case .favorite:
+            return environment.resolvedTab(forFavorite: payload.nodeID, in: payload.spaceID)
+        case .todayTab, .pinnedNode:
+            return payload.nodeID
+        }
+    }
+
+    private func clearHighlightIfMine() {
+        guard let environment, environment.activeSplitDropZone?.targetTabID == targetTabID else { return }
+        environment.activeSplitDropZone = nil
+    }
 }

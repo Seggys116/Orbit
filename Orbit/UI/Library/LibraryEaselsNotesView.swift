@@ -76,11 +76,12 @@ private struct EntryRow: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2, perform: open)
             .onTapGesture(perform: select)
-            .contextMenu {
-                Button("Open") { open() }
+            .orbitRightClickMenu {
+                var entries: [OrbitContextMenuEntry] = [.item(OrbitContextMenuItem(title: "Open") { open() })]
                 if let exportAsImage {
-                    Button("Export as Image…") { exportAsImage() }
+                    entries.append(.item(OrbitContextMenuItem(title: "Export as Image…") { exportAsImage() }))
                 }
+                return entries
             }
     }
 

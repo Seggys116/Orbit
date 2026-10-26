@@ -6,6 +6,7 @@ struct GeneralSettingsPane: View {
     // Key name is load-bearing: renaming it resets the preference for anyone who already set it.
     @AppStorage("OrbitConfirmBeforeQuit", store: OrbitDefaults.standard) private var confirmBeforeQuit = false
 
+    @State private var borderless = BorderlessSettings.shared
     @State private var isDefaultBrowser = false
 
     var body: some View {
@@ -15,6 +16,12 @@ struct GeneralSettingsPane: View {
             OrbitSettingsSection(title: "Browsing") {
                 OrbitSettingsRow(title: "Warn before quitting", description: "Only prompts when multiple tabs are open.") {
                     OrbitToggle(accessibilityLabel: "Warn before quitting with multiple tabs open", isOn: $confirmBeforeQuit, accentColor: SettingsPalette.accent)
+                }
+            }
+
+            OrbitSettingsSection(title: "Appearance") {
+                OrbitSettingsRow(title: "Borderless", description: "Pages fill the window edge to edge.") {
+                    OrbitToggle(accessibilityLabel: "Borderless window", isOn: $borderless.isEnabled, accentColor: SettingsPalette.accent)
                 }
             }
 
@@ -93,7 +100,7 @@ struct GeneralSettingsPane: View {
             }
             OrbitSettingsRow(
                 title: "Include pre-release versions",
-                description: "Get beta builds before they're released to everyone. These are less tested and may be less stable."
+                description: "Get beta builds early. They may be less stable."
             ) {
                 OrbitToggle(accessibilityLabel: "Include pre-release versions", isOn: $updater.isPrereleaseChannelEnabled, accentColor: SettingsPalette.accent)
             }

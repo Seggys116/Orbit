@@ -117,16 +117,25 @@ struct SplitGroupRowView: View {
             // The pointer can exit through a pill's own edge fast enough that the pill's own onHover(false) never fires, stranding an x visible over an unhovered row.
             if !hovering { hoveredPaneID = nil }
         }
-        .contextMenu {
-            Button("Separate All Tabs") { env.separateAllTabs(group.id) }
-            Divider()
-            ForEach(tabs) { tab in
-                Button("Close \(tab.displayTitle)") { env.closeTabPreservingBookmark(tab.id) }
-            }
-            Button("Close Split", role: .destructive) {
-                for tab in tabs { env.closeTabPreservingBookmark(tab.id) }
-            }
+        .orbitRightClickMenu { splitGroupMenuEntries }
+    }
+
+    private var splitGroupMenuEntries: [OrbitContextMenuEntry] {
+        var entries: [OrbitContextMenuEntry] = [
+            .item(OrbitContextMenuItem(title: "Separate All Tabs", systemImage: "rectangle.split.2x1.slash") {
+                env.separateAllTabs(group.id)
+            }),
+            .divider(),
+        ]
+        for tab in tabs {
+            entries.append(.item(OrbitContextMenuItem(title: "Close \(tab.displayTitle)", systemImage: "xmark") {
+                env.closeTabPreservingBookmark(tab.id)
+            }))
         }
+        entries.append(.item(OrbitContextMenuItem(title: "Close Split", systemImage: "xmark.square", isDestructive: true) {
+            for tab in tabs { env.closeTabPreservingBookmark(tab.id) }
+        }))
+        return entries
     }
 
     private func paneSegment(_ tab: Tab) -> some View {
@@ -145,6 +154,7 @@ struct SplitGroupRowView: View {
                 )
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .orbitTooltip(tab.displayTitle)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .mask(
                     HStack(spacing: 0) {
@@ -187,6 +197,17 @@ struct SplitGroupRowView: View {
                 hoveredPaneID = nil
             }
         }
+        .sidebarDragSource(dragPayload(for: tab)) {
+            SidebarDragLabel(title: tab.displayTitle)
+        }
+    }
+
+    private func dragPayload(for tab: Tab) -> SidebarDragPayload {
+        SidebarDragPayload(
+            nodeID: tab.id,
+            kind: tab.section == .pinned ? .pinnedNode : .todayTab,
+            spaceID: tab.spaceID
+        )
     }
 
     // AppKit catcher, not .onTapGesture: SwiftUI gestures and AppKit mouseDown are independent, so both would fire and the pane would activate as its own close ran.

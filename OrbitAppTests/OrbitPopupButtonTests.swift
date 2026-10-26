@@ -45,12 +45,23 @@ private func keyDownEvent(characters: String) -> NSEvent {
 }
 
 @MainActor
-private func invoke(_ item: NSMenuItem, file: StaticString = #filePath, line: UInt = #line) {
-    guard let target = item.target, let action = item.action else {
-        XCTFail("Menu item \"\(item.title)\" has no target/action wired — a real click could never invoke it.", file: file, line: line)
+private func invoke(_ item: OrbitContextMenuItem, file: StaticString = #filePath, line: UInt = #line) {
+    guard let action = item.action else {
+        XCTFail("Menu item \"\(item.title)\" has no action wired — a real click could never invoke it.", file: file, line: line)
         return
     }
-    _ = target.perform(action, with: item)
+    action()
+}
+
+@MainActor
+private func wire<Option: Hashable>(
+    _ host: OrbitPopupButtonMenuHostView,
+    to button: OrbitPopupButton<Option>
+) -> () -> [OrbitContextMenuItem]? {
+    host.entriesProvider = button.buildEntries
+    var presented: [OrbitContextMenuEntry]?
+    host.presentEntries = { entries, _ in presented = entries }
+    return { presented?.flattenedItems }
 }
 
 // MARK: - The click path
@@ -63,7 +74,7 @@ final class OrbitPopupButtonClickTests: XCTestCase {
     private func makeControl(
         options: [String],
         box: SelectionBox<String>
-    ) -> (host: OrbitPopupButtonMenuHostView, presented: () -> NSMenu?) {
+    ) -> (host: OrbitPopupButtonMenuHostView, presented: () -> [OrbitContextMenuItem]?) {
         let button = OrbitPopupButton(
             options: options,
             label: { $0 },
@@ -71,10 +82,7 @@ final class OrbitPopupButtonClickTests: XCTestCase {
             accessibilityLabel: "Archive tabs after"
         )
         let host = OrbitPopupButtonMenuHostView(frame: NSRect(x: 0, y: 0, width: 200, height: 26))
-        host.menuProvider = button.buildMenu
-        var presented: NSMenu?
-        host.presentMenu = { menu, _ in presented = menu }
-        return (host, { presented })
+        return (host, wire(host, to: button))
     }
 
     func test_click_presentsAMenuContainingEveryOptionInOrder() {
@@ -87,7 +95,7 @@ final class OrbitPopupButtonClickTests: XCTestCase {
             XCTFail("Clicking OrbitPopupButton presented nothing — this is the dead-control bug itself.")
             return
         }
-        XCTAssertEqual(menu.items.map(\.title), policies, "Every option passed to OrbitPopupButton must reach the presented menu, in order.")
+        XCTAssertEqual(menu.map(\.title), policies, "Every option passed to OrbitPopupButton must reach the presented menu, in order.")
     }
 
     func test_selectingAnOption_writesThroughTheBinding() {
@@ -95,7 +103,7 @@ final class OrbitPopupButtonClickTests: XCTestCase {
         let (host, presented) = makeControl(options: policies, box: box)
 
         host.mouseDown(with: mouseDownEvent())
-        guard let menu = presented(), let item = menu.items.first(where: { $0.title == "After 7 Days" }) else {
+        guard let menu = presented(), let item = menu.first(where: { $0.title == "After 7 Days" }) else {
             XCTFail("The presented menu did not contain the option being selected.")
             return
         }
@@ -110,7 +118,7 @@ final class OrbitPopupButtonClickTests: XCTestCase {
         let (host, presented) = makeControl(options: policies, box: box)
 
         host.mouseDown(with: mouseDownEvent())
-        guard let first = presented()?.items.first(where: { $0.title == "After 24 Hours" }) else {
+        guard let first = presented()?.first(where: { $0.title == "After 24 Hours" }) else {
             XCTFail("First presentation did not contain the option being selected.")
             return
         }
@@ -118,7 +126,7 @@ final class OrbitPopupButtonClickTests: XCTestCase {
         XCTAssertEqual(box.value, "After 24 Hours")
 
         host.mouseDown(with: mouseDownEvent())
-        guard let second = presented()?.items.first(where: { $0.title == "Never" }) else {
+        guard let second = presented()?.first(where: { $0.title == "Never" }) else {
             XCTFail("Second presentation did not contain the option being selected.")
             return
         }
@@ -135,10 +143,10 @@ final class OrbitPopupButtonClickTests: XCTestCase {
             XCTFail("Clicking OrbitPopupButton presented nothing.")
             return
         }
-        let checkedTitles = menu.items.filter { $0.state == .on }.map(\.title)
+        let checkedTitles = menu.filter(\.isChecked).map(\.title)
         XCTAssertEqual(checkedTitles, ["After 12 Hours"], "Exactly the selected option must be checked.")
 
-        guard let item = menu.items.first(where: { $0.title == "Never" }) else {
+        guard let item = menu.first(where: { $0.title == "Never" }) else {
             XCTFail("The presented menu did not contain the option being selected.")
             return
         }
@@ -150,7 +158,7 @@ final class OrbitPopupButtonClickTests: XCTestCase {
             return
         }
         XCTAssertEqual(
-            reopened.items.filter { $0.state == .on }.map(\.title),
+            reopened.filter(\.isChecked).map(\.title),
             ["Never"],
             "After picking a new option the checkmark must follow it, not stay on the old one."
         )
@@ -165,9 +173,8 @@ final class OrbitPopupButtonClickTests: XCTestCase {
             XCTFail("Clicking OrbitPopupButton presented nothing.")
             return
         }
-        for item in menu.items {
+        for item in menu {
             XCTAssertTrue(item.isEnabled, "\"\(item.title)\" is disabled and could never be picked.")
-            XCTAssertNotNil(item.target, "\"\(item.title)\" has no target.")
             XCTAssertNotNil(item.action, "\"\(item.title)\" has no action.")
         }
     }
@@ -182,19 +189,17 @@ final class OrbitPopupButtonClickTests: XCTestCase {
             accessibilityLabel: "Destination"
         )
         let host = OrbitPopupButtonMenuHostView(frame: NSRect(x: 0, y: 0, width: 200, height: 26))
-        host.menuProvider = button.buildMenu
-        var presented: NSMenu?
-        host.presentMenu = { menu, _ in presented = menu }
+        let presented = wire(host, to: button)
 
         host.mouseDown(with: mouseDownEvent())
-        guard let menu = presented else {
+        guard let menu = presented() else {
             XCTFail("Clicking an Optional-backed OrbitPopupButton presented nothing.")
             return
         }
-        XCTAssertEqual(menu.items.map(\.title), ["Most Recent Space", "A Space"])
-        XCTAssertEqual(menu.items.filter { $0.state == .on }.map(\.title), ["A Space"], "The checkmark must sit on the non-nil selection.")
+        XCTAssertEqual(menu.map(\.title), ["Most Recent Space", "A Space"])
+        XCTAssertEqual(menu.filter(\.isChecked).map(\.title), ["A Space"], "The checkmark must sit on the non-nil selection.")
 
-        invoke(menu.items[0])
+        invoke(menu[0])
         XCTAssertNil(box.value, "Selecting the nil row must write nil through the Binding.")
     }
 
@@ -204,7 +209,7 @@ final class OrbitPopupButtonClickTests: XCTestCase {
 
         host.mouseDown(with: mouseDownEvent())
 
-        XCTAssertEqual(presented()?.items.count, 0, "An empty option list must still present (an empty) menu.")
+        XCTAssertEqual(presented()?.count, 0, "An empty option list must still hand an (empty) entry list to the presenter.")
         XCTAssertEqual(box.value, "Never", "Nothing may be written through the binding when there was nothing to pick.")
     }
 }
@@ -214,7 +219,7 @@ final class OrbitPopupButtonClickTests: XCTestCase {
 @MainActor
 final class OrbitPopupButtonKeyboardTests: XCTestCase {
 
-    private func makeHost(box: SelectionBox<String>) -> (OrbitPopupButtonMenuHostView, () -> NSMenu?) {
+    private func makeHost(box: SelectionBox<String>) -> (OrbitPopupButtonMenuHostView, () -> [OrbitContextMenuItem]?) {
         let button = OrbitPopupButton(
             options: ["Never", "After 12 Hours"],
             label: { $0 },
@@ -222,10 +227,7 @@ final class OrbitPopupButtonKeyboardTests: XCTestCase {
             accessibilityLabel: "Archive tabs after"
         )
         let host = OrbitPopupButtonMenuHostView(frame: NSRect(x: 0, y: 0, width: 200, height: 26))
-        host.menuProvider = button.buildMenu
-        var presented: NSMenu?
-        host.presentMenu = { menu, _ in presented = menu }
-        return (host, { presented })
+        return (host, wire(host, to: button))
     }
 
     func test_spaceKey_opensTheMenuAndItsRowsStillWriteThrough() {
@@ -234,7 +236,7 @@ final class OrbitPopupButtonKeyboardTests: XCTestCase {
 
         host.keyDown(with: keyDownEvent(characters: " "))
 
-        guard let menu = presented(), let item = menu.items.first(where: { $0.title == "After 12 Hours" }) else {
+        guard let menu = presented(), let item = menu.first(where: { $0.title == "After 12 Hours" }) else {
             XCTFail("Space did not open the menu — the keyboard path is dead.")
             return
         }
@@ -266,7 +268,7 @@ final class OrbitPopupButtonKeyboardTests: XCTestCase {
         XCTAssertTrue(host.canBecomeKeyView)
     }
 
-    func test_hostViewInheritsClickBehaviourFromTheProvenBaseClass() {
+    func test_hostViewClaimsClicksAndTakesTheFirstOne() {
         let host = OrbitPopupButtonMenuHostView(frame: NSRect(x: 0, y: 0, width: 200, height: 26))
         XCTAssertTrue(host.acceptsFirstMouse(for: nil))
         XCTAssertTrue(host.hitTest(NSPoint(x: 10, y: 10)) === host, "The catcher must claim clicks inside its own bounds.")
@@ -301,18 +303,16 @@ final class OrbitPopupButtonCallSiteTests: XCTestCase {
         )
 
         let host = OrbitPopupButtonMenuHostView(frame: NSRect(x: 0, y: 0, width: 200, height: 26))
-        host.menuProvider = button.buildMenu
-        var presented: NSMenu?
-        host.presentMenu = { menu, _ in presented = menu }
+        let presented = wire(host, to: button)
 
         host.mouseDown(with: mouseDownEvent())
-        guard let menu = presented else {
+        guard let menu = presented() else {
             XCTFail("The Profiles pane's archive-policy popup presented nothing when clicked.")
             return
         }
-        XCTAssertEqual(menu.items.map(\.title), ArchivePolicy.allCases.map(\.menuTitle), "Every archive policy must be offered.")
+        XCTAssertEqual(menu.map(\.title), ArchivePolicy.allCases.map(\.menuTitle), "Every archive policy must be offered.")
 
-        guard let item = menu.items.first(where: { $0.title == target.menuTitle }) else {
+        guard let item = menu.first(where: { $0.title == target.menuTitle }) else {
             XCTFail("The presented menu did not contain \(target.menuTitle).")
             return
         }
@@ -357,18 +357,16 @@ final class OrbitPopupButtonCallSiteTests: XCTestCase {
         )
 
         let host = OrbitPopupButtonMenuHostView(frame: NSRect(x: 0, y: 0, width: 200, height: 26))
-        host.menuProvider = button.buildMenu
-        var presented: NSMenu?
-        host.presentMenu = { menu, _ in presented = menu }
+        let presented = wire(host, to: button)
 
         host.mouseDown(with: mouseDownEvent())
-        guard let menu = presented else {
+        guard let menu = presented() else {
             XCTFail("Settings → Profiles' \"Add a Space\" popup presented nothing when clicked.")
             return
         }
-        XCTAssertEqual(menu.items.map(\.title), candidates.map(\.name), "Every candidate Space must be offered.")
+        XCTAssertEqual(menu.map(\.title), candidates.map(\.name), "Every candidate Space must be offered.")
 
-        guard let item = menu.items.first(where: { $0.title == "Add-a-Space Popup Test" }) else {
+        guard let item = menu.first(where: { $0.title == "Add-a-Space Popup Test" }) else {
             XCTFail("The presented menu did not contain the test Space.")
             return
         }
@@ -398,15 +396,15 @@ final class NotesHeadingMenuTests: XCTestCase {
 
     func test_click_presentsAllFourHeadingOptionsInOrder() {
         let (controller, _) = makeController()
-        let host = OrbitMenuButtonClickCatchingView(frame: NSRect(x: 0, y: 0, width: 34, height: 22))
-        host.menuProvider = { NotesHeadingOption.buildNSMenu(for: controller) }
-        var presented: NSMenu?
-        host.presentMenu = { menu, _ in presented = menu }
+        let host = OrbitEntryMenuButtonView(frame: NSRect(x: 0, y: 0, width: 34, height: 22))
+        host.entriesProvider = { NotesHeadingOption.menuEntries(for: controller) }
+        var presented: [OrbitContextMenuEntry]?
+        host.presentEntries = { entries, _ in presented = entries }
 
         host.mouseDown(with: mouseDownEvent())
 
         XCTAssertEqual(
-            presented?.items.map(\.title),
+            presented?.flattenedItems.map(\.title),
             NotesHeadingOption.allCases.map(\.title),
             "Clicking the Notes heading control must present the same four options the old SwiftUI Menu offered."
         )
@@ -414,32 +412,32 @@ final class NotesHeadingMenuTests: XCTestCase {
 
     func test_pickingHeading1_makesTheParagraphFontLargerAndBoldThanBody() {
         let (controller, textView) = makeController()
-        let host = OrbitMenuButtonClickCatchingView(frame: NSRect(x: 0, y: 0, width: 34, height: 22))
-        host.menuProvider = { NotesHeadingOption.buildNSMenu(for: controller) }
-        var presented: NSMenu?
-        host.presentMenu = { menu, _ in presented = menu }
+        let host = OrbitEntryMenuButtonView(frame: NSRect(x: 0, y: 0, width: 34, height: 22))
+        host.entriesProvider = { NotesHeadingOption.menuEntries(for: controller) }
+        var presented: [OrbitContextMenuEntry]?
+        host.presentEntries = { entries, _ in presented = entries }
 
         func paragraphFont() -> NSFont? {
             textView.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
         }
 
         host.mouseDown(with: mouseDownEvent())
-        guard let bodyItem = presented?.items.first(where: { $0.title == NotesHeadingOption.body.title }) else {
+        guard let bodyItem = presented?.first(titled: NotesHeadingOption.body.title) else {
             XCTFail("The presented menu did not contain the Body option.")
             return
         }
-        invoke(bodyItem)
+        bodyItem.action?()
         guard let bodyFont = paragraphFont() else {
             XCTFail("Applying Body left no font attribute on the paragraph at all.")
             return
         }
 
         host.mouseDown(with: mouseDownEvent())
-        guard let headingItem = presented?.items.first(where: { $0.title == NotesHeadingOption.heading1.title }) else {
+        guard let headingItem = presented?.first(titled: NotesHeadingOption.heading1.title) else {
             XCTFail("The presented menu did not contain the Heading 1 option.")
             return
         }
-        invoke(headingItem)
+        headingItem.action?()
         guard let headingFont = paragraphFont() else {
             XCTFail("Applying Heading 1 left no font attribute on the paragraph at all.")
             return
@@ -458,15 +456,15 @@ final class NotesHeadingMenuTests: XCTestCase {
 
     func test_headingLevelsDescendInSize() {
         let (controller, textView) = makeController()
-        let menuFor = { NotesHeadingOption.buildNSMenu(for: controller) }
+        let menuFor = { NotesHeadingOption.menuEntries(for: controller) }
 
         func applyThenMeasure(_ option: NotesHeadingOption) -> CGFloat? {
             let menu = menuFor()
-            guard let item = menu.items.first(where: { $0.title == option.title }) else {
+            guard let item = menu.first(titled: option.title) else {
                 XCTFail("Menu did not contain \(option.title).")
                 return nil
             }
-            invoke(item)
+            item.action?()
             return (textView.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.pointSize
         }
 

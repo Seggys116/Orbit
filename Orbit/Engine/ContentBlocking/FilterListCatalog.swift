@@ -31,7 +31,7 @@ nonisolated public enum FilterListCategory: String, Codable, Sendable, CaseItera
         switch self {
         case .cookies: return "Blocking cookie banners may cause pages to load incorrectly."
         case .compatibility:
-            return "Un-blocks the handful of requests that a filter list gets wrong and a site cannot load without."
+            return "Allows requests that sites need to load."
         default: return nil
         }
     }

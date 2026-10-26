@@ -4,6 +4,7 @@ import SwiftUI
 struct SiteControlPopoverView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.orbitSpaceTheme) private var spaceTheme
 
     // Every property and method below reads tab/tab.id, never env.activeTab: that would describe whichever pane is focused rather than the pane whose button was actually pressed (wrong in a split, wrong for a Little Orbit window).
     var tab: Tab
@@ -34,21 +35,46 @@ struct SiteControlPopoverView: View {
         env.webContents[tab.id]?.currentCertificate()
     }
 
+    private var chrome: SpaceThemeChrome? {
+        spaceTheme.map { SpaceThemeChrome(theme: $0, colorScheme: colorScheme) }
+    }
+
+    private var secondaryText: AnyShapeStyle {
+        chrome.map { AnyShapeStyle($0.secondaryForeground) } ?? AnyShapeStyle(HierarchicalShapeStyle.secondary)
+    }
+
+    private var pressStyle: OrbitPressReportingButtonStyle {
+        OrbitPressReportingButtonStyle(dimsOnPress: chrome == nil)
+    }
+
+    @ViewBuilder
+    private var sectionDivider: some View {
+        if let chrome {
+            Rectangle()
+                .fill(chrome.divider)
+                .frame(height: OrbitMetrics.contextMenuDividerThickness)
+        } else {
+            Divider()
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Divider()
+            sectionDivider
             actionIconRow
             if Self.isExtensionsSectionVisible(engine: env.engine) {
-                Divider()
+                sectionDivider
                 extensionsRow
             }
-            Divider()
+            sectionDivider
             settingsSection
-            Divider()
+            sectionDivider
             secureFooter
         }
         .frame(width: 300)
+        .orbitThemedSurface(chrome)
+        .orbitThemeAnimation(value: chrome)
         .onAppear {
             reloadPermissionRows()
             reloadExtensionActionEntries()
@@ -142,7 +168,7 @@ struct SiteControlPopoverView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(securityLabel).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(securityLabel).font(.system(size: 11)).foregroundStyle(secondaryText)
             }
             Spacer()
         }
@@ -166,7 +192,7 @@ struct SiteControlPopoverView: View {
         case .secure: return .green
         case .certificateError: return .red
         case .insecure, .mixedContent: return .orange
-        case .local, .unknown, nil: return .secondary
+        case .local, .unknown, nil: return chrome?.secondaryForeground ?? .secondary
         }
     }
 
@@ -251,12 +277,9 @@ struct SiteControlPopoverView: View {
                 .font(.system(size: OrbitMetrics.iconMedium, weight: .medium))
                 .frame(maxWidth: .infinity)
                 .frame(height: OrbitMetrics.siteControlActionButtonHeight)
-                .background(
-                    RoundedRectangle(cornerRadius: OrbitMetrics.siteControlActionButtonCornerRadius, style: .continuous)
-                        .fill(Color.secondary.opacity(0.12))
-                )
+                .orbitThemedTile(chrome, cornerRadius: OrbitMetrics.siteControlActionButtonCornerRadius)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(pressStyle)
         .disabled(disabled)
         .orbitTooltip(disabled ? (unavailableReason ?? "") : "")
         .accessibilityLabel(disabled ? "\(accessibilityLabel): unavailable" : accessibilityLabel)
@@ -430,10 +453,7 @@ struct SiteControlPopoverView: View {
                 ZStack(alignment: .topTrailing) {
                     extensionActionIconImage(entry)
                         .frame(width: 36, height: 36)
-                        .background(
-                            RoundedRectangle(cornerRadius: OrbitMetrics.siteControlActionButtonCornerRadius, style: .continuous)
-                                .fill(Color.secondary.opacity(0.12))
-                        )
+                        .orbitThemedTile(chrome, cornerRadius: OrbitMetrics.siteControlActionButtonCornerRadius, dimsWhenDisabled: false)
                         // Reflects chrome.action.disable() for this tab, using
                         // the same disabled-opacity token as OrbitButton.
                         .opacity(entry.actionState.isEnabled ? 1 : OrbitControlMetrics.buttonDisabledOpacity)
@@ -444,7 +464,7 @@ struct SiteControlPopoverView: View {
                     }
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(pressStyle)
             .disabled(!entry.actionState.isEnabled)
             .accessibilityLabel(entry.accessibleTitle)
             .orbitTooltip(entry.accessibleTitle)
@@ -460,10 +480,10 @@ struct SiteControlPopoverView: View {
 
     private func extensionActionBadge(_ text: String, state: ExtensionActionState) -> some View {
         let fill = state.badgeBackgroundColor.isUnset
-            ? OrbitControlColor.extensionBadgeFill(for: colorScheme)
+            ? (chrome?.accent ?? OrbitControlColor.extensionBadgeFill(for: colorScheme))
             : Color(state.badgeBackgroundColor)
         let foreground = state.badgeTextColor.isUnset
-            ? OrbitControlColor.extensionBadgeText
+            ? (chrome?.accentContrast ?? OrbitControlColor.extensionBadgeText)
             : Color(state.badgeTextColor)
         return Text(text)
             .font(.system(size: OrbitControlMetrics.extensionBadgeFontSize, weight: .semibold))
@@ -503,7 +523,7 @@ struct SiteControlPopoverView: View {
         case .genericGlyph:
             Image(systemName: "puzzlepiece.extension.fill")
                 .font(.system(size: 15))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(secondaryText)
         }
     }
 
@@ -537,9 +557,9 @@ struct SiteControlPopoverView: View {
     private var extensionOptionsGlyph: some View {
         Image(systemName: "gearshape.fill")
             .font(.system(size: 7, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(chrome?.accentContrast ?? .white)
             .padding(3)
-            .background(Circle().fill(Color.secondary))
+            .background(Circle().fill(chrome?.accent ?? Color.secondary))
             .offset(x: 3, y: 3)
     }
 
@@ -601,11 +621,11 @@ struct SiteControlPopoverView: View {
 
     // MARK: - Settings row content (sizing pass)
 
-    private func settingsRowContent(symbol: String, title: String, value: String) -> some View {
+    private func settingsRowContent(symbol: String, title: String, value: String, isInteractive: Bool = true) -> some View {
         HStack(spacing: OrbitMetrics.siteControlRowBadgeToTextGap) {
             ZStack {
                 Circle()
-                    .fill(Color.secondary.opacity(0.12))
+                    .fill(chrome?.restFill ?? OrbitThemedTileBackground.legacyFill)
                     .frame(width: OrbitMetrics.siteControlRowBadgeDiameter, height: OrbitMetrics.siteControlRowBadgeDiameter)
                 Image(systemName: symbol)
                     .font(.system(size: OrbitMetrics.siteControlRowBadgeGlyphSize, weight: .medium))
@@ -616,7 +636,7 @@ struct SiteControlPopoverView: View {
                     .lineLimit(1)
                 Text(value)
                     .font(.system(size: OrbitMetrics.siteControlRowValueFontSize))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondaryText)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -624,6 +644,7 @@ struct SiteControlPopoverView: View {
         .padding(.horizontal, OrbitMetrics.siteControlRowHorizontalMargin)
         .frame(height: OrbitMetrics.siteControlRowPitch)
         .contentShape(Rectangle())
+        .orbitThemedRowHighlight(isInteractive ? chrome : nil, cornerRadius: OrbitMetrics.siteControlActionButtonCornerRadius)
     }
 
     private var extensionsRow: some View {
@@ -634,7 +655,7 @@ struct SiteControlPopoverView: View {
             } label: {
                 settingsRowContent(symbol: "puzzlepiece.extension", title: "Extensions", value: extensionsSubtitle)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(pressStyle)
             .accessibilityLabel("Extensions: \(extensionsSubtitle)")
         }
     }
@@ -645,13 +666,13 @@ struct SiteControlPopoverView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Settings")
                 .font(.system(size: OrbitControlMetrics.sectionHeaderFontSize, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(secondaryText)
                 .padding(.horizontal, OrbitMetrics.siteControlRowHorizontalMargin)
                 .padding(.bottom, 4)
 
             permissionSection
 
-            settingsRowContent(symbol: "pip", title: "Picture-in-Picture", value: "Automatic")
+            settingsRowContent(symbol: "pip", title: "Picture-in-Picture", value: "Automatic", isInteractive: false)
 
             Button {
                 isAutoPeekEnabled.toggle()
@@ -663,7 +684,7 @@ struct SiteControlPopoverView: View {
                     value: isAutoPeekEnabled ? "While Pinned" : "Off"
                 )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(pressStyle)
 
             siteDataRows
             developerToolsRow
@@ -673,7 +694,7 @@ struct SiteControlPopoverView: View {
             } label: {
                 settingsRowContent(symbol: "hammer", title: "Developer Mode", value: developerModeEnabled ? "On" : "Off")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(pressStyle)
         }
         .padding(.vertical, 10)
     }
@@ -707,10 +728,10 @@ struct SiteControlPopoverView: View {
                 value: available ? "Open" : "Unavailable"
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(pressStyle)
         .disabled(!available)
         .orbitTooltip(available ? "" : developerToolsUnavailableReason)
-        .accessibilityLabel(available ? "Developer Tools" : "Developer Tools: unavailable — \(developerToolsUnavailableReason)")
+        .accessibilityLabel(available ? "Developer Tools" : "Developer Tools: unavailable. \(developerToolsUnavailableReason)")
     }
 
     // MARK: - Site data: Clear Cookies / Clear Cache
@@ -725,7 +746,7 @@ struct SiteControlPopoverView: View {
             } label: {
                 settingsRowContent(symbol: "network", title: "Clear Cookies for This Site", value: cookiesClearState.label)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(pressStyle)
             .disabled(env.webContents[tab.id]?.session == nil || cookiesClearState == .clearing)
             .accessibilityLabel("Clear Cookies for This Site, scoped to \(host) only")
 
@@ -734,7 +755,7 @@ struct SiteControlPopoverView: View {
             } label: {
                 settingsRowContent(symbol: "internaldrive", title: "Clear Cache (Entire Session)", value: cacheClearState.label)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(pressStyle)
             .disabled(env.engine == nil || env.webContents[tab.id]?.session == nil || cacheClearState == .clearing)
             .accessibilityLabel("Clear Cache for the entire browsing session, not only this site")
         }
@@ -839,33 +860,30 @@ struct SiteControlPopoverView: View {
         session.setContentSetting(setting, for: kind, url: origin)
     }
 
-    static func makePermissionMenu(
+    static func permissionMenuEntries(
         for row: PermissionRow,
         origin: URL,
         session: any EngineSession,
         onChange: @escaping () -> Void
-    ) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        for choice: (ContentSetting, String) in [(.allow, "Allow"), (.block, "Block"), (.ask, "Ask")] {
-            let item = ClosureMenuItem(title: choice.1) {
+    ) -> [OrbitContextMenuEntry] {
+        let choices: [(ContentSetting, String)] = [(.allow, "Allow"), (.block, "Block"), (.ask, "Ask")]
+        return choices.map { choice in
+            .item(OrbitContextMenuItem(title: choice.1, isChecked: row.setting == choice.0) {
                 setPermission(choice.0, kind: row.kind, origin: origin, session: session)
                 onChange()
-            }
-            item.state = row.setting == choice.0 ? .on : .off
-            menu.addItem(item)
+            })
         }
-        return menu
     }
 
     private var permissionSection: some View {
         ForEach(permissionRows) { row in
-            OrbitNSMenuButton {
-                guard let session = env.webContents[tab.id]?.session else { return NSMenu() }
-                return Self.makePermissionMenu(for: row, origin: tab.url, session: session) {
+            OrbitMenuButton(entries: {
+                OrbitMenuThemeSource.shared.adopt(environment: env, spaceID: tab.spaceID)
+                guard let session = env.webContents[tab.id]?.session else { return [] }
+                return Self.permissionMenuEntries(for: row, origin: tab.url, session: session) {
                     reloadPermissionRows()
                 }
-            } label: {
+            }) {
                 settingsRowContent(symbol: Self.symbolName(for: row.kind), title: row.title, value: row.valueLabel)
             }
             .accessibilityLabel("\(row.title): \(row.valueLabel)")
@@ -906,7 +924,7 @@ struct SiteControlPopoverView: View {
             }
             .padding(.horizontal, OrbitMetrics.siteControlFooterPillHorizontalPadding)
             .frame(height: OrbitMetrics.siteControlFooterPillHeight)
-            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+            .background(Capsule().fill(chrome?.restFill ?? OrbitThemedTileBackground.legacyFill))
             Spacer(minLength: 0)
         }
         .padding(.horizontal, OrbitMetrics.siteControlRowHorizontalMargin)
@@ -928,10 +946,7 @@ struct SiteControlPopoverView: View {
             .font(.system(size: OrbitMetrics.iconMedium, weight: .medium))
             .frame(maxWidth: .infinity)
             .frame(height: OrbitMetrics.siteControlActionButtonHeight)
-            .background(
-                RoundedRectangle(cornerRadius: OrbitMetrics.siteControlActionButtonCornerRadius, style: .continuous)
-                    .fill(Color.secondary.opacity(0.12))
-            )
+            .orbitThemedTile(chrome, cornerRadius: OrbitMetrics.siteControlActionButtonCornerRadius, dimsWhenDisabled: false)
             .overlay {
                 #if DEBUG
                 if isAvailable, !screenshotModeRepresentableDisabled {

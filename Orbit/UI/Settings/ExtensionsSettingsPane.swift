@@ -193,7 +193,7 @@ struct ExtensionsSettingsPane: View {
         case .extensionID:
             return "Looks like an extension id."
         case .unrecognized:
-            return "That doesn't look like a Chrome Web Store link or extension id yet."
+            return "That doesn't look like a Chrome Web Store link or extension id."
         }
     }
 
@@ -383,7 +383,7 @@ struct ExtensionsEngineStartingNotice: View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text("WebKit isn't running yet. Your extensions appear here as soon as it starts.")
+            Text("WebKit is starting. Extensions appear here shortly.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -403,7 +403,7 @@ struct ExtensionPendingChangesBanner: View {
             Image(systemName: "arrow.triangle.2.circlepath")
                 .foregroundStyle(.orange)
             Text(lastError.map { "WebKit refused to load an extension: \($0)" }
-                ?? "Some extensions are installed but not running yet.")
+                ?? "Some extensions aren't running yet.")
                 .font(.system(size: 12, weight: .medium))
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
@@ -561,7 +561,7 @@ struct ExtensionRowView: View {
                     warningsDetail(detail.warnings)
                 }
             } else {
-                Text("This extension's manifest.json could not be read.")
+                Text("Couldn't read manifest.json.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
             }
@@ -572,15 +572,12 @@ struct ExtensionRowView: View {
     @ViewBuilder
     private func sourceRow(_ detail: ExtensionsSettingsPane.ExtensionRowDetail) -> some View {
         if detail.isPathDerived {
-            Text("Loaded from a local, unpacked folder with no signing key, so its id is generated from that folder's path rather than assigned by the Chrome Web Store. There's no Web Store listing to link to and no update to check for.")
+            Text("Loaded from a local folder. No Web Store listing or updates.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                Text("This extension's id matches how the Chrome Web Store identifies it.")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     OrbitButton(title: "View on Chrome Web Store…", kind: .secondary, isCompact: true, accentColor: SettingsPalette.accent, action: onOpenWebStoreListing)
                     OrbitButton(title: "Check for Update", kind: .secondary, isCompact: true, accentColor: SettingsPalette.accent, action: onCheckForUpdate)

@@ -5,18 +5,19 @@ import Foundation
 enum CommandBarActivation {
 
     @discardableResult
-    static func activate(_ result: CommandResult, in env: AppEnvironment, instant: Bool = false) -> Bool {
+    static func activate(_ result: CommandResult, in env: AppEnvironment, mode: CommandBarMode? = nil, instant: Bool = false) -> Bool {
         guard let spaceID = env.activeSpace?.id else { return false }
+        let mode = mode ?? env.commandBarMode
         if instant, let instantURL = result.instantOpenURL {
-            navigate(to: instantURL, in: env, spaceID: spaceID)
+            navigate(to: instantURL, in: env, spaceID: spaceID, mode: mode)
             return true
         }
         switch result.kind.activationIntent {
         case .navigate(let url):
-            navigate(to: url, in: env, spaceID: spaceID)
+            navigate(to: url, in: env, spaceID: spaceID, mode: mode)
         case .searchGoogle(let text):
             guard let url = env.searchEngine.searchURL(for: text) else { break }
-            navigate(to: url, in: env, spaceID: spaceID)
+            navigate(to: url, in: env, spaceID: spaceID, mode: mode)
         case .switchToTab(let tabID):
             env.activateTab(tabID)
         case .switchToSpaceAndTab(let targetSpaceID, let tabID):
@@ -32,7 +33,7 @@ enum CommandBarActivation {
 
     // Same three rules, same order, as CommandBarEngine.results' row 1, so this backstop can never disagree with the list about where a query goes.
     @discardableResult
-    static func commitTypedText(_ text: String, siteEngine: SiteSearchEngine?, in env: AppEnvironment) -> Bool {
+    static func commitTypedText(_ text: String, siteEngine: SiteSearchEngine?, in env: AppEnvironment, mode: CommandBarMode? = nil) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let spaceID = env.activeSpace?.id else { return false }
         let destination: URL?
@@ -42,13 +43,13 @@ enum CommandBarActivation {
             destination = CommandBarEngine.detectTypedURL(trimmed) ?? env.searchEngine.searchURL(for: trimmed)
         }
         guard let destination else { return false }
-        navigate(to: destination, in: env, spaceID: spaceID)
+        navigate(to: destination, in: env, spaceID: spaceID, mode: mode ?? env.commandBarMode)
         return true
     }
 
     // spaceID is always the caller's current Space: a URL that happens to be open elsewhere is opened here, never jumped to.
-    static func navigate(to url: URL, in env: AppEnvironment, spaceID: SpaceID) {
-        switch env.commandBarMode {
+    static func navigate(to url: URL, in env: AppEnvironment, spaceID: SpaceID, mode: CommandBarMode? = nil) {
+        switch mode ?? env.commandBarMode {
         case .newTab, .chatGPT:
             env.openTab(url: url, in: spaceID)
         case .blankPane(let tabID):

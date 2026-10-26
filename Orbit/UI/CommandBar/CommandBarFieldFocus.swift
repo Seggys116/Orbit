@@ -7,6 +7,7 @@ enum CommandBarFieldFocus {
     // attempts finished before the field was installed, and the page kept the keyboard.
     static let maximumAttempts = 40
     static let fieldIdentifier = "orbit.command-bar.query"
+    static let embeddedFieldIdentifier = "orbit.new-tab-page.query"
 
     // Scans key, then main, then every other window: an app that is not frontmost has no key window even though one of its windows may still own the responder.
     static var focusedFieldEditor: NSTextView? {
@@ -30,6 +31,8 @@ enum CommandBarFieldFocus {
 
     // Waits for the field editor's text to match text() so a re-present over an already-open bar doesn't select stale text.
     static func claim(
+        identifier: String = fieldIdentifier,
+        yielding: @escaping () -> Bool = { false },
         showing text: @escaping () -> String,
         isFocused: @escaping () -> Bool,
         requestFocus: @escaping () -> Void
@@ -40,10 +43,10 @@ enum CommandBarFieldFocus {
         // after a non-activating menu panel closes) is the risky case that check exists for.
         let wasAlreadyFocused = isFocused()
         for _ in 0..<maximumAttempts {
-            if Task.isCancelled { return }
+            if Task.isCancelled || yielding() { return }
             ensureAKeyWindowExists()
             requestFocus()
-            focusFieldDirectly()
+            focusFieldDirectly(identifier: identifier)
             // editor.window?.isKeyWindow is load-bearing when focus is being newly acquired,
             // not redundant with the scan order above: AppKit will assign a field editor as
             // firstResponder on a window that isn't key, but a non-key window never receives
@@ -76,14 +79,14 @@ enum CommandBarFieldFocus {
 
     /// `@FocusState` does not move `NSWindow.firstResponder` off a web view that is
     /// already there. The field is found by the identifier set on the command bar's text field.
-    static func focusFieldDirectly() {
+    static func focusFieldDirectly(identifier: String = fieldIdentifier) {
         var seen: [NSWindow] = []
         if let key = NSApp.keyWindow { seen.append(key) }
         if let main = NSApp.mainWindow { seen.append(main) }
         seen.append(contentsOf: NSApp.windows)
         var visited = Set<ObjectIdentifier>()
         for window in seen where visited.insert(ObjectIdentifier(window)).inserted {
-            guard let field = textField(identifier: fieldIdentifier, in: window.contentView) else { continue }
+            guard let field = textField(identifier: identifier, in: window.contentView) else { continue }
             if !window.isKeyWindow, window.canBecomeKey { window.makeKey() }
             if window.firstResponder === field { return }
             if let editor = window.firstResponder as? NSTextView, editor.isFieldEditor, editor.delegate === field {

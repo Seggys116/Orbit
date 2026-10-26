@@ -241,7 +241,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
         for emoji in Self.emojiSpread {
             let space = Space(name: "Systems", icon: emoji, iconIsEmoji: true, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
             let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
-            let image = render(SpaceTitleRow(space: space).environment(env), size: size)
+            let image = render(SpaceTitleRow(space: space).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
             let ink = inkBoundingBox(in: image, region: region)
             assertInkHasMarginAndIsCentered(ink, in: region, label: "SpaceTitleRow emoji '\(emoji)'")
         }
@@ -252,7 +252,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
         for symbol in ["display", "tv", "desktopcomputer", "star.fill"] {
             let space = Space(name: "Systems", icon: symbol, iconIsEmoji: false, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
             let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
-            let image = render(SpaceTitleRow(space: space).environment(env), size: size)
+            let image = render(SpaceTitleRow(space: space).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
             let ink = inkBoundingBox(in: image, region: region)
             assertInkHasMarginAndIsCentered(ink, in: region, label: "SpaceTitleRow symbol '\(symbol)'")
         }
@@ -287,7 +287,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
         let space = Space(name: "Reading List", icon: "📚", iconIsEmoji: true, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
         let image = render(
-            onDarkBacking(SpaceTitleRow(space: space).environment(env), size: size),
+            onDarkBacking(SpaceTitleRow(space: space).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: size),
             size: size
         )
         image.writeDiagnosticPNG(named: "SpaceTitleRow-emoji")
@@ -298,7 +298,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
         let space = Space(name: "Systems", icon: "display", iconIsEmoji: false, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
         let image = render(
-            onDarkBacking(SpaceTitleRow(space: space).environment(env), size: size),
+            onDarkBacking(SpaceTitleRow(space: space).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: size),
             size: size
         )
         image.writeDiagnosticPNG(named: "SpaceTitleRow-symbol")
@@ -319,6 +319,7 @@ final class SpaceIconViewRenderTests: XCTestCase {
             SpaceTitleRow(space: symbolSpace)
         }
         .environment(env)
+        .environment(\.orbitScreenshotModeDragDisabled, true)
 
         let image = render(onDarkBacking(content, size: size), size: size)
         image.writeDiagnosticPNG(named: "SpaceTitleRow-emoji-and-symbol")
@@ -347,5 +348,48 @@ final class SpaceIconViewRenderTests: XCTestCase {
             spaceImage.color(atX: 30, y: 30).isApproximately(dotImage.color(atX: 30, y: 30), tolerance: 0.06),
             "a Space created without picking an icon must render identically to the explicit dot case"
         )
+    }
+
+    // MARK: - The Space name reads at the sidebar's primary text weight
+
+    private func peakAlpha(in image: RenderedImage, region: CGRect) -> Double {
+        let bitmap = image.bitmap
+        let x0 = max(0, Int((region.minX * image.scale).rounded(.down)))
+        let x1 = min(bitmap.pixelsWide, Int((region.maxX * image.scale).rounded(.up)))
+        let y0 = max(0, Int((region.minY * image.scale).rounded(.down)))
+        let y1 = min(bitmap.pixelsHigh, Int((region.maxY * image.scale).rounded(.up)))
+        var peak = 0.0
+        for y in y0..<y1 {
+            for x in x0..<x1 {
+                if let alpha = bitmap.colorAt(x: x, y: y)?.alphaComponent { peak = max(peak, Double(alpha)) }
+            }
+        }
+        return peak
+    }
+
+    func test_spaceTitleRow_nameAndIconDrawAtThePrimaryRowTextOpacityOnDarkAndLightThemes() {
+        let themes: [(String, SpaceTheme, Double)] = [
+            ("dark", SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.10, green: 0.10, blue: 0.12)], grain: 0), 0.90),
+            ("light", SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.95, green: 0.95, blue: 0.93)], grain: 0), 0.82),
+            ("default gradient", SpaceTheme(), SpaceTheme().isDarkSurface ? 0.90 : 0.82),
+        ]
+        let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
+        let leading = OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset
+        let nameStart = leading + OrbitMetrics.sidebarSpaceIconSize + OrbitMetrics.sidebarRowContentSpacing
+        let nameRegion = CGRect(x: nameStart, y: 0, width: size.width - nameStart - leading, height: size.height)
+        for (label, theme, readableAlpha) in themes {
+            let space = Space(name: "Home", icon: "house.fill", iconIsEmoji: false, theme: theme, profileID: env.createDefaultProfileIfNeeded())
+            let image = render(SpaceTitleRow(space: space).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
+            let name = peakAlpha(in: image, region: nameRegion)
+            let icon = peakAlpha(in: image, region: Self.spaceTitleRowIconRegion)
+            XCTAssertGreaterThanOrEqual(
+                name, readableAlpha - 0.08,
+                "\(label) theme: the Space name peaks at alpha \(name), not the theme's readable foreground (\(readableAlpha)). It is drawn faded, the dull grey the user reported."
+            )
+            XCTAssertGreaterThanOrEqual(
+                icon, readableAlpha - 0.08,
+                "\(label) theme: the Space icon peaks at alpha \(icon), fainter than the theme's readable foreground (\(readableAlpha))."
+            )
+        }
     }
 }

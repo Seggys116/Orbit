@@ -103,16 +103,18 @@ struct BoostsEditorView: View {
                         Spacer()
                     }
                     .tag(boost.id)
-                    .contextMenu {
-                        Button(boost.isEnabled ? "Disable" : "Enable") {
-                            env.boostStore.setEnabled(!boost.isEnabled, forBoost: boost.id)
-                            BoostRuntime.shared.reapply(host: host, env: env)
-                        }
-                        Button("Delete", role: .destructive) {
-                            env.boostStore.deleteBoost(boost.id)
-                            if selectedBoostID == boost.id { selectedBoostID = boostsForHost.first?.id }
-                            BoostRuntime.shared.reapply(host: host, env: env)
-                        }
+                    .orbitRightClickMenu {
+                        [
+                            .item(OrbitContextMenuItem(title: boost.isEnabled ? "Disable" : "Enable") {
+                                env.boostStore.setEnabled(!boost.isEnabled, forBoost: boost.id)
+                                BoostRuntime.shared.reapply(host: host, env: env)
+                            }),
+                            .item(OrbitContextMenuItem(title: "Delete", isDestructive: true) {
+                                env.boostStore.deleteBoost(boost.id)
+                                if selectedBoostID == boost.id { selectedBoostID = boostsForHost.first?.id }
+                                BoostRuntime.shared.reapply(host: host, env: env)
+                            })
+                        ]
                     }
                 }
             }
@@ -168,7 +170,7 @@ struct BoostsEditorView: View {
                 .focused($isNameFieldFocused)
                 .fixedSize(horizontal: true, vertical: false)
 
-                OrbitNSMenuButton(menu: { boostNameMenu(for: boost) }) {
+                OrbitMenuButton(entries: { boostNameMenuEntries(for: boost) }) {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.secondary)
@@ -226,37 +228,30 @@ struct BoostsEditorView: View {
 
     // MARK: - The Boost-name dropdown (Arc's caret menu)
 
-    private func boostNameMenu(for boost: Boost) -> NSMenu {
-        let menu = NSMenu()
+    private func boostNameMenuEntries(for boost: Boost) -> [OrbitContextMenuEntry] {
         let boostID = boost.id
-
-        menu.addItem(ClosureMenuItem(title: "Rename this Boost…") {
-            Task { @MainActor in isNameFieldFocused = true }
-        })
-
-        menu.addItem(ClosureMenuItem(title: "Shuffle") {
-            Task { @MainActor in shuffle(boostID) }
-        })
-
-        menu.addItem(ClosureMenuItem(title: "Reset all Edits") {
-            Task { @MainActor in resetAllEdits(boostID) }
-        })
-
-        menu.addItem(ClosureMenuItem(title: "Delete this Boost") {
-            Task { @MainActor in
-                env.boostStore.deleteBoost(boostID)
-                if selectedBoostID == boostID { selectedBoostID = boostsForHost.first?.id }
-                BoostRuntime.shared.reapply(host: host, env: env)
-            }
-        })
-
-        menu.addItem(.separator())
-
-        menu.addItem(ClosureMenuItem(title: "All Boosts…") {
-            Task { @MainActor in LibraryWindowController.show(section: .boosts) }
-        })
-
-        return menu
+        return [
+            .item(OrbitContextMenuItem(title: "Rename this Boost…") {
+                Task { @MainActor in isNameFieldFocused = true }
+            }),
+            .item(OrbitContextMenuItem(title: "Shuffle") {
+                Task { @MainActor in shuffle(boostID) }
+            }),
+            .item(OrbitContextMenuItem(title: "Reset all Edits") {
+                Task { @MainActor in resetAllEdits(boostID) }
+            }),
+            .item(OrbitContextMenuItem(title: "Delete this Boost") {
+                Task { @MainActor in
+                    env.boostStore.deleteBoost(boostID)
+                    if selectedBoostID == boostID { selectedBoostID = boostsForHost.first?.id }
+                    BoostRuntime.shared.reapply(host: host, env: env)
+                }
+            }),
+            .divider(),
+            .item(OrbitContextMenuItem(title: "All Boosts…") {
+                Task { @MainActor in LibraryWindowController.show(section: .boosts) }
+            })
+        ]
     }
 
     private func shuffle(_ boostID: UUID) {
@@ -490,7 +485,7 @@ struct BoostsEditorView: View {
     private func jsPane(_ boost: Boost) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("JavaScript Boosts can't be shared — see the share button's tooltip.")
+                Text("JavaScript Boosts can't be shared. See the share button's tooltip.")
                     .font(.system(size: 10.5)).foregroundStyle(.secondary)
                 Spacer()
                 Button("Apply") {
@@ -545,7 +540,7 @@ struct BoostsEditorView: View {
                     Label("Invert Lightness", systemImage: "lightbulb")
                 }
                 .toggleStyle(.button)
-                .orbitTooltip("Invert lightness — a dark mode for sites that don't have one")
+                .orbitTooltip("Invert lightness: a dark mode for sites without one")
 
                 Button {
                     isAdvancedColorPresented.toggle()

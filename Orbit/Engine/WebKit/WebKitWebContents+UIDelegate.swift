@@ -197,6 +197,12 @@ extension WebKitWebContents {
             view.observe(\.title) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.noteDocumentTitle() }
             },
+            view.observe(\.estimatedProgress) { [weak self] view, _ in
+                MainActor.assumeIsolated { self?.noteEngineLoading(isLoading: view.isLoading, progress: view.estimatedProgress) }
+            },
+            view.observe(\.isLoading) { [weak self] view, _ in
+                MainActor.assumeIsolated { self?.noteEngineLoading(isLoading: view.isLoading, progress: view.estimatedProgress) }
+            },
         ]
         // The frame watcher exists only while an exit is being put back. A permanent one
         // runs on every resize and fights a docked inspector for the page frame.

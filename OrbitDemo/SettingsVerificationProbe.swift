@@ -111,23 +111,21 @@ enum SettingsVerificationProbe {
 
     // MARK: - 3. Category filter: real click delivery, real menu, no modal tracking
 
-    // Does not call the real presentMenu (NSMenu.popUp): its modal tracking session would block
-    // this thread with no accessibility grant available to dismiss it, hanging the probe.
     private static func checkCategoryFilterClickDelivery(window: NSWindow) {
         guard let contentView = window.contentView else {
             fail("category filter check: Settings window has no contentView.")
             return
         }
-        guard let hostView = firstView(ofClassNamed: "OrbitPopupButtonMenuHostView", in: contentView) as? OrbitMenuButtonClickCatchingView else {
+        guard let hostView = firstView(ofClassNamed: "OrbitPopupButtonMenuHostView", in: contentView) as? OrbitPopupButtonMenuHostView else {
             fail("category filter check: no OrbitPopupButtonMenuHostView found in the Keybinds pane's real view tree — the category filter is not mounted at all.")
             return
         }
         emit("OK   found the category filter's real OrbitPopupButtonMenuHostView in the live view tree, at \(hostView.convert(hostView.bounds, to: nil))")
 
-        var capturedMenu: NSMenu?
-        let original = hostView.presentMenu
-        hostView.presentMenu = { menu, _ in capturedMenu = menu }
-        defer { hostView.presentMenu = original }
+        var capturedEntries: [OrbitContextMenuEntry]?
+        let original = hostView.presentEntries
+        hostView.presentEntries = { entries, _ in capturedEntries = entries }
+        defer { hostView.presentEntries = original }
 
         let pointInWindow = hostView.convert(NSPoint(x: hostView.bounds.midX, y: hostView.bounds.midY), to: nil)
         guard let down = NSEvent.mouseEvent(
@@ -147,36 +145,37 @@ enum SettingsVerificationProbe {
 
         window.sendEvent(down)
 
-        guard let menu = capturedMenu else {
+        guard let entries = capturedEntries else {
             fail("category filter check: a real mouseDown through window.sendEvent(_:) did not reach OrbitPopupButtonMenuHostView.mouseDown — the click was swallowed somewhere in the real, hosted view hierarchy.")
             return
         }
-        emit("OK   a real, window-dispatched mouseDown reached the click catcher and built a real NSMenu (\(menu.items.count) items).")
+        let items = entries.flattenedItems
+        emit("OK   a real, window-dispatched mouseDown reached the click catcher and built a real Orbit menu (\(items.count) items).")
 
         let expectedCount = ShortcutCategory.allCases.count + 1
-        if menu.items.count == expectedCount {
+        if items.count == expectedCount {
             emit("OK   menu item count matches \"All Categories\" + every ShortcutCategory (\(expectedCount)).")
         } else {
-            fail("category filter check: menu has \(menu.items.count) items, expected \(expectedCount) (\"All Categories\" + \(ShortcutCategory.allCases.count) categories).")
+            fail("category filter check: menu has \(items.count) items, expected \(expectedCount) (\"All Categories\" + \(ShortcutCategory.allCases.count) categories).")
         }
 
-        guard let checked = menu.items.first(where: { $0.state == .on }) else {
+        guard let checked = items.first(where: { $0.isChecked }) else {
             fail("category filter check: no menu item is checked — the currently-selected \"All Categories\" option should carry a checkmark.")
             return
         }
         emit("OK   currently-selected option is checked in the real menu: \"\(checked.title)\"")
 
-        guard menu.items.count > 1 else {
+        guard items.count > 1 else {
             fail("category filter check: menu has no category items to invoke.")
             return
         }
-        let categoryItem = menu.items[1]
-        guard let target = categoryItem.target, let action = categoryItem.action else {
-            fail("category filter check: \"\(categoryItem.title)\" has no target/action pair to invoke.")
+        let categoryItem = items[1]
+        guard let action = categoryItem.action else {
+            fail("category filter check: \"\(categoryItem.title)\" has no action to invoke.")
             return
         }
-        _ = (target as AnyObject).perform(action, with: categoryItem)
-        emit("OK   invoked \"\(categoryItem.title)\"'s real target/action pair (the same pair NSMenu's own tracking loop would invoke on a real click).")
+        action()
+        emit("OK   invoked \"\(categoryItem.title)\"'s real action (the same closure the menu panel runs on a real click).")
     }
 
     // MARK: - Window / view discovery

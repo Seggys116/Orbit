@@ -81,7 +81,7 @@ struct NotesEditorView: View {
 
     private var toolbar: some View {
         HStack(spacing: 6) {
-            OrbitNSMenuButton(menu: { NotesHeadingOption.buildNSMenu(for: controller) }) {
+            OrbitMenuButton(entries: { NotesHeadingOption.menuEntries(for: controller) }) {
                 Image(systemName: "textformat.size")
                     .frame(width: 34)
             }
@@ -223,14 +223,11 @@ enum NotesHeadingOption: CaseIterable {
         }
     }
 
-    static func buildNSMenu(for controller: RichTextController) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        for option in NotesHeadingOption.allCases {
-            menu.addItem(ClosureMenuItem(title: option.title) {
+    static func menuEntries(for controller: RichTextController) -> [OrbitContextMenuEntry] {
+        NotesHeadingOption.allCases.map { option in
+            .item(OrbitContextMenuItem(title: option.title) {
                 controller.applyHeading(option.level)
             })
         }
-        return menu
     }
 }

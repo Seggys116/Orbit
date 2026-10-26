@@ -51,9 +51,15 @@ struct SpaceSwitchingSidebarContainer: View {
                 gestureCatcher(width: width, height: geo.size.height, orderedSpaces: orderedSpaces, activeIndex: activeIndex)
             )
             .environment(\.spaceSwipeProgress, SpaceSwipeProgress(fraction: translation / width, isDragging: isDragging))
-            .preference(
-                key: SpaceSwipeBlendKey.self,
-                value: swipeBlend(width: width, orderedSpaces: orderedSpaces, activeIndex: activeIndex)
+            .modifier(
+                SpaceSwipeBlendPublisher(
+                    translation: translation,
+                    width: width,
+                    isDragging: isDragging,
+                    current: blendStop(at: activeIndex, in: orderedSpaces),
+                    previous: blendStop(at: activeIndex.map { $0 - 1 }, in: orderedSpaces),
+                    next: blendStop(at: activeIndex.map { $0 + 1 }, in: orderedSpaces)
+                )
             )
         }
     }
@@ -102,30 +108,11 @@ struct SpaceSwitchingSidebarContainer: View {
 
     // MARK: Background crossfade (published upward, painted window-wide)
 
-    // nil at rest lets the window fall back to ThemeBackgroundView.
-    private func swipeBlend(width: CGFloat, orderedSpaces: [Space], activeIndex: Int?) -> SpaceSwipeBlend? {
-        guard isDragging, let activeIndex, orderedSpaces.indices.contains(activeIndex) else { return nil }
-
-        let currentSpace = orderedSpaces[activeIndex]
-        var blend = SpaceSwipeBlend(
-            currentTheme: currentSpace.theme,
-            currentBlur: SpaceVisualPrefsStore.shared.blur(for: currentSpace.id)
-        )
-
-        let fraction = min(max(translation / width, -1), 1)
-        if fraction > 0, activeIndex > 0 {
-            let previousSpace = orderedSpaces[activeIndex - 1]
-            blend.incomingTheme = previousSpace.theme
-            blend.incomingBlur = SpaceVisualPrefsStore.shared.blur(for: previousSpace.id)
-            blend.incomingWeight = Double(fraction)
-        } else if fraction < 0, activeIndex < orderedSpaces.count - 1 {
-            let nextSpace = orderedSpaces[activeIndex + 1]
-            blend.incomingTheme = nextSpace.theme
-            blend.incomingBlur = SpaceVisualPrefsStore.shared.blur(for: nextSpace.id)
-            blend.incomingWeight = Double(-fraction)
-        }
-
-        return blend
+    // nil outside a drag lets the window fall back to ThemeBackgroundView.
+    private func blendStop(at index: Int?, in orderedSpaces: [Space]) -> SpaceSwipeBlend.Stop? {
+        guard isDragging, let index, orderedSpaces.indices.contains(index) else { return nil }
+        let space = orderedSpaces[index]
+        return SpaceSwipeBlend.Stop(theme: space.theme, blur: SpaceVisualPrefsStore.shared.blur(for: space.id))
     }
 
     // MARK: Gesture end
@@ -162,7 +149,7 @@ struct SpaceSwitchingSidebarContainer: View {
                 // running must win, not be clobbered once the animation catches up — only apply
                 // the swipe's own destination if nothing else already moved the active Space.
                 if Self.shouldApplySwipeDestination(activeSpaceIDAtCompletion: env.activeSpace?.id, originSpaceID: originID) {
-                    env.selectSpace(destination.id)
+                    env.selectSpace(destination.id, animated: false)
                 }
                 translation = 0
                 isDragging = false

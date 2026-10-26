@@ -4,7 +4,9 @@ struct SpaceIconView: View {
     var icon: SpaceIcon
     var size: CGFloat
     var foregroundColor: Color = .primary
-    var opacity: Double = 1
+    var dim: Double = 0
+    var emojiScale: CGFloat = OrbitMetrics.spaceIconEmojiScaleFraction
+    var symbolScale: CGFloat = OrbitMetrics.spaceIconSymbolScaleFraction
 
     // Optional: this view also renders in hosting contexts with no injected
     // environment (menus, drag previews), where the process root owns the
@@ -16,7 +18,11 @@ struct SpaceIconView: View {
     }
 
     var body: some View {
-        content.opacity(opacity)
+        content.brightness(-OrbitMetrics.spacePagerInactiveBrightnessDrop * dim)
+    }
+
+    private var glyphColor: Color {
+        foregroundColor.opacity(1 - (1 - OrbitMetrics.spacePagerInactiveOpacity) * dim)
     }
 
     @ViewBuilder
@@ -26,7 +32,7 @@ struct SpaceIconView: View {
             dot
         case .emoji(let emoji):
             Text(emoji)
-                .font(.system(size: size * OrbitMetrics.spaceIconEmojiScaleFraction))
+                .font(.system(size: size * emojiScale))
                 .lineLimit(1)
                 .frame(width: size, height: size, alignment: .center)
         case .symbol(let symbol):
@@ -40,10 +46,10 @@ struct SpaceIconView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .fontWeight(.semibold)
-                    .foregroundStyle(foregroundColor)
+                    .foregroundStyle(glyphColor)
                     .frame(
-                        width: size * OrbitMetrics.spaceIconSymbolScaleFraction,
-                        height: size * OrbitMetrics.spaceIconSymbolScaleFraction
+                        width: size * symbolScale,
+                        height: size * symbolScale
                     )
                     // Every sibling case below frames itself to size x size; without this the glyph's own
                     // tight bounding box (which varies per symbol) becomes what the caller centers, not size.
@@ -66,7 +72,7 @@ struct SpaceIconView: View {
 
     private var dot: some View {
         Circle()
-            .fill(foregroundColor)
+            .fill(glyphColor)
             .frame(width: size * SpaceIconView.dotDiameterFraction, height: size * SpaceIconView.dotDiameterFraction)
     }
 

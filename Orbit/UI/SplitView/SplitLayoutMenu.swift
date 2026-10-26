@@ -152,23 +152,21 @@ enum SplitLayoutOption: Hashable, CaseIterable {
         env.createSplit(existingTabID: tab.id, newTabID: blankTabID, edge: edge)
     }
 
-    static func buildNSMenu(forPaneOf tab: Tab, in env: AppEnvironment) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
+    static func menuEntries(forPaneOf tab: Tab, in env: AppEnvironment) -> [OrbitContextMenuEntry] {
+        var entries: [OrbitContextMenuEntry] = []
         let axis = env.splitGroup(for: tab.id)?.axis
         for option in options(forPaneOf: tab, in: env) {
             if option.startsNewGroup {
-                menu.addItem(.separator())
+                entries.append(.divider())
             }
-            let title = option.title(inGroupWith: axis)
-            let item = ClosureMenuItem(title: title, enabled: isEnabled(option, forPaneOf: tab, in: env)) {
+            entries.append(.item(OrbitContextMenuItem(
+                title: option.title(inGroupWith: axis),
+                systemImage: option.symbolName(inGroupWith: axis),
+                isEnabled: isEnabled(option, forPaneOf: tab, in: env)
+            ) {
                 perform(option, forPaneOf: tab, in: env)
-            }
-            let image = NSImage(systemSymbolName: option.symbolName(inGroupWith: axis), accessibilityDescription: title)
-            image?.isTemplate = true
-            item.image = image
-            menu.addItem(item)
+            }))
         }
-        return menu
+        return entries
     }
 }

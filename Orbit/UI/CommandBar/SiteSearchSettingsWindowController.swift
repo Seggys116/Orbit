@@ -163,14 +163,13 @@ private struct SiteSearchSettingsRow: View {
                 .buttonStyle(.plain)
                 .orbitTooltip("Edit")
 
-                Menu {
-                    Button("Delete", role: .destructive, action: onDelete)
-                } label: {
+                OrbitMenuButton(entries: {
+                    [.item(OrbitContextMenuItem(title: "Delete", isDestructive: true, action: onDelete))]
+                }) {
                     Image(systemName: "ellipsis")
+                        .frame(width: 24)
+                        .contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: 24)
             }
             .foregroundStyle(.secondary)
             .frame(width: 64, alignment: .trailing)

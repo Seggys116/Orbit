@@ -1,5 +1,5 @@
 //  Regression guard: the split view button opened no dropdown. Drives SplitLayoutOption
-//  directly, and buildNSMenu's real NSMenuItem pairs, the way AppKit's own tracking loop does.
+//  directly, and menuEntries' actions.
 
 import Foundation
 import AppKit
@@ -196,7 +196,7 @@ final class SplitLayoutMenuTests: XCTestCase {
         XCTAssertEqual(SplitLayoutOption.flipToHorizontal.title(inGroupWith: .vertical), "Convert to Horizontal Split View")
     }
 
-    func test_buildNSMenu_forAStackedSplit_usesTheStackedWording() {
+    func test_menuEntries_forAStackedSplit_usesTheStackedWording() {
         let tabA = makeTab(url: "https://a.example.com")
         let tabB = makeTab(url: "https://b.example.com")
         defer { cleanup([tabA.id, tabB.id]) }
@@ -206,14 +206,14 @@ final class SplitLayoutMenuTests: XCTestCase {
         }
         defer { env.store.dissolveSplit(groupID) }
 
-        let titles = SplitLayoutOption.buildNSMenu(forPaneOf: tabA, in: env).items.map(\.title)
+        let titles = SplitLayoutOption.menuEntries(forPaneOf: tabA, in: env).flattenedItems.map(\.title)
 
         XCTAssertTrue(titles.contains("Move Up"), "A stacked split must not offer \"Move Left\"; it had: \(titles)")
         XCTAssertTrue(titles.contains("Add Bottom Split"), "…nor \"Add Right Split\"; it had: \(titles)")
         XCTAssertTrue(titles.contains("Convert to Horizontal Split View"))
     }
 
-    func test_buildNSMenu_everyItemCarriesARealSymbolImage() {
+    func test_menuEntries_everyItemCarriesARealSymbolImage() {
         let tabA = makeTab(url: "https://a.example.com")
         let tabB = makeTab(url: "https://b.example.com")
         defer { cleanup([tabA.id, tabB.id]) }
@@ -225,17 +225,23 @@ final class SplitLayoutMenuTests: XCTestCase {
 
         for (axis, label) in [(SplitGroup.Axis.horizontal, "side-by-side"), (.vertical, "stacked")] {
             env.setSplitAxis(axis, forGroup: groupID)
-            let menu = SplitLayoutOption.buildNSMenu(forPaneOf: tabA, in: env)
-            for item in menu.items where !item.isSeparatorItem {
-                XCTAssertNotNil(item.image, "\"\(item.title)\" (\(label)) has no icon — its SF Symbol name does not resolve on this OS.")
-                XCTAssertTrue(item.image?.isTemplate ?? false, "\"\(item.title)\" (\(label))'s icon must be a template so it greys out with its title.")
+            let items = SplitLayoutOption.menuEntries(forPaneOf: tabA, in: env).flattenedItems
+            for item in items {
+                let symbol = item.systemImage ?? ""
+                XCTAssertNotNil(
+                    NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
+                    "\"\(item.title)\" (\(label)) has no icon — its SF Symbol name does not resolve on this OS."
+                )
             }
         }
 
         let lone = makeTab(url: "https://lone.example.com")
         defer { cleanup([lone.id]) }
-        for item in SplitLayoutOption.buildNSMenu(forPaneOf: lone, in: env).items where !item.isSeparatorItem {
-            XCTAssertNotNil(item.image, "\"\(item.title)\" has no icon.")
+        for item in SplitLayoutOption.menuEntries(forPaneOf: lone, in: env).flattenedItems {
+            XCTAssertNotNil(
+                NSImage(systemSymbolName: item.systemImage ?? "", accessibilityDescription: nil),
+                "\"\(item.title)\" has no icon."
+            )
         }
     }
 
@@ -354,16 +360,16 @@ final class SplitLayoutMenuTests: XCTestCase {
         }
         defer { env.store.dissolveSplit(groupID) }
 
-        let menu = SplitLayoutOption.buildNSMenu(forPaneOf: tabA, in: env)
-        guard let item = menu.items.first(where: { $0.title == SplitLayoutOption.flipToVertical.title(inGroupWith: .horizontal) }) else {
-            XCTFail("The Split View menu must carry a flip item; it had: \(menu.items.map(\.title))")
+        let entries = SplitLayoutOption.menuEntries(forPaneOf: tabA, in: env)
+        guard let item = entries.first(titled: SplitLayoutOption.flipToVertical.title(inGroupWith: .horizontal)) else {
+            XCTFail("The Split View menu must carry a flip item; it had: \(entries.flattenedItems.map(\.title))")
             return
         }
-        guard let action = item.action, let target = item.target else {
-            XCTFail("The flip menu item has no target/action pair, so clicking it would do nothing.")
+        guard let action = item.action else {
+            XCTFail("The flip menu item has no action, so clicking it would do nothing.")
             return
         }
-        _ = target.perform(action, with: item)
+        action()
 
         XCTAssertEqual(env.splitGroup(for: tabA.id)?.axis, .vertical)
     }
@@ -529,28 +535,35 @@ final class SplitLayoutMenuTests: XCTestCase {
         XCTAssertNotNil(env.tab(tabA.id), "The former sibling must survive as an ordinary tab — this is \"Separate All Tabs\", not \"close the others\".")
     }
 
-    // MARK: - The real NSMenu a click presents
+    // MARK: - The entries a click presents
 
-    private func invoke(_ item: NSMenuItem) {
-        guard let target = item.target, let action = item.action else {
-            XCTFail("Menu item \"\(item.title)\" has no target/action wired — a real click could never invoke it.")
+    private func invoke(_ item: OrbitContextMenuItem) {
+        guard let action = item.action else {
+            XCTFail("Menu item \"\(item.title)\" has no action wired — a real click could never invoke it.")
             return
         }
-        _ = target.perform(action, with: item)
+        action()
     }
 
-    func test_buildNSMenu_itemTitles_matchOptionsExactly() {
+    private func titlesWithDividers(_ entries: [OrbitContextMenuEntry]) -> [String] {
+        entries.map { entry in
+            if case .item(let item) = entry { return item.title }
+            return ""
+        }
+    }
+
+    func test_menuEntries_itemTitles_matchOptionsExactly() {
         let tab = makeTab()
         defer { cleanup([tab.id]) }
 
-        let menu = SplitLayoutOption.buildNSMenu(forPaneOf: tab, in: env)
+        let entries = SplitLayoutOption.menuEntries(forPaneOf: tab, in: env)
         let axis = env.splitGroup(for: tab.id)?.axis
         let expected = SplitLayoutOption.options(forPaneOf: tab, in: env).map { $0.title(inGroupWith: axis) }
 
-        XCTAssertEqual(menu.items.map(\.title), expected)
+        XCTAssertEqual(entries.flattenedItems.map(\.title), expected)
     }
 
-    func test_buildNSMenu_dividersAndOrderMatchArcsOwnCapture() {
+    func test_menuEntries_dividersAndOrderMatchArcsOwnCapture() {
         let tabA = makeTab(url: "https://a.example.com")
         let tabB = makeTab(url: "https://b.example.com")
         defer { cleanup([tabA.id, tabB.id]) }
@@ -560,9 +573,9 @@ final class SplitLayoutMenuTests: XCTestCase {
         }
         defer { env.store.dissolveSplit(groupID) }
 
-        let menu = SplitLayoutOption.buildNSMenu(forPaneOf: tabA, in: env)
+        let entries = SplitLayoutOption.menuEntries(forPaneOf: tabA, in: env)
 
-        XCTAssertEqual(menu.items.map(\.title), [
+        XCTAssertEqual(titlesWithDividers(entries), [
             "Move Left",
             "Move Right",
             "",                                 // separator
@@ -577,18 +590,18 @@ final class SplitLayoutMenuTests: XCTestCase {
             "Share Split View…",
         ])
         for index in [2, 5, 10] {
-            XCTAssertTrue(menu.items[index].isSeparatorItem, "Expected a real NSMenuItem.separator() at index \(index).")
+            guard case .divider = entries[index] else {
+                XCTFail("Expected a divider at index \(index).")
+                continue
+            }
         }
     }
 
-    func test_buildNSMenu_everyRealItem_hasAWorkingTargetActionPair() {
+    func test_menuEntries_everyRealItem_hasAnAction() {
         let tab = makeTab()
         defer { cleanup([tab.id]) }
 
-        let menu = SplitLayoutOption.buildNSMenu(forPaneOf: tab, in: env)
-
-        for item in menu.items where !item.isSeparatorItem {
-            XCTAssertNotNil(item.target, "\"\(item.title)\" has no target.")
+        for item in SplitLayoutOption.menuEntries(forPaneOf: tab, in: env).flattenedItems {
             XCTAssertNotNil(item.action, "\"\(item.title)\" has no action.")
         }
     }
@@ -604,8 +617,8 @@ final class SplitLayoutMenuTests: XCTestCase {
             }
         }
 
-        let menu = SplitLayoutOption.buildNSMenu(forPaneOf: tab, in: env)
-        guard let splitRightItem = menu.items.first(where: { $0.title == "Split Right" }) else {
+        let entries = SplitLayoutOption.menuEntries(forPaneOf: tab, in: env)
+        guard let splitRightItem = entries.first(titled: "Split Right") else {
             XCTFail("Expected a \"Split Right\" item in the real menu.")
             return
         }
@@ -613,7 +626,7 @@ final class SplitLayoutMenuTests: XCTestCase {
         invoke(splitRightItem)
 
         guard let group = env.splitGroup(for: tab.id) else {
-            XCTFail("Invoking the real \"Split Right\" NSMenuItem did not create a split group.")
+            XCTFail("Invoking the real \"Split Right\" menu item did not create a split group.")
             return
         }
         XCTAssertEqual(group.tabIDs.count, 2)
@@ -631,15 +644,15 @@ final class SplitLayoutMenuTests: XCTestCase {
         }
         XCTAssertNotNil(env.splitGroup(for: tabA.id), "test precondition: actually split")
 
-        let menu = SplitLayoutOption.buildNSMenu(forPaneOf: tabA, in: env)
-        guard let separateItem = menu.items.first(where: { $0.title == "Separate All Tabs" }) else {
+        let entries = SplitLayoutOption.menuEntries(forPaneOf: tabA, in: env)
+        guard let separateItem = entries.first(titled: "Separate All Tabs") else {
             XCTFail("Expected a \"Separate All Tabs\" item in the real menu.")
             return
         }
 
         invoke(separateItem)
 
-        XCTAssertNil(env.splitGroup(for: tabA.id), "Invoking the real \"Separate All Tabs\" NSMenuItem must dissolve the group.")
+        XCTAssertNil(env.splitGroup(for: tabA.id), "Invoking the real \"Separate All Tabs\" menu item must dissolve the group.")
         XCTAssertNil(env.splitGroup(for: tabB.id))
         XCTAssertNotNil(env.tab(tabA.id), "\"Separate\", not \"close\" — the tab must survive.")
         XCTAssertNotNil(env.tab(tabB.id))

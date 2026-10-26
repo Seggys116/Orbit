@@ -2,8 +2,7 @@ import AppKit
 import SwiftUI
 
 // NSMenu.autoenablesItems defaults true and silently re-enables items without validateMenuItem(_:).
-// Still used by SiteControlPopoverView's permission (Allow/Block/Ask) dropdown -- an NSMenu-backed
-// picker, not the page context menu below.
+// Used by the main menu and its Import submenu.
 final class ClosureMenuItem: NSMenuItem, NSMenuItemValidation {
     private let handler: () -> Void
 

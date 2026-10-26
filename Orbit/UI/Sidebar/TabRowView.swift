@@ -51,7 +51,7 @@ enum TabRowTrailingAction: Equatable {
 
     var help: String {
         switch self {
-        case .closeTabKeepingBookmark: return "Close Tab — keeps the bookmark"
+        case .closeTabKeepingBookmark: return "Close Tab (keeps the bookmark)"
         case .removeBookmark: return "Remove Bookmark"
         case .closeTab: return "Close Tab"
         }
@@ -299,7 +299,7 @@ private struct TabRowChrome: View, Equatable {
             isHovering = hovering
             handleHoverPreview(hovering)
         }
-        .contextMenu { TabContextMenu(tab: tab, onRename: renameAction) }
+        .orbitRightClickMenu { TabContextMenu(env: env, tab: tab, onRename: renameAction).entries }
         // orbitHoverPopover, not .popover: a plain SwiftUI .popover is .transient and installs an event monitor that eats the very next mouse-down outside it, which would eat the click that follows a dwell-triggered preview.
         .orbitHoverPopover(isPresented: $showPreview, preferredEdge: .maxX) {
             if let previewImage {
@@ -406,7 +406,7 @@ private struct TabRowChrome: View, Equatable {
 
     private var faviconHint: String {
         guard hasNavigatedAwayFromPinnedURL else { return "" }
-        return "Reset to \(pinnedOriginName) — hold Command to also open this page in a new tab"
+        return "Reset to \(pinnedOriginName). Hold Command to open this page in a new tab."
     }
 
     private var favicon: some View {
@@ -480,6 +480,7 @@ private struct TabRowChrome: View, Equatable {
             )
             .lineLimit(1)
             .truncationMode(.tail)
+            .orbitTooltip(tab.displayTitle)
     }
 
     private func beginRename() {
@@ -488,9 +489,16 @@ private struct TabRowChrome: View, Equatable {
         DispatchQueue.main.async { titleFieldFocused = true }
     }
 
+    private var isVisibleInContent: Bool {
+        if tab.id == env.activeTabID { return true }
+        guard let active = env.activeTabID, let group = env.splitGroup(for: active) else { return false }
+        return group.tabIDs.contains(tab.id)
+    }
+
     private func handleHoverPreview(_ hovering: Bool) {
         previewTask?.cancel()
         guard hovering,
+              !isVisibleInContent,
               TabRowView.shouldAttemptHoverPreview(section: tab.section),
               SidebarRecentPagesPreviewController.service(for: tab) == nil,
               let contents else {
@@ -525,21 +533,26 @@ private struct TabRowChrome: View, Equatable {
     }
 }
 
-struct TabContextMenu: View {
-    @Environment(AppEnvironment.self) private var env
+@MainActor
+struct TabContextMenu {
+    var env: AppEnvironment
     var tab: Tab
 
     var onRename: (() -> Void)?
 
-    var body: some View {
+    var entries: [OrbitContextMenuEntry] {
+        var entries: [OrbitContextMenuEntry] = []
         if let onRename {
-            Button("Rename Tab", action: onRename)
-            Divider()
+            entries.append(.item(OrbitContextMenuItem(title: "Rename Tab", systemImage: "pencil", action: onRename)))
+            entries.append(.divider())
         }
-        Button(tab.section == .pinned ? "Unpin Tab" : "Pin Tab") {
+        entries.append(.item(OrbitContextMenuItem(
+            title: tab.section == .pinned ? "Unpin Tab" : "Pin Tab",
+            systemImage: tab.section == .pinned ? "pin.slash" : "pin"
+        ) {
             env.togglePin(tab.id)
-        }
-        Button("Add to Favorites") {
+        }))
+        entries.append(.item(OrbitContextMenuItem(title: "Add to Favorites", systemImage: "star") {
             // Must read the outcome, not discard it: an already-favourited tab or a Space at capacity needs to say why, not silently do nothing.
             guard let outcome = env.promoteTabToFavorite(tab.id) else { return }
             switch outcome {
@@ -550,47 +563,70 @@ struct TabContextMenu: View {
             case .atCapacity:
                 FavoritesToastPresenter.shared.announceAtCapacity()
             }
-        }
+        }))
         if tab.section == .pinned {
-            Menu("Edit Pinned Page") {
-                Button("Replace Pinned URL with Current") { env.replacePinnedURLWithCurrent(tab.id) }
-                Button("Edit...") { promptToEditPinnedURL() }
-            }
+            entries.append(.item(OrbitContextMenuItem(title: "Edit Pinned Page", systemImage: "link", submenu: [
+                .item(OrbitContextMenuItem(title: "Replace Pinned URL with Current", systemImage: "arrow.triangle.2.circlepath") {
+                    env.replacePinnedURLWithCurrent(tab.id)
+                }),
+                .item(OrbitContextMenuItem(title: "Edit...", systemImage: "pencil") {
+                    Task { @MainActor in promptToEditPinnedURL() }
+                }),
+            ])))
         }
-        Divider()
-        Menu("Add Split View") {
-            Button("Split Right") { splitWithNewTab(edge: .right) }
-            Button("Split Left") { splitWithNewTab(edge: .left) }
-            Button("Split Up") { splitWithNewTab(edge: .top) }
-            Button("Split Down") { splitWithNewTab(edge: .bottom) }
-        }
+        entries.append(.divider())
+        entries.append(.item(OrbitContextMenuItem(title: "Add Split View", systemImage: "rectangle.split.2x1", submenu: [
+            .item(OrbitContextMenuItem(title: "Split Right", systemImage: "rectangle.righthalf.inset.filled") { splitWithNewTab(edge: .right) }),
+            .item(OrbitContextMenuItem(title: "Split Left", systemImage: "rectangle.lefthalf.inset.filled") { splitWithNewTab(edge: .left) }),
+            .item(OrbitContextMenuItem(title: "Split Up", systemImage: "rectangle.tophalf.inset.filled") { splitWithNewTab(edge: .top) }),
+            .item(OrbitContextMenuItem(title: "Split Down", systemImage: "rectangle.bottomhalf.inset.filled") { splitWithNewTab(edge: .bottom) }),
+        ])))
         if env.splitGroup(for: tab.id) != nil {
-            Button("Separate All Tabs") {
+            entries.append(.item(OrbitContextMenuItem(title: "Separate All Tabs", systemImage: "rectangle.split.2x1.slash") {
                 if let groupID = env.splitGroup(for: tab.id)?.id { env.separateAllTabs(groupID) }
-            }
+            }))
         }
-        Divider()
-        MoveTabToSpaceMenu(tabID: tab.id, currentSection: tab.section)
-        Button(tab.isMuted ? "Unmute Tab" : "Mute Tab") { env.muteTab(tab.id, muted: !tab.isMuted) }
-        Divider()
-        Button("Copy URL") {
+        entries.append(.divider())
+        entries.append(MoveTabToSpaceMenu.entry(tabID: tab.id, in: env))
+        entries.append(.item(OrbitContextMenuItem(
+            title: tab.isMuted ? "Unmute Tab" : "Mute Tab",
+            systemImage: tab.isMuted ? "speaker.wave.2" : "speaker.slash"
+        ) {
+            env.muteTab(tab.id, muted: !tab.isMuted)
+        }))
+        entries.append(.divider())
+        entries.append(.item(OrbitContextMenuItem(title: "Copy URL", systemImage: "doc.on.doc") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(tab.url.absoluteString, forType: .string)
-        }
-        Divider()
+        }))
+        entries.append(.divider())
         if tab.section == .archived {
-            Button("Restore Tab") { env.restoreFromArchive(tab.id) }
+            entries.append(.item(OrbitContextMenuItem(title: "Restore Tab", systemImage: "arrow.uturn.backward") {
+                env.restoreFromArchive(tab.id)
+            }))
         } else {
-            Button("Archive Tab") { env.archiveTab(tab.id) }
+            entries.append(.item(OrbitContextMenuItem(title: "Archive Tab", systemImage: "archivebox") {
+                env.archiveTab(tab.id)
+            }))
         }
         if tab.section == .pinned {
             // "Close Tab" is absent on a pinned row on purpose: closeTab(_:) on a pinned tab is already an unpin, offered here by its own name as "Unpin Tab" above.
-            Button("Close Tab (Keep Bookmark)") { env.closeTabKeepingBookmark(tab.id) }
-                .disabled(!env.isTabOpen(tab.id))
-            Button("Remove Bookmark", role: .destructive) { env.removeBookmark(tab.id) }
+            entries.append(.item(OrbitContextMenuItem(
+                title: "Close Tab (Keep Bookmark)",
+                systemImage: "xmark",
+                isEnabled: env.isTabOpen(tab.id)
+            ) {
+                env.closeTabKeepingBookmark(tab.id)
+            }))
+            entries.append(.item(OrbitContextMenuItem(title: "Remove Bookmark", systemImage: "bookmark.slash", isDestructive: true) {
+                env.removeBookmark(tab.id)
+            }))
         } else {
-            Button("Close Tab", role: .destructive) { env.closeTab(tab.id) }
+            entries.append(.item(OrbitContextMenuItem(title: "Close Tab", systemImage: "xmark", isDestructive: true) {
+                env.closeTab(tab.id)
+            }))
         }
+        return entries
     }
 
     // NSAlert with an accessory NSTextField, not a SwiftUI sheet: a context-menu action runs after the menu tears down, with no view left to attach a sheet/alert to.
@@ -670,7 +706,7 @@ struct PinnedFolderRowView: View {
                         .foregroundStyle(theme.readableForeground)
                         .lineLimit(1)
                 }
-                .orbitTooltip("Click to collapse/expand — double-click to rename")
+                .orbitTooltip("Click to collapse or expand. Double-click to rename.")
             }
 
             Spacer(minLength: 4)
@@ -706,23 +742,39 @@ struct PinnedFolderRowView: View {
         .onChange(of: folder.isExpanded) { _, expanded in
             if expanded { showPreview = false }
         }
-        .contextMenu {
-            Button("Change Icon…") { promptToChangeIcon() }
-            if folder.icon != nil {
-                Button("Reset to Default Icon") {
-                    env.setFolderIcon(nil, isEmoji: false, forFolder: folder.id, in: spaceID)
-                }
-            }
-            Button("Rename Folder") { beginRename() }
-            Button(folder.isExpanded ? "Collapse" : "Expand") { env.toggleFolderExpanded(folder.id, in: spaceID) }
-            Button("New Folder Inside") {
-                env.createFolder(name: "New Folder", in: spaceID, parent: folder.id)
-                if !folder.isExpanded { env.toggleFolderExpanded(folder.id, in: spaceID) }
-            }
-            Divider()
-            Button("Ungroup (Keep Tabs)") { env.deleteFolder(folder.id, in: spaceID, keepingChildren: true) }
-            Button("Delete Folder and Tabs", role: .destructive) { env.deleteFolder(folder.id, in: spaceID, keepingChildren: false) }
+        .orbitRightClickMenu { folderMenuEntries }
+    }
+
+    private var folderMenuEntries: [OrbitContextMenuEntry] {
+        var entries: [OrbitContextMenuEntry] = [
+            .item(OrbitContextMenuItem(title: "Change Icon…", systemImage: "face.smiling") {
+                Task { @MainActor in promptToChangeIcon() }
+            }),
+        ]
+        if folder.icon != nil {
+            entries.append(.item(OrbitContextMenuItem(title: "Reset to Default Icon", systemImage: "arrow.counterclockwise") {
+                env.setFolderIcon(nil, isEmoji: false, forFolder: folder.id, in: spaceID)
+            }))
         }
+        entries.append(.item(OrbitContextMenuItem(title: "Rename Folder", systemImage: "pencil") { beginRename() }))
+        entries.append(.item(OrbitContextMenuItem(
+            title: folder.isExpanded ? "Collapse" : "Expand",
+            systemImage: folder.isExpanded ? "chevron.down" : "chevron.right"
+        ) {
+            env.toggleFolderExpanded(folder.id, in: spaceID)
+        }))
+        entries.append(.item(OrbitContextMenuItem(title: "New Folder Inside", systemImage: "folder.badge.plus") {
+            env.createFolder(name: "New Folder", in: spaceID, parent: folder.id)
+            if !folder.isExpanded { env.toggleFolderExpanded(folder.id, in: spaceID) }
+        }))
+        entries.append(.divider())
+        entries.append(.item(OrbitContextMenuItem(title: "Ungroup (Keep Tabs)", systemImage: "rectangle.stack.badge.minus") {
+            env.deleteFolder(folder.id, in: spaceID, keepingChildren: true)
+        }))
+        entries.append(.item(OrbitContextMenuItem(title: "Delete Folder and Tabs", systemImage: "trash", isDestructive: true) {
+            env.deleteFolder(folder.id, in: spaceID, keepingChildren: false)
+        }))
+        return entries
     }
 
     @ViewBuilder

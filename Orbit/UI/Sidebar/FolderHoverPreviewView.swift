@@ -72,10 +72,9 @@ struct FolderHoverPreviewRow: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture { onSelect(item.tabID) }
-        .contextMenu {
-            if let tab = env.tab(item.tabID) {
-                TabContextMenu(tab: tab)
-            }
+        .orbitRightClickMenu {
+            guard let tab = env.tab(item.tabID) else { return [] }
+            return TabContextMenu(env: env, tab: tab).entries
         }
     }
 

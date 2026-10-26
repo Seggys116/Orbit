@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 
 enum OrbitMetrics {
@@ -128,10 +129,10 @@ enum OrbitMetrics {
     // MARK: Space pager (SpaceSwitcherPagerView)
 
     static let spacePagerDotSize: CGFloat = sidebarBottomBarIconSize
-    static let spacePagerDotSpacing: CGFloat = 10
-    static let spacePagerContainerPadding: CGFloat = 4
-    static let spacePagerActiveOpacity: Double = 1
-    static let spacePagerInactiveOpacity: Double = 0.55
+    static let spacePagerDotSpacing: CGFloat = 2
+    static let spacePagerContainerPadding: CGFloat = 2
+    static let spacePagerInactiveOpacity: Double = 0.72
+    static let spacePagerInactiveBrightnessDrop: Double = 0.35
 
     static let spacePagerMinimumSizeScale: CGFloat = 0.6
 
@@ -251,10 +252,9 @@ enum OrbitMetrics {
     // Close to a pill against a 32pt row -- a selected row must never read as
     // a squared-off system selection bar.
     static let contextMenuRowCornerRadius: CGFloat = 11
-    static let contextMenuRowHorizontalPadding: CGFloat = 12
-    // The visible gutter between the highlight and the container edge.
-    static let contextMenuRowHorizontalInset: CGFloat = 8
-    static let contextMenuVerticalPadding: CGFloat = 7
+    static let contextMenuRowHorizontalPadding: CGFloat = 8
+    static let contextMenuRowHorizontalInset: CGFloat = 6
+    static let contextMenuVerticalPadding: CGFloat = contextMenuRowHorizontalInset
     static let contextMenuIconSize: CGFloat = 13
     static let contextMenuIconToTitleGap: CGFloat = 8
     static let contextMenuFontSize: CGFloat = 13
@@ -284,6 +284,72 @@ enum OrbitMetrics {
     static let contextMenuAnchorGap: CGFloat = 5
     static let contextMenuScreenEdgeInset: CGFloat = 8
     static let contextMenuSubmenuOverlap: CGFloat = 4
+}
+
+@MainActor
+@Observable
+final class BorderlessSettings {
+
+    #if DEBUG
+    static var shared = BorderlessSettings()
+    #else
+    static let shared = BorderlessSettings()
+    #endif
+
+    static let defaultsKey = "OrbitBorderlessWindow"
+
+    @ObservationIgnored private let defaults: UserDefaults
+
+    var isEnabled: Bool {
+        didSet {
+            guard isEnabled != oldValue else { return }
+            defaults.set(isEnabled, forKey: Self.defaultsKey)
+        }
+    }
+
+    init(defaults: UserDefaults = OrbitDefaults.standard) {
+        self.defaults = defaults
+        self.isEnabled = (defaults.object(forKey: Self.defaultsKey) as? Bool) ?? false
+    }
+
+    var cardInset: CGFloat { isEnabled ? 0 : OrbitMetrics.cardInset }
+
+    var cardCornerRadius: CGFloat { OrbitMetrics.cardCornerRadius }
+
+    // Card edges that run flush against the window edge; the window's own mask rounds those corners.
+    func flushEdges(isSidebarVisible: Bool) -> Edge.Set {
+        guard isEnabled else { return [] }
+        return isSidebarVisible ? [.top, .bottom, .trailing] : .all
+    }
+
+    static func cardCornerRadii(flushEdges: Edge.Set) -> RectangleCornerRadii {
+        let radius = OrbitMetrics.cardCornerRadius
+        func corner(_ a: Edge.Set, _ b: Edge.Set) -> CGFloat {
+            flushEdges.contains(a) && flushEdges.contains(b) ? 0 : radius
+        }
+        return RectangleCornerRadii(
+            topLeading: corner(.top, .leading),
+            bottomLeading: corner(.bottom, .leading),
+            bottomTrailing: corner(.bottom, .trailing),
+            topTrailing: corner(.top, .trailing)
+        )
+    }
+
+    func contentCardLeadingInset(isSidebarVisible: Bool) -> CGFloat {
+        if isEnabled { return isSidebarVisible ? -OrbitMetrics.sidebarResizeHandleWidth : 0 }
+        return isSidebarVisible ? OrbitMetrics.contentCardLeadingSeam : OrbitMetrics.cardInset
+    }
+}
+
+private struct PaneCardFlushEdgesKey: EnvironmentKey {
+    static let defaultValue: Edge.Set = []
+}
+
+extension EnvironmentValues {
+    var paneCardFlushEdges: Edge.Set {
+        get { self[PaneCardFlushEdgesKey.self] }
+        set { self[PaneCardFlushEdgesKey.self] = newValue }
+    }
 }
 
 enum OrbitMotion {

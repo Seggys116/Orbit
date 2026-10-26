@@ -35,7 +35,8 @@ struct OrbitToggle: View {
             )
         }
         .buttonStyle(.plain)
-        .focusable(true)
+        // Not .focusable(true): it forces the key-view loop and draws the system ring over the custom one.
+        .focusEffectDisabled()
         .focused($isFocused)
         .opacity(isEnabled ? 1 : OrbitControlMetrics.buttonDisabledOpacity)
         .accessibilityLabel(accessibilityLabel)

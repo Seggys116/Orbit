@@ -38,6 +38,7 @@ struct ThemeBackgroundView: View {
     var blur: Double = 0 // 0...1 gradient softness, from the theme editor's blur slider
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var displayedTheme: SpaceTheme
     @State private var previousTheme: SpaceTheme?
     @State private var crossfadeProgress: Double = 1
@@ -50,17 +51,24 @@ struct ThemeBackgroundView: View {
 
     var body: some View {
         ZStack {
+            // The outgoing layer stays opaque under the incoming one: fading both would dip coverage mid-crossfade.
             if let previousTheme, crossfadeProgress < 0.999 {
-                layer(for: previousTheme).opacity(1 - crossfadeProgress)
+                layer(for: previousTheme)
             }
             layer(for: displayedTheme).opacity(crossfadeProgress)
         }
+        .animation(OrbitThemeMotion.animation(reduceMotion: reduceMotion, token: OrbitMotion.quick), value: blur)
         .ignoresSafeArea()
         .onChange(of: theme) { oldValue, newValue in
             previousTheme = oldValue
             displayedTheme = newValue
+            guard let animation = OrbitThemeMotion.animation(reduceMotion: reduceMotion) else {
+                previousTheme = nil
+                crossfadeProgress = 1
+                return
+            }
             crossfadeProgress = 0
-            withAnimation(OrbitMotion.dramatic) { crossfadeProgress = 1 }
+            withAnimation(animation) { crossfadeProgress = 1 }
         }
         #if DEBUG
         .onAppear { ThemeSelfCheck.runOnce() }
@@ -283,6 +291,92 @@ extension Color {
             Double(rgb.alphaComponent)
         )
     }
+}
+
+
+private struct OrbitSpaceThemeKey: EnvironmentKey {
+    static let defaultValue: SpaceTheme? = nil
+}
+
+private struct OrbitControlPressedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var orbitSpaceTheme: SpaceTheme? {
+        get { self[OrbitSpaceThemeKey.self] }
+        set { self[OrbitSpaceThemeKey.self] = newValue }
+    }
+
+    var orbitControlPressed: Bool {
+        get { self[OrbitControlPressedKey.self] }
+        set { self[OrbitControlPressedKey.self] = newValue }
+    }
+}
+
+struct SpaceThemeChrome: Equatable {
+    var foreground: Color
+    var secondaryForeground: Color
+    var restFill: Color
+    var hoverFill: Color
+    var pressedFill: Color
+    var border: Color
+    var divider: Color
+    var surface: Color
+    var accent: Color
+    var accentContrast: Color
+    var disabledOpacity: Double
+
+    static let pressedFillMultiplier: Double = 1.6
+
+    init(theme: SpaceTheme, colorScheme: ColorScheme) {
+        let readable = theme.readableForeground
+        foreground = readable
+        secondaryForeground = theme.readableSecondaryForeground
+        restFill = readable.opacity(OrbitMetrics.sidebarActiveRowOpacity)
+        hoverFill = readable.opacity(OrbitMetrics.miniPlayerSurfaceOpacity)
+        pressedFill = readable.opacity(OrbitMetrics.miniPlayerSurfaceOpacity * Self.pressedFillMultiplier)
+        border = readable.opacity(OrbitMetrics.cardBorderOpacity)
+        divider = readable.opacity(OrbitMetrics.sidebarDividerOpacity)
+        let base = (theme.adaptedColors(for: colorScheme).first ?? Color(theme.primary.nsColor)).srgbComponents
+        let opaqueSurface = Color(.sRGB, red: base.red, green: base.green, blue: base.blue, opacity: 1)
+        surface = opaqueSurface
+        accent = theme.isDarkSurface ? Color.white : Color.black
+        accentContrast = opaqueSurface
+        disabledOpacity = OrbitMetrics.contextMenuDisabledOpacity
+    }
+}
+
+enum OrbitThemeMotion {
+    /// nil under Reduce Motion, so a theme change snaps instead of crossfading.
+    static func animation(reduceMotion: Bool, token: Animation = OrbitMotion.dramatic) -> Animation? {
+        reduceMotion ? nil : token
+    }
+}
+
+private struct OrbitThemeAnimationModifier<Value: Equatable>: ViewModifier {
+    var value: Value
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(OrbitThemeMotion.animation(reduceMotion: reduceMotion), value: value)
+    }
+}
+
+extension View {
+    func orbitThemeAnimation<Value: Equatable>(value: Value) -> some View {
+        modifier(OrbitThemeAnimationModifier(value: value))
+    }
+}
+
+@MainActor
+final class OrbitMenuThemeSource {
+    static let shared = OrbitMenuThemeSource()
+    private init() {}
+
+    var provider: (() -> SpaceTheme?)?
+
+    var theme: SpaceTheme? { provider?() }
 }
 
 // Tiny deterministic RNG so mesh jitter is stable per-theme.

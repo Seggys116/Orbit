@@ -7,16 +7,22 @@ import OSLog
 struct PaneCardChrome: ViewModifier {
     var isFocused: Bool
 
+    @Environment(\.paneCardFlushEdges) private var flushEdges
+
     func body(content: Content) -> some View {
+        let settings = BorderlessSettings.shared
+        let shape = UnevenRoundedRectangle(cornerRadii: BorderlessSettings.cardCornerRadii(flushEdges: flushEdges), style: .continuous)
         content
-            .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.cardCornerRadius, style: .continuous))
+            .clipShape(shape)
             .overlay(alignment: .center) {
-                RoundedRectangle(cornerRadius: OrbitMetrics.cardCornerRadius, style: .continuous)
-                    .strokeBorder(
-                        isFocused ? Color.accentColor.opacity(0.75) : Color.white.opacity(OrbitMetrics.cardBorderOpacity),
-                        lineWidth: isFocused ? 2 : OrbitMetrics.cardBorderWidth
-                    )
-                    .allowsHitTesting(false)
+                if !settings.isEnabled || isFocused {
+                    shape
+                        .strokeBorder(
+                            isFocused ? Color.accentColor.opacity(0.75) : Color.white.opacity(OrbitMetrics.cardBorderOpacity),
+                            lineWidth: isFocused ? 2 : OrbitMetrics.cardBorderWidth
+                        )
+                        .allowsHitTesting(false)
+                }
             }
     }
 }
@@ -142,6 +148,7 @@ struct ContentCardView: View {
 
 struct SingleTabContentView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.paneCardFlushEdges) private var flushEdges
     var tab: Tab
     var isFocusedPane: Bool = false
 
@@ -157,6 +164,11 @@ struct SingleTabContentView: View {
             paneContent
         }
         .paneCardChrome(isFocused: isInSplit && isFocusedPane)
+        .overlay {
+            if let zone = env.activeSplitDropZone, zone.targetTabID == tab.id {
+                SplitDropHighlight(edge: zone.edge)
+            }
+        }
         .overlay {
             if let preview = PeekState.shared.activePreview, preview.sourceTabID == tab.id {
                 peekOverlay(preview)
@@ -201,7 +213,7 @@ struct SingleTabContentView: View {
                 panel
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.cardCornerRadius, style: .continuous))
+        .clipShape(UnevenRoundedRectangle(cornerRadii: BorderlessSettings.cardCornerRadii(flushEdges: flushEdges), style: .continuous))
         .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .center)))
     }
 
@@ -251,15 +263,10 @@ struct SingleTabContentView: View {
 }
 
 struct NewTabPlaceholder: View {
-    @Environment(AppEnvironment.self) private var env
     var tab: Tab?
 
     var body: some View {
-        Color(nsColor: .textBackgroundColor)
-            .task(id: tab?.id) {
-                guard let tab else { return }
-                env.presentBlankPaneCommandBar(tab.id)
-            }
+        NewTabPageView(tab: tab)
     }
 }
 
@@ -310,136 +317,55 @@ struct SplitDropZoneOverlay: View {
         #endif
     }
 
+    // The drop is an AppKit destination above the web view: a SwiftUI .onDrop loses the mouse-up to WebKit.
     private var realBody: some View {
         GeometryReader { proxy in
-            ZStack {
-                // Equatable and blind to the highlight. Writing the highlight
-                // used to rebuild this drop target mid-drag, so the release
-                // never arrived and the pink preview stayed on the page.
-                SplitDropCatcher(
-                    size: proxy.size,
-                    targetTabID: env.activeTabID,
-                    isAtPaneLimit: isAtPaneLimit,
-                    allowedOrientation: allowedOrientation
-                )
-                .equatable()
-
-                if let zone = env.activeSplitDropZone {
-                    highlight(for: zone.edge, size: proxy.size)
+            Color.clear
+                .onChange(of: env.activeSplitDropZone != nil) { _, showing in
+                    if showing {
+                        SplitDropHighlightWatch.arm { env.activeSplitDropZone = nil }
+                    }
                 }
-            }
-            .animation(OrbitMotion.quick, value: env.activeSplitDropZone)
-            .onChange(of: env.activeSplitDropZone != nil) { _, showing in
-                if showing {
-                    SplitDropHighlightWatch.arm { env.activeSplitDropZone = nil }
+                .onDisappear { SplitDropHighlightWatch.disarm() }
+                .onChange(of: proxy.size, initial: true) { _, size in
+                    guard env.contentAreaSize != size else { return }
+                    env.contentAreaSize = size
                 }
-            }
-            .onDisappear { SplitDropHighlightWatch.disarm() }
-            .onChange(of: proxy.size, initial: true) { _, size in
-                guard env.contentAreaSize != size else { return }
-                env.contentAreaSize = size
-            }
         }
-        .allowsHitTesting(env.activeTabID != nil)
+        .allowsHitTesting(false)
     }
+}
 
-    private var activeGroup: SplitGroup? { env.activeSplitGroup }
+struct SplitDropHighlight: View {
+    var edge: SplitEdge
 
-    private var allowedOrientation: SplitOrientation? { activeGroup?.axis }
-
-    private var isAtPaneLimit: Bool {
-        guard let activeGroup else { return false }
-        return activeGroup.tabIDs.count >= SplitGroup.maximumPanes
-    }
-
-    private func highlight(for edge: SplitEdge, size: CGSize) -> some View {
-        let existingPanes = max(1, activeGroup?.tabIDs.count ?? 1)
-        let share = 1 / CGFloat(existingPanes + 1)
-        let isSideBySide = (edge == .left || edge == .right)
-        let width = size.width * (isSideBySide ? share : 1)
-        let height = size.height * (isSideBySide ? 1 : share)
-        let x: CGFloat = edge == .right ? size.width - width / 2 : (edge == .left ? width / 2 : size.width / 2)
-        let y: CGFloat = edge == .bottom ? size.height - height / 2 : (edge == .top ? height / 2 : size.height / 2)
-        return RoundedRectangle(cornerRadius: OrbitMetrics.cardCornerRadius, style: .continuous)
-            .fill(Color.accentColor.opacity(0.22))
-            .overlay(
+    var body: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            let horizontal = edge == .left || edge == .right
+            let width = horizontal ? size.width * 0.5 : size.width
+            let height = horizontal ? size.height : size.height * 0.5
+            let x: CGFloat = edge == .right ? size.width - width / 2 : (horizontal ? width / 2 : size.width / 2)
+            let y: CGFloat = edge == .bottom ? size.height - height / 2 : (horizontal ? size.height / 2 : height / 2)
+            ZStack {
+                RoundedRectangle(cornerRadius: OrbitMetrics.cardCornerRadius, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.28))
                 RoundedRectangle(cornerRadius: OrbitMetrics.cardCornerRadius, style: .continuous)
                     .strokeBorder(Color.accentColor, lineWidth: 2)
-            )
-            .padding(OrbitSplitPaneMetrics.paneGap)
+                VStack(spacing: 6) {
+                    Image(systemName: edge.symbolName)
+                        .font(.system(size: 22, weight: .semibold))
+                    Text(edge.label)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+            .padding(8)
             .frame(width: width, height: height)
             .position(x: x, y: y)
-            .allowsHitTesting(false)
-            .transition(.opacity)
-    }
-}
-
-// Does not read the highlight. Its inputs stay equal while the preview
-// changes, so the drop registration survives until the mouse is released.
-private struct SplitDropCatcher: View, Equatable {
-    var size: CGSize
-    var targetTabID: TabID?
-    var isAtPaneLimit: Bool
-    var allowedOrientation: SplitOrientation?
-
-    static func == (lhs: SplitDropCatcher, rhs: SplitDropCatcher) -> Bool {
-        lhs.size == rhs.size
-            && lhs.targetTabID == rhs.targetTabID
-            && lhs.isAtPaneLimit == rhs.isAtPaneLimit
-            && lhs.allowedOrientation == rhs.allowedOrientation
-    }
-
-    var body: some View {
-        SplitDropCatcherBody(
-            size: size,
-            targetTabID: targetTabID,
-            isAtPaneLimit: isAtPaneLimit,
-            allowedOrientation: allowedOrientation
-        )
-    }
-}
-
-private struct SplitDropCatcherBody: View {
-    @Environment(AppEnvironment.self) private var env
-    var size: CGSize
-    var targetTabID: TabID?
-    var isAtPaneLimit: Bool
-    var allowedOrientation: SplitOrientation?
-
-    // No contentShape: a hit-testing rectangle here would take clicks and
-    // scrolling away from the page. The drop delegate still hears the drag.
-    var body: some View {
-        Color.clear
-            .sidebarPayloadDropDestination { items, location in
-                defer { env.activeSplitDropZone = nil }
-                guard !isAtPaneLimit else { return false }
-                guard let item = items.first, let targetTabID else { return false }
-                guard item.nodeID != targetTabID else { return false }
-                guard env.splitGroup(for: targetTabID)?.tabIDs.contains(item.nodeID) != true else { return false }
-                let edge = SplitDropZoneGeometry.edge(
-                    at: location,
-                    in: size,
-                    allowedOrientation: allowedOrientation
-                )
-                env.createSplit(existingTabID: targetTabID, newTabID: item.nodeID, edge: edge)
-                return true
-            } isTargeted: { targeted in
-                guard !targeted else { return }
-                env.activeSplitDropZone = nil
-            } onUpdate: { location in
-                guard let targetTabID, !isAtPaneLimit else {
-                    env.activeSplitDropZone = nil
-                    return
-                }
-                let edge = SplitDropZoneGeometry.edge(
-                    at: location,
-                    in: size,
-                    allowedOrientation: allowedOrientation
-                )
-                let zone = SplitDropZone(edge: edge, targetTabID: targetTabID)
-                guard env.activeSplitDropZone != zone else { return }
-                env.activeSplitDropZone = zone
-            }
+        }
+        .allowsHitTesting(false)
+        .transition(.opacity)
     }
 }
 

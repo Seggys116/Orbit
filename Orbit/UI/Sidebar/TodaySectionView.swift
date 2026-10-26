@@ -3,7 +3,7 @@ import SwiftUI
 @MainActor
 enum SidebarNewTabRowAction {
     static func perform(in env: AppEnvironment) {
-        env.perform(.newTabCommandBar)
+        env.openNewTabPage()
     }
 }
 
@@ -12,7 +12,12 @@ struct TodaySectionView: View {
     var spaceID: SpaceID
     var theme: SpaceTheme
 
+    // Every Today tab, listed or not: drop math indexes the store's own list.
     private var tabs: [Tab] { env.todayTabs(in: spaceID) }
+
+    private var listedTabs: [Tab] { NewTabPageModel.listed(tabs) }
+
+    private var isNewTabPageActive: Bool { env.isNewTabPageActive(in: spaceID) }
 
     private var tidyPhase: TidyTabsCoordinator.Phase {
         TidyTabsCoordinator.shared.phase(for: spaceID)
@@ -27,7 +32,7 @@ struct TodaySectionView: View {
             newTabRow
 
             VStack(spacing: OrbitMetrics.sidebarRowSpacing) {
-                ForEach(tidyGroupedTodayItems(tabs, splitGroup: env.splitGroup(for:))) { item in
+                ForEach(tidyGroupedTodayItems(listedTabs, splitGroup: env.splitGroup(for:))) { item in
                     switch item {
                     case .header(let name):
                         TidyGroupHeaderRow(
@@ -44,6 +49,7 @@ struct TodaySectionView: View {
                             isFolder: false,
                             accentColor: theme.readableForeground,
                             bodyDropIntent: splitIntent,
+                            dragLabel: tab.displayTitle,
                             onDrop: handleInsertion
                         ) {
                             TabRowView(tab: tab, theme: theme)
@@ -55,6 +61,8 @@ struct TodaySectionView: View {
                             isFolder: false,
                             accentColor: theme.readableForeground,
                             bodyDropIntent: splitIntent(extending: group),
+                            rejectDropIDs: Set(members.map(\.id)),
+                            ownsDragSource: false,
                             onDrop: handleInsertion
                         ) {
                             SplitGroupRowView(
@@ -67,9 +75,12 @@ struct TodaySectionView: View {
                 }
             }
         }
-        .contextMenu {
-            Button("Clear All Today Tabs") { env.clearTodayTabs(in: spaceID) }
+        .orbitRightClickMenu {
+            [.item(OrbitContextMenuItem(title: "Clear All Today Tabs", systemImage: "trash") {
+                env.clearTodayTabs(in: spaceID)
+            })]
         }
+        .onAppear { env.sweepAbandonedNewTabPages(in: spaceID) }
     }
 
     private func tidyErrorRow(_ message: String) -> some View {
@@ -109,10 +120,18 @@ struct TodaySectionView: View {
             .padding(.leading, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
             .padding(.trailing, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
             .frame(height: OrbitMetrics.sidebarRowHeight)
+            .background(
+                RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius)
+                    .fill(isNewTabPageActive ? theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity) : .clear)
+                    .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
+                    .padding(.vertical, OrbitMetrics.sidebarRowPillVerticalInset)
+            )
             .contentShape(Rectangle())
         }
-        .foregroundStyle(theme.readableForeground.opacity(OrbitMetrics.sidebarNewTabRowOpacity))
-        .orbitTooltip("New Tab — \u{2318}T")
+        .foregroundStyle(theme.readableForeground.opacity(
+            isNewTabPageActive ? OrbitMetrics.sidebarRowLabelOpacityActive : OrbitMetrics.sidebarNewTabRowOpacity
+        ))
+        .orbitTooltip("New Tab")
     }
 
     private var splitIntent: SidebarRowBodyDropIntent {
@@ -163,14 +182,17 @@ struct TodaySectionView: View {
                 guard let anchorIndex = ids.firstIndex(of: targetID) else { return }
                 let index = SidebarReorderMath.insertionIndex(after: anchorIndex, draggedIndex: draggedIndex)
                 apply(toIndex: index)
-            case .groupingWithSibling(let targetID):
+            case .groupingWithSibling(let targetID, let droppedEdge):
                 guard let anchorIndex = ids.firstIndex(of: targetID) else { return }
+                if env.splitGroup(for: targetID)?.tabIDs.contains(resolvedNodeID) == true { return }
                 // Position first, split second: groupedSidebarRows only collapses adjacent same-group tabs into one joined row, so panes left apart in the list would render as two ordinary rows sharing a pane.
                 let index = SidebarReorderMath.insertionIndex(after: anchorIndex, draggedIndex: draggedIndex)
                 apply(toIndex: index)
 
                 let edge: SplitEdge
-                if let existing = env.splitGroup(for: targetID) {
+                if let droppedEdge {
+                    edge = droppedEdge
+                } else if let existing = env.splitGroup(for: targetID) {
                     edge = existing.axis == .vertical ? .bottom : .right
                 } else {
                     edge = env.preferredSplitEdge()

@@ -41,6 +41,9 @@ enum SidebarDragSession {
         SidebarTearOffDetector.begin(payload)
     }
 
+    /// True from `begin` until the drag is consumed or discarded; `current` is nil on the first turn.
+    static var hasInFlightDrag: Bool { record != nil }
+
     static var current: SidebarDragPayload? {
         guard let record, let changeCount = record.changeCount else { return nil }
         guard changeCount == NSPasteboard(name: .drag).changeCount else { return nil }
@@ -92,11 +95,72 @@ extension View {
     }
 }
 
+struct SidebarDragLabel: View {
+    var title: String
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 12, weight: .medium))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.ultraThinMaterial, in: Capsule())
+            .frame(maxWidth: 180)
+    }
+}
+
+private struct SidebarRowDragSource: ViewModifier {
+    var payload: SidebarDragPayload
+    var label: String?
+    var enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if !enabled {
+            content
+        } else if let label {
+            content.sidebarDragSource(payload) { SidebarDragLabel(title: label) }
+        } else {
+            content.sidebarDragSource(payload)
+        }
+    }
+}
+
+private struct SplitSideHint: View {
+    var edge: SplitEdge
+    var color: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            let horizontal = edge == .left || edge == .right
+            let width = horizontal ? proxy.size.width * 0.5 : proxy.size.width
+            let height = horizontal ? proxy.size.height : proxy.size.height * 0.5
+            let x: CGFloat = edge == .right ? proxy.size.width - width / 2 : (horizontal ? width / 2 : proxy.size.width / 2)
+            let y: CGFloat = edge == .bottom ? proxy.size.height - height / 2 : (horizontal ? proxy.size.height / 2 : height / 2)
+            ZStack {
+                Rectangle().fill(color.opacity(0.2))
+                VStack(spacing: 2) {
+                    Image(systemName: edge.symbolName)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(edge.label)
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(color)
+            }
+            .frame(width: width, height: height)
+            .position(x: x, y: y)
+        }
+        .frame(height: OrbitMetrics.sidebarRowHeight)
+        .allowsHitTesting(false)
+    }
+}
+
 enum DropInsertion: Equatable {
     case before(UUID)
     case after(UUID)
     case insideFolder(FolderID)
-    case groupingWithSibling(UUID)
+    case groupingWithSibling(UUID, SplitEdge?)
 }
 
 enum PinnedTreeLocation {
@@ -293,12 +357,17 @@ struct SidebarDropTarget<Content: View>: View {
     // theme.readableForeground, not Color(theme.primary.nsColor): primary is the sidebar's own background gradient stop, so the latter draws this invisibly against it.
     var accentColor: Color
     var bodyDropIntent: SidebarRowBodyDropIntent = .groupIntoFolder
+    var rejectDropIDs: Set<UUID> = []
+    var ownsDragSource: Bool = true
+    var dragLabel: String? = nil
     var onDrop: (SidebarDragPayload, DropInsertion) -> Void
     @ViewBuilder var content: () -> Content
 
     @State private var topTargeted = false
     @State private var bottomTargeted = false
     @State private var insideTargeted = false
+    @State private var proposedEdge: SplitEdge?
+    @State private var rowSize: CGSize = .zero
 
     // The two strips default to .allowsHitTesting(false): SwiftUI hit-tests a ZStack front-to-back, so an unconditionally hit-testable strip would swallow every ordinary click/drag-start in its band before content() ever sees it.
     @State private var isDragActivityNearby = false
@@ -357,26 +426,51 @@ struct SidebarDropTarget<Content: View>: View {
         }
     }
 
+    private func draggedPayload() -> SidebarDragPayload? {
+        SidebarDragSession.current ?? SidebarDragPayload.decodeSynchronously().first
+    }
+
+    private func rejects(_ payload: SidebarDragPayload?) -> Bool {
+        guard let payload else { return false }
+        if payload.nodeID == rowID { return true }
+        return rejectDropIDs.contains(payload.nodeID)
+    }
+
     private var realBody: some View {
         ZStack(alignment: .top) {
             content()
-                .sidebarDragSource(payload)
+                .modifier(SidebarRowDragSource(payload: payload, label: dragLabel, enabled: ownsDragSource))
                 .sidebarPayloadDropDestination { items, _ in
-                    guard let item = items.first, item.nodeID != rowID else { return false }
+                    guard let item = items.first, !rejects(item) else { return false }
                     if isFolder {
                         onDrop(item, .insideFolder(rowID))
                     } else {
-                        onDrop(item, .groupingWithSibling(rowID))
+                        onDrop(item, .groupingWithSibling(rowID, proposedEdge))
                     }
                     return true
                 } isTargeted: { targeted in
-                    insideTargeted = targeted
-                    if targeted {
+                    let show = targeted && !rejects(draggedPayload())
+                    insideTargeted = show
+                    if !show { proposedEdge = nil }
+                    if show {
                         clearOtherZones(keeping: .inside)
                         noteDragActivity()
                     }
-                } onUpdate: { _ in
+                } onUpdate: { location in
                     noteDragActivity()
+                    guard !rejects(draggedPayload()) else {
+                        proposedEdge = nil
+                        return
+                    }
+                    guard case .createSplit(let axis) = bodyDropIntent, rowSize.width > 0, rowSize.height > 0 else {
+                        proposedEdge = nil
+                        return
+                    }
+                    proposedEdge = SplitDropZoneGeometry.edge(
+                        at: location,
+                        in: rowSize,
+                        allowedOrientation: axis
+                    )
                 }
 
             VStack(spacing: 0) {
@@ -427,7 +521,10 @@ struct SidebarDropTarget<Content: View>: View {
                     .allowsHitTesting(false)
             }
 
-            if insideTargeted, showsBodyHighlight, let glyph = bodyAffordanceGlyph {
+            if insideTargeted, showsBodyHighlight, let edge = proposedEdge {
+                SplitSideHint(edge: edge, color: accentColor)
+                    .allowsHitTesting(false)
+            } else if insideTargeted, showsBodyHighlight, let glyph = bodyAffordanceGlyph {
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
                     Image(systemName: glyph)
@@ -438,6 +535,13 @@ struct SidebarDropTarget<Content: View>: View {
                 .frame(height: OrbitMetrics.sidebarRowHeight)
                 .allowsHitTesting(false)
                 .transition(.opacity)
+            }
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { rowSize = proxy.size }
+                    .onChange(of: proxy.size) { _, size in rowSize = size }
             }
         }
         // Elevated only while showing an indicator: .offset does not affect layout, so the bottom caret's offset puts roughly half its height into the next row's band, which would otherwise paint over it.

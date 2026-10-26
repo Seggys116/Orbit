@@ -37,6 +37,7 @@ public final class FaviconCache {
     // MARK: - Synchronous lookup
 
     public func cachedImage(forHost host: String) -> NSImage? {
+        if host.lowercased() == FaviconCache.newTabHost { return FaviconCache.newTabIcon }
         let key = host.lowercased() as NSString
         if let cached = memoryCache.object(forKey: key) {
             return cached
@@ -439,6 +440,26 @@ public final class FaviconCache {
 
         return image
     }
+
+    public nonisolated static let newTabHost = "new-tab"
+
+    static let newTabIcon: NSImage = {
+        let size: CGFloat = 32
+        let image = NSImage(size: NSSize(width: size, height: size))
+        image.lockFocus()
+        defer { image.unlockFocus() }
+        let bounds = NSRect(x: 0, y: 0, width: size, height: size)
+        NSColor(calibratedWhite: 0.5, alpha: 0.28).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: size * 0.22, yRadius: size * 0.22).fill()
+        let configuration = NSImage.SymbolConfiguration(pointSize: size * 0.52, weight: .semibold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(calibratedWhite: 0.62, alpha: 1)]))
+        if let symbol = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration) {
+            let origin = NSPoint(x: (size - symbol.size.width) / 2, y: (size - symbol.size.height) / 2)
+            symbol.draw(at: origin, from: .zero, operation: .sourceOver, fraction: 1)
+        }
+        return image
+    }()
 
     private nonisolated static func deterministicColor(for host: String) -> NSColor {
         let hash = fnv1aHash(host)

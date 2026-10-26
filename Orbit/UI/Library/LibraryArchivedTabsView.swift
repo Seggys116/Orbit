@@ -197,9 +197,11 @@ private struct ArchivedTabRow: View {
         }
         .padding(.leading, CGFloat(depth) * ArchivedRowMetrics.indentPerDepth)
         .contentShape(Rectangle())
-        .contextMenu {
-            Button("Restore to Today") { env.restoreFromArchive(tab.id, section: .today) }
-            Button("Restore to Pinned") { env.restoreFromArchive(tab.id, section: .pinned) }
+        .orbitRightClickMenu {
+            [
+                .item(OrbitContextMenuItem(title: "Restore to Today") { env.restoreFromArchive(tab.id, section: .today) }),
+                .item(OrbitContextMenuItem(title: "Restore to Pinned") { env.restoreFromArchive(tab.id, section: .pinned) })
+            ]
         }
         // Order matters: double-tap must be declared before single-tap.
         .onTapGesture(count: 2) {

@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import OSLog
 import Observation
+import SwiftUI
 import WebKit
 
 @MainActor
@@ -254,6 +255,10 @@ final class AppEnvironment {
     // Counts opening gestures, not presentations — bumped so CommandBarView
     // can tell a second ⌘L over an already-open bar from the first.
     var commandBarPresentationSerial: Int = 0
+
+    // MARK: - New Tab page bookkeeping
+
+    @ObservationIgnored var lastObservedActiveTabID: TabID?
 
     // MARK: - Find bar
 
@@ -731,17 +736,28 @@ final class AppEnvironment {
     // In a window-scoped environment this moves this window only and never
     // touches state.activeSpaceID — before this existed, opening an
     // Incognito window switched every open window to the Incognito Space.
-    func selectSpace(_ id: SpaceID) {
-        guard isWindowScoped else {
-            store.switchToSpace(id)
-            // activeTabID is per Space, so the window is now showing a
-            // different tab without any tab having been activated.
+    func selectSpace(_ id: SpaceID, animated: Bool = true) {
+        animatingSpaceSwitch(animated) {
+            guard isWindowScoped else {
+                store.switchToSpace(id)
+                syncExtensionActiveTab()
+                return
+            }
+            guard store.space(id) != nil else { return }
+            windowActiveSpaceID = id
             syncExtensionActiveTab()
+        }
+    }
+
+    // The one place a Space switch gets its theme crossfade; the swipe settle passes animated: false.
+    private func animatingSpaceSwitch(_ animated: Bool, _ change: () -> Void) {
+        guard animated else {
+            change()
             return
         }
-        guard store.space(id) != nil else { return }
-        windowActiveSpaceID = id
-        syncExtensionActiveTab()
+        withAnimation(OrbitThemeMotion.animation(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)) {
+            change()
+        }
     }
 
     func nextSpace() { stepSpace(offset: 1) }
@@ -750,7 +766,9 @@ final class AppEnvironment {
     // Must walk pagerSpaces, never the document's full spaces list — stepping through the full list could step an Incognito or torn-off window onto a Space belonging to a different, persistent window and show that window's own tab, live.
     private func stepSpace(offset: Int) {
         guard isWindowScoped else {
-            if offset > 0 { store.nextSpace() } else { store.previousSpace() }
+            animatingSpaceSwitch(true) {
+                if offset > 0 { store.nextSpace() } else { store.previousSpace() }
+            }
             return
         }
         let ordered = pagerSpaces
@@ -1246,6 +1264,7 @@ final class AppEnvironment {
     // The one place chrome.tabs is told the active tab — every path that changes it must call
     // this, not just openTab/activateTab, or extensions reading it get a wrong answer. Idempotent.
     func syncExtensionActiveTab() {
+        discardNewTabPageIfLeft()
         let current = activeTabID
         guard current != lastPushedActiveTabID else { return }
         // A tab with no live renderer is not in OrbitTabRegistry, so it cannot

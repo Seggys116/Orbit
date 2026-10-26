@@ -54,11 +54,13 @@ struct TidyGroupHeaderRow: View {
         .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
         .padding(.top, OrbitMetrics.sidebarInterSectionGap)
         .contentShape(Rectangle())
-        .contextMenu {
-            Button("Remove Header", action: onRemoveHeader)
-            Button("Convert to Folder", action: onConvertToFolder)
-            Divider()
-            Button("Close Tabs in Group", action: onCloseGroup)
+        .orbitRightClickMenu {
+            [
+                .item(OrbitContextMenuItem(title: "Remove Header", systemImage: "text.badge.minus", action: onRemoveHeader)),
+                .item(OrbitContextMenuItem(title: "Convert to Folder", systemImage: "folder", action: onConvertToFolder)),
+                .divider(),
+                .item(OrbitContextMenuItem(title: "Close Tabs in Group", systemImage: "xmark", action: onCloseGroup)),
+            ]
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Tab group \(name)")

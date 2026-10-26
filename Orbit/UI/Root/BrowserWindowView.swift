@@ -168,12 +168,13 @@ struct BrowserWindowView: View {
                     HStack(spacing: 0) {
                         SpaceSwitchingSidebarContainer()
                             .frame(width: env.sidebarWidth)
-                            .contextMenu { sidebarBackgroundMenu }
+                            .orbitRightClickBackdropMenu { sidebarBackgroundMenuEntries }
                             .overlay { newSpaceFlowPanel }
                         resizeHandle
                     }
                     .overlay(alignment: .topLeading) { PositionedWindowControls() }
                     .transition(.sidebarCollapse(width: dockedSidebarColumnWidth))
+                    .zIndex(1)
                 }
 
                 contentColumn
@@ -194,6 +195,13 @@ struct BrowserWindowView: View {
         // already happens inside an explicit withAnimation in handleHoverEdge, and an
         // ambient modifier here could desynchronize the panel's transition from its content.
         .animation(OrbitMotion.standard, value: env.isCommandBarPresented)
+        .onChange(of: env.isSidebarVisible) { _, isVisible in
+            guard isVisible else { return }
+            hoverHideTask?.cancel()
+            hoverHideTask = nil
+            hoverPhase = .hidden
+            env.isSidebarHoverRevealed = false
+        }
         .onChange(of: env.activeTabID) { _, newID in
             // A click on a real page has to take the new-tab spotlight with it.
             // A blank pane keeps the bar: that pane is what presents it.
@@ -307,18 +315,20 @@ struct BrowserWindowView: View {
 
     // Docked, the handle already takes its share of cardInset. Hidden, the leading edge is the window and keeps the full inset.
     private var contentCardLeadingInset: CGFloat {
-        env.isSidebarVisible ? OrbitMetrics.contentCardLeadingSeam : OrbitMetrics.cardInset
+        BorderlessSettings.shared.contentCardLeadingInset(isSidebarVisible: env.isSidebarVisible)
     }
 
     private var contentColumn: some View {
-        VStack(spacing: 0) {
+        let cardInset = BorderlessSettings.shared.cardInset
+        return VStack(spacing: 0) {
             ContentCardView()
                 .commandBarAnchor(.contentRegion)
+                .environment(\.paneCardFlushEdges, BorderlessSettings.shared.flushEdges(isSidebarVisible: env.isSidebarVisible))
                 .padding(EdgeInsets(
-                    top: OrbitMetrics.cardInset,
+                    top: cardInset,
                     leading: contentCardLeadingInset,
-                    bottom: OrbitMetrics.cardInset,
-                    trailing: OrbitMetrics.cardInset
+                    bottom: cardInset,
+                    trailing: cardInset
                 ))
                 #if DEBUG
                 .background(contentCardFrameProbe)
@@ -412,11 +422,11 @@ struct BrowserWindowView: View {
 
     // MARK: Sidebar background context menu
 
-    private var sidebarBackgroundMenu: some View {
-        Group {
-            Button("New Space…") { presentNewSpaceFlow() }
-            Button("Manage Spaces…") { LibraryWindowController.show(section: .spaces) }
-        }
+    private var sidebarBackgroundMenuEntries: [OrbitContextMenuEntry] {
+        [
+            .item(OrbitContextMenuItem(title: "New Space…") { presentNewSpaceFlow() }),
+            .item(OrbitContextMenuItem(title: "Manage Spaces…") { LibraryWindowController.show(section: .spaces) })
+        ]
     }
 
     // MARK: Sidebar resize handle

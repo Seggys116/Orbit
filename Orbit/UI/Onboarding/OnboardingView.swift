@@ -66,7 +66,7 @@ struct OnboardingView: View {
         case .profileSetup:
             VStack(alignment: .leading, spacing: 10) {
                 Text("Set Up Your Spaces").font(.system(size: 24, weight: .bold))
-                Text("Orbit keeps everything local — no account required. Spaces are separate sets of tabs and favourites you switch between. Start with these, or make them your own.")
+                Text("Spaces are separate sets of tabs and favourites. No account needed.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -77,7 +77,7 @@ struct OnboardingView: View {
         case .searchEngine:
             VStack(alignment: .leading, spacing: 10) {
                 Text("Default Search Engine").font(.system(size: 24, weight: .bold))
-                Text("Used for anything you type in the Command Bar that isn't an address. You can change it any time in Settings › Profiles.")
+                Text("Used for searches in the Command Bar. Change it later in Settings › Profiles.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                 // OrbitPopupButton, not a stock Picker: a menu-style Picker does not present reliably inside this app's NSHostingView.
@@ -93,7 +93,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Make Orbit Your Default").font(.system(size: 24, weight: .bold))
                 if offersDefaultBrowserButton {
-                    Text("Open links from anywhere in Orbit. macOS asks you to confirm — you can say no, and nothing in Orbit will raise it again by itself.")
+                    Text("Open links from other apps in Orbit. macOS asks you to confirm.")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -124,7 +124,7 @@ struct OnboardingView: View {
                 spaceDraftRow(draft: $draft)
             }
             if spaceDrafts.isEmpty {
-                Text("Continuing without adding any Space starts you with a single default Space instead.")
+                Text("With no Space added, you start with one default Space.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -174,7 +174,7 @@ struct OnboardingView: View {
             Text("Import From Your Old Browser").font(.system(size: 24, weight: .bold))
 
             if availableImportSources.isEmpty {
-                Text("Orbit couldn't find data from \(Self.supportedBrowserList) on this Mac. You can import later from Archive › Import from Another Browser.")
+                Text("No data found from \(Self.supportedBrowserList). You can import later from Archive › Import from Another Browser.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -205,7 +205,7 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Stay signed in to your sites")
                         .font(.system(size: 12, weight: .medium))
-                    Text("Copies your login sessions. macOS will ask for permission to read \(selectedImportSource?.displayName ?? "the browser")'s saved key.")
+                    Text("Copies your login sessions. macOS asks permission to read \(selectedImportSource?.displayName ?? "the browser")'s saved key.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -226,12 +226,12 @@ struct OnboardingView: View {
 
     private var importDescription: String {
         guard let source = selectedImportSource else {
-            return "Pick a browser to bring your bookmarks and browsing history across. Passwords are never imported."
+            return "Pick a browser to import bookmarks and history. Passwords are never imported."
         }
         guard source.importsNativeStructure else {
-            return "Orbit can import your bookmarks and browsing history from \(source.displayName). Passwords are not imported."
+            return "Imports bookmarks and history from \(source.displayName). Passwords are not imported."
         }
-        return "Orbit can import your Arc Spaces whole: their names, icons and themes, your pinned tabs and folders, Today tabs, favourites, archived tabs, browsing history, site icons, extensions, keyboard shortcuts, per-site zoom and your link-routing rules. Passwords are not imported."
+        return "Imports your Arc Spaces, tabs, folders, history, extensions and shortcuts. Passwords are not imported."
     }
 
     private func importSourceRow(_ browser: ImportableBrowser) -> some View {
@@ -378,7 +378,7 @@ struct OnboardingView: View {
             caveats.append("\(summary.extensionsAlreadyInstalled) extension\(summary.extensionsAlreadyInstalled == 1 ? "" : "s") from Arc \(summary.extensionsAlreadyInstalled == 1 ? "was" : "were") already installed in Orbit.")
         }
         if !summary.extensionsNeedingManualInstall.isEmpty {
-            caveats.append("Couldn't install \(summary.extensionsNeedingManualInstall.joined(separator: ", ")) from Arc — reinstall from the Chrome Web Store.")
+            caveats.append("Couldn't install \(summary.extensionsNeedingManualInstall.joined(separator: ", ")) from Arc. Reinstall from the Chrome Web Store.")
         }
         if !summary.keyBindingsNeedingManualRebind.isEmpty {
             let actions = summary.keyBindingsNeedingManualRebind.joined(separator: ", ")
@@ -402,7 +402,7 @@ struct OnboardingView: View {
             break
         case .staged(let sites, let indexedDBSites, _):
             let count = max(sites, indexedDBSites)
-            caveats.append("Saved site data — drawings, notes and offline documents — came across for \(count) site\(count == 1 ? "" : "s"). Restart Orbit to put \(count == 1 ? "it" : "them") in place. Sites Orbit already holds data for keep Orbit's.")
+            caveats.append("Saved site data came across for \(count) site\(count == 1 ? "" : "s"). Restart Orbit to apply it. Sites Orbit already holds data for keep Orbit's.")
         case .failed(let reason):
             caveats.append("Arc's saved site data could not be read: \(reason)")
         }

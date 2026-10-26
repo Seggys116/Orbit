@@ -61,6 +61,7 @@ struct OrbitMenuPanelAnchor: NSViewRepresentable {
                 tearDown()
                 return
             }
+            controller.anchorView = anchor
             guard !controller.isPresented else {
                 controller.updateRootEntries(entries)
                 return

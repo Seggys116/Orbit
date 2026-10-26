@@ -22,6 +22,7 @@ struct SidebarNodeRow: View {
                     rowID: tabID,
                     isFolder: false,
                     accentColor: theme.readableForeground,
+                    dragLabel: tab.displayTitle,
                     onDrop: onInsertion
                 ) {
                     TabRowView(tab: tab, depth: depth, theme: theme)

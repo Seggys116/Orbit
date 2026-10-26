@@ -42,15 +42,15 @@ enum GitHubLiveFolderCopy {
         guard case .failed(let error, _) = status else { return nil }
         switch error {
         case .signedOut:
-            return "Signed out of GitHub — showing last fetch"
+            return "Signed out of GitHub. Showing last fetch."
         case .rateLimited:
-            return "Rate limited — showing last fetch"
+            return "Rate limited. Showing last fetch."
         case .network:
-            return "Offline — showing last fetch"
+            return "Offline. Showing last fetch."
         case .badResponse(let code):
-            return "GitHub returned \(code) — showing last fetch"
+            return "GitHub returned \(code). Showing last fetch."
         case .malformed:
-            return "Unreadable response from GitHub — showing last fetch"
+            return "Unreadable response from GitHub. Showing last fetch."
         }
     }
 
@@ -211,7 +211,7 @@ struct GitHubLiveFolderRowView: View {
         )
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
-        .contextMenu { folderContextMenu(config) }
+        .orbitRightClickMenu { folderMenuEntries(config) }
     }
 
     private var rowActivationCatcher: some View {
@@ -275,46 +275,34 @@ struct GitHubLiveFolderRowView: View {
 
     // MARK: The folder's context menu
 
-    // A nested Menu inside a .contextMenu presents correctly here; a Menu used as a click-to-open button does not.
-    @ViewBuilder
-    private func folderContextMenu(_ config: GitHubLiveFolderConfig) -> some View {
-        Button(GitHubLiveFolderCopy.changeIcon) { promptToChangeIcon(config) }
-        Button(GitHubLiveFolderCopy.rename) { beginRename() }
-        Button(GitHubLiveFolderCopy.deleteLiveFolder, role: .destructive) { setEnabled(false) }
-
-        Menu(GitHubLiveFolderCopy.folderFlyout) {
-            Button(GitHubLiveFolderCopy.lastFetch(store.lastSuccessfulFetch)) {}
-                .disabled(true)
-
-            if let staleness = GitHubLiveFolderCopy.staleness(for: store.status) {
-                Button(staleness) {}
-                    .disabled(true)
-            }
-
-            Button(GitHubLiveFolderCopy.refresh) { Task { await store.refresh() } }
-
-            Divider()
-
-            Button {
-                setFilter(createdByMe: !config.includesCreatedByMe)
-            } label: {
-                if config.includesCreatedByMe {
-                    Label(GitHubLiveFolderCopy.createdByMe, systemImage: "checkmark")
-                } else {
-                    Text(GitHubLiveFolderCopy.createdByMe)
-                }
-            }
-
-            Button {
-                setFilter(reviewRequests: !config.includesReviewRequests)
-            } label: {
-                if config.includesReviewRequests {
-                    Label(GitHubLiveFolderCopy.reviewRequests, systemImage: "checkmark")
-                } else {
-                    Text(GitHubLiveFolderCopy.reviewRequests)
-                }
-            }
+    private func folderMenuEntries(_ config: GitHubLiveFolderConfig) -> [OrbitContextMenuEntry] {
+        var flyout: [OrbitContextMenuEntry] = [
+            .item(OrbitContextMenuItem(title: GitHubLiveFolderCopy.lastFetch(store.lastSuccessfulFetch), isEnabled: false)),
+        ]
+        if let staleness = GitHubLiveFolderCopy.staleness(for: store.status) {
+            flyout.append(.item(OrbitContextMenuItem(title: staleness, isEnabled: false)))
         }
+        flyout.append(.item(OrbitContextMenuItem(title: GitHubLiveFolderCopy.refresh, systemImage: "arrow.clockwise") {
+            Task { await store.refresh() }
+        }))
+        flyout.append(.divider())
+        flyout.append(.item(OrbitContextMenuItem(title: GitHubLiveFolderCopy.createdByMe, isChecked: config.includesCreatedByMe) {
+            setFilter(createdByMe: !config.includesCreatedByMe)
+        }))
+        flyout.append(.item(OrbitContextMenuItem(title: GitHubLiveFolderCopy.reviewRequests, isChecked: config.includesReviewRequests) {
+            setFilter(reviewRequests: !config.includesReviewRequests)
+        }))
+
+        return [
+            .item(OrbitContextMenuItem(title: GitHubLiveFolderCopy.changeIcon, systemImage: "face.smiling") {
+                Task { @MainActor in promptToChangeIcon(config) }
+            }),
+            .item(OrbitContextMenuItem(title: GitHubLiveFolderCopy.rename, systemImage: "pencil") { beginRename() }),
+            .item(OrbitContextMenuItem(title: GitHubLiveFolderCopy.deleteLiveFolder, systemImage: "trash", isDestructive: true) {
+                setEnabled(false)
+            }),
+            .item(OrbitContextMenuItem(title: GitHubLiveFolderCopy.folderFlyout, systemImage: "ellipsis.circle", submenu: flyout)),
+        ]
     }
 
     // MARK: Mutations
@@ -453,12 +441,14 @@ struct GitHubPullRequestRowView: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .orbitTooltip(helpText)
-        .contextMenu {
-            Button("Open in New Tab") { open() }
-            Button("Copy Link") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(pullRequest.url.absoluteString, forType: .string)
-            }
+        .orbitRightClickMenu {
+            [
+                .item(OrbitContextMenuItem(title: "Open in New Tab", systemImage: "arrow.up.forward.square") { open() }),
+                .item(OrbitContextMenuItem(title: "Copy Link", systemImage: "link") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(pullRequest.url.absoluteString, forType: .string)
+                }),
+            ]
         }
     }
 

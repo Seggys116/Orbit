@@ -94,7 +94,9 @@ struct SidebarView: View {
 
             SidebarBottomBar(theme: space.theme)
                 .padding(.bottom, OrbitMetrics.sidebarInterSectionGap)
+                .zIndex(1)
         }
+        .coordinateSpace(name: SidebarBottomBar.sidebarSpace)
         .background { chromeDragSurface }
         .background {
             if paintsOwnBackground {

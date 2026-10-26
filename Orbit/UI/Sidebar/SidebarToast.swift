@@ -117,7 +117,7 @@ enum FavoritesToastCopy {
     static let alreadyFavoriteTitle = "Already in Favorites"
     static let alreadyFavoriteBody = "This page is already a favorite in this Space."
     static let atCapacityTitle = "Favorites Is Full"
-    static let atCapacityBody = "Remove a favorite to add another — Favorites holds up to \(OrbitMetrics.favoritesMaximumCount) per Space."
+    static let atCapacityBody = "Favorites holds up to \(OrbitMetrics.favoritesMaximumCount) per Space. Remove one to add another."
 }
 
 // SidebarToastPresenter's stored properties are plain, not @Observable-tracked (only the superclass carries that macro), so a property added on a subclass would silently not participate in SwiftUI's observation.
@@ -139,7 +139,7 @@ final class FavoritesToastPresenter: SidebarToastPresenter {
 
 enum PersistenceToastCopy {
     static let saveFailedTitle = "Couldn't Save Changes"
-    static let saveFailedBody = "Orbit couldn't write your latest changes to disk. They're still open in this window — check available disk space and try again."
+    static let saveFailedBody = "Couldn't save your latest changes. They're still open in this window. Check disk space and try again."
 }
 
 @MainActor

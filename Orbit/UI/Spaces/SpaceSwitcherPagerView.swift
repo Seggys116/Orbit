@@ -93,27 +93,20 @@ struct SpaceSwitcherPagerView: View {
         // (measured directly in SpacePagerClickReliabilityTests). FavoritesGridView hit the exact
         // same failure with the exact same combination and documents the same fix at its own
         // sidebarDragSource call sites — .onTapGesture is what actually coexists with a drag source.
-        let base = iconView(for: space, isActive: isActive, highlight: highlight)
-            .frame(width: OrbitMetrics.spacePagerDotSize * sizeScale, height: OrbitMetrics.spacePagerDotSize * sizeScale)
-            .background(
-                // Same fill/opacity TabRowView and SettingsNavRow use for their own selected row,
-                // so the active Space reads with Orbit's existing selection language rather than a new one.
-                RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius, style: .continuous)
-                    .fill(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity * highlight))
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(OrbitMotion.dramatic) { env.selectSpace(space.id) }
-            }
-            .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(space.name)
-            .orbitHoverHighlight(
-                fill: theme.readableForeground.opacity(OrbitMetrics.sidebarHoverRowOpacity),
-                cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius
-            )
-            .orbitTooltip(space.name)
-            .scaleEffect(tabDropTargetID == space.id ? 1.18 : 1)
-            .animation(OrbitMotion.quick, value: tabDropTargetID)
+        let base = SpacePagerIconButton(
+            space: space,
+            theme: theme,
+            highlight: highlight,
+            sizeScale: sizeScale,
+            isDropTarget: tabDropTargetID == space.id
+        )
+        .onTapGesture {
+            withAnimation(OrbitMotion.dramatic) { env.selectSpace(space.id) }
+        }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(space.name)
+        .orbitTooltip(space.name)
+        .animation(OrbitMotion.quick, value: tabDropTargetID)
 
         return Group {
             #if DEBUG
@@ -139,8 +132,12 @@ struct SpaceSwitcherPagerView: View {
             .onDrag {
                 Self.itemProvider(for: SpacePagerDragPayload(spaceID: space.id))
             } preview: {
-                iconView(for: space, isActive: true, highlight: 1)
-                    .padding(6)
+                SpaceIconView(
+                    icon: space.resolvedIcon,
+                    size: OrbitMetrics.spacePagerDotSize,
+                    foregroundColor: theme.readableForeground
+                )
+                .padding(4)
             }
             .dropDestination(for: SpacePagerDragPayload.self) { items, _ in
                 guard let item = items.first, item.spaceID != space.id else { return false }
@@ -162,50 +159,57 @@ struct SpaceSwitcherPagerView: View {
             } isTargeted: { targeted in
                 tabDropTargetID = targeted ? space.id : (tabDropTargetID == space.id ? nil : tabDropTargetID)
             }
-            .contextMenu {
-                Button("New Folder") { env.createFolder(name: "New Folder", in: space.id) }
-                Button("Paste as New Tab") { pasteAsNewTab(into: space.id) }
-                Divider()
-                Button("Rename Space") {
-                    editingSpaceID = space.id
-                    isEditPresented = true
-                }
-                Button("Change Icon…") {
-                    iconChooserSpaceID = space.id
-                    isIconChooserPresented = true
-                }
-                Button("Theme…") {
-                    themeEditorSpaceID = space.id
-                    isThemeEditorPresented = true
-                }
-                Divider()
-                Button("Duplicate") { env.store.duplicateSpace(space.id) }
-                Divider()
-                Button("Move Left") { env.store.moveSpaceLeft(space.id) }
-                    .disabled(index == 0)
-                Button("Move Right") { env.store.moveSpaceRight(space.id) }
-                    .disabled(index == orderedSpaces.count - 1)
-                Divider()
-                Button("Delete", role: .destructive) { env.deleteSpace(space.id) }
-                    .disabled(orderedSpaces.count <= 1)
-            }
+            .orbitRightClickMenu { dotMenuEntries(space: space, index: index) }
+    }
+
+    private func dotMenuEntries(space: Space, index: Int) -> [OrbitContextMenuEntry] {
+        [
+            .item(OrbitContextMenuItem(title: "New Folder", systemImage: "folder.badge.plus") {
+                env.createFolder(name: "New Folder", in: space.id)
+            }),
+            .item(OrbitContextMenuItem(title: "Paste as New Tab", systemImage: "doc.on.clipboard") {
+                pasteAsNewTab(into: space.id)
+            }),
+            .divider(),
+            .item(OrbitContextMenuItem(title: "Rename Space", systemImage: "pencil") {
+                editingSpaceID = space.id
+                isEditPresented = true
+            }),
+            .item(OrbitContextMenuItem(title: "Change Icon…", systemImage: "face.smiling") {
+                iconChooserSpaceID = space.id
+                isIconChooserPresented = true
+            }),
+            .item(OrbitContextMenuItem(title: "Theme…", systemImage: "paintpalette") {
+                themeEditorSpaceID = space.id
+                isThemeEditorPresented = true
+            }),
+            .divider(),
+            .item(OrbitContextMenuItem(title: "Duplicate", systemImage: "plus.square.on.square") {
+                env.store.duplicateSpace(space.id)
+            }),
+            .divider(),
+            .item(OrbitContextMenuItem(title: "Move Left", systemImage: "arrow.left", isEnabled: index != 0) {
+                env.store.moveSpaceLeft(space.id)
+            }),
+            .item(OrbitContextMenuItem(title: "Move Right", systemImage: "arrow.right", isEnabled: index != orderedSpaces.count - 1) {
+                env.store.moveSpaceRight(space.id)
+            }),
+            .divider(),
+            .item(OrbitContextMenuItem(
+                title: "Delete",
+                systemImage: "trash",
+                isEnabled: orderedSpaces.count > 1,
+                isDestructive: true
+            ) {
+                env.deleteSpace(space.id)
+            }),
+        ]
     }
 
     private func pasteAsNewTab(into spaceID: SpaceID) {
         guard let string = NSPasteboard.general.string(forType: .string) else { return }
         guard let url = env.resolveTypedInput(string) else { return }
         env.openTab(url: url, in: spaceID)
-    }
-
-    private func iconView(for space: Space, isActive: Bool, highlight: Double) -> some View {
-        let blended = OrbitMetrics.spacePagerInactiveOpacity
-            + (OrbitMetrics.spacePagerActiveOpacity - OrbitMetrics.spacePagerInactiveOpacity) * highlight
-        return SpaceIconView(
-            icon: space.resolvedIcon,
-            size: OrbitMetrics.iconFavicon * sizeScale,
-            foregroundColor: theme.readableForeground,
-            opacity: blended
-        )
     }
 
     private func highlightIntensity(forIndex index: Int, isActive: Bool) -> Double {
@@ -292,6 +296,33 @@ struct SpaceSwitcherPagerView: View {
         let gapsWidth = CGFloat(max(0, count - 1)) * OrbitMetrics.spacePagerDotSpacing * scale
         let paddingWidth = OrbitMetrics.spacePagerContainerPadding * 2 * scale
         return dotsWidth + gapsWidth + paddingWidth
+    }
+}
+
+private struct SpacePagerIconButton: View {
+    var space: Space
+    var theme: SpaceTheme
+    var highlight: Double
+    var sizeScale: CGFloat
+    var isDropTarget: Bool
+
+    var body: some View {
+        let side = OrbitMetrics.spacePagerDotSize * sizeScale
+        SpaceIconView(
+            icon: space.resolvedIcon,
+            size: side,
+            foregroundColor: theme.readableForeground,
+            dim: 1 - highlight,
+            emojiScale: 0.82,
+            symbolScale: 0.9
+        )
+        .frame(width: side, height: side)
+        .contentShape(Rectangle())
+        .orbitHoverHighlight(
+            fill: theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity),
+            cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius
+        )
+        .scaleEffect(isDropTarget ? 1.12 : 1)
     }
 }
 

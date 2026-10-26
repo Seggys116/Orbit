@@ -17,6 +17,7 @@ final class AppEnvironment {
     var navigationStates: [TabID: NavigationState] = [:]
     var mediaStates: [TabID: MediaState] = [:]
     var recentDownloads: [DownloadItem] = []
+    let downloadStore = DownloadStore(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("orbit-test-downloads-\(UUID().uuidString).json"))
     var activeTabID: TabID?
     var siteControlPresentedTabID: TabID?
 
@@ -74,6 +75,7 @@ final class AppEnvironment {
     func perform(_ command: ShortcutCommandID) { recordedActions.append("perform(\(command.rawValue))") }
     func muteTab(_ id: TabID, muted: Bool) { recordedActions.append("muteTab") }
     func closeTab(_ id: TabID) { recordedActions.append("closeTab") }
+    func cancelDownload(_ id: UUID) { recordedActions.append("cancelDownload") }
     func closeTabPreservingBookmark(_ id: TabID) { recordedActions.append("closeTabPreservingBookmark") }
     func activateTab(_ id: TabID) { recordedActions.append("activateTab") }
     func activateTabDismissingCommandBar(_ id: TabID) { recordedActions.append("activateTab") }
@@ -240,6 +242,47 @@ enum DeveloperModeSettings {
 
 enum SplitEdge: Sendable {
     case left, right, top, bottom
+
+    var symbolName: String {
+        switch self {
+        case .left, .right: "rectangle.split.2x1"
+        case .top, .bottom: "rectangle.split.1x2"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .left: "Left"
+        case .right: "Right"
+        case .top: "Top"
+        case .bottom: "Bottom"
+        }
+    }
+}
+
+enum SplitDropZoneGeometry {
+    static func edge(
+        at location: CGPoint,
+        in size: CGSize,
+        allowedOrientation: SplitGroup.Axis? = nil
+    ) -> SplitEdge {
+        guard size.width > 0, size.height > 0 else { return .right }
+        let left = location.x / size.width
+        let right = 1 - left
+        let top = location.y / size.height
+        let bottom = 1 - top
+        switch allowedOrientation {
+        case .horizontal:
+            return left <= right ? .left : .right
+        case .vertical:
+            return top <= bottom ? .top : .bottom
+        case nil:
+            if min(left, right) <= min(top, bottom) {
+                return left <= right ? .left : .right
+            }
+            return top <= bottom ? .top : .bottom
+        }
+    }
 }
 
 // MARK: - SiteControlPopoverView double

@@ -112,7 +112,7 @@ struct UpdaterStatusView: View {
                     Text("Orbit \(version) is available.")
                         .font(.system(size: 12, weight: .semibold))
                     if isInformationOnly {
-                        Text("This update can't be installed automatically. Visit the release page to update Orbit by hand.")
+                        Text("This update must be installed manually from the release page.")
                             .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                     }
@@ -183,7 +183,7 @@ struct UpdaterStatusView: View {
                 }
             }
         } else {
-            Text("No release notes were provided for this update.")
+            Text("No release notes.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

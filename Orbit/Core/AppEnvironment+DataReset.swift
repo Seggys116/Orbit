@@ -40,19 +40,19 @@ nonisolated enum DataResetCategory: String, CaseIterable, Identifiable, Sendable
 
     var detail: String {
         switch self {
-        case .history: return "Every page visit Orbit has recorded on this Mac."
-        case .cookiesAndLogins: return "Cookies, local and session storage, IndexedDB, service workers and the other data sites store on this Mac. Passwords saved to the system keychain are not touched."
+        case .history: return "Every recorded page visit."
+        case .cookiesAndLogins: return "Cookies and other site data. Saved keychain passwords are kept."
         case .cache: return "Cached pages, scripts and site icons."
-        case .downloads: return "Orbit's list of downloads. The downloaded files stay on disk."
-        case .spacesAndTabs: return "Every Space, tab and Space icon, back to a fresh sidebar."
-        case .favourites: return "Favourites, bookmarked rows and bookmark folders in every Space."
-        case .notes: return "Every note and everything written in it."
-        case .easels: return "Every Easel and the images stored in it."
-        case .boosts: return "Every Boost, including its custom CSS and JavaScript."
+        case .downloads: return "The list only. Downloaded files stay on disk."
+        case .spacesAndTabs: return "Every Space and tab."
+        case .favourites: return "Favourites and bookmarks in every Space."
+        case .notes: return "Every note."
+        case .easels: return "Every Easel and its images."
+        case .boosts: return "Every Boost, with its CSS and JavaScript."
         case .extensions: return "Every installed extension and its files."
-        case .siteSettings: return "Per-site permissions, zoom, custom site searches and the ad-blocker allowlist."
-        case .preferences: return "Every Orbit setting, back to its default."
-        case .syncCache: return "Orbit's local sync bookkeeping. Nothing is removed from iCloud."
+        case .siteSettings: return "Permissions, zoom, site searches and the ad-blocker allowlist."
+        case .preferences: return "Every setting returns to its default."
+        case .syncCache: return "Local sync data only. iCloud is untouched."
         }
     }
 

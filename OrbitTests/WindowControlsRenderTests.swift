@@ -9,7 +9,7 @@ final class WindowControlsRenderTests: XCTestCase {
 
     func test_clusterRendersAtDeclaredSize() {
         let size = CGSize(width: OrbitWindowControlMetrics.clusterWidth, height: OrbitWindowControlMetrics.diameter)
-        let rendered = render(WindowControlsCluster(isKey: true, isHovering: false), size: size)
+        let rendered = render(WindowControlsCluster(isKey: true, isHovering: false).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
 
         guard let box = rendered.boundingBoxOfContent(tolerance: 0.03) else {
             rendered.writeDiagnosticPNG(named: "WindowControls-declaredSize-FAILED-empty")
@@ -89,8 +89,8 @@ final class WindowControlsRenderTests: XCTestCase {
 
     func test_hover_revealsGlyphsAcrossAllThreeDots() {
         let size = CGSize(width: OrbitWindowControlMetrics.clusterWidth, height: OrbitWindowControlMetrics.diameter)
-        let restRender = render(WindowControlsCluster(isKey: true, isHovering: false), size: size)
-        let hoverRender = render(WindowControlsCluster(isKey: true, isHovering: true), size: size)
+        let restRender = render(WindowControlsCluster(isKey: true, isHovering: false).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
+        let hoverRender = render(WindowControlsCluster(isKey: true, isHovering: true).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
 
         let dotCenters: [CGFloat] = (0..<3).map { index in
             OrbitWindowControlMetrics.diameter / 2 + CGFloat(index) * (OrbitWindowControlMetrics.diameter + OrbitWindowControlMetrics.spacing)
@@ -120,8 +120,8 @@ final class WindowControlsRenderTests: XCTestCase {
 
     func test_isKeyFalse_rendersDesaturatedRatherThanColoured() {
         let size = CGSize(width: OrbitWindowControlMetrics.clusterWidth, height: OrbitWindowControlMetrics.diameter)
-        let keyRender = render(WindowControlsCluster(isKey: true, isHovering: false), size: size)
-        let inactiveRender = render(WindowControlsCluster(isKey: false, isHovering: false), size: size)
+        let keyRender = render(WindowControlsCluster(isKey: true, isHovering: false).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
+        let inactiveRender = render(WindowControlsCluster(isKey: false, isHovering: false).environment(\.orbitScreenshotModeDragDisabled, true), size: size)
 
         let closeDotCenterX = Int(OrbitWindowControlMetrics.diameter / 2)
         let centerY = Int(OrbitWindowControlMetrics.diameter / 2)

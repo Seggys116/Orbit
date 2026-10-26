@@ -5,11 +5,28 @@ struct SidebarBottomBar: View {
     @Environment(AppEnvironment.self) private var env
     var theme: SpaceTheme
 
-    @State private var showLibraryFlyout = false
+    @State private var showDownloadsPreview = false
     @State private var isHoveringLibraryButton = false
-    @State private var isHoveringFlyout = false
-    @State private var libraryHoverTask: Task<Void, Never>?
+    @State private var isHoveringDownloadsPanel = false
+    @State private var downloadsPreviewTask: Task<Void, Never>?
+    @State private var downloadsCloseTask: Task<Void, Never>?
+    @State private var downloadsEscapeMonitor: Any?
+    @State private var barWidth: CGFloat = 0
+    @State private var spaceAboveBar: CGFloat?
     @State private var isNewItemMenuPresented = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    #if DEBUG
+    @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDisabled
+    @Environment(\.orbitForcesDownloadsPreview) private var forcesDownloadsPreview
+    #else
+    private let forcesDownloadsPreview = false
+    #endif
+
+    static let sidebarSpace = "OrbitSidebar"
+
+    private static let horizontalInset = (OrbitMetrics.sidebarBottomBarHeight - OrbitMetrics.sidebarBottomBarIconSize) / 2
 
     var body: some View {
         HStack(spacing: OrbitMetrics.sidebarBottomBarSpacing) {
@@ -23,9 +40,39 @@ struct SidebarBottomBar: View {
 
             newItemMenu
         }
-        .padding(.horizontal, OrbitMetrics.sidebarBottomBarHorizontalPadding)
+        .padding(.horizontal, Self.horizontalInset)
         .frame(height: OrbitMetrics.sidebarBottomBarHeight)
-        .overlay(alignment: .bottom) { libraryFlyout }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.size.width, initial: true) { _, width in barWidth = width }
+                    .onChange(of: proxy.frame(in: .named(Self.sidebarSpace)).minY, initial: true) { _, top in
+                        spaceAboveBar = top > 0 ? top : nil
+                    }
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if showDownloadsPreview || forcesDownloadsPreview {
+                DownloadsPreviewOverlay(
+                    theme: theme,
+                    containerWidth: barWidth,
+                    spaceAbove: spaceAboveBar,
+                    anchorMinX: Self.horizontalInset,
+                    anchorMidX: Self.horizontalInset + OrbitMetrics.sidebarBottomBarIconSize / 2,
+                    reduceMotion: reduceMotion,
+                    onHoverChange: { hovering in
+                        isHoveringDownloadsPanel = hovering
+                        scheduleDownloadsPreviewClose()
+                    },
+                    onDismiss: { setDownloadsPreview(false) }
+                )
+            }
+        }
+        .onDisappear {
+            downloadsPreviewTask?.cancel()
+            downloadsCloseTask?.cancel()
+            removeDownloadsEscapeMonitor()
+        }
     }
 
     // MARK: Space pager region (always present, centred, overflow-safe)
@@ -48,6 +95,10 @@ struct SidebarBottomBar: View {
 
     private var newItemMenu: some View {
         OrbitNSActionButton {
+            if OrbitMenuClickGuard.wasDismissedThisTurn {
+                isNewItemMenuPresented = false
+                return
+            }
             isNewItemMenuPresented.toggle()
         } label: {
             Image(systemName: "plus")
@@ -74,6 +125,9 @@ struct SidebarBottomBar: View {
 
     private var libraryButton: some View {
         OrbitNSActionButton {
+            downloadsPreviewTask?.cancel()
+            downloadsPreviewTask = nil
+            setDownloadsPreview(false)
             LibraryWindowController.show(section: .downloads)
         } label: {
             Image(systemName: "archivebox")
@@ -81,7 +135,7 @@ struct SidebarBottomBar: View {
                 .foregroundStyle(theme.readableForeground)
                 .frame(width: OrbitMetrics.sidebarBottomBarIconSize, height: OrbitMetrics.sidebarBottomBarIconSize)
                 .background {
-                    if showLibraryFlyout || isHoveringLibraryButton {
+                    if showDownloadsPreview || isHoveringLibraryButton {
                         RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius, style: .continuous)
                             .fill(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity))
                     }
@@ -89,70 +143,248 @@ struct SidebarBottomBar: View {
         }
         .onHover { hovering in
             isHoveringLibraryButton = hovering
-            rescheduleFlyout()
+            scheduleDownloadsPreview(hovering: hovering)
+            scheduleDownloadsPreviewClose()
         }
     }
 
-    static func shouldOpenFlyout(isHoveringButton: Bool, isHoveringFlyout: Bool, downloadCount: Int) -> Bool {
-        (isHoveringButton || isHoveringFlyout) && downloadCount > 0
+    static let downloadsPreviewIntentDelay: UInt64 = 350_000_000
+
+    static func canPresentDownloadsPreview(
+        sidebarDragInFlight: Bool,
+        menuIsOpen: Bool,
+        primaryButtonIsDown: Bool,
+        screenshotMode: Bool
+    ) -> Bool {
+        !sidebarDragInFlight && !menuIsOpen && !primaryButtonIsDown && !screenshotMode
     }
 
-    private func rescheduleFlyout() {
-        libraryHoverTask?.cancel()
-        let wantsOpen = Self.shouldOpenFlyout(
-            isHoveringButton: isHoveringLibraryButton,
-            isHoveringFlyout: isHoveringFlyout,
-            downloadCount: env.recentDownloads.count
-        )
-        guard wantsOpen != showLibraryFlyout else { return }
-        libraryHoverTask = Task {
-            try? await Task.sleep(nanoseconds: wantsOpen ? 350_000_000 : 120_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(OrbitMotion.quick) { showLibraryFlyout = wantsOpen }
+    private var isScreenshotMode: Bool {
+        #if DEBUG
+        screenshotModeDisabled
+        #else
+        false
+        #endif
+    }
+
+    private var anotherMenuIsOpen: Bool {
+        isNewItemMenuPresented || NSApp.windows.contains { $0 is OrbitMenuPanel && $0.isVisible }
+    }
+
+    private func scheduleDownloadsPreview(hovering: Bool) {
+        downloadsPreviewTask?.cancel()
+        downloadsPreviewTask = nil
+        guard hovering, !showDownloadsPreview else { return }
+        downloadsPreviewTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.downloadsPreviewIntentDelay)
+            guard !Task.isCancelled, isHoveringLibraryButton else { return }
+            guard Self.canPresentDownloadsPreview(
+                sidebarDragInFlight: SidebarDragSession.hasInFlightDrag,
+                menuIsOpen: anotherMenuIsOpen,
+                primaryButtonIsDown: NSEvent.pressedMouseButtons & 1 != 0,
+                screenshotMode: isScreenshotMode
+            ) else { return }
+            setDownloadsPreview(true)
         }
     }
 
-    // env.recentDownloads.isEmpty covers the list emptying while the flyout is already open with no hover event to re-evaluate it.
-    @ViewBuilder
-    private var libraryFlyout: some View {
-        if showLibraryFlyout, !env.recentDownloads.isEmpty {
-            GeometryReader { proxy in
-                let bar = proxy.frame(in: .global)
-                let sidebarHeight = bar.maxY + OrbitMetrics.sidebarInterSectionGap
-                let panelHeight = max(0, bar.minY - OrbitMetrics.sidebarTopRowHeight)
-                DownloadsFlyoutView(theme: theme, downloads: env.recentDownloads)
-                    .frame(width: proxy.size.width, height: panelHeight, alignment: .bottom)
-                    .background(alignment: .bottom) {
-                        // ThemeBackgroundView's gradients are unit-point based: painted at the panel's own size instead of the sidebar's, the stops land at the wrong height and leave a visible seam.
-                        ThemeBackgroundView(theme: theme)
-                            .frame(height: sidebarHeight)
-                            .offset(y: bar.height + OrbitMetrics.sidebarInterSectionGap)
-                    }
-                    .clipped()
-                    .offset(y: -panelHeight)
-                    .onHover { hovering in
-                        isHoveringFlyout = hovering
-                        rescheduleFlyout()
-                    }
+    // Moving into the panel, or dragging a row out of it with the button down, must not close the drag's source panel.
+    private func scheduleDownloadsPreviewClose() {
+        downloadsCloseTask?.cancel()
+        downloadsCloseTask = nil
+        guard showDownloadsPreview, !isHoveringLibraryButton, !isHoveringDownloadsPanel else { return }
+        downloadsCloseTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: Self.downloadsPreviewCloseGrace)
+                guard !Task.isCancelled, !isHoveringLibraryButton, !isHoveringDownloadsPanel else { return }
+                if NSEvent.pressedMouseButtons & 1 != 0 { continue }
+                setDownloadsPreview(false)
+                return
             }
-            .transition(.opacity)
         }
+    }
+
+    static let downloadsPreviewCloseGrace = UInt64(OrbitHoverPopoverPointerZone.grace * 1_000_000_000)
+
+    private func setDownloadsPreview(_ shown: Bool) {
+        guard shown != showDownloadsPreview else { return }
+        downloadsCloseTask?.cancel()
+        downloadsCloseTask = nil
+        if shown {
+            installDownloadsEscapeMonitor()
+        } else {
+            isHoveringDownloadsPanel = false
+            removeDownloadsEscapeMonitor()
+        }
+        if reduceMotion {
+            showDownloadsPreview = shown
+        } else {
+            withAnimation(OrbitMotion.quick) { showDownloadsPreview = shown }
+        }
+    }
+
+    private func installDownloadsEscapeMonitor() {
+        removeDownloadsEscapeMonitor()
+        downloadsEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53 else { return event } // kVK_Escape
+            setDownloadsPreview(false)
+            return nil
+        }
+    }
+
+    private func removeDownloadsEscapeMonitor() {
+        if let downloadsEscapeMonitor {
+            NSEvent.removeMonitor(downloadsEscapeMonitor)
+        }
+        downloadsEscapeMonitor = nil
     }
 }
 
-struct DownloadsFlyoutView: View {
+enum DownloadsPreviewLayout {
+    static let maxWidth: CGFloat = 300
+    static let edgeInset: CGFloat = OrbitMetrics.sidebarHorizontalPadding
+    static let gap: CGFloat = 4
+
+    static func placement(containerWidth: CGFloat, anchorMinX: CGFloat) -> (originX: CGFloat, width: CGFloat) {
+        let width = max(0, min(maxWidth, containerWidth - edgeInset * 2))
+        let originX = min(max(anchorMinX, edgeInset), max(edgeInset, containerWidth - edgeInset - width))
+        return (originX, width)
+    }
+
+    static let rowHeightBound: CGFloat = 52
+    static let chromeHeightBound: CGFloat = 56
+
+    /// Height the panel may occupy above the bar; `nil` when the bar's position inside the sidebar is unknown.
+    static func maxHeight(spaceAbove: CGFloat?) -> CGFloat? {
+        spaceAbove.map { max(0, $0 - edgeInset - gap) }
+    }
+
+    static func visibleRowCount(rowCount: Int, maxHeight: CGFloat?) -> Int {
+        guard let maxHeight else { return rowCount }
+        let fitting = Int((max(0, maxHeight - chromeHeightBound) / rowHeightBound).rounded(.down))
+        return min(rowCount, fitting)
+    }
+}
+
+struct DownloadsPreviewOverlay: View {
     var theme: SpaceTheme
-    var downloads: [DownloadItem]
+    var containerWidth: CGFloat
+    var spaceAbove: CGFloat?
+    var anchorMinX: CGFloat
+    var anchorMidX: CGFloat
+    var reduceMotion: Bool
+    var onHoverChange: (Bool) -> Void
+    var onDismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: OrbitMetrics.sidebarBottomBarSpacing) {
-            ForEach(downloads) { item in
-                DownloadsFlyoutRow(theme: theme, item: item)
+        let placement = DownloadsPreviewLayout.placement(containerWidth: containerWidth, anchorMinX: anchorMinX)
+        let anchorX = placement.width > 0 ? min(max((anchorMidX - placement.originX) / placement.width, 0), 1) : 0
+        DownloadsPreviewPanel(
+            theme: theme,
+            width: placement.width,
+            maxHeight: DownloadsPreviewLayout.maxHeight(spaceAbove: spaceAbove),
+            onDismiss: onDismiss
+        )
+            .padding(.bottom, DownloadsPreviewLayout.gap)
+            .contentShape(Rectangle())
+            .onHover(perform: onHoverChange)
+            .padding(.leading, placement.originX)
+            .offset(y: -OrbitMetrics.sidebarBottomBarHeight)
+            .transition(
+                reduceMotion
+                    ? .opacity
+                    : .opacity.combined(with: .scale(scale: 0.94, anchor: UnitPoint(x: anchorX, y: 1)))
+            )
+    }
+}
+
+struct DownloadsPreviewPanel: View {
+    static let cornerRadius = OrbitMetrics.sidebarRowCornerRadius + OrbitMetrics.sidebarHorizontalPadding / 2
+
+    @Environment(AppEnvironment.self) private var env
+    var theme: SpaceTheme
+    var width: CGFloat
+    var maxHeight: CGFloat?
+    var onDismiss: () -> Void
+
+    @State private var isHoveringFooter = false
+
+    private var surface: RoundedRectangle {
+        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+    }
+
+    var body: some View {
+        let all = env.recentDownloads
+        let downloads = Array(all.prefix(DownloadsPreviewLayout.visibleRowCount(rowCount: all.count, maxHeight: maxHeight)))
+        VStack(spacing: 0) {
+            if all.isEmpty {
+                if DownloadsPreviewLayout.visibleRowCount(rowCount: 1, maxHeight: maxHeight) > 0 {
+                    emptyState
+                }
+            } else {
+                ForEach(downloads) { item in
+                    DownloadsPreviewRow(item: item, theme: theme, onDismiss: onDismiss)
+                }
             }
+
+            Rectangle()
+                .fill(theme.readableForeground.opacity(OrbitMetrics.cardBorderOpacity))
+                .frame(height: OrbitMetrics.cardBorderWidth)
+                .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
+                .padding(.vertical, 4)
+
+            footer
         }
-        .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
-        .padding(.bottom, OrbitMetrics.sidebarSectionSpacing)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .padding(.vertical, 6)
+        .frame(width: width)
+        .background(
+            surface
+                .fill(Color(theme.primary.nsColor))
+                .overlay(surface.fill(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity)))
+        )
+        .overlay(
+            surface.strokeBorder(
+                theme.readableForeground.opacity(OrbitMetrics.cardBorderOpacity),
+                lineWidth: OrbitMetrics.cardBorderWidth
+            )
+        )
+        .shadow(
+            color: .black.opacity(OrbitMetrics.contextMenuShadowOpacity),
+            radius: OrbitMetrics.contextMenuShadowRadius,
+            y: OrbitMetrics.contextMenuShadowYOffset
+        )
+        .contentShape(surface)
+    }
+
+    private var emptyState: some View {
+        Text("No recent downloads")
+            .font(OrbitFont.commandBarRowSubtitle)
+            .foregroundStyle(theme.readableSecondaryForeground)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
+            .padding(.vertical, 12)
+    }
+
+    private var footer: some View {
+        Text("Show all downloads")
+            .font(OrbitFont.commandBarRowTitle)
+            .foregroundStyle(theme.readableForeground)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius)
+                    .fill(isHoveringFooter ? theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity) : .clear)
+                    .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding / 2)
+            )
+            .contentShape(Rectangle())
+            .onHover { isHoveringFooter = $0 }
+            .onTapGesture {
+                onDismiss()
+                LibraryWindowController.show(section: .downloads)
+            }
     }
 }
 
@@ -168,26 +400,24 @@ enum DownloadsFlyoutTime {
     }
 }
 
-struct DownloadsFlyoutRow: View {
-    var theme: SpaceTheme
-    var item: DownloadItem
+struct DownloadsPreviewRow: View {
+    static let thumbnailSide: CGFloat = 32
 
+    @Environment(AppEnvironment.self) private var env
     @Environment(\.displayScale) private var displayScale
     #if DEBUG
     @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
     #endif
+
+    var item: DownloadItem
+    var theme: SpaceTheme
+    var onDismiss: () -> Void
+
+    @State private var isHovering = false
     @State private var thumbnail: NSImage?
 
     private var fileExists: Bool {
-        FileManager.default.fileExists(atPath: item.destinationURL.path)
-    }
-
-    private var displayName: String {
-        fileExists ? item.destinationURL.lastPathComponent : item.suggestedFileName
-    }
-
-    private var timestamp: String {
-        DownloadsFlyoutTime.string(for: item.finishedAt ?? item.startedAt, relativeTo: Date())
+        env.downloadStore.fileStillExists(item.id)
     }
 
     private var isInFlight: Bool {
@@ -197,8 +427,39 @@ struct DownloadsFlyoutRow: View {
         }
     }
 
+    private var isOpenable: Bool { item.state == .completed && fileExists }
+
+    private var isMissing: Bool { item.state == .completed && !fileExists }
+
+    private var displayName: String {
+        fileExists ? item.destinationURL.lastPathComponent : item.suggestedFileName
+    }
+
     private var progress: DownloadProgress {
         DownloadProgress(receivedBytes: item.receivedBytes, totalBytes: item.totalBytes, state: item.state)
+    }
+
+    private var timestamp: String {
+        DownloadsFlyoutTime.string(for: item.finishedAt ?? item.startedAt, relativeTo: Date())
+    }
+
+    private var detailText: String {
+        switch item.state {
+        case .completed:
+            if !fileExists { return "Moved or deleted" }
+            let bytes = item.totalBytes > 0 ? item.totalBytes : item.receivedBytes
+            return "\(LibraryByteFormat.string(bytes)) · \(timestamp)"
+        case .cancelled:
+            return "Cancelled · \(timestamp)"
+        case .interrupted:
+            return "Failed · \(timestamp)"
+        case .pending:
+            return "Starting…"
+        case .inProgress, .paused:
+            let received = LibraryByteFormat.string(item.receivedBytes)
+            let text = item.totalBytes > 0 ? "\(received) of \(LibraryByteFormat.string(item.totalBytes))" : received
+            return item.state == .paused ? "Paused · \(text)" : text
+        }
     }
 
     var body: some View {
@@ -213,43 +474,49 @@ struct DownloadsFlyoutRow: View {
         #endif
     }
 
+    @ViewBuilder
     private var draggableRow: some View {
-        rowContent
-            .onDrag {
-                guard fileExists else { return NSItemProvider() }
-                return NSItemProvider(contentsOf: item.destinationURL) ?? NSItemProvider()
-            }
+        if isOpenable {
+            rowContent
+                .onDrag { NSItemProvider(contentsOf: item.destinationURL) ?? NSItemProvider() }
+        } else {
+            rowContent
+        }
     }
 
     private var rowContent: some View {
         HStack(spacing: OrbitMetrics.sidebarRowContentSpacing) {
             thumbnailView
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(displayName)
-                    .font(.system(size: OrbitMetrics.sidebarSpaceNameFontSize, weight: .regular))
-                    .foregroundStyle(theme.readableForeground.opacity(OrbitMetrics.sidebarRowLabelOpacityInactive))
+                    .font(OrbitFont.commandBarRowTitle)
+                    .foregroundStyle(theme.readableForeground)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(timestamp)
-                    .font(.system(size: OrbitMetrics.sidebarRowFontSize, weight: .regular))
-                    .foregroundStyle(theme.readableForeground.opacity(OrbitMetrics.sidebarSpaceNameOpacity))
+                    .truncationMode(.middle)
+                Text(detailText)
+                    .font(OrbitFont.commandBarRowSubtitle)
+                    .foregroundStyle(theme.readableSecondaryForeground)
                     .lineLimit(1)
-                if isInFlight, let fraction = progress.fraction {
-                    ProgressView(value: fraction)
-                        .controlSize(.small)
-                        .tint(theme.readableForeground)
+                if isInFlight {
+                    progressBar
                 }
             }
             Spacer(minLength: 0)
+            trailingControl
         }
+        .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius)
+                .fill(isHovering && !isMissing ? theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity) : .clear)
+                .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding / 2)
+        )
         .contentShape(Rectangle())
-        .onTapGesture {
-            guard fileExists else { return }
-            NSWorkspace.shared.open(item.destinationURL)
-        }
-        .orbitTooltip(displayName)
+        .onHover { isHovering = $0 }
+        .onTapGesture { open() }
+        .help(displayName)
         .task(id: item.destinationURL) {
-            let side = OrbitMetrics.spaceBadgeSize
+            let side = Self.thumbnailSide
             let scale = max(1, displayScale)
             if let hit = DownloadThumbnailStore.shared.cached(for: item.destinationURL, side: side, scale: scale) {
                 thumbnail = hit
@@ -259,15 +526,77 @@ struct DownloadsFlyoutRow: View {
         }
     }
 
+    private var progressBar: some View {
+        Capsule()
+            .fill(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity * 2))
+            .frame(height: 3)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(theme.readableForeground)
+                        .frame(width: proxy.size.width * (progress.fraction ?? 0.3))
+                }
+            }
+    }
+
     private var thumbnailView: some View {
         Image(nsImage: thumbnail ?? DownloadFileIcon.icon(for: item, fileExists: fileExists))
             .resizable()
             .aspectRatio(contentMode: .fill)
-            .frame(width: OrbitMetrics.spaceBadgeSize, height: OrbitMetrics.spaceBadgeSize)
+            .frame(width: Self.thumbnailSide, height: Self.thumbnailSide)
             .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius, style: .continuous))
-            .opacity(item.state == .cancelled || item.state == .interrupted ? OrbitMetrics.spacePagerInactiveOpacity : 1)
+            .opacity(item.state == .cancelled || item.state == .interrupted || isMissing ? OrbitMetrics.spacePagerInactiveOpacity : 1)
+    }
+
+    @ViewBuilder
+    private var trailingControl: some View {
+        Group {
+            if isInFlight {
+                controlButton(symbol: "xmark", help: "Cancel") {
+                    env.cancelDownload(item.id)
+                }
+            } else {
+                controlButton(symbol: "folder", help: "Show in Finder") {
+                    env.downloadStore.revealInFinder(item.id)
+                    onDismiss()
+                }
+            }
+        }
+        .opacity(isHovering ? 1 : 0)
+        .allowsHitTesting(isHovering)
+    }
+
+    private func controlButton(symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.readableForeground)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func open() {
+        guard isOpenable else { return }
+        NSWorkspace.shared.open(item.destinationURL)
+        onDismiss()
     }
 }
+
+#if DEBUG
+private struct OrbitForcesDownloadsPreviewKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var orbitForcesDownloadsPreview: Bool {
+        get { self[OrbitForcesDownloadsPreviewKey.self] }
+        set { self[OrbitForcesDownloadsPreviewKey.self] = newValue }
+    }
+}
+#endif
 
 extension Notification.Name {
     static let orbitPresentBoostsEditor = Notification.Name("OrbitPresentBoostsEditor")

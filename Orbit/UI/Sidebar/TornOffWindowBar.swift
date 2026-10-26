@@ -15,7 +15,7 @@ struct TornOffWindowBar: View {
                 .foregroundStyle(theme.readableForeground)
                 .accessibilityHidden(true)
 
-            Text("Temporary — closes with this window")
+            Text("Temporary. Closes with this window.")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(theme.readableForeground)
                 .lineLimit(1)

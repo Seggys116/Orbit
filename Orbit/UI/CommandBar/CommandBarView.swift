@@ -69,14 +69,31 @@ struct CommandBarView: View {
 
     var width: CGFloat = OrbitMetrics.commandBarWidth
 
+    /// The bar as the New Tab page's search field; lists nothing until something is typed.
+    struct Embedding {
+        var paneTabID: TabID?
+        var seedQuery: String?
+        var onInputChange: (Bool) -> Void
+
+        var mode: CommandBarMode {
+            paneTabID.map(CommandBarMode.blankPane) ?? .newTab
+        }
+    }
+
+    private var embedding: Embedding?
+
+    @Environment(\.colorScheme) private var colorScheme
+
     // seededFrom resolves opening state before first layout so the panel never lays out once at 52pt and then springs to full height once the first result set lands.
     init(
         width: CGFloat = OrbitMetrics.commandBarWidth,
         initialSiteSearchScope: InitialSiteSearchScope? = nil,
-        seededFrom env: AppEnvironment? = nil
+        seededFrom env: AppEnvironment? = nil,
+        embedding: Embedding? = nil
     ) {
         self.width = width
         self.initialSiteSearchScope = initialSiteSearchScope
+        self.embedding = embedding
         guard let env else { return }
         let opening = Self.openingState(env: env, scope: initialSiteSearchScope)
         _activeSiteEngine = State(initialValue: opening.engine)
@@ -107,7 +124,78 @@ struct CommandBarView: View {
     @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
     #endif
 
+    private var mode: CommandBarMode {
+        embedding?.mode ?? env.commandBarMode
+    }
+
+    private var hasInput: Bool {
+        activeSiteEngine != nil || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showsResults: Bool {
+        !results.isEmpty && (embedding == nil || hasInput)
+    }
+
+    private var fieldIdentifier: String {
+        embedding == nil ? CommandBarFieldFocus.fieldIdentifier : CommandBarFieldFocus.embeddedFieldIdentifier
+    }
+
     var body: some View {
+        chrome
+            .onAppear(perform: setupInitialState)
+            // Re-presenting over an open bar never fires .onAppear again, so the serial forces a re-seed.
+            .onChange(of: env.commandBarPresentationSerial) { _, _ in
+                guard embedding == nil else { return }
+                setupInitialState()
+            }
+            .onChange(of: query) { _, newValue in
+                guard !isSeedingQuery else {
+                    isSeedingQuery = false
+                    return
+                }
+                refreshResults(for: newValue)
+            }
+            .onChange(of: hasInput) { _, value in embedding?.onInputChange(value) }
+            .onChange(of: env.isCommandBarPresented) { _, presented in
+                guard embedding != nil else { return }
+                if presented {
+                    focusClaim?.cancel()
+                    focusClaim = nil
+                } else {
+                    claimFocus()
+                }
+            }
+            .onDisappear {
+                focusClaim?.cancel()
+                focusClaim = nil
+            }
+    }
+
+    @ViewBuilder
+    private var chrome: some View {
+        if embedding == nil {
+            panel
+                .frame(width: width)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OrbitMetrics.commandBarCornerRadius))
+                .overlay(RoundedRectangle(cornerRadius: OrbitMetrics.commandBarCornerRadius).strokeBorder(.white.opacity(0.1)))
+                .shadow(color: .black.opacity(0.35), radius: 30, x: 0, y: 14)
+        } else {
+            let shape = RoundedRectangle(cornerRadius: Self.embeddedFieldHeight / 2, style: .circular)
+            panel
+                .frame(maxWidth: .infinity)
+                .clipShape(shape)
+                .background(
+                    shape
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.07) : Color.white)
+                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.10), radius: 14, x: 0, y: 4)
+                )
+                .overlay(shape.strokeBorder(Color.primary.opacity(isFocused ? 0.28 : 0.12), lineWidth: 1))
+        }
+    }
+
+    private static let embeddedFieldHeight: CGFloat = 54
+
+    private var panel: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
@@ -119,7 +207,7 @@ struct CommandBarView: View {
                 TextField(inputPlaceholder, text: $query)
                     .textFieldStyle(.plain)
                     .font(OrbitFont.commandBarInput)
-                    .accessibilityIdentifier(CommandBarFieldFocus.fieldIdentifier)
+                    .accessibilityIdentifier(fieldIdentifier)
                     .focused($isFocused)
                     .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
                     .onKeyPress(.downArrow) { moveSelection(1); return .handled }
@@ -141,7 +229,14 @@ struct CommandBarView: View {
                         leaveSiteSearch(restoringShortcutOf: engine)
                         return .handled
                     }
-                    .onKeyPress(.escape) { dismiss(); return .handled }
+                    .onKeyPress(.escape) {
+                        if embedding != nil {
+                            clearInput()
+                        } else {
+                            dismiss()
+                        }
+                        return .handled
+                    }
                     // Cmd/Ctrl-A: AppKit's own moveToBeginningOfParagraph: binding for Ctrl-A would park the caret and select nothing, so this field diverges deliberately.
                     .onKeyPress(keys: ["a"]) { keyPress in
                         guard keyPress.modifiers.contains(.control) || keyPress.modifiers.contains(.command) else { return .ignored }
@@ -166,10 +261,10 @@ struct CommandBarView: View {
                     .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 16)
-            .frame(height: 52)
+            .padding(.horizontal, embedding == nil ? 16 : 20)
+            .frame(height: embedding == nil ? 52 : Self.embeddedFieldHeight)
 
-            if !results.isEmpty {
+            if showsResults {
                 Rectangle()
                     .fill(Color.primary.opacity(OrbitMetrics.commandBarSeparatorOpacity))
                     .frame(height: OrbitMetrics.commandBarSeparatorHeight)
@@ -201,24 +296,6 @@ struct CommandBarView: View {
                     }
                 }
             }
-        }
-        .frame(width: width)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OrbitMetrics.commandBarCornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: OrbitMetrics.commandBarCornerRadius).strokeBorder(.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.35), radius: 30, x: 0, y: 14)
-        .onAppear(perform: setupInitialState)
-        // Re-presenting over an already-open bar (e.g. Cmd+L while a Cmd+T bar is up) never fires .onAppear again, so the serial forces a re-seed.
-        .onChange(of: env.commandBarPresentationSerial) { _, _ in setupInitialState() }
-        .onChange(of: query) { _, newValue in
-            guard !isSeedingQuery else {
-                isSeedingQuery = false
-                return
-            }
-            refreshResults(for: newValue)
-        }
-        .onDisappear {
-            focusClaim?.cancel()
-            focusClaim = nil
         }
     }
 
@@ -320,8 +397,8 @@ struct CommandBarView: View {
         seeding.disablesAnimations = true
         withTransaction(seeding) {
             activeSiteEngine = initialSiteSearchScope?.engine
-                ?? (env.commandBarMode == .chatGPT && isChatGPTCommandBarAvailable ? ChatGPTCommandBar.virtualEngine() : nil)
-            query = initialSiteSearchScope?.query ?? env.commandBarMode.initialQuery
+                ?? (mode == .chatGPT && isChatGPTCommandBarAvailable ? ChatGPTCommandBar.virtualEngine() : nil)
+            query = initialSiteSearchScope?.query ?? embedding?.seedQuery ?? mode.initialQuery
             refreshResults(for: query, fetchSuggestions: false)
         }
 
@@ -339,8 +416,9 @@ struct CommandBarView: View {
         let siteSearch = siteSearchState
         let chatGPTAvailable = isChatGPTCommandBarAvailable
         let instantLinksEnabled = AssistSettings.isInstantLinksEnabled
+        let mode = self.mode
         publish(CommandBarEngine.results(
-            query: text, mode: env.commandBarMode, env: env, suggestions: suggestions,
+            query: text, mode: mode, env: env, suggestions: suggestions,
             searchEngine: env.searchEngine, siteSearch: siteSearch,
             isChatGPTCommandBarAvailable: chatGPTAvailable, isInstantLinksEnabled: instantLinksEnabled
         ), for: text)
@@ -353,7 +431,7 @@ struct CommandBarView: View {
             await env.prepareHistorySearch(for: text)
             guard !Task.isCancelled, generation.isCurrent(token) else { return }
             publish(CommandBarEngine.results(
-                query: text, mode: env.commandBarMode, env: env, suggestions: suggestions,
+                query: text, mode: mode, env: env, suggestions: suggestions,
                 searchEngine: env.searchEngine, siteSearch: siteSearch,
                 isChatGPTCommandBarAvailable: chatGPTAvailable, isInstantLinksEnabled: instantLinksEnabled
             ), for: text)
@@ -367,7 +445,7 @@ struct CommandBarView: View {
             guard !Task.isCancelled, generation.isCurrent(token) else { return }
             suggestions = fetched
             publish(CommandBarEngine.results(
-                query: text, mode: env.commandBarMode, env: env, suggestions: fetched,
+                query: text, mode: mode, env: env, suggestions: fetched,
                 searchEngine: engine, siteSearch: siteSearch,
                 isChatGPTCommandBarAvailable: chatGPTAvailable, isInstantLinksEnabled: instantLinksEnabled
             ), for: text)
@@ -375,7 +453,7 @@ struct CommandBarView: View {
     }
 
     private func moveSelection(_ delta: Int) {
-        guard !results.isEmpty else { return }
+        guard showsResults else { return }
         selectedIndex = ((selectedIndex + delta) % results.count + results.count) % results.count
         requestScroll(to: selectedIndex)
     }
@@ -406,6 +484,8 @@ struct CommandBarView: View {
         focusClaim?.cancel()
         focusClaim = Task { @MainActor in
             await CommandBarFieldFocus.claim(
+                identifier: fieldIdentifier,
+                yielding: { embeddedBarIsInactive },
                 showing: { query },
                 isFocused: { isFocused },
                 requestFocus: { isFocused = true }
@@ -413,8 +493,21 @@ struct CommandBarView: View {
         }
     }
 
+    private var embeddedBarIsInactive: Bool {
+        guard let embedding else { return false }
+        if env.isCommandBarPresented || env.isFindBarPresented { return true }
+        if let paneTabID = embedding.paneTabID, env.activeTabID != paneTabID { return true }
+        return false
+    }
+
+    private func clearInput() {
+        activeSiteEngine = nil
+        suggestions = []
+        query = ""
+    }
+
     private func autocomplete() {
-        guard let first = results.first else { return }
+        guard showsResults, let first = results.first else { return }
         switch first.kind {
         case .typedURL(let url): query = url.absoluteString
         case .searchSuggestion(let text): query = text
@@ -433,10 +526,11 @@ struct CommandBarView: View {
 
     private func commit(instant: Bool) {
         // Enter on an emptied address field leaves the page alone. With nothing typed the list is only recents and favourites, and committing the top one would navigate the tab somewhere the user never asked for.
-        if env.commandBarMode.editsCurrentPage, activeSiteEngine == nil, query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if mode.editsCurrentPage, activeSiteEngine == nil, query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             dismiss()
             return
         }
+        if embedding != nil, !hasInput { return }
         if selectedIndex < results.count {
             activate(results[selectedIndex], instant: instant)
             return
@@ -445,19 +539,23 @@ struct CommandBarView: View {
     }
 
     private func commitTypedTextDirectly() {
-        guard CommandBarActivation.commitTypedText(query, siteEngine: activeSiteEngine, in: env) else { return }
+        guard CommandBarActivation.commitTypedText(query, siteEngine: activeSiteEngine, in: env, mode: mode) else { return }
         dismiss()
     }
 
     private func activate(_ result: CommandResult, instant: Bool = false) {
-        guard CommandBarActivation.activate(result, in: env, instant: instant) else { return }
+        guard CommandBarActivation.activate(result, in: env, mode: mode, instant: instant) else { return }
         dismiss()
     }
 
     private func dismiss() {
         suggestionsTask?.cancel()
         historySearchTask?.cancel()
-        env.dismissCommandBar()
+        if embedding != nil {
+            clearInput()
+        } else {
+            env.dismissCommandBar()
+        }
     }
 }
 

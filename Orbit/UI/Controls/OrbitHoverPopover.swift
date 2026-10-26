@@ -52,6 +52,7 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
         private var appResignObserver: NSObjectProtocol?
         /// Replaced in tests: the real pointer is not scriptable.
         var pointerLocation: () -> NSPoint = { NSEvent.mouseLocation }
+        var primaryButtonIsDown: () -> Bool = { NSEvent.pressedMouseButtons & 1 != 0 }
 
         private var popover: NSPopover?
         private var hostingController: NSHostingController<HostedContent>?
@@ -185,7 +186,7 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
                   let popoverWindow = popover.contentViewController?.view.window
             else { return }
             let anchorRect = anchorWindow.convertToScreen(anchor.convert(anchor.bounds, to: nil))
-            if OrbitHoverPopoverPointerZone.contains(pointerLocation(), anchor: anchorRect, popover: popoverWindow.frame) {
+            if hasOpenMenuPanel(in: popoverWindow) || primaryButtonIsDown() || OrbitHoverPopoverPointerZone.contains(pointerLocation(), anchor: anchorRect, popover: popoverWindow.frame) {
                 pointerLastInside = now
                 return
             }
@@ -231,6 +232,7 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
         private func dismissIfOutside(_ event: NSEvent) {
             guard let popover, let popoverWindow = popover.contentViewController?.view.window else { return }
             guard event.window !== popoverWindow else { return }
+            if let eventWindow = event.window, Self.isMenuPanel(eventWindow, descendantOf: popoverWindow) { return }
             // A click back on the anchor itself (e.g. re-clicking the toolbar icon) is the
             // caller's own action to arbitrate, not a dismiss-and-reopen from here.
             if let currentAnchor, let anchorWindow = currentAnchor.window, anchorWindow === event.window {
@@ -246,9 +248,24 @@ struct OrbitHoverPopover<Content: View>: NSViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.popover != nil else { return }
                 let popoverWindow = self.popover?.contentViewController?.view.window
+                if let popoverWindow, self.hasOpenMenuPanel(in: popoverWindow) { return }
                 if OrbitHoverPopoverPointerZone.holdsFocus(popoverWindowIsKey: popoverWindow?.isKeyWindow ?? false) { return }
                 self.close()
             }
+        }
+
+        private func hasOpenMenuPanel(in popoverWindow: NSWindow) -> Bool {
+            popoverWindow.childWindows?.contains { $0 is OrbitMenuPanel } ?? false
+        }
+
+        private static func isMenuPanel(_ window: NSWindow, descendantOf popoverWindow: NSWindow) -> Bool {
+            guard window is OrbitMenuPanel else { return false }
+            var ancestor = window.parent
+            while let current = ancestor {
+                if current === popoverWindow { return true }
+                ancestor = current.parent
+            }
+            return false
         }
 
         private func removeDismissalMonitors() {

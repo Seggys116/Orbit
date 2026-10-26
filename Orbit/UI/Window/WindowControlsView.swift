@@ -47,7 +47,8 @@ struct WindowControlsCluster: View {
 
     @ViewBuilder
     private func dot(color: Color, glyph: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        // A catcher, not a Button: click recovery would hand a plain Button's click to the toolbar catcher beneath.
+        OrbitNSActionButton(action: action) {
             ZStack {
                 Circle().fill(isKey ? color : WindowControlsCluster.inactiveColor)
                 if isHovering {
@@ -57,10 +58,12 @@ struct WindowControlsCluster: View {
                 }
             }
             .frame(width: OrbitWindowControlMetrics.diameter, height: OrbitWindowControlMetrics.diameter)
-            .contentShape(Circle())
         }
-        .buttonStyle(.plain)
         .orbitTooltip(help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { action() }
     }
 }
 

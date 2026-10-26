@@ -1,5 +1,14 @@
 import SwiftUI
 
+enum PinnedSectionMenu {
+    @MainActor
+    static func newFolderEntries(env: AppEnvironment, spaceID: SpaceID) -> [OrbitContextMenuEntry] {
+        [.item(OrbitContextMenuItem(title: "New Folder", systemImage: "folder.badge.plus") {
+            env.createFolder(name: "New Folder", in: spaceID)
+        })]
+    }
+}
+
 struct PinnedSectionView: View {
     @Environment(AppEnvironment.self) private var env
     var spaceID: SpaceID
@@ -22,6 +31,8 @@ struct PinnedSectionView: View {
                         rowID: members[0].id,
                         isFolder: false,
                         accentColor: theme.readableForeground,
+                        rejectDropIDs: Set(members.map(\.id)),
+                        ownsDragSource: false,
                         onDrop: handleInsertion
                     ) {
                         SplitGroupRowView(
@@ -33,8 +44,8 @@ struct PinnedSectionView: View {
                 }
             }
         }
-        .contextMenu {
-            Button("New Folder") { env.createFolder(name: "New Folder", in: spaceID) }
+        .orbitRightClickMenu {
+            PinnedSectionMenu.newFolderEntries(env: env, spaceID: spaceID)
         }
     }
 
@@ -86,7 +97,7 @@ struct PinnedSectionView: View {
                 apply(parent: anchor.parent, atIndex: index)
             case .insideFolder(let folderID):
                 apply(parent: folderID, atIndex: .max)
-            case .groupingWithSibling(let targetID):
+            case .groupingWithSibling(let targetID, _):
                 // groupIntoNewFolder's moveNode no-ops on a node not yet in the tree, so an unpinned node must be pinned first.
                 if needsPin {
                     env.pinTab(resolvedNodeID, toParent: nil, atIndex: .max, in: spaceID)
@@ -151,8 +162,8 @@ struct PinnedSectionEmptyDropZone: View {
             } isTargeted: { targeted in
                 isDropTargeted = targeted
             }
-            .contextMenu {
-                Button("New Folder") { env.createFolder(name: "New Folder", in: spaceID) }
+            .orbitRightClickMenu {
+                PinnedSectionMenu.newFolderEntries(env: env, spaceID: spaceID)
             }
     }
 }

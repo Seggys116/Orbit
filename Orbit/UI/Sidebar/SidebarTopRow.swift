@@ -26,19 +26,21 @@ struct SidebarTopRow: View {
     }
 
     private var toggleButton: some View {
-        Button {
-            env.perform(.toggleSidebar)
-        } label: {
+        // A catcher, not a Button: click recovery would hand a plain Button's click to the toolbar catcher beneath.
+        OrbitNSActionButton(action: { env.perform(.toggleSidebar) }) {
             Image(systemName: "sidebar.left")
                 .font(.system(size: OrbitMetrics.sidebarTopRowIconSize * sidebarToggleGlyphScale, weight: .semibold))
                 .frame(width: OrbitMetrics.sidebarTopRowIconSize, height: OrbitMetrics.sidebarTopRowIconSize)
         }
-        .buttonStyle(.plain)
         .foregroundStyle(theme.readableForeground)
         .orbitHoverHighlight(
             fill: theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity),
             cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius
         )
-        .orbitTooltip("Show/Hide Sidebar — \u{2318}S")
+        .orbitTooltip("Show/Hide Sidebar (\u{2318}S)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Show/Hide Sidebar")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { env.perform(.toggleSidebar) }
     }
 }

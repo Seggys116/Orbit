@@ -673,4 +673,111 @@ final class PaneChromeTests: XCTestCase {
             "Expected the measured seam (\(seam)pt) to equal OrbitSplitPaneMetrics.interPaneGap (\(OrbitSplitPaneMetrics.interPaneGap)pt) — the constant and what actually renders have drifted apart."
         )
     }
+
+    // MARK: - 8. Borderless: rounded against the docked sidebar, flush at the window edge
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_borderless_cardRoundsIntoTheDockedSidebarAndRunsFlushAtTheWindowEdge
+
+    func test_borderless_cardRoundsIntoTheDockedSidebarAndRunsFlushAtTheWindowEdge() {
+        PeekState.shared.dismiss()
+
+        let suiteName = "OrbitTests-PaneChrome-borderless-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let originalSettings = BorderlessSettings.shared
+        let borderless = BorderlessSettings(defaults: defaults)
+        borderless.isEnabled = true
+        BorderlessSettings.shared = borderless
+
+        let spaceColor = ThemeColor(red: 0.93, green: 0.16, blue: 0.55)
+        let theme = SpaceTheme(style: .solid, colors: [spaceColor], grain: 0)
+        let profileID = env.createDefaultProfileIfNeeded()
+        let spaceID = env.createSpace(name: "Borderless Corner Space", icon: "circle", iconIsEmoji: false, theme: theme, profileID: profileID)
+        let originalActiveSpaceID = env.state.activeSpaceID
+        let originalSidebarVisible = env.isSidebarVisible
+        defer {
+            BorderlessSettings.shared = originalSettings
+            defaults.removePersistentDomain(forName: suiteName)
+            env.isSidebarVisible = originalSidebarVisible
+            env.state.activeSpaceID = originalActiveSpaceID
+            env.deleteSpace(spaceID)
+        }
+        env.state.activeSpaceID = spaceID
+
+        let size = CGSize(width: 900, height: 600)
+        let tolerance = 0.06
+
+        for sidebarVisible in [true, false] {
+            env.isSidebarVisible = sidebarVisible
+            var windowView = AnyView(BrowserWindowView(skipOnboarding: true).environment(env))
+            #if DEBUG
+            windowView = AnyView(windowView.environment(\.orbitScreenshotModeDragDisabled, true))
+            #endif
+            let rendered = render(windowView, size: size)
+            let png = rendered.writeDiagnosticPNG(named: "borderless-corners-sidebarVisible-\(sidebarVisible)")
+            print("[BORDERLESS-CORNERS] sidebarVisible=\(sidebarVisible) png=\(png?.path ?? "not written")")
+
+            let leadingX = sidebarVisible ? Int(env.sidebarWidth.rounded()) : 0
+            let trailingX = Int(size.width) - 1
+            let bottomY = Int(size.height) - 1
+
+            // One point in from a corner lies outside a 10pt radius: Space background if rounded, card if square.
+            let topRight = rendered.color(atX: trailingX - 1, y: 1)
+            let topRightBelow = rendered.color(atX: trailingX - 1, y: 14)
+            let bottomRight = rendered.color(atX: trailingX - 1, y: bottomY - 1)
+            let bottomRightAbove = rendered.color(atX: trailingX - 1, y: bottomY - 14)
+
+            XCTAssertTrue(
+                topRight.isApproximately(topRightBelow, tolerance: tolerance),
+                "Borderless, the top-right corner meets the window edge and must be flush (card-filled); got \(topRight) against the card just below it, \(topRightBelow) (sidebarVisible: \(sidebarVisible))."
+            )
+            XCTAssertTrue(
+                bottomRight.isApproximately(bottomRightAbove, tolerance: tolerance),
+                "Borderless, the bottom-right corner meets the window edge and must be flush (card-filled); got \(bottomRight) against \(bottomRightAbove) (sidebarVisible: \(sidebarVisible))."
+            )
+
+            let topLeft = rendered.color(atX: leadingX + 1, y: 1)
+            let topLeftBeside = rendered.color(atX: leadingX + 1, y: 14)
+            let bottomLeft = rendered.color(atX: leadingX + 1, y: bottomY - 1)
+            let bottomLeftBeside = rendered.color(atX: leadingX + 1, y: bottomY - 14)
+            if sidebarVisible {
+                XCTAssertFalse(
+                    topLeft.isApproximately(topLeftBeside, tolerance: tolerance),
+                    "Borderless with the sidebar docked, the card's top-left corner must stay rounded so the sidebar rounds into the page; the corner pixel (\(topLeft)) matched the card (\(topLeftBeside))."
+                )
+                XCTAssertFalse(
+                    bottomLeft.isApproximately(bottomLeftBeside, tolerance: tolerance),
+                    "Borderless with the sidebar docked, the card's bottom-left corner must stay rounded; the corner pixel (\(bottomLeft)) matched the card (\(bottomLeftBeside))."
+                )
+            } else {
+                XCTAssertTrue(
+                    topLeft.isApproximately(topLeftBeside, tolerance: tolerance),
+                    "Borderless with the sidebar hidden, the leading corners meet the window edge and must be flush; the corner pixel (\(topLeft)) differed from the card (\(topLeftBeside))."
+                )
+                XCTAssertTrue(
+                    bottomLeft.isApproximately(bottomLeftBeside, tolerance: tolerance),
+                    "Borderless with the sidebar hidden, the bottom-left corner must be flush; the corner pixel (\(bottomLeft)) differed from the card (\(bottomLeftBeside))."
+                )
+            }
+        }
+    }
+
+    func test_borderlessCornerRadii_squareOnlyWhereBothEdgesAreFlush() {
+        let r = OrbitMetrics.cardCornerRadius
+        let docked = BorderlessSettings.cardCornerRadii(flushEdges: [.top, .bottom, .trailing])
+        XCTAssertEqual(docked.topLeading, r)
+        XCTAssertEqual(docked.bottomLeading, r)
+        XCTAssertEqual(docked.topTrailing, 0)
+        XCTAssertEqual(docked.bottomTrailing, 0)
+
+        let hidden = BorderlessSettings.cardCornerRadii(flushEdges: .all)
+        XCTAssertEqual([hidden.topLeading, hidden.bottomLeading, hidden.topTrailing, hidden.bottomTrailing], [0, 0, 0, 0])
+
+        let leftPane = BorderlessSettings.cardCornerRadii(flushEdges: [.top, .bottom, .leading])
+        XCTAssertEqual(leftPane.topLeading, 0)
+        XCTAssertEqual(leftPane.topTrailing, r, "A split pane's inner corners stay rounded where it meets the gap.")
+        XCTAssertEqual(leftPane.bottomTrailing, r)
+
+        let normal = BorderlessSettings.cardCornerRadii(flushEdges: [])
+        XCTAssertEqual([normal.topLeading, normal.bottomLeading, normal.topTrailing, normal.bottomTrailing], [r, r, r, r])
+    }
 }

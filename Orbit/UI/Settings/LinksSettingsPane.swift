@@ -14,7 +14,7 @@ struct LinksSettingsPane: View {
         VStack(alignment: .leading, spacing: SettingsMetrics.sectionStackSpacing) {
             Text("Links").font(.system(size: 20, weight: .bold))
 
-            paragraph("Little Orbit is a smaller, simpler Orbit window. It's perfect for quick lookups and reading funny tweets your friends send you.")
+            paragraph("Little Orbit is a small window for quick lookups.")
 
             OrbitSettingsSection(title: nil) {
                 littleOrbitHotkeyRow
@@ -35,7 +35,7 @@ struct LinksSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "Links from other apps open in Little Orbit",
-                    description: "Sets Air Traffic Control's Default destination, used when no route matches."
+                    description: "Sets the Air Traffic Control default."
                 ) {
                     OrbitToggle(
                         accessibilityLabel: "Links from other apps open in Little Orbit",
@@ -67,7 +67,7 @@ struct LinksSettingsPane: View {
                 }
             }
 
-            paragraph("Peek is a way to preview a link without opening a new tab. It's perfect for quickly looking at a link from an email, news article, or tweet.")
+            paragraph("Peek previews a link without opening a new tab.")
 
             OrbitSettingsSection(title: nil) {
                 OrbitSettingsRow(title: "Open a Peek window when clicking on links with Shift held") {
@@ -86,7 +86,7 @@ struct LinksSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "Open a Peek window when clicking on links to other sites",
-                    description: "Note: This only affects Favorites and Pinned tabs"
+                    description: "Only affects Favorites and Pinned tabs."
                 ) {
                     OrbitToggle(
                         accessibilityLabel: "Open a Peek window when clicking on links to other sites",
@@ -142,7 +142,7 @@ struct LinksSettingsPane: View {
         let keys = binding?.displayString ?? "no key"
         return OrbitSettingsRow(
             title: "Open Little Orbit when I press \(keys)",
-            description: "Works while Orbit is frontmost. Orbit does not install a system-wide hotkey."
+            description: "Works only while Orbit is frontmost."
         ) {
             OrbitButton(title: binding == nil ? "Set in Keybinds…" : "Change in Keybinds…", kind: .secondary, accentColor: SettingsPalette.accent) {
                 SettingsRouter.shared.selectedPane = .shortcuts

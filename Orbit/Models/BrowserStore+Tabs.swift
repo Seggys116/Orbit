@@ -129,6 +129,17 @@ public extension BrowserStore {
         }
     }
 
+    func discardTab(_ id: TabID) {
+        guard let tab = state.tabs[id] else { return }
+        var newState = state
+        removeFromAllContainers(id, spaceID: tab.spaceID, in: &newState)
+        newState.tabs.removeValue(forKey: id)
+        if newState.activeTabBySpace[tab.spaceID] == id {
+            newState.activeTabBySpace[tab.spaceID] = fallbackActiveTab(excluding: id, in: tab.spaceID, previousState: state, newState: newState)
+        }
+        state = newState
+    }
+
     // MARK: - Bookmarked (pinned) rows that are also open tabs
 
     // No fallbackActiveTab: this is a deactivation, not "give me the next tab".

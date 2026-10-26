@@ -4,6 +4,21 @@
 import AppKit
 import SwiftUI
 
+/// Set when a menu dismisses, cleared next run-loop turn; a trigger button uses it to avoid reopening the menu.
+enum OrbitMenuClickGuard {
+    private static var dismissedToken: UInt64 = 0
+
+    static func noteDismissed() {
+        dismissedToken &+= 1
+        let noted = dismissedToken
+        DispatchQueue.main.async {
+            if dismissedToken == noted { dismissedToken = 0 }
+        }
+    }
+
+    static var wasDismissedThisTurn: Bool { dismissedToken != 0 }
+}
+
 final class OrbitMenuPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -24,6 +39,9 @@ final class OrbitMenuPanelController {
 
     private var levels: [Level] = []
     private weak var ownerWindow: NSWindow?
+    weak var anchorView: NSView?
+    /// Screen coordinates of the opening control; the panel's shadow covers it, so a second click misses the button.
+    private var anchorScreenRect: CGRect = .zero
     private var sentinel: OrbitMenuAnchorSentinel?
     private var onDismiss: (() -> Void)?
 
@@ -50,6 +68,8 @@ final class OrbitMenuPanelController {
         guard !entries.isEmpty else { return }
 
         self.ownerWindow = ownerWindow
+        self.anchorScreenRect = anchorRect
+        self.anchorView = anchorView
         self.onDismiss = onDismiss
 
         pushLevel(
@@ -103,6 +123,7 @@ final class OrbitMenuPanelController {
         }
         let callback = onDismiss
         onDismiss = nil
+        OrbitMenuClickGuard.noteDismissed()
         callback?()
     }
 
@@ -330,7 +351,12 @@ final class OrbitMenuPanelController {
         // unmodified so the click still reaches whatever it hit; only the
         // menu's own dismissal rides along.
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-            self?.dismissIfOutside(event)
+            guard let self else { return event }
+            if self.clickClosesAnchor(event) {
+                self.dismiss()
+                return nil
+            }
+            self.dismissIfOutside(event)
             return event
         }
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
@@ -368,6 +394,17 @@ final class OrbitMenuPanelController {
         }
         guard !levels.contains(where: { $0.panel === window }) else { return }
         dismiss()
+    }
+
+    private func clickClosesAnchor(_ event: NSEvent) -> Bool {
+        guard isPresented, anchorScreenRect.width > 1, anchorScreenRect.height > 1 else { return false }
+        let screenPoint: NSPoint
+        if let window = event.window {
+            screenPoint = window.convertToScreen(NSRect(origin: event.locationInWindow, size: .zero)).origin
+        } else {
+            screenPoint = NSEvent.mouseLocation
+        }
+        return anchorScreenRect.insetBy(dx: -4, dy: -4).contains(screenPoint)
     }
 
     private func removeMonitors() {

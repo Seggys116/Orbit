@@ -1,6 +1,4 @@
-//  Drives SidebarNewItemOption.perform(in:)/.buildNSMenu(in:) directly
-//  against the real AppEnvironment, including invoking the real NSMenuItems'
-//  target/action pairs the way AppKit's own menu-tracking loop does.
+//  Drives SidebarNewItemOption against the real AppEnvironment, invoking the menu items' actions.
 
 import Foundation
 import AppKit
@@ -42,25 +40,19 @@ final class SidebarNewItemMenuTests: XCTestCase {
         )
     }
 
-    func test_buildNSMenu_itemTitles_matchAllCasesInOrder() {
-        let menu = SidebarNewItemOption.buildNSMenu(in: env)
-        XCTAssertEqual(menu.items.map(\.title), SidebarNewItemOption.allCases.map(\.title))
+    func test_contextMenuEntries_itemTitles_matchAllCasesInOrder() {
+        let titles = SidebarNewItemOption.contextMenuEntries(in: env).compactMap { entry -> String? in
+            if case .item(let item) = entry { return item.title }
+            return nil
+        }
+        XCTAssertEqual(titles, SidebarNewItemOption.allCases.map(\.title))
     }
 
-    func test_buildNSMenu_everyItem_hasAWorkingTargetActionPair() {
-        let menu = SidebarNewItemOption.buildNSMenu(in: env)
-        for item in menu.items {
-            XCTAssertNotNil(item.target, "\"\(item.title)\" has no target.")
-            XCTAssertNotNil(item.action, "\"\(item.title)\" has no action.")
+    private func menuItem(titled title: String) -> OrbitContextMenuItem? {
+        for entry in SidebarNewItemOption.contextMenuEntries(in: env) {
+            if case .item(let item) = entry, item.title == title { return item }
         }
-    }
-
-    private func invoke(_ item: NSMenuItem) {
-        guard let target = item.target, let action = item.action else {
-            XCTFail("Menu item \"\(item.title)\" has no target/action wired — a real click could never invoke it.")
-            return
-        }
-        _ = target.perform(action, with: item)
+        return nil
     }
 
     // MARK: - .newTab
@@ -78,13 +70,12 @@ final class SidebarNewItemMenuTests: XCTestCase {
 
     func test_invokingTheNewTabMenuItem_presentsTheCommandBar() {
         env.isCommandBarPresented = false
-        let menu = SidebarNewItemOption.buildNSMenu(in: env)
-        guard let item = menu.items.first(where: { $0.title == "New Tab" }) else {
-            XCTFail("Expected a \"New Tab\" item in the real menu.")
+        guard let item = menuItem(titled: "New Tab") else {
+            XCTFail("Expected a \"New Tab\" item in the menu.")
             return
         }
-        invoke(item)
-        XCTAssertTrue(env.isCommandBarPresented, "Invoking the real \"New Tab\" NSMenuItem must present the Command Bar.")
+        item.action?()
+        XCTAssertTrue(env.isCommandBarPresented, "Invoking the \"New Tab\" menu item must present the Command Bar.")
     }
 
     // MARK: - .newSplitView
@@ -146,13 +137,12 @@ final class SidebarNewItemMenuTests: XCTestCase {
             return
         }
         let before = env.pinnedNodes(in: spaceID).count
-        let menu = SidebarNewItemOption.buildNSMenu(in: env)
-        guard let item = menu.items.first(where: { $0.title == "New Folder" }) else {
-            XCTFail("Expected a \"New Folder\" item in the real menu.")
+        guard let item = menuItem(titled: "New Folder") else {
+            XCTFail("Expected a \"New Folder\" item in the menu.")
             return
         }
 
-        invoke(item)
+        item.action?()
 
         let after = env.pinnedNodes(in: spaceID)
         defer {
@@ -163,7 +153,7 @@ final class SidebarNewItemMenuTests: XCTestCase {
                 env.deleteFolder(folder.id, in: spaceID, keepingChildren: false)
             }
         }
-        XCTAssertEqual(after.count, before + 1, "Invoking the real \"New Folder\" NSMenuItem must add exactly one node to the Pinned root.")
+        XCTAssertEqual(after.count, before + 1, "Invoking the \"New Folder\" menu item must add exactly one node to the Pinned root.")
     }
 
     // MARK: - .newSpace

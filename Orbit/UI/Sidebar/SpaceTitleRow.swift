@@ -12,6 +12,10 @@ struct SpaceTitleRow: View {
     @State private var showThemeEditor = false
     @State private var showIconPicker = false
 
+    #if DEBUG
+    @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
+    #endif
+
     var body: some View {
         HStack(spacing: OrbitMetrics.sidebarRowContentSpacing) {
             spaceIconDisplay
@@ -26,43 +30,16 @@ struct SpaceTitleRow: View {
             } else {
                 Text(space.name)
                     .font(OrbitFont.sidebarSpaceName)
-                    .foregroundStyle(space.theme.readableForeground.opacity(OrbitMetrics.sidebarSpaceNameOpacity))
+                    .foregroundStyle(space.theme.readableForeground.opacity(OrbitMetrics.sidebarRowLabelOpacityActive))
                     .lineLimit(1)
-                    .onTapGesture(count: 2) { beginRename() }
+                    .overlay { chromeDragSurface(onDoubleClick: beginRename) }
             }
             Spacer()
         }
         .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
         .frame(height: OrbitMetrics.sidebarSpaceNameRowHeight)
-        .contentShape(Rectangle())
-        .contextMenu {
-            Button("New Folder") { env.createFolder(name: "New Folder", in: space.id) }
-            Button("Paste as New Tab") { pasteAsNewTab() }
-            Divider()
-            Button("Rename Space") { beginRename() }
-            Button("Change Icon…") { showIconPicker = true }
-            Button("Theme…") { showThemeEditor = true }
-            Button(space.isPinnedSectionCollapsed ? "Expand Pinned" : "Collapse Pinned") {
-                withAnimation(OrbitMotion.standard) {
-                    env.store.mutateSpace(space.id) { $0.isPinnedSectionCollapsed.toggle() }
-                }
-            }
-            Menu(GitHubLiveFolderCopy.spaceMenuLiveFolders) {
-                Button { toggleGitHubLiveFolder() } label: {
-                    if isGitHubLiveFolderEnabled {
-                        Label(gitHubLiveFolderItem.title, systemImage: "checkmark")
-                    } else {
-                        Text(gitHubLiveFolderItem.title)
-                    }
-                }
-                .disabled(!gitHubLiveFolderItem.isActionable)
-            }
-            Divider()
-            Button("New Space") { presentNewSpaceFlow() }
-            Button("Manage Spaces…") { presentManageSpaces() }
-            Divider()
-            Button("Delete Space", role: .destructive) { env.deleteSpace(space.id) }
-        }
+        .background { chromeDragSurface(onDoubleClick: nil) }
+        .orbitRightClickMenu { menuEntries }
         .popover(isPresented: $showThemeEditor, arrowEdge: .top) {
             ThemeEditorView(
                 theme: Binding(
@@ -78,15 +55,67 @@ struct SpaceTitleRow: View {
         }
     }
 
+    // Hit-testable SwiftUI in front of a drag surface takes its click, so the icon opts out.
+    @ViewBuilder
+    private func chromeDragSurface(onDoubleClick: (() -> Void)?) -> some View {
+        #if DEBUG
+        if screenshotModeDragDisabled {
+            Color.clear.allowsHitTesting(false)
+        } else {
+            SidebarChromeDragSurface(onDoubleClick: onDoubleClick)
+        }
+        #else
+        SidebarChromeDragSurface(onDoubleClick: onDoubleClick)
+        #endif
+    }
+
     private var spaceIconDisplay: some View {
         SpaceIconView(
             icon: space.resolvedIcon,
             size: OrbitMetrics.sidebarSpaceIconSize,
-            foregroundColor: space.theme.readableForeground,
-            opacity: 1
+            foregroundColor: space.theme.readableForeground.opacity(OrbitMetrics.sidebarRowLabelOpacityActive)
         )
         .frame(width: OrbitMetrics.sidebarSpaceIconSize, height: OrbitMetrics.sidebarSpaceIconSize)
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private var menuEntries: [OrbitContextMenuEntry] {
+        let liveFolder = gitHubLiveFolderItem
+        return [
+            .item(OrbitContextMenuItem(title: "New Folder", systemImage: "folder.badge.plus") {
+                env.createFolder(name: "New Folder", in: space.id)
+            }),
+            .item(OrbitContextMenuItem(title: "Paste as New Tab", systemImage: "doc.on.clipboard") { pasteAsNewTab() }),
+            .divider(),
+            .item(OrbitContextMenuItem(title: "Rename Space", systemImage: "pencil") { beginRename() }),
+            .item(OrbitContextMenuItem(title: "Change Icon…", systemImage: "face.smiling") { showIconPicker = true }),
+            .item(OrbitContextMenuItem(title: "Theme…", systemImage: "paintpalette") { showThemeEditor = true }),
+            .item(OrbitContextMenuItem(
+                title: space.isPinnedSectionCollapsed ? "Expand Pinned" : "Collapse Pinned",
+                systemImage: space.isPinnedSectionCollapsed ? "chevron.down" : "chevron.up"
+            ) {
+                withAnimation(OrbitMotion.standard) {
+                    env.store.mutateSpace(space.id) { $0.isPinnedSectionCollapsed.toggle() }
+                }
+            }),
+            .item(OrbitContextMenuItem(title: GitHubLiveFolderCopy.spaceMenuLiveFolders, systemImage: "tray.full", submenu: [
+                .item(OrbitContextMenuItem(
+                    title: liveFolder.title,
+                    isEnabled: liveFolder.isActionable,
+                    isChecked: isGitHubLiveFolderEnabled
+                ) {
+                    toggleGitHubLiveFolder()
+                }),
+            ])),
+            .divider(),
+            .item(OrbitContextMenuItem(title: "New Space", systemImage: "plus.square.on.square") { presentNewSpaceFlow() }),
+            .item(OrbitContextMenuItem(title: "Manage Spaces…", systemImage: "square.grid.2x2") { presentManageSpaces() }),
+            .divider(),
+            .item(OrbitContextMenuItem(title: "Delete Space", systemImage: "trash", isDestructive: true) {
+                env.deleteSpace(space.id)
+            }),
+        ]
     }
 
     // MARK: - Live Folders ▸ GitHub

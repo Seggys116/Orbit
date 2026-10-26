@@ -621,6 +621,7 @@ nonisolated public struct Tab: Identifiable, Codable, Hashable, Sendable {
         if let customTitle, !customTitle.isEmpty { return customTitle }
         if let tidiedTitle, !tidiedTitle.isEmpty { return tidiedTitle }
         if !title.isEmpty { return title }
+        if url.scheme == "orbit", url.host() == "new-tab" { return "New Tab" }
         return url.host() ?? url.absoluteString
     }
 

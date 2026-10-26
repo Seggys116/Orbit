@@ -110,7 +110,7 @@ struct ManageSpacesColumnsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     // The tree as-is: flattening lost the folders entirely.
                     let pinnedNodes = env.pinnedNodes(in: space.id)
-                    let today = env.todayTabs(in: space.id).map(\.id)
+                    let today = env.listedTodayTabs(in: space.id).map(\.id)
 
                     ForEach(pinnedNodes, id: \.id) { node in
                         ManageSpacesNodeRow(node: node, originSpaceID: space.id, depth: 0)
@@ -230,19 +230,21 @@ enum ManageSpacesOverflowMenu {
         var editTheme: () -> Void
     }
 
-    static func build(for space: Space, in env: AppEnvironment, actions: Actions) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-
-        menu.addItem(ClosureMenuItem(title: "Rename Space", handler: actions.rename))
-        menu.addItem(ClosureMenuItem(title: "Change Icon…", handler: actions.changeIcon))
-        menu.addItem(ClosureMenuItem(title: "Theme…", handler: actions.editTheme))
-
-        menu.addItem(.separator())
-        menu.addItem(ClosureMenuItem(title: "Delete Space", enabled: env.spaces.count > 1) {
-            env.deleteSpace(space.id)
-        })
-        return menu
+    static func entries(for space: Space, in env: AppEnvironment, actions: Actions) -> [OrbitContextMenuEntry] {
+        [
+            .item(OrbitContextMenuItem(title: "Rename Space", systemImage: "pencil", action: actions.rename)),
+            .item(OrbitContextMenuItem(title: "Change Icon…", systemImage: "face.smiling", action: actions.changeIcon)),
+            .item(OrbitContextMenuItem(title: "Theme…", systemImage: "paintpalette", action: actions.editTheme)),
+            .divider(),
+            .item(OrbitContextMenuItem(
+                title: "Delete Space",
+                systemImage: "trash",
+                isEnabled: env.spaces.count > 1,
+                isDestructive: true
+            ) {
+                env.deleteSpace(space.id)
+            }),
+        ]
     }
 }
 
@@ -348,8 +350,8 @@ private struct ManageSpacesColumnFooter: View {
             Spacer()
 
             // SwiftUI's Menu does not present reliably in this app's hosting configuration.
-            OrbitNSMenuButton(menu: {
-                ManageSpacesOverflowMenu.build(
+            OrbitMenuButton(entries: {
+                ManageSpacesOverflowMenu.entries(
                     for: space,
                     in: env,
                     actions: .init(

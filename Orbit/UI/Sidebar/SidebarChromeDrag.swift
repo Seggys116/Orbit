@@ -8,11 +8,17 @@ import SwiftUI
 // means those views never start a drag. This surface calls performDrag(with:) itself.
 
 struct SidebarChromeDragSurface: NSViewRepresentable {
+    var onDoubleClick: (() -> Void)? = nil
+
     func makeNSView(context: Context) -> SidebarChromeDragView {
-        SidebarChromeDragView()
+        let view = SidebarChromeDragView()
+        view.doubleClickAction = onDoubleClick
+        return view
     }
 
-    func updateNSView(_ nsView: SidebarChromeDragView, context: Context) {}
+    func updateNSView(_ nsView: SidebarChromeDragView, context: Context) {
+        nsView.doubleClickAction = onDoubleClick
+    }
 
     static func dismantleNSView(_ nsView: SidebarChromeDragView, coordinator: ()) {
         nsView.removeMonitor()
@@ -61,22 +67,39 @@ final class SidebarChromeDragView: NSView {
         }
     }
 
-    override func mouseDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.control) {
-            forwardContextClick(event)
-            return
-        }
-        // A control that lost the hit test to this background still has to run.
-        // Empty chrome has nothing under it but the hosting view, which is not a control.
-        if let control = controlUnderneath(event) {
-            control.mouseDown(with: event)
-            return
-        }
-        beginWindowDrag(with: event)
+    enum MouseDownAction {
+        case forwardContextClick
+        case control(NSView)
+        case doubleClickAction
+        case titleBarDoubleClick
+        case windowDrag
     }
 
-    // This view is the hit target for empty chrome, so the sidebar's SwiftUI context
-    // menu never sees the right-click unless it is handed back.
+    var doubleClickAction: (() -> Void)?
+
+    func mouseDownAction(for event: NSEvent) -> MouseDownAction {
+        if event.modifierFlags.contains(.control) { return .forwardContextClick }
+        if let control = controlUnderneath(event) { return .control(control) }
+        if event.clickCount >= 2 {
+            return doubleClickAction == nil ? .titleBarDoubleClick : .doubleClickAction
+        }
+        return .windowDrag
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        switch mouseDownAction(for: event) {
+        case .forwardContextClick:
+            forwardContextClick(event)
+        case .control(let control):
+            control.mouseDown(with: event)
+        case .doubleClickAction:
+            doubleClickAction?()
+        case .titleBarDoubleClick, .windowDrag:
+            beginWindowDrag(with: event)
+        }
+    }
+
+    // This view is the hit target for empty chrome, so a right-click no Orbit menu claimed goes to the view beneath.
     override func rightMouseDown(with event: NSEvent) {
         forwardContextClick(event)
     }

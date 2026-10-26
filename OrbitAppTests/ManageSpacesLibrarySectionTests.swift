@@ -32,31 +32,24 @@ final class ManageSpacesLibrarySectionTests: XCTestCase {
         .init(rename: rename, changeIcon: changeIcon, editTheme: editTheme)
     }
 
-    private func invoke(_ item: NSMenuItem) {
-        guard let action = item.action, let target = item.target else {
-            return XCTFail("\(item.title) has no target/action pair — it cannot do anything when clicked.")
+    private func invoke(_ item: OrbitContextMenuItem) {
+        guard let action = item.action else {
+            return XCTFail("\(item.title) has no action — it cannot do anything when clicked.")
         }
-        _ = target.perform(action, with: item)
+        action()
     }
 
     // MARK: - The `…` overflow the reference draws on every column footer
 
-    func testEveryOverflowMenuItemHasATargetAndAction() {
+    func testEveryOverflowMenuItemHasAnAction() {
         let spaceID = makeSpace(named: "Overflow Wiring")
         let space = try! XCTUnwrap(env.space(spaceID))
 
-        let menu = ManageSpacesOverflowMenu.build(for: space, in: env, actions: noopActions())
+        let entries = ManageSpacesOverflowMenu.entries(for: space, in: env, actions: noopActions())
 
-        for item in menu.items where !item.isSeparatorItem {
-            if let submenu = item.submenu {
-                for subitem in submenu.items where !subitem.isSeparatorItem {
-                    XCTAssertNotNil(subitem.action, "`\(item.title) ▸ \(subitem.title)` does nothing when clicked.")
-                    XCTAssertNotNil(subitem.target, "`\(item.title) ▸ \(subitem.title)` has no target.")
-                }
-            } else {
-                XCTAssertNotNil(item.action, "`\(item.title)` does nothing when clicked.")
-                XCTAssertNotNil(item.target, "`\(item.title)` has no target.")
-            }
+        XCTAssertFalse(entries.flattenedItems.isEmpty)
+        for item in entries.flattenedItems where !item.hasSubmenu {
+            XCTAssertNotNil(item.action, "`\(item.title)` does nothing when clicked.")
         }
     }
 
@@ -67,7 +60,7 @@ final class ManageSpacesLibrarySectionTests: XCTestCase {
         var renamed = false
         var iconChanged = false
         var themeEdited = false
-        let menu = ManageSpacesOverflowMenu.build(
+        let entries = ManageSpacesOverflowMenu.entries(
             for: space,
             in: env,
             actions: noopActions(
@@ -78,7 +71,7 @@ final class ManageSpacesLibrarySectionTests: XCTestCase {
         )
 
         for title in ["Rename Space", "Change Icon…", "Theme…"] {
-            guard let item = menu.items.first(where: { $0.title == title }) else {
+            guard let item = entries.first(titled: title) else {
                 return XCTFail("The `…` overflow lost `\(title)`.")
             }
             invoke(item)
@@ -94,11 +87,12 @@ final class ManageSpacesLibrarySectionTests: XCTestCase {
         let space = try! XCTUnwrap(env.space(spaceID))
         XCTAssertGreaterThan(env.spaces.count, 1, "test precondition: more than one Space exists, so deletion is permitted")
 
-        let menu = ManageSpacesOverflowMenu.build(for: space, in: env, actions: noopActions())
-        guard let item = menu.items.first(where: { $0.title == "Delete Space" }) else {
+        let entries = ManageSpacesOverflowMenu.entries(for: space, in: env, actions: noopActions())
+        guard let item = entries.first(titled: "Delete Space") else {
             return XCTFail("The `…` overflow lost `Delete Space`; nothing else in this surface can delete a Space.")
         }
         XCTAssertTrue(item.isEnabled, "`Delete Space` is disabled while more than one Space exists.")
+        XCTAssertTrue(item.isDestructive, "`Delete Space` is not styled as destructive.")
         invoke(item)
 
         XCTAssertNil(env.space(spaceID), "`Delete Space` did not delete the Space.")

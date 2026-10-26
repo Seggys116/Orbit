@@ -24,7 +24,7 @@ final class SpaceThemeEditorWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Theme — \(space.name)"
+        window.title = "Theme: \(space.name)"
         // contentViewController, not contentView: ThemeEditorView's height falls out of its
         // content, and a fixed contentView frame would clip or gap the palette strip.
         window.contentViewController = NSHostingController(

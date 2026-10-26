@@ -46,8 +46,7 @@ extension AppEnvironment: WebContentsDelegate {
             return false
         }
         if let sourceTabID = tabID(for: contents), shouldPeek(sourceTabID: sourceTabID, modifiers: modifiers) {
-            PeekState.shared.present(sourceTabID: sourceTabID, url: url)
-            _ = extensionPoints.peekPanel?(sourceTabID, url)
+            openPeek(sourceTabID: sourceTabID, url: url)
             return false
         }
         guard let rule = matchingRoutingRule(for: url) else { return true }
@@ -67,6 +66,11 @@ extension AppEnvironment: WebContentsDelegate {
         case .archived:
             return false
         }
+    }
+
+    private func openPeek(sourceTabID: TabID, url: URL) {
+        PeekState.shared.present(sourceTabID: sourceTabID, url: url)
+        _ = extensionPoints.peekPanel?(sourceTabID, url)
     }
 
     func shouldOpenInLittleOrbit(modifiers: NSEvent.ModifierFlags) -> Bool {
@@ -173,7 +177,14 @@ extension AppEnvironment: WebContentsDelegate {
         case .newBackgroundTab:
             openTab(url: request.url, in: tab.spaceID, section: .today, activate: false)
             return true
-        case .newWindow, .popup:
+        case .newWindow:
+            if shouldPeek(sourceTabID: tabID, modifiers: [.shift]) {
+                openPeek(sourceTabID: tabID, url: request.url)
+                return true
+            }
+            LittleOrbitWindowController.open(url: request.url)
+            return true
+        case .popup:
             LittleOrbitWindowController.open(url: request.url)
             return true
         case .download:
@@ -189,7 +200,15 @@ extension AppEnvironment: WebContentsDelegate {
         switch request.disposition {
         case .download:
             return false
-        case .newWindow, .popup:
+        case .newWindow:
+            if shouldPeek(sourceTabID: tabID, modifiers: [.shift]) {
+                openPeek(sourceTabID: tabID, url: request.url)
+                return false
+            }
+            guard let adopted = pending.adopt() else { return false }
+            LittleOrbitWindowController.open(adopting: adopted, url: request.url)
+            return true
+        case .popup:
             guard let adopted = pending.adopt() else { return false }
             LittleOrbitWindowController.open(adopting: adopted, url: request.url)
             return true

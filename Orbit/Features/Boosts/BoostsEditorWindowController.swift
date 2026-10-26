@@ -37,7 +37,7 @@ final class BoostsEditorWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Boosts — \(host)"
+        window.title = "Boosts: \(host)"
         window.contentView = NSHostingView(rootView: BoostsEditorView(host: host).orbitEnvironment(AppEnvironment.processRoot))
         window.center()
         let controller = BoostsEditorWindowController(window: window)

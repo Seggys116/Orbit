@@ -96,7 +96,7 @@ struct CommandBarOverlayLayout<Content: View>: View {
                         .onTapGesture(perform: onScrimTap)
                 }
 
-                dim(over: region)
+                dim(over: region, in: proxy.size)
 
                 content(CommandBarPlacement.width(forAvailableWidth: region.width))
                     .fixedSize()
@@ -116,8 +116,22 @@ struct CommandBarOverlayLayout<Content: View>: View {
         .contentShape(CommandBarScrimShape(leadingInset: passthroughLeadingWidth))
     }
 
-    private func dim(over region: CGRect) -> some View {
-        RoundedRectangle(cornerRadius: targetRect == nil ? 0 : OrbitMetrics.cardCornerRadius, style: .continuous)
+    private func dimFlushEdges(for region: CGRect, in containerSize: CGSize) -> Edge.Set {
+        guard targetRect != nil else { return .all }
+        guard BorderlessSettings.shared.isEnabled else { return [] }
+        var edges: Edge.Set = []
+        if region.minX <= 0.5 { edges.insert(.leading) }
+        if region.minY <= 0.5 { edges.insert(.top) }
+        if region.maxX >= containerSize.width - 0.5 { edges.insert(.trailing) }
+        if region.maxY >= containerSize.height - 0.5 { edges.insert(.bottom) }
+        return edges
+    }
+
+    private func dim(over region: CGRect, in containerSize: CGSize) -> some View {
+        UnevenRoundedRectangle(
+            cornerRadii: BorderlessSettings.cardCornerRadii(flushEdges: dimFlushEdges(for: region, in: containerSize)),
+            style: .continuous
+        )
             .fill(Color.black.opacity(scrimOpacity))
             .frame(width: region.width, height: region.height)
             .position(x: region.midX, y: region.midY)

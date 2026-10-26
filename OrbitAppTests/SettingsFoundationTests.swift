@@ -246,3 +246,75 @@ final class OrbitSettingsRowTruncationTests: XCTestCase {
         )
     }
 }
+
+// MARK: - 6. OrbitSettingsRow: the trailing control is centred and the padding is even
+
+@MainActor
+final class OrbitSettingsRowAlignmentTests: XCTestCase {
+
+    private static let width: CGFloat = 300
+    private static let toggleBand = 256...299
+    private static let textBand = 0...200
+
+    private func makeRow(description: String?) -> some View {
+        OrbitSettingsRow(title: "HEHE", description: description) {
+            OrbitToggle(accessibilityLabel: "test control", isOn: .constant(true))
+        }
+    }
+
+    private func rowHeight(description: String?) -> CGFloat {
+        NSHostingView(rootView: makeRow(description: description).frame(width: Self.width)).fittingSize.height
+    }
+
+    private func verticalInk(_ image: RenderedImage, x: ClosedRange<Int>, height: CGFloat) -> (top: CGFloat, bottom: CGFloat)? {
+        var first: Int?
+        var last: Int?
+        for y in 0..<Int(height.rounded(.up)) {
+            let band = CGRect(x: x.lowerBound, y: y, width: x.count, height: 1)
+            if image.containsNonBackgroundPixels(in: band, background: .clear) {
+                if first == nil { first = y }
+                last = y
+            }
+        }
+        guard let first, let last else { return nil }
+        return (CGFloat(first), CGFloat(last + 1))
+    }
+
+    private func measure(description: String?, name: String) -> (height: CGFloat, toggle: (top: CGFloat, bottom: CGFloat), text: (top: CGFloat, bottom: CGFloat))? {
+        let height = rowHeight(description: description)
+        let rendered = render(makeRow(description: description), size: CGSize(width: Self.width, height: height))
+        rendered.writeDiagnosticPNG(named: name)
+        guard
+            let toggle = verticalInk(rendered, x: Self.toggleBand, height: height),
+            let text = verticalInk(rendered, x: Self.textBand, height: height)
+        else {
+            XCTFail("OrbitSettingsRow drew no toggle or no text (\(name)).")
+            return nil
+        }
+        return (height, toggle, text)
+    }
+
+    func test_singleLineRow_toggleIsCentredInTheRowAndPaddingIsEven() {
+        guard let m = measure(description: nil, name: "OrbitSettingsRowAlignment_singleLine") else { return }
+        let topGap = m.toggle.top
+        let bottomGap = m.height - m.toggle.bottom
+        XCTAssertEqual(topGap, bottomGap, accuracy: 1, "Top padding (\(topGap)pt) and bottom padding (\(bottomGap)pt) around the toggle must match.")
+        XCTAssertEqual((m.toggle.top + m.toggle.bottom) / 2, m.height / 2, accuracy: 1, "The toggle must sit at the vertical centre of the row.")
+        XCTAssertEqual(
+            (m.toggle.top + m.toggle.bottom) / 2, (m.text.top + m.text.bottom) / 2, accuracy: 2,
+            "The toggle must be level with the title on a single-line row."
+        )
+    }
+
+    func test_rowWithDescription_toggleIsCentredAgainstTheWholeTextBlock() {
+        guard let m = measure(description: "ALL THE EDGE", name: "OrbitSettingsRowAlignment_withDescription") else { return }
+        let topGap = m.toggle.top
+        let bottomGap = m.height - m.toggle.bottom
+        XCTAssertEqual(topGap, bottomGap, accuracy: 1, "Top padding (\(topGap)pt) and bottom padding (\(bottomGap)pt) around the toggle must match.")
+        XCTAssertEqual((m.toggle.top + m.toggle.bottom) / 2, m.height / 2, accuracy: 1, "The toggle must sit at the vertical centre of the row.")
+        XCTAssertEqual(
+            (m.toggle.top + m.toggle.bottom) / 2, (m.text.top + m.text.bottom) / 2, accuracy: 2.5,
+            "The toggle must be centred against the title and description together, not level with the title alone."
+        )
+    }
+}

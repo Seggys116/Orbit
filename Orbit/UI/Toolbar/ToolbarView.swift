@@ -163,6 +163,7 @@ struct ToolbarPaneCapabilities: Equatable {
 struct ToolbarView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var toolbarSettings = ToolbarSettings.shared
 
@@ -228,6 +229,14 @@ struct ToolbarView: View {
         )
     }
 
+    private var spaceTheme: SpaceTheme? {
+        env.space(tab.spaceID)?.theme ?? env.activeSpace?.theme
+    }
+
+    private func adoptMenuTheme() {
+        OrbitMenuThemeSource.shared.adopt(environment: env, spaceID: tab.spaceID)
+    }
+
     private static func color(_ theme: ThemeColor) -> Color {
         Color(.sRGB, red: theme.red, green: theme.green, blue: theme.blue, opacity: theme.alpha)
     }
@@ -263,9 +272,15 @@ struct ToolbarView: View {
                 .frame(height: OrbitToolbarMetrics.contentDividerThickness)
                 .allowsHitTesting(false)
         }
-        .contextMenu { ToolbarContextMenu(tab: tab, settings: toolbarSettings, developerModeSettings: developerModeSettings) }
+        .orbitRightClickMenu { () -> [OrbitContextMenuEntry] in
+            adoptMenuTheme()
+            return ToolbarContextMenu(tab: tab, settings: toolbarSettings, developerModeSettings: developerModeSettings).entries(in: env)
+        }
         .background(headerDoubleClickObserver)
-        .animation(.easeInOut(duration: OrbitToolbarMetrics.backgroundCrossFadeDuration), value: headerBackground)
+        .animation(
+            OrbitThemeMotion.animation(reduceMotion: reduceMotion, token: .easeInOut(duration: OrbitToolbarMetrics.backgroundCrossFadeDuration)),
+            value: headerBackground
+        )
         .task(id: sampleTaskID) { await sampleHeaderColorIfNeeded() }
         #if DEBUG
         .background(frameProbe)
@@ -322,7 +337,7 @@ struct ToolbarView: View {
         iconButton("sidebar.left") {
             env.perform(.toggleSidebar)
         }
-        .orbitTooltip("Show/Hide Sidebar — \u{2318}S")
+        .orbitTooltip("Show/Hide Sidebar (\u{2318}S)")
     }
 
     private func navButton(_ symbol: String, direction: ToolbarNavDirection, enabled: Bool) -> some View {
@@ -454,7 +469,7 @@ struct ToolbarView: View {
             fill: headerHoverFill,
             cornerRadius: OrbitToolbarMetrics.hoverHighlightCornerRadius
         )
-        .orbitTooltip("Search or Enter URL — \u{2318}L")
+        .orbitTooltip("Search or Enter URL (\u{2318}L)")
     }
 
     // Document pages route to .blankPane(tab.id), not .editURL(tab.url): orbit://note/<uuid> must never be shown for editing.
@@ -488,9 +503,13 @@ struct ToolbarView: View {
             }
             .popover(isPresented: siteControlPopoverBinding, arrowEdge: .bottom) {
                 SiteControlPopoverView(tab: tab)
+                    .environment(\.orbitSpaceTheme, spaceTheme)
             }
             if paneCapabilities.allowsSplit {
-                OrbitNSMenuButton(menu: { SplitLayoutOption.buildNSMenu(forPaneOf: tab, in: env) }) {
+                OrbitMenuButton(entries: {
+                    adoptMenuTheme()
+                    return SplitLayoutOption.menuEntries(forPaneOf: tab, in: env)
+                }) {
                     trailingIconGlyph(.splitView)
                 }
                 .frame(width: OrbitToolbarMetrics.trailingIconSize, height: OrbitToolbarMetrics.trailingIconSize)

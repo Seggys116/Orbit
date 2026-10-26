@@ -18,6 +18,22 @@ enum SplitEdge: Sendable {
         case .right, .bottom: return false
         }
     }
+
+    var label: String {
+        switch self {
+        case .left: "Left"
+        case .right: "Right"
+        case .top: "Top"
+        case .bottom: "Bottom"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .left, .right: "rectangle.split.2x1"
+        case .top, .bottom: "rectangle.split.1x2"
+        }
+    }
 }
 
 struct SplitDropZone: Equatable {

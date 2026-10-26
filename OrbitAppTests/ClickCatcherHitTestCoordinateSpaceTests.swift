@@ -13,6 +13,8 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
             ("ToolbarAddressCopyClickCatchingNSView", { ToolbarAddressCopyClickCatchingNSView(frame: $0) }),
             ("ToolbarNavButtonClickCatchingView", { ToolbarNavButtonClickCatchingView(frame: $0) }),
             ("OrbitMenuButtonClickCatchingView", { OrbitMenuButtonClickCatchingView(frame: $0) }),
+            ("OrbitEntryMenuButtonView", { OrbitEntryMenuButtonView(frame: $0) }),
+            ("OrbitPopupButtonMenuHostView", { OrbitPopupButtonMenuHostView(frame: $0) }),
         ]
     }
 
@@ -198,7 +200,7 @@ final class ClickCatcherHitTestCoordinateSpaceTests: XCTestCase {
         let popupHost = OrbitPopupButtonMenuHostView(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
         XCTAssertTrue(
             OrbitWindowContentView.isClickCatcher(popupHost),
-            "OrbitPopupButtonMenuHostView inherits every hit-testing behaviour of OrbitMenuButtonClickCatchingView and must inherit its recoverability too."
+            "OrbitPopupButtonMenuHostView must conform to OrbitClickCatching so the recovery walk can find it."
         )
     }
 

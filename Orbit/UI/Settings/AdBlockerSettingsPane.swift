@@ -11,7 +11,7 @@ struct AdBlockerSettingsPane: View {
             OrbitSettingsSection(title: nil) {
                 OrbitSettingsRow(
                     title: "Block Ads & Trackers",
-                    description: "Blocks ads, trackers and cookie banners as pages load, using whichever lists below are enabled."
+                    description: "Uses the enabled lists below."
                 ) {
                     OrbitToggle(
                         accessibilityLabel: "Block Ads and Trackers",
@@ -138,8 +138,8 @@ private struct FilterListRow: View {
     var onOpenLink: (URL) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: OrbitControlMetrics.settingsRowLabelSpacing) {
-            HStack(alignment: .firstTextBaseline, spacing: OrbitControlMetrics.settingsRowContentSpacing) {
+        HStack(alignment: .center, spacing: OrbitControlMetrics.settingsRowContentSpacing) {
+            VStack(alignment: .leading, spacing: OrbitControlMetrics.settingsRowLabelSpacing) {
                 HStack(spacing: 6) {
                     Text(descriptor.displayName)
                         .font(.system(size: OrbitControlMetrics.settingsRowTitleFontSize, weight: .medium))
@@ -151,27 +151,27 @@ private struct FilterListRow: View {
                             .background(Capsule().fill(.tertiary.opacity(0.3)))
                     }
                 }
-                .layoutPriority(1)
-                Spacer(minLength: OrbitControlMetrics.settingsRowContentSpacing)
-                OrbitToggle(
-                    accessibilityLabel: "\(descriptor.displayName) enabled",
-                    isOn: Binding(get: { isEnabled }, set: onToggle),
-                    accentColor: SettingsPalette.accent,
-                    isCompact: true
-                )
-            }
 
-            HStack(spacing: 8) {
-                Text("\(statusText) · \(descriptor.licence)")
-                    .font(.system(size: OrbitControlMetrics.settingsRowDescriptionFontSize))
-                    .foregroundStyle(isFailed ? Color.red : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let link = descriptor.infoURL ?? descriptor.licenceURL {
-                    OrbitButton(title: "Info…", kind: .ghost, isCompact: true, accentColor: SettingsPalette.accent) {
-                        onOpenLink(link)
+                HStack(spacing: 8) {
+                    Text("\(statusText) · \(descriptor.licence)")
+                        .font(.system(size: OrbitControlMetrics.settingsRowDescriptionFontSize))
+                        .foregroundStyle(isFailed ? Color.red : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let link = descriptor.infoURL ?? descriptor.licenceURL {
+                        OrbitButton(title: "Info…", kind: .ghost, isCompact: true, accentColor: SettingsPalette.accent) {
+                            onOpenLink(link)
+                        }
                     }
                 }
             }
+            .layoutPriority(1)
+            Spacer(minLength: 0)
+            OrbitToggle(
+                accessibilityLabel: "\(descriptor.displayName) enabled",
+                isOn: Binding(get: { isEnabled }, set: onToggle),
+                accentColor: SettingsPalette.accent,
+                isCompact: true
+            )
         }
         .frame(minHeight: SettingsMetrics.rowMinHeight)
         .padding(.vertical, SettingsMetrics.rowVerticalPadding)

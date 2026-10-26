@@ -32,27 +32,24 @@ enum ToolbarNavHistory {
         history.first { $0.offset == direction.immediateOffset }?.url
     }
 
-    @MainActor
-    static func buildNSMenu(items: [ToolbarHistoryItem], onSelect: @escaping (Int) -> Void) -> NSMenu {
-        let menu = NSMenu(title: "Tab History")
-        for item in items {
-            menu.addItem(ClosureMenuItem(title: item.title) { onSelect(item.offset) })
+    static func menuEntries(items: [ToolbarHistoryItem], onSelect: @escaping (Int) -> Void) -> [OrbitContextMenuEntry] {
+        items.map { item in
+            .item(OrbitContextMenuItem(title: item.title) { onSelect(item.offset) })
         }
-        return menu
     }
 }
 
 @MainActor
-final class ToolbarNavButtonClickCatchingView: NSView, OrbitClickCatching {
+final class ToolbarNavButtonClickCatchingView: NSView, OrbitClickCatching, OrbitHandlesRightClick {
     var isEnabled: () -> Bool = { true }
 
     var onNavigate: (() -> Void)?
     var immediateURL: (() -> URL?)?
     var onNavigateInNewTab: ((URL) -> Void)?
 
-    var historyMenu: (() -> NSMenu?)?
+    var historyMenu: (() -> [OrbitContextMenuEntry]?)?
 
-    var presentMenu: (NSMenu) -> Void = ToolbarNavButton.popUpAtCursor
+    var presentMenu: (([OrbitContextMenuEntry]) -> Void)?
 
     private var holdTimer: Timer?
 
@@ -86,8 +83,16 @@ final class ToolbarNavButtonClickCatchingView: NSView, OrbitClickCatching {
         isPressPending = false
         holdTimer?.invalidate()
         holdTimer = nil
-        guard let menu = historyMenu?() else { return }
-        presentMenu(menu)
+        presentHistory()
+    }
+
+    private func presentHistory() {
+        guard let entries = historyMenu?() else { return }
+        if let presentMenu {
+            presentMenu(entries)
+        } else {
+            ToolbarNavButton.presentAtCursor(entries, from: self)
+        }
     }
 
     // If the hold already fired, isPressPending is already false and this mouseUp is the second half of that same press — it must do nothing more.
@@ -108,8 +113,7 @@ final class ToolbarNavButtonClickCatchingView: NSView, OrbitClickCatching {
 
     // rightMouseDown is a separate responder-chain callback from mouseDown and is never subject to mouseDownCanMoveWindow (window dragging is left-button-only).
     override func rightMouseDown(with event: NSEvent) {
-        guard let menu = historyMenu?() else { return }
-        presentMenu(menu)
+        presentHistory()
     }
 }
 
@@ -118,8 +122,8 @@ private struct ToolbarNavButtonCatcher: NSViewRepresentable {
     var onNavigate: () -> Void
     var immediateURL: () -> URL?
     var onNavigateInNewTab: (URL) -> Void
-    var historyMenu: () -> NSMenu?
-    var presentMenu: (NSMenu) -> Void
+    var historyMenu: () -> [OrbitContextMenuEntry]?
+    var presentMenu: (([OrbitContextMenuEntry]) -> Void)?
 
     func makeNSView(context: Context) -> ToolbarNavButtonClickCatchingView {
         let view = ToolbarNavButtonClickCatchingView()
@@ -155,7 +159,7 @@ struct ToolbarNavButton: View {
     var onNavigateInNewTab: (URL) -> Void
     var onSelectHistory: (Int) -> Void
 
-    var presentHoldMenu: (NSMenu) -> Void = ToolbarNavButton.popUpAtCursor
+    var presentHoldMenu: (([OrbitContextMenuEntry]) -> Void)?
 
     static let holdDuration: Double = 0.35
 
@@ -193,16 +197,16 @@ struct ToolbarNavButton: View {
         )
     }
 
-    private func historyMenuOrNil() -> NSMenu? {
+    private func historyMenuOrNil() -> [OrbitContextMenuEntry]? {
         let items = ToolbarNavHistory.entries(from: history(), direction: direction)
         guard !items.isEmpty else { return nil }
-        return ToolbarNavHistory.buildNSMenu(items: items, onSelect: onSelectHistory)
+        return ToolbarNavHistory.menuEntries(items: items, onSelect: onSelectHistory)
     }
 
     @MainActor
-    static func popUpAtCursor(_ menu: NSMenu) {
-        guard let window = NSApp.keyWindow, let view = window.contentView else { return }
+    static func presentAtCursor(_ entries: [OrbitContextMenuEntry], from view: NSView) {
+        guard let window = view.window else { return }
         let point = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        menu.popUp(positioning: nil, at: point, in: view)
+        OrbitContextMenuPresenter.shared.present(entries: entries, anchorView: view, at: point)
     }
 }

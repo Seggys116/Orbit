@@ -101,6 +101,9 @@ struct EaselCanvasView: View {
                 }
             )
             .onTapGesture { model.selection.removeAll() }
+            .orbitRightClickMenu { location in
+                itemContextMenuEntries(at: toCanvasPoint(location, model: model), model: model)
+            }
             .onDrop(of: [.fileURL, .image], isTargeted: nil) { providers, location in
                 guard let provider = providers.first else { return false }
                 let canvasPoint = toCanvasPoint(location, model: model)
@@ -489,6 +492,15 @@ struct EaselCanvasView: View {
         let height = width * aspect
         let frame = CGRect(x: point.x - width / 2, y: point.y - height / 2, width: width, height: height)
         _ = model.addItem(.image(fileName: fileName), frame: frame)
+    }
+
+    private func itemContextMenuEntries(at canvasPoint: CGPoint, model: EaselCanvasModel) -> [OrbitContextMenuEntry] {
+        guard model.activeTool == .select else { return [] }
+        let hit = model.items
+            .sorted(by: { $0.zIndex > $1.zIndex })
+            .first { EaselItemContainerView.contains($0, canvasPoint: canvasPoint) }
+        guard let hit else { return [] }
+        return EaselItemContainerView.contextMenuEntries(for: hit, model: model)
     }
 
     private func toCanvasPoint(_ location: CGPoint, model: EaselCanvasModel) -> CGPoint {

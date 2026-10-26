@@ -256,7 +256,7 @@ final class GitHubLiveFolderSidebarTests: XCTestCase {
         XCTAssertEqual(store.lastSuccessfulFetch, firstFetch, "A failed attempt must not move the last-success timestamp.")
         XCTAssertTrue(GitHubLiveFolderVisibility.shouldRender(config: enabled, store: store))
         XCTAssertEqual(
-            GitHubLiveFolderCopy.staleness(for: store.status), "Offline — showing last fetch",
+            GitHubLiveFolderCopy.staleness(for: store.status), "Offline. Showing last fetch.",
             "The menu has to say the folder is showing older data; a bare `Last fetch:` row would imply the time is current."
         )
     }
@@ -433,11 +433,11 @@ final class GitHubLiveFolderSidebarTests: XCTestCase {
         XCTAssertNil(GitHubLiveFolderCopy.staleness(for: .loading))
         XCTAssertNil(GitHubLiveFolderCopy.staleness(for: .loaded(Date())))
 
-        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.rateLimited, lastSuccess: nil)), "Rate limited — showing last fetch")
-        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.network("timeout"), lastSuccess: nil)), "Offline — showing last fetch")
-        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.signedOut, lastSuccess: nil)), "Signed out of GitHub — showing last fetch")
-        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.badResponse(503), lastSuccess: nil)), "GitHub returned 503 — showing last fetch")
-        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.malformed("bad"), lastSuccess: nil)), "Unreadable response from GitHub — showing last fetch")
+        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.rateLimited, lastSuccess: nil)), "Rate limited. Showing last fetch.")
+        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.network("timeout"), lastSuccess: nil)), "Offline. Showing last fetch.")
+        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.signedOut, lastSuccess: nil)), "Signed out of GitHub. Showing last fetch.")
+        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.badResponse(503), lastSuccess: nil)), "GitHub returned 503. Showing last fetch.")
+        XCTAssertEqual(GitHubLiveFolderCopy.staleness(for: .failed(.malformed("bad"), lastSuccess: nil)), "Unreadable response from GitHub. Showing last fetch.")
     }
 
     func test_spaceMenuItem_saysWhyItCannotActRatherThanFailingSilently() {

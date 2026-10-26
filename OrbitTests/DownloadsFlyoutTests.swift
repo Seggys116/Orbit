@@ -1,119 +1,10 @@
-// No heading, no divider, no button: rows bottom-aligned above the bottom bar. Every
-// assertion is a relationship between renders, a string Arc displays, or a real transition.
-
 import SwiftUI
 import XCTest
 
 @MainActor
 final class DownloadsFlyoutTests: XCTestCase {
 
-    // MARK: - Fixtures
-
-    private static let canvas = CGSize(width: OrbitMetrics.sidebarDefaultWidth, height: 420)
-
-    private func makeDownload(
-        name: String,
-        finishedAt: Date? = Date(timeIntervalSinceNow: -120)
-    ) -> DownloadItem {
-        DownloadItem(
-            sourceURL: URL(string: "https://example.com/\(name)")!,
-            destinationURL: URL(fileURLWithPath: "/tmp/OrbitDownloadsFlyoutTests/\(name)"),
-            suggestedFileName: name,
-            state: .completed,
-            startedAt: Date(timeIntervalSinceNow: -300),
-            finishedAt: finishedAt
-        )
-    }
-
-    private func renderFlyout(_ downloads: [DownloadItem], size: CGSize = DownloadsFlyoutTests.canvas) -> RenderedImage {
-        render(
-            DownloadsFlyoutView(theme: SpaceTheme(), downloads: downloads)
-                .environment(\.orbitScreenshotModeDragDisabled, true),
-            size: size
-        )
-    }
-
-    // MARK: - No heading, no divider, no button
-
-    func testFlyoutWithNoDownloadsPaintsNothingAtAll() {
-        let rendered = renderFlyout([])
-
-        if let box = rendered.boundingBoxOfContent(tolerance: 0.03) {
-            rendered.writeDiagnosticPNG(named: "DownloadsFlyout-empty-FAILED")
-            XCTFail(
-                """
-                A downloads flyout with nothing downloaded painted content at \(box). Arc's flyout \
-                (refs/reference/web/arc-library-icon-hover-downloads-flyout-frame.png) has no heading, \
-                no divider and no button, so with no rows there is nothing left to draw — and \
-                refs/ARC_INTERACTION.md §5 forbids placeholder copy in its place. See the diagnostic PNG.
-                """
-            )
-        }
-    }
-
-    func testFlyoutWithDownloadsPaintsThem() {
-        let rendered = renderFlyout([makeDownload(name: "Report.pdf"), makeDownload(name: "Photo.heic")])
-
-        guard rendered.boundingBoxOfContent(tolerance: 0.03) != nil else {
-            rendered.writeDiagnosticPNG(named: "DownloadsFlyout-populated-FAILED")
-            XCTFail("The flyout painted nothing with two downloads in it, so the empty-state assertion above is measuring a view that cannot draw. See the diagnostic PNG.")
-            return
-        }
-    }
-
-    // MARK: - Bottom-aligned, and growing upwards
-
-    func testFlyoutRowsSitAtTheBottomOfThePanel() {
-        let rendered = renderFlyout([makeDownload(name: "Report.pdf"), makeDownload(name: "Photo.heic")])
-
-        guard let box = rendered.boundingBoxOfContent(tolerance: 0.03) else {
-            XCTFail("Nothing was drawn, so this test cannot say where it landed — see testFlyoutWithDownloadsPaintsThem.")
-            return
-        }
-        let gapAbove = box.minY
-        let gapBelow = Self.canvas.height - box.maxY
-
-        XCTAssertLessThan(
-            gapBelow, gapAbove,
-            """
-            The flyout's rows are \(gapBelow)pt from the panel's bottom edge and \(gapAbove)pt from its \
-            top — i.e. top-aligned. Arc bottom-aligns them against the sidebar's bottom bar \
-            (refs/reference/web/arc-library-icon-hover-downloads-flyout-frame.png).
-            """
-        )
-    }
-
-    func testAddingRowsExtendsTheListUpwardsAndLeavesItsBottomEdgeAlone() {
-        let one = renderFlyout([makeDownload(name: "Report.pdf")])
-        let three = renderFlyout([
-            makeDownload(name: "Report.pdf"),
-            makeDownload(name: "Photo.heic"),
-            makeDownload(name: "Notes.txt"),
-        ])
-
-        guard let oneBox = one.boundingBoxOfContent(tolerance: 0.03),
-              let threeBox = three.boundingBoxOfContent(tolerance: 0.03) else {
-            XCTFail("One or both renders painted nothing — see testFlyoutWithDownloadsPaintsThem.")
-            return
-        }
-
-        XCTAssertEqual(
-            threeBox.maxY, oneBox.maxY, accuracy: 2,
-            """
-            The list's bottom edge moved from \(oneBox.maxY)pt to \(threeBox.maxY)pt when two rows were \
-            added. Bottom-aligned means the bottom edge is the anchor and extra rows grow away from it.
-            """
-        )
-        XCTAssertLessThan(
-            threeBox.minY, oneBox.minY,
-            """
-            Three rows did not reach higher up the panel (\(threeBox.minY)pt) than one row \
-            (\(oneBox.minY)pt), so rows are not stacking upwards from the bottom.
-            """
-        )
-    }
-
-    // MARK: - The second line reads the way Arc's does
+    // MARK: - The relative time reads in full words
 
     func testRelativeTimeReadsExactlyAsArcsFlyoutDoes() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -175,58 +66,241 @@ final class DownloadsFlyoutTests: XCTestCase {
         )
     }
 
-    // MARK: - For human eyes
+    // MARK: - The preview only appears when nothing else owns the pointer
 
-    func testWriteFlyoutImageForHumanInspection() {
-        let downloads = [
-            makeDownload(name: "IMG_4632.HEIC", finishedAt: Date(timeIntervalSinceNow: -7 * 24 * 60 * 60)),
-            makeDownload(name: "Draft_Proposal_Movember.pages", finishedAt: Date(timeIntervalSinceNow: -4 * 60)),
-            makeDownload(name: "Untitled spreadsheet.numbers", finishedAt: Date(timeIntervalSinceNow: -2 * 60)),
-            makeDownload(name: "Half Baked Harvest (Recipes).pdf", finishedAt: Date(timeIntervalSinceNow: -60)),
-        ]
-        let theme = SpaceTheme()
-        let view = VStack(spacing: 0) {
-            DownloadsFlyoutView(theme: theme, downloads: downloads)
-            SidebarBottomBar(theme: theme).environment(AppEnvironment())
+    func testDownloadsPreviewPresentsWhenNothingElseIsGoingOn() {
+        XCTAssertTrue(
+            SidebarBottomBar.canPresentDownloadsPreview(
+                sidebarDragInFlight: false, menuIsOpen: false, primaryButtonIsDown: false, screenshotMode: false
+            ),
+            "Resting on the archive button with nothing else active must show the recent downloads."
+        )
+    }
+
+    func testDownloadsPreviewStaysHiddenWhileAnythingElseOwnsThePointer() {
+        XCTAssertFalse(
+            SidebarBottomBar.canPresentDownloadsPreview(
+                sidebarDragInFlight: true, menuIsOpen: false, primaryButtonIsDown: false, screenshotMode: false
+            ),
+            "A sidebar row drag passing over the button must not pop a panel up under it."
+        )
+        XCTAssertFalse(
+            SidebarBottomBar.canPresentDownloadsPreview(
+                sidebarDragInFlight: false, menuIsOpen: true, primaryButtonIsDown: false, screenshotMode: false
+            ),
+            "Another menu being open must keep the preview away."
+        )
+        XCTAssertFalse(
+            SidebarBottomBar.canPresentDownloadsPreview(
+                sidebarDragInFlight: false, menuIsOpen: false, primaryButtonIsDown: true, screenshotMode: false
+            ),
+            "A held mouse button means a drag or a press in progress, not a hover."
+        )
+        XCTAssertFalse(
+            SidebarBottomBar.canPresentDownloadsPreview(
+                sidebarDragInFlight: false, menuIsOpen: false, primaryButtonIsDown: false, screenshotMode: true
+            ),
+            "Screenshot mode renders the bar without hover surfaces."
+        )
+    }
+
+    // MARK: - The panel stays inside the sidebar
+
+    func testPlacementKeepsThePanelInsideTheContainerAtEveryWidth() {
+        for containerWidth in stride(from: CGFloat(100), through: 600, by: 10) {
+            for anchorMinX in [CGFloat(0), 6, 40, containerWidth, containerWidth + 200] {
+                let placement = DownloadsPreviewLayout.placement(containerWidth: containerWidth, anchorMinX: anchorMinX)
+                XCTAssertGreaterThanOrEqual(
+                    placement.originX, DownloadsPreviewLayout.edgeInset,
+                    "The panel starts left of the sidebar's padding at container \(containerWidth), anchor \(anchorMinX)."
+                )
+                XCTAssertLessThanOrEqual(
+                    placement.originX + placement.width, max(containerWidth - DownloadsPreviewLayout.edgeInset, DownloadsPreviewLayout.edgeInset),
+                    "The panel runs past the sidebar's right padding at container \(containerWidth), anchor \(anchorMinX)."
+                )
+                XCTAssertLessThanOrEqual(placement.width, DownloadsPreviewLayout.maxWidth)
+            }
         }
+    }
+
+    func testPlacementShrinksThePanelToANarrowSidebarAndKeepsItAtFullWidthInAWideOne() {
+        let narrow = DownloadsPreviewLayout.placement(containerWidth: 220, anchorMinX: 6)
+        XCTAssertEqual(narrow.width, 220 - 2 * DownloadsPreviewLayout.edgeInset, "A 220pt sidebar leaves the panel the width between its paddings.")
+        XCTAssertEqual(narrow.originX, DownloadsPreviewLayout.edgeInset, "The library button sits at the far left; the panel aligns to the sidebar padding, not to the button's own inset.")
+
+        let wide = DownloadsPreviewLayout.placement(containerWidth: 600, anchorMinX: 6)
+        XCTAssertEqual(wide.width, DownloadsPreviewLayout.maxWidth, "A wide sidebar does not stretch the panel.")
+    }
+
+    func testVisibleRowCountNeverLetsThePanelOutgrowTheSpaceAboveTheBar() {
+        for spaceAbove in stride(from: CGFloat(0), through: 900, by: 5) {
+            let maxHeight = DownloadsPreviewLayout.maxHeight(spaceAbove: spaceAbove)
+            let rows = DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: maxHeight)
+            let worstCase = DownloadsPreviewLayout.chromeHeightBound + CGFloat(rows) * DownloadsPreviewLayout.rowHeightBound
+            if rows > 0 {
+                XCTAssertLessThanOrEqual(worstCase, maxHeight ?? .infinity, "\(rows) rows overflow \(spaceAbove)pt above the bar.")
+            }
+            XCTAssertLessThanOrEqual(rows, 6)
+        }
+    }
+
+    func testShortContainersShowFewerRowsAndTallOnesShowAll() {
+        XCTAssertEqual(DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: DownloadsPreviewLayout.maxHeight(spaceAbove: 900)), 6)
+        XCTAssertEqual(DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: DownloadsPreviewLayout.maxHeight(spaceAbove: 200)), 2)
+        XCTAssertEqual(
+            DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: DownloadsPreviewLayout.maxHeight(spaceAbove: 40)), 0,
+            "With almost no room only the footer is kept."
+        )
+        XCTAssertEqual(DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: nil), 6, "An unknown bar position applies no cap.")
+    }
+
+    func testPanelRenderedInAShortContainerStaysUnderItsMaxHeight() throws {
+        let theme = SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.16, green: 0.14, blue: 0.22)], followsSystemAppearance: false)
+        let spaceAbove: CGFloat = 200
+        let image = renderDownloadsOverlay(theme: theme, containerWidth: 220, appearance: .darkAqua, withDownloads: true, spaceAbove: spaceAbove)
+        let panel = try XCTUnwrap(opaqueBounds(of: image))
+        let limit = try XCTUnwrap(DownloadsPreviewLayout.maxHeight(spaceAbove: spaceAbove))
+
+        XCTAssertLessThanOrEqual(panel.height, limit + 1, "The panel is taller than the room above the bar.")
+        XCTAssertGreaterThan(panel.height, DownloadsPreviewLayout.chromeHeightBound / 2, "The panel lost its footer.")
+    }
+
+    // MARK: - The panel wears the Space's theme
+
+    func testPanelStaysInsideANarrowSidebarAndPaintsTheSpacesThemeNotTheSystemAppearance() throws {
+        let dark = SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.16, green: 0.14, blue: 0.22)], followsSystemAppearance: false)
+        let light = SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.93, green: 0.91, blue: 0.86)], followsSystemAppearance: false)
+        let width: CGFloat = 220
+
+        var surfaces: [String: [RGBA]] = [:]
+        for (name, theme) in [("dark", dark), ("light", light)] {
+            for appearance in [NSAppearance.Name.darkAqua, .aqua] {
+                let image = renderDownloadsOverlay(theme: theme, containerWidth: width, appearance: appearance, withDownloads: true)
+                let label = "\(name) theme under \(appearance.rawValue)"
+                let panel = try XCTUnwrap(opaqueBounds(of: image), "Nothing opaque was painted for the \(label); the panel has no surface of its own.")
+
+                XCTAssertGreaterThanOrEqual(panel.minX, DownloadsPreviewLayout.edgeInset - 1, "\(label): the panel pokes out of the sidebar's left edge.")
+                XCTAssertLessThanOrEqual(panel.maxX, width - DownloadsPreviewLayout.edgeInset + 1, "\(label): the panel pokes out of the sidebar's right edge.")
+                XCTAssertGreaterThanOrEqual(panel.minY, 0, "\(label): the panel is cut off at the top.")
+
+                let sample = image.color(atX: Int(panel.midX), y: Int(panel.minY) + 3)
+                let expected = expectedSurface(of: theme, appearance: appearance)
+                XCTAssertTrue(
+                    sample.isApproximately(expected, tolerance: 0.02),
+                    "\(label): the panel surface is \(sample), expected the Space's own surface \(expected). A system popover colour would follow the appearance instead."
+                )
+                surfaces[name, default: []].append(sample)
+            }
+        }
+
+        for (name, samples) in surfaces {
+            XCTAssertTrue(
+                samples[0].isApproximately(samples[1], tolerance: 0.02),
+                "The \(name) Space's panel changes colour with the system appearance: \(samples[0]) vs \(samples[1])."
+            )
+        }
+        if let darkSample = surfaces["dark"]?.first, let lightSample = surfaces["light"]?.first {
+            XCTAssertFalse(darkSample.isApproximately(lightSample, tolerance: 0.05), "Different Space themes painted the same panel colour \(darkSample).")
+        }
+    }
+
+    func testEmptyPanelStillPaintsAThemedSurfaceInsideTheSidebar() throws {
+        let theme = SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.12, green: 0.2, blue: 0.3)], followsSystemAppearance: false)
+        let image = renderDownloadsOverlay(theme: theme, containerWidth: 220, appearance: .aqua, withDownloads: false)
+        let panel = try XCTUnwrap(opaqueBounds(of: image), "The empty state painted no panel.")
+
+        XCTAssertGreaterThanOrEqual(panel.minX, DownloadsPreviewLayout.edgeInset - 1)
+        XCTAssertLessThanOrEqual(panel.maxX, 220 - DownloadsPreviewLayout.edgeInset + 1)
+        XCTAssertTrue(
+            image.containsNonBackgroundPixels(
+                in: panel.insetBy(dx: 6, dy: 6),
+                background: expectedSurface(of: theme, appearance: .aqua),
+                tolerance: 0.1
+            ),
+            "The empty panel drew no text or divider over its surface."
+        )
+    }
+
+    // MARK: - Panel rendering support
+
+    private func renderDownloadsOverlay(
+        theme: SpaceTheme,
+        containerWidth: CGFloat,
+        appearance: NSAppearance.Name,
+        withDownloads: Bool,
+        spaceAbove: CGFloat? = nil
+    ) -> RenderedImage {
+        let env = AppEnvironment()
+        if withDownloads {
+            let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            let source = URL(string: "https://example.com/file")!
+            env.recentDownloads = [
+                DownloadItem(
+                    sourceURL: source, destinationURL: directory.appendingPathComponent("movie.mov"),
+                    suggestedFileName: "movie.mov", totalBytes: 1_000_000, receivedBytes: 400_000, state: .inProgress
+                ),
+                DownloadItem(
+                    sourceURL: source, destinationURL: directory.appendingPathComponent("report.pdf"),
+                    suggestedFileName: "report.pdf", totalBytes: 2_000, receivedBytes: 2_000, state: .completed,
+                    finishedAt: Date().addingTimeInterval(-240)
+                ),
+                DownloadItem(
+                    sourceURL: source, destinationURL: directory.appendingPathComponent("archive.zip"),
+                    suggestedFileName: "archive.zip", state: .cancelled, finishedAt: Date().addingTimeInterval(-3_600)
+                ),
+            ]
+        }
+
+        let inset = (OrbitMetrics.sidebarBottomBarHeight - OrbitMetrics.sidebarBottomBarIconSize) / 2
+        let size = CGSize(width: containerWidth, height: 480)
+        let scene = VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Color.clear
+                .frame(width: containerWidth, height: OrbitMetrics.sidebarBottomBarHeight)
+                .overlay(alignment: .bottomLeading) {
+                    DownloadsPreviewOverlay(
+                        theme: theme,
+                        containerWidth: containerWidth,
+                        spaceAbove: spaceAbove,
+                        anchorMinX: inset,
+                        anchorMidX: inset + OrbitMetrics.sidebarBottomBarIconSize / 2,
+                        reduceMotion: true,
+                        onHoverChange: { _ in },
+                        onDismiss: {}
+                    )
+                }
+        }
+        .frame(width: size.width, height: size.height)
+        .environment(env)
         .environment(\.orbitScreenshotModeDragDisabled, true)
-        .background { ThemeBackgroundView(theme: theme, blur: 0) }
 
-        render(view, size: CGSize(width: OrbitMetrics.sidebarDefaultWidth, height: 420))
-            .writeDiagnosticPNG(named: "DownloadsFlyout-over-theme")
+        return render(scene, size: size, appearance: appearance)
     }
 
-    // MARK: - An empty flyout must never open in the first place
-
-    func testHoveringTheLibraryButtonWithNothingDownloadedDoesNotOpenThePanel() {
-        XCTAssertFalse(
-            SidebarBottomBar.shouldOpenFlyout(isHoveringButton: true, isHoveringFlyout: false, downloadCount: 0),
-            """
-            Hovering the Library button with nothing downloaded opened the flyout panel. That panel paints \
-            opaque theme colour over the whole sidebar and the empty flyout paints nothing into it, so the \
-            tab list simply vanishes for as long as the pointer rests on the archive glyph — which is what \
-            every user sees on first launch.
-            """
-        )
-        XCTAssertFalse(
-            SidebarBottomBar.shouldOpenFlyout(isHoveringButton: false, isHoveringFlyout: true, downloadCount: 0),
-            "The grace period that lets the pointer travel from the button onto the panel must not be able to hold an empty panel open either."
-        )
+    private func opaqueBounds(of image: RenderedImage) -> CGRect? {
+        var minX = Int.max, minY = Int.max, maxX = Int.min, maxY = Int.min
+        for y in 0..<Int(image.pointSize.height) {
+            for x in 0..<Int(image.pointSize.width) where image.color(atX: x, y: y).a >= 0.97 {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x + 1)
+                maxY = max(maxY, y + 1)
+            }
+        }
+        guard minX != Int.max else { return nil }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
-    func testHoveringTheLibraryButtonWithDownloadsStillOpensThePanel() {
-        XCTAssertTrue(
-            SidebarBottomBar.shouldOpenFlyout(isHoveringButton: true, isHoveringFlyout: false, downloadCount: 1),
-            "One download is enough to have something to present, and Arc's Help Center describes hovering the Library icon as the way to reach recent files."
+    private func expectedSurface(of theme: SpaceTheme, appearance: NSAppearance.Name) -> RGBA {
+        let side: CGFloat = 40
+        let swatch = render(
+            Color(theme.primary.nsColor)
+                .overlay(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity))
+                .frame(width: side, height: side),
+            size: CGSize(width: side, height: side),
+            appearance: appearance
         )
-        XCTAssertTrue(
-            SidebarBottomBar.shouldOpenFlyout(isHoveringButton: false, isHoveringFlyout: true, downloadCount: 4),
-            "The pointer moving off the button and onto the panel's own rows must keep the panel open, or the rows could never be clicked or dragged."
-        )
-        XCTAssertFalse(
-            SidebarBottomBar.shouldOpenFlyout(isHoveringButton: false, isHoveringFlyout: false, downloadCount: 4),
-            "With the pointer nowhere near either surface the panel must close regardless of how many downloads there are."
-        )
+        return swatch.color(atX: Int(side / 2), y: Int(side / 2))
     }
 
     // MARK: - The Library button leads the bottom bar

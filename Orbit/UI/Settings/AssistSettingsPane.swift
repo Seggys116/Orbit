@@ -29,7 +29,7 @@ struct AssistSettingsPane: View {
             OrbitSettingsSection(title: nil) {
                 OrbitSettingsRow(
                     title: "Assist",
-                    description: "Orbit's AI-assisted features, off until you turn them on. With this switch off nothing below runs and Orbit makes no AI request of any kind, whatever the individual switches say."
+                    description: "Off by default. When off, Orbit makes no AI requests."
                 ) {
                     OrbitToggle(accessibilityLabel: "Assist", isOn: $assistEnabled, accentColor: SettingsPalette.accent)
                 }
@@ -46,7 +46,7 @@ struct AssistSettingsPane: View {
                 .opacity(assistEnabled ? 1 : Self.disabledOpacity)
             }
 
-            Text("Orbit ships no model and has no server, so every switch that calls one stays inert until you point it at a provider you control — Anthropic, any OpenAI-compatible service, or something running on your own machine. Nothing here ever invents a result: when a request cannot be made, Orbit says so rather than showing something plausible.")
+            Text("Orbit has no built-in model. Features stay off until you add a provider below.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -54,7 +54,7 @@ struct AssistSettingsPane: View {
             OrbitSettingsSection(title: "Provider") {
                 OrbitSettingsRow(
                     title: "Provider",
-                    description: "Anthropic speaks the Messages API. Everything else — OpenAI, OpenRouter, Groq, together.ai, Ollama, LM Studio — speaks the OpenAI chat-completions API. Each provider keeps its own key."
+                    description: "Anthropic, or any OpenAI-compatible service. Each keeps its own key."
                 ) {
                     OrbitPopupButton(
                         options: AssistProviderKind.allCases,
@@ -112,7 +112,7 @@ struct AssistSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "API key",
-                    description: "Stored in your login Keychain, never in Orbit's preferences or its saved state. Not needed for a local server."
+                    description: "Stored in your Keychain. Not needed for a local server."
                 ) {
                     OrbitSecureField(
                         placeholder: providerKind.apiKeyPlaceholder,
@@ -148,7 +148,7 @@ struct AssistSettingsPane: View {
             OrbitSettingsSection(title: "Features") {
                 OrbitSettingsRow(
                     title: "Tidy Tabs",
-                    description: "Press the broom icon to let your Sidebar organize itself whenever you have more than six Today Tabs. With this off the broom still works, grouping those tabs by site instead — nothing is sent anywhere."
+                    description: "The broom groups Today tabs by topic. When off, it groups by site."
                 ) {
                     OrbitToggle(accessibilityLabel: "Tidy Tabs", isOn: $tidyTabs, accentColor: SettingsPalette.accent)
                 }
@@ -162,7 +162,7 @@ struct AssistSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "Instant Links",
-                    description: "Press Shift + Enter for any web search to instantly open the top result. Only offered on search engines that publish a way to do this — today that is DuckDuckGo."
+                    description: "Shift + Enter opens the top search result. DuckDuckGo only."
                 ) {
                     OrbitToggle(accessibilityLabel: "Instant Links", isOn: $instantLinks, accentColor: SettingsPalette.accent)
                 }
@@ -172,7 +172,7 @@ struct AssistSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "Ask on Page",
-                    description: "Press Command + F on any page to ask a question and get an answer in seconds."
+                    description: "Press Command + F to ask a question about the page."
                 ) {
                     OrbitToggle(accessibilityLabel: "Ask on Page", isOn: $askOnPage, accentColor: SettingsPalette.accent)
                 }
@@ -183,7 +183,7 @@ struct AssistSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "5-Second Previews",
-                    description: "Press Shift and hover over any link to generate a summary of the webpage, without a single click. Orbit fetches the linked page itself to do this, so that site sees a visit."
+                    description: "Shift + hover summarizes a link. Orbit fetches the page, so that site sees a visit."
                 ) {
                     OrbitToggle(accessibilityLabel: "5-Second Previews", isOn: $fiveSecondPreviews, accentColor: SettingsPalette.accent)
                 }
@@ -194,7 +194,7 @@ struct AssistSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "Tidy Tab Titles",
-                    description: "Have your tabs automatically renamed with tidier, shorter titles when you Pin them. Renaming a tab yourself always wins, and switching this off restores the real titles."
+                    description: "Shortens titles when you pin a tab. Turning off restores them."
                 ) {
                     OrbitToggle(accessibilityLabel: "Tidy Tab Titles", isOn: $tidyTabTitles, accentColor: SettingsPalette.accent)
                 }
@@ -209,7 +209,7 @@ struct AssistSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "Tidy Downloads",
-                    description: "Keep your many files more organized with smartly renamed downloads — and make them a little easier to find later."
+                    description: "Renames downloads so they're easier to find."
                 ) {
                     OrbitToggle(accessibilityLabel: "Tidy Downloads", isOn: $tidyDownloads, accentColor: SettingsPalette.accent)
                 }
@@ -221,7 +221,7 @@ struct AssistSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "ChatGPT in the Command Bar",
-                    description: "Press ⌥⌘G, start typing, and get answers in fewer clicks. Orbit opens your question in ChatGPT rather than answering it here, so this one needs no provider above."
+                    description: "Press ⌥⌘G to ask ChatGPT. Needs no provider."
                 ) {
                     OrbitToggle(accessibilityLabel: "ChatGPT in the Command Bar", isOn: $chatGPTCommandBar, accentColor: SettingsPalette.accent)
                 }

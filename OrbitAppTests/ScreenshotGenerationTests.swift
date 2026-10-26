@@ -1303,7 +1303,7 @@ private struct ScreenshotSettingsComposition: View {
 // MARK: - Screenshot-only drag suppression, applied at the call site
 
 private extension View {
-    /// Despite the name this is the shared "suppress the thing ImageRenderer cannot flatten" flag: it also elides OrbitNSMenuButton/OrbitPopupButton's invisible NSViewRepresentable click-catchers, which otherwise rasterise as a solid block.
+    /// Also the shared flag that elides invisible NSViewRepresentable click-catchers, which rasterise as a solid block.
     func orbitScreenshotModeDragDisabledForTests() -> some View {
         #if DEBUG
         return self.environment(\.orbitScreenshotModeDragDisabled, true)

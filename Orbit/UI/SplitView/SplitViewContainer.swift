@@ -54,6 +54,16 @@ struct SplitViewContainer: View {
                 let length = available * CGFloat(group.fractions.indices.contains(index) ? group.fractions[index] : 1.0 / Double(group.tabIDs.count))
                 // Padding applied before .frame(width:), not after: SwiftUI's .padding() adds to a view's ideal size, so padding an already-fixed view would overflow the total width instead of shrinking the inner content.
                 SingleTabContentView(tab: tab, isFocusedPane: env.focusedSplitPaneIndex == index)
+                    .transformEnvironment(\.paneCardFlushEdges) { edges in
+                        let innerLeading = orientation == .horizontal && index > 0
+                        let innerTrailing = orientation == .horizontal && index < lastIndex
+                        let innerTop = orientation == .vertical && index > 0
+                        let innerBottom = orientation == .vertical && index < lastIndex
+                        if innerLeading { edges.remove(.leading) }
+                        if innerTrailing { edges.remove(.trailing) }
+                        if innerTop { edges.remove(.top) }
+                        if innerBottom { edges.remove(.bottom) }
+                    }
                     .padding(.leading, (orientation == .horizontal && index > 0) ? OrbitSplitPaneMetrics.paneGap : 0)
                     .padding(.trailing, (orientation == .horizontal && index < lastIndex) ? OrbitSplitPaneMetrics.paneGap : 0)
                     .padding(.top, (orientation == .vertical && index > 0) ? OrbitSplitPaneMetrics.paneGap : 0)

@@ -26,18 +26,34 @@ struct EaselItemContainerView: View {
                 }
             }
             .gesture(moveGesture)
-            .contextMenu {
-                Button("Bring to Front") { model.bringToFront(item.id) }
-                Button("Send to Back") { model.sendToBack(item.id) }
-                Divider()
-                Button("Delete", role: .destructive) {
-                    model.selection = [item.id]
-                    model.deleteSelected()
-                }
-            }
             // Without this, an item's move gesture wins the hit test and swallows drawing-tool drags over it.
             .allowsHitTesting(model.activeTool == .select)
             .onDisappear { commitPendingTextEditIfNeeded() }
+    }
+
+    // The canvas owns the right-click: items sit inside its zoom and pan transforms.
+    static func contextMenuEntries(for item: EaselItem, model: EaselCanvasModel) -> [OrbitContextMenuEntry] {
+        let id = item.id
+        return [
+            .item(OrbitContextMenuItem(title: "Bring to Front") { model.bringToFront(id) }),
+            .item(OrbitContextMenuItem(title: "Send to Back") { model.sendToBack(id) }),
+            .divider(),
+            .item(OrbitContextMenuItem(title: "Delete", isDestructive: true) {
+                model.selection = [id]
+                model.deleteSelected()
+            })
+        ]
+    }
+
+    static func contains(_ item: EaselItem, canvasPoint point: CGPoint) -> Bool {
+        let width = max(item.frame.width, 1)
+        let height = max(item.frame.height, 1)
+        let radians = item.rotation * .pi / 180
+        let dx = point.x - item.frame.midX
+        let dy = point.y - item.frame.midY
+        let localX = dx * cos(radians) + dy * sin(radians)
+        let localY = -dx * sin(radians) + dy * cos(radians)
+        return abs(localX) <= width / 2 && abs(localY) <= height / 2
     }
 
     private func commitPendingTextEditIfNeeded() {

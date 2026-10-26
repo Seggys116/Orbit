@@ -27,7 +27,7 @@ struct ExtensionPermissionsConsentSheetView: View {
                 Text("\(request.extensionName) is requesting additional permissions")
                     .font(.system(size: OrbitMetrics.extensionInstallTitleFontSize, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
-                Text("It already runs in Orbit. Granting these gives it access it does not have today.")
+                Text("Granting these gives it access it doesn't have today.")
                     .font(.system(size: OrbitMetrics.extensionInstallDetailFontSize))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

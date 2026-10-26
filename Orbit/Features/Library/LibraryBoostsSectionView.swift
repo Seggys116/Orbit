@@ -81,8 +81,8 @@ struct LibraryBoostsSectionView: View {
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) { editingHost = entry.host }
                         .onTapGesture { router.select(.boostHost(entry.host)) }
-                        .contextMenu {
-                            Button("Edit Boosts…") { editingHost = entry.host }
+                        .orbitRightClickMenu {
+                            [.item(OrbitContextMenuItem(title: "Edit Boosts…") { editingHost = entry.host })]
                         }
                     }
                 }

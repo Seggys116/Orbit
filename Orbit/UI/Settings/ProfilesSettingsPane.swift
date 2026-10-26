@@ -38,7 +38,7 @@ struct ProfilesSettingsPane: View {
                 OrbitButton(title: "New Profile…", kind: .primary, accentColor: SettingsPalette.accent) { showNewProfileSheet = true }
             }
 
-            Text("Profiles help keep your data separate across Spaces – like history, logins, cookies, and extensions. You can use any Profile across one or more Spaces.")
+            Text("Profiles keep history, logins, cookies and extensions separate between Spaces.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
@@ -79,6 +79,7 @@ struct ProfilesSettingsPane: View {
                 }
             }
             .background(RoundedRectangle(cornerRadius: OrbitControlMetrics.sectionCornerRadius, style: .continuous).fill(OrbitControlColor.fill(for: colorScheme)))
+            .clipShape(RoundedRectangle(cornerRadius: OrbitControlMetrics.sectionCornerRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: OrbitControlMetrics.sectionCornerRadius, style: .continuous).strokeBorder(OrbitControlColor.border(for: colorScheme)))
         }
         .frame(width: Self.profileListWidth)
@@ -112,8 +113,7 @@ struct ProfilesSettingsPane: View {
                 .foregroundStyle(.secondary)
         }
         .frame(minHeight: OrbitControlMetrics.textFieldHeight)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(10)
         .background(isSelected ? SettingsPalette.accent.opacity(0.16) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture { selectedProfileID = profile.id }
@@ -144,7 +144,7 @@ struct ProfilesSettingsPane: View {
 
                 OrbitSettingsRow(
                     title: "Include search engine suggestions",
-                    description: "Sends what you type to \(profile.searchEngine.displayName) to fetch completions."
+                    description: "Sends what you type to \(profile.searchEngine.displayName)."
                 ) {
                     OrbitToggle(
                         accessibilityLabel: "Include search engine suggestions",
@@ -166,7 +166,7 @@ struct ProfilesSettingsPane: View {
             OrbitSettingsSection(title: nil) {
                 OrbitSettingsRow(
                     title: "Archive tabs after",
-                    description: "Applies to every Space on this Profile. The tab you are looking at, tabs in a Split View, and tabs playing media are never archived."
+                    description: "Open, split and playing tabs are never archived."
                 ) {
                     archivePolicyPicker(profile)
                 }
@@ -226,7 +226,7 @@ struct ProfilesSettingsPane: View {
 
         return OrbitSettingsRow(
             title: "Add a Space",
-            description: "Moves the Space onto this Profile. Its cookies, logins, history and extensions become this Profile's, effective immediately."
+            description: "The Space switches to this Profile's cookies, logins and history."
         ) {
             OrbitPopupButton(
                 options: candidates.map { Optional($0.id) },
@@ -297,7 +297,7 @@ private struct NewProfileSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New Profile").font(.system(size: 15, weight: .semibold))
             OrbitTextField(placeholder: "Name", text: $name, accentColor: SettingsPalette.accent)
-            Text("New Profiles start empty — no logins, cookies or history — and fill in as you browse.")
+            Text("New Profiles start with no logins, cookies or history.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             HStack {

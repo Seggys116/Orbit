@@ -384,18 +384,19 @@ final class ToolbarModeTests: XCTestCase {
     func test_theHoldMenuIsBuiltFromTheSameRowsAndItsItemsReallyNavigate() {
         var selected: [Int] = []
         let rows = ToolbarNavHistory.entries(from: history(), direction: .back)
-        let menu = ToolbarNavHistory.buildNSMenu(items: rows) { selected.append($0) }
+        let entries = ToolbarNavHistory.menuEntries(items: rows) { selected.append($0) }
+        let items = entries.flattenedItems
 
         XCTAssertEqual(
-            menu.items.map(\.title), ["One Back", "Two Back"],
+            items.map(\.title), ["One Back", "Two Back"],
             "The press-and-hold menu and the right-click menu must offer the same history, in the same order — they are built from one function so they cannot diverge."
         )
 
-        guard let first = menu.items.first, let action = first.action, let target = first.target else {
-            XCTFail("The first history row carries no target/action, so choosing it would do nothing.")
+        guard let action = items.first?.action else {
+            XCTFail("The first history row carries no action, so choosing it would do nothing.")
             return
         }
-        _ = target.perform(action)
+        action()
 
         XCTAssertEqual(
             selected, [-1],
@@ -451,7 +452,7 @@ final class ToolbarModeTests: XCTestCase {
         var navigateCount = 0
         var presentedCount = 0
         view.onNavigate = { navigateCount += 1 }
-        view.historyMenu = { NSMenu() }
+        view.historyMenu = { [] }
         view.presentMenu = { _ in presentedCount += 1 }
 
         view.mouseDown(with: navMouseEvent(type: .leftMouseDown))
@@ -506,17 +507,17 @@ final class ToolbarModeTests: XCTestCase {
 
     func test_pressAndHold_presentsTheMenu_andTheFollowingMouseUpDoesNotNavigate() {
         let view = ToolbarNavButtonClickCatchingView(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
-        let expectedMenu = NSMenu()
-        var presentedMenu: NSMenu?
-        view.historyMenu = { expectedMenu }
-        view.presentMenu = { presentedMenu = $0 }
+        let expectedEntries: [OrbitContextMenuEntry] = [.item(OrbitContextMenuItem(title: "One Back"))]
+        var presentedTitles: [String]?
+        view.historyMenu = { expectedEntries }
+        view.presentMenu = { presentedTitles = $0.flattenedItems.map(\.title) }
         view.onNavigate = { XCTFail("A press-and-hold must not also count as a plain click.") }
 
         view.mouseDown(with: navMouseEvent(type: .leftMouseDown))
         XCTAssertTrue(view.isPressPending, "A press must be tracked between mouseDown and its resolution.")
 
         view.holdTimerFired()
-        XCTAssertTrue(presentedMenu === expectedMenu, "The hold firing must present the exact NSMenu historyMenu() returns.")
+        XCTAssertEqual(presentedTitles, ["One Back"], "The hold firing must present the exact entries historyMenu() returns.")
         XCTAssertFalse(view.isPressPending, "The hold firing must resolve the press.")
 
         view.mouseUp(with: navMouseEvent(type: .leftMouseUp))
@@ -537,7 +538,7 @@ final class ToolbarModeTests: XCTestCase {
     func test_quickClick_neverPresentsTheHoldMenu() {
         let view = ToolbarNavButtonClickCatchingView(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
         var presentedCount = 0
-        view.historyMenu = { NSMenu() }
+        view.historyMenu = { [] }
         view.presentMenu = { _ in presentedCount += 1 }
         view.onNavigate = {}
 
@@ -550,14 +551,14 @@ final class ToolbarModeTests: XCTestCase {
 
     func test_rightClick_presentsTheSameMenuThePressAndHoldPathDoes() {
         let view = ToolbarNavButtonClickCatchingView(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
-        let expectedMenu = NSMenu()
-        var presentedMenu: NSMenu?
-        view.historyMenu = { expectedMenu }
-        view.presentMenu = { presentedMenu = $0 }
+        let expectedEntries: [OrbitContextMenuEntry] = [.item(OrbitContextMenuItem(title: "One Back"))]
+        var presentedTitles: [String]?
+        view.historyMenu = { expectedEntries }
+        view.presentMenu = { presentedTitles = $0.flattenedItems.map(\.title) }
 
         view.rightMouseDown(with: navMouseEvent(type: .rightMouseDown))
 
-        XCTAssertTrue(presentedMenu === expectedMenu)
+        XCTAssertEqual(presentedTitles, ["One Back"])
     }
 
     func test_rightClick_withNoHistory_presentsNothing() {

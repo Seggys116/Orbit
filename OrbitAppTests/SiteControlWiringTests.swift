@@ -160,16 +160,17 @@ final class SiteControlWiringTests: XCTestCase {
             SiteControlPopoverView.permissionRows(origin: url, session: session, manageable: Set(PermissionKind.allCases)).first
         )
         var reloadCount = 0
-        let menu = SiteControlPopoverView.makePermissionMenu(for: row, origin: url, session: session) { reloadCount += 1 }
+        let menu = SiteControlPopoverView.permissionMenuEntries(for: row, origin: url, session: session) { reloadCount += 1 }
+        let items = menu.flattenedItems
 
-        XCTAssertEqual(menu.items.map(\.title), ["Allow", "Block", "Ask"])
+        XCTAssertEqual(items.map(\.title), ["Allow", "Block", "Ask"])
         XCTAssertEqual(
-            menu.items.first(where: { $0.title == "Allow" })?.state, .on,
+            items.first(where: { $0.title == "Allow" })?.isChecked, true,
             "The menu does not mark the value the site currently has."
         )
 
-        let block = try XCTUnwrap(menu.items.first(where: { $0.title == "Block" }))
-        _ = block.target?.perform(block.action, with: block)
+        let block = try XCTUnwrap(items.first(where: { $0.title == "Block" }))
+        block.action?()
 
         XCTAssertEqual(
             session.contentSetting(.geolocation, for: url), .block,
@@ -177,8 +178,8 @@ final class SiteControlWiringTests: XCTestCase {
         )
         XCTAssertEqual(reloadCount, 1, "The popover was not told to re-read its rows, so it would keep showing the old value.")
 
-        let ask = try XCTUnwrap(menu.items.first(where: { $0.title == "Ask" }))
-        _ = ask.target?.perform(ask.action, with: ask)
+        let ask = try XCTUnwrap(items.first(where: { $0.title == "Ask" }))
+        ask.action?()
         XCTAssertEqual(
             session.contentSetting(.geolocation, for: url), .ask,
             "Revoke from the row's menu did not reach the engine."

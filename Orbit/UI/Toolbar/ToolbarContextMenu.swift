@@ -3,71 +3,60 @@
 import AppKit
 import SwiftUI
 
-struct ToolbarContextMenu: View {
-    @Environment(AppEnvironment.self) private var env
-
+struct ToolbarContextMenu {
     var tab: Tab
     var settings: ToolbarSettings
     var developerModeSettings: DeveloperModeSettings
 
-    var body: some View {
-        Button("Copy URL") { ToolbarContextMenuAction.copyURL(tab.url) }
+    @MainActor
+    func entries(in env: AppEnvironment) -> [OrbitContextMenuEntry] {
+        let tab = tab
+        let settings = settings
+        var entries: [OrbitContextMenuEntry] = [
+            .item(OrbitContextMenuItem(title: "Copy URL") { ToolbarContextMenuAction.copyURL(tab.url) }),
+            .item(OrbitContextMenuItem(title: "Share") { MenuSharePresenter.shared.present(items: [tab.url]) }),
+            .item(OrbitContextMenuItem(title: "Capture...") { env.extensionPoints.presentCaptureTool?(tab.id, false) }),
+            .item(OrbitContextMenuItem(title: "Capture Full Page") { env.extensionPoints.presentCaptureTool?(tab.id, true) }),
+            .divider(),
+            .item(OrbitContextMenuItem(title: fullURLRowTitle) { settings.toggleFullURL() }),
+            .item(OrbitContextMenuItem(title: settings.visibilityMenuTitle) { settings.toggleVisible() })
+        ]
 
-        ShareLink("Share", item: tab.url)
-
-        Button("Capture...") { env.extensionPoints.presentCaptureTool?(tab.id, false) }
-        Button("Capture Full Page") { env.extensionPoints.presentCaptureTool?(tab.id, true) }
-
-        Divider()
-
-        fullURLRow
-        Button(settings.visibilityMenuTitle) { settings.toggleVisible() }
-
-        if developerModeSettings.isEnabled {
-            screenSizeMenu
+        if developerModeSettings.isEnabled, let screenSize = screenSizeEntries(in: env) {
+            entries.append(.divider())
+            entries.append(screenSize)
         }
+        return entries
     }
 
-    @ViewBuilder
-    private var screenSizeMenu: some View {
-        if let contents = env.webContents[tab.id] as? WebKitWebContents {
-            Divider()
-            Menu("Screen Size") {
-                let mode = InspectorDeviceMode.shared
-                let current = mode.preset(for: contents)
-                ForEach(InspectorDeviceMode.Preset.devices) { preset in
-                    Toggle(preset.title, isOn: Binding(
-                        get: { current == preset },
-                        set: { isOn in
-                            guard isOn else { return }
-                            mode.setPreset(preset, for: contents)
-                        }
-                    ))
-                }
-                Divider()
-                Menu("Width") {
-                    ForEach(InspectorDeviceMode.widths, id: \.self) { width in
-                        Toggle("\(Int(width))", isOn: Binding(
-                            get: {
-                                current == .responsive && mode.responsiveWidth(for: contents) == width
-                            },
-                            set: { isOn in
-                                guard isOn else { return }
-                                mode.setResponsiveWidth(width, for: contents)
-                                mode.setPreset(.responsive, for: contents)
-                            }
-                        ))
-                    }
-                }
-            }
+    @MainActor
+    private func screenSizeEntries(in env: AppEnvironment) -> OrbitContextMenuEntry? {
+        guard let contents = env.webContents[tab.id] as? WebKitWebContents else { return nil }
+        let mode = InspectorDeviceMode.shared
+        let current = mode.preset(for: contents)
+
+        let presets: [OrbitContextMenuEntry] = InspectorDeviceMode.Preset.devices.map { preset in
+            .item(OrbitContextMenuItem(title: preset.title, isChecked: current == preset) {
+                guard current != preset else { return }
+                mode.setPreset(preset, for: contents)
+            })
         }
+        let widths: [OrbitContextMenuEntry] = InspectorDeviceMode.widths.map { width in
+            let isCurrent = current == .responsive && mode.responsiveWidth(for: contents) == width
+            return .item(OrbitContextMenuItem(title: "\(Int(width))", isChecked: isCurrent) {
+                guard !isCurrent else { return }
+                mode.setResponsiveWidth(width, for: contents)
+                mode.setPreset(.responsive, for: contents)
+            })
+        }
+
+        return .item(OrbitContextMenuItem(
+            title: "Screen Size",
+            submenu: presets + [.divider(), .item(OrbitContextMenuItem(title: "Width", submenu: widths))]
+        ))
     }
 
-    // Developer Mode forces the full URL on regardless of settings.showsFullURL, so the row must not claim "Hide Full URL" when pressing it would not actually hide anything; it still toggles the real preference (which takes over once Developer Mode is off), just states when it's currently masked.
-    private var fullURLRow: some View {
-        Button(fullURLRowTitle) { settings.toggleFullURL() }
-    }
-
+    // Developer Mode forces the full URL on, so the row must not claim "Hide Full URL" while that masks the preference.
     var fullURLRowTitle: String {
         guard developerModeSettings.isEnabled, settings.showsFullURL else {
             return settings.fullURLMenuTitle

@@ -15,28 +15,36 @@ struct OrbitContextMenuView: View {
     var onRowActivate: ((OrbitContextMenuItem, CGRect) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.orbitSpaceTheme) private var environmentTheme
     @State private var fallbackSelection = OrbitMenuSelectionModel()
 
     private var activeSelection: OrbitMenuSelectionModel { selection ?? fallbackSelection }
+
+    private var chrome: SpaceThemeChrome? {
+        (environmentTheme ?? OrbitMenuThemeSource.shared.theme).map {
+            SpaceThemeChrome(theme: $0, colorScheme: colorScheme)
+        }
+    }
 
     private var surface: OrbitMenuSurfaceShape {
         OrbitMenuSurfaceShape(cornerRadius: OrbitMetrics.contextMenuCornerRadius, arrow: arrow)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let chrome = self.chrome
+        return VStack(alignment: .leading, spacing: 0) {
             ForEach(entries) { entry in
-                row(for: entry)
+                row(for: entry, chrome: chrome)
             }
         }
         .padding(.vertical, OrbitMetrics.contextMenuVerticalPadding)
         .frame(width: OrbitMetrics.contextMenuWidth)
         .padding(.top, arrow?.edge == .top ? OrbitMetrics.contextMenuArrowHeight : 0)
         .padding(.bottom, arrow?.edge == .bottom ? OrbitMetrics.contextMenuArrowHeight : 0)
-        .background(surface.fill(OrbitColor.menuSurface(for: colorScheme)))
+        .background(surface.fill(chrome?.surface ?? OrbitColor.menuSurface(for: colorScheme)))
         .overlay(
             surface.strokeBorder(
-                OrbitControlColor.border(for: colorScheme),
+                chrome?.border ?? OrbitControlColor.border(for: colorScheme),
                 lineWidth: OrbitAcrylic.panelEdgeHighlightWidth
             )
         )
@@ -44,18 +52,20 @@ struct OrbitContextMenuView: View {
         .coordinateSpace(name: Self.coordinateSpace)
         .onAppear { activeSelection.setEntries(entries) }
         .onChange(of: entries.map(\.id)) { _, _ in activeSelection.setEntries(entries) }
+        .orbitThemeAnimation(value: chrome)
     }
 
     // AnyView, not `some View`: this recurses into itself for `.section`'s
     // nested entries, and an opaque return type cannot be defined in terms
     // of itself.
-    private func row(for entry: OrbitContextMenuEntry) -> AnyView {
+    private func row(for entry: OrbitContextMenuEntry, chrome: SpaceThemeChrome?) -> AnyView {
         switch entry {
         case .item(let item):
             return AnyView(
                 OrbitContextMenuRow(
                     item: item,
                     selection: activeSelection,
+                    chrome: chrome,
                     onRowActivate: onRowActivate,
                     onSelect: onSelect
                 )
@@ -63,7 +73,7 @@ struct OrbitContextMenuView: View {
         case .divider:
             return AnyView(
                 Rectangle()
-                    .fill(OrbitColor.menuDivider(for: colorScheme))
+                    .fill(chrome?.divider ?? OrbitColor.menuDivider(for: colorScheme))
                     .frame(height: OrbitMetrics.contextMenuDividerThickness)
                     .padding(.vertical, OrbitMetrics.contextMenuDividerVerticalPadding)
                     .padding(.horizontal, OrbitMetrics.contextMenuRowHorizontalInset + OrbitMetrics.contextMenuRowHorizontalPadding)
@@ -73,11 +83,11 @@ struct OrbitContextMenuView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(title.uppercased())
                         .font(.system(size: OrbitMetrics.contextMenuSectionHeaderFontSize, weight: .semibold))
-                        .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
+                        .foregroundStyle(chrome?.secondaryForeground ?? OrbitControlColor.secondaryForeground(for: colorScheme))
                         .padding(.horizontal, OrbitMetrics.contextMenuRowHorizontalInset + OrbitMetrics.contextMenuRowHorizontalPadding)
                         .padding(.top, 6)
                         .padding(.bottom, 2)
-                    ForEach(entries) { child in row(for: child) }
+                    ForEach(entries) { child in row(for: child, chrome: chrome) }
                 }
             )
         }
@@ -87,6 +97,7 @@ struct OrbitContextMenuView: View {
 private struct OrbitContextMenuRow: View {
     var item: OrbitContextMenuItem
     var selection: OrbitMenuSelectionModel
+    var chrome: SpaceThemeChrome?
     var onRowActivate: ((OrbitContextMenuItem, CGRect) -> Void)?
     var onSelect: () -> Void
 
@@ -139,12 +150,12 @@ private struct OrbitContextMenuRow: View {
             if let shortcut = item.shortcut {
                 Text(shortcut)
                     .font(.system(size: OrbitMetrics.contextMenuShortcutFontSize))
-                    .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
+                    .foregroundStyle(secondaryColor)
             }
             if item.hasSubmenu {
                 Image(systemName: "chevron.right")
                     .font(.system(size: OrbitMetrics.contextMenuSubmenuChevronSize, weight: .semibold))
-                    .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
+                    .foregroundStyle(secondaryColor)
             }
         }
         .foregroundStyle(foregroundColor)
@@ -169,11 +180,16 @@ private struct OrbitContextMenuRow: View {
     }
 
     private var foregroundColor: Color {
-        item.isDestructive ? .red : OrbitControlColor.primaryForeground(for: colorScheme)
+        item.isDestructive ? .red : (chrome?.foreground ?? OrbitControlColor.primaryForeground(for: colorScheme))
+    }
+
+    private var secondaryColor: Color {
+        chrome?.secondaryForeground ?? OrbitControlColor.secondaryForeground(for: colorScheme)
     }
 
     private var rowFill: Color {
         guard isActive else { return .clear }
+        if let chrome, !item.isDestructive { return chrome.hoverFill }
         let opacity = colorScheme == .dark ? OrbitMetrics.contextMenuHoverOpacityDark : OrbitMetrics.contextMenuHoverOpacityLight
         if item.isDestructive { return .red.opacity(opacity * 0.7) }
         return OrbitColor.menuHighlight(for: colorScheme).opacity(opacity)

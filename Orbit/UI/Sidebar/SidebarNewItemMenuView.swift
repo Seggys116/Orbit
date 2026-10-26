@@ -1,5 +1,6 @@
 //  SidebarNewItemMenu.swift owns the action logic; this file is presentation only.
 
+import AppKit
 import SwiftUI
 
 struct SidebarNewItemMenuSection: Identifiable {
@@ -221,6 +222,6 @@ struct SidebarNewItemMenuRow: View {
         .disabled(!isAvailable)
         .onHover { isHovering = $0 }
         .orbitTooltip(unavailableReason ?? "")
-        .accessibilityLabel(isAvailable ? option.title : "\(option.title): unavailable — \(unavailableReason ?? "")")
+        .accessibilityLabel(isAvailable ? option.title : "\(option.title): unavailable. \(unavailableReason ?? "")")
     }
 }

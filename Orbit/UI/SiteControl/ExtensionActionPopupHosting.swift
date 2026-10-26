@@ -187,6 +187,13 @@ struct ExtensionPopupMessageView<Accessory: View>: View {
     var message: String
     @ViewBuilder var accessory: () -> Accessory
 
+    @Environment(\.orbitSpaceTheme) private var spaceTheme
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var chrome: SpaceThemeChrome? {
+        spaceTheme.map { SpaceThemeChrome(theme: $0, colorScheme: colorScheme) }
+    }
+
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: symbol)
@@ -194,13 +201,15 @@ struct ExtensionPopupMessageView<Accessory: View>: View {
                 .foregroundStyle(symbolColor)
             Text(message)
                 .font(.system(size: OrbitMetrics.siteControlRowValueFontSize))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(chrome.map { AnyShapeStyle($0.secondaryForeground) } ?? AnyShapeStyle(HierarchicalShapeStyle.secondary))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             accessory()
         }
         .padding(16)
         .frame(width: ExtensionActionPopupSupport.popupMessageWidth)
+        .orbitThemedSurface(chrome)
+        .orbitThemeAnimation(value: chrome)
     }
 }
 
