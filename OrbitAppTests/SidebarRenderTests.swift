@@ -3,9 +3,14 @@ import SwiftUI
 @testable import Orbit
 
 @MainActor
+private func makeSidebarTestEnvironment() -> AppEnvironment {
+    AppEnvironment.demo
+}
+
+@MainActor
 final class SidebarRenderTests: XCTestCase {
 
-    private lazy var env: AppEnvironment = AppEnvironment.demo
+    private lazy var env: AppEnvironment = makeSidebarTestEnvironment()
 
     override func setUp() {
         super.setUp()
@@ -293,7 +298,7 @@ final class SidebarRenderTests: XCTestCase {
 @MainActor
 final class NewTabPageTests: XCTestCase {
 
-    private lazy var env: AppEnvironment = AppEnvironment.demo
+    private lazy var env: AppEnvironment = makeSidebarTestEnvironment()
     private let profileID = UUID()
 
     override func setUp() {
@@ -858,7 +863,7 @@ final class DownloadsPanelHostedTests: XCTestCase {
     private static let lightTheme = SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.93, green: 0.91, blue: 0.86)], followsSystemAppearance: false)
 
     private func makeEnvironment() -> (AppEnvironment, Space) {
-        let env = AppEnvironment.demo
+        let env = makeSidebarTestEnvironment()
         env.state = OrbitState.demo
         env.isSidebarVisible = true
         env.isSidebarHoverRevealed = false
@@ -1069,7 +1074,7 @@ final class SpaceTitleRowWindowDragTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        env = AppEnvironment.demo
+        env = makeSidebarTestEnvironment()
         env.isSidebarVisible = true
         env.isSidebarHoverRevealed = false
     }

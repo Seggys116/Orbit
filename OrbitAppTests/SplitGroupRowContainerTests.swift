@@ -47,7 +47,8 @@ final class SplitGroupRowContainerTests: XCTestCase {
         let size = CGSize(width: 400, height: OrbitMetrics.sidebarRowHeight)
         let rendered = render(
             SplitGroupRowView(group: group, tabs: [tabA, tabB], theme: SpaceTheme())
-                .environment(env),
+                .environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true),
             size: size
         )
 
@@ -83,7 +84,8 @@ final class SplitGroupRowContainerTests: XCTestCase {
         let size = CGSize(width: 400, height: OrbitMetrics.sidebarRowHeight)
         let rendered = render(
             SplitGroupRowView(group: group, tabs: [tabA, tabB], theme: SpaceTheme())
-                .environment(env),
+                .environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true),
             size: size
         )
 
@@ -132,6 +134,7 @@ final class SplitGroupRowContainerTests: XCTestCase {
         let rendered = render(
             SplitGroupRowView(group: group, tabs: [tabA, tabB], theme: SpaceTheme())
                 .environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true)
                 .background(Color(red: 0.16, green: 0.13, blue: 0.22)),
             size: size
         )
@@ -176,6 +179,7 @@ final class SplitGroupRowContainerTests: XCTestCase {
         let rendered = render(
             SplitGroupRowView(group: group, tabs: tabs, theme: SpaceTheme())
                 .environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true)
                 .background(Color(red: 0.16, green: 0.13, blue: 0.22)),
             size: size
         )

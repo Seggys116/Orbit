@@ -395,7 +395,7 @@ final class EaselTeardownRegressionTests: XCTestCase {
             EaselCanvasModel.shapeGeometry(from: start, to: end, lineWidth: EaselCanvasModel.defaultStrokeWidth)
         )
 
-        let rendered = render(EaselCanvasView(easelID: easel.id).environment(env), size: CGSize(width: 400, height: 300))
+        let rendered = render(EaselCanvasView(easelID: easel.id).environment(env).environment(\.orbitScreenshotModeDragDisabled, true), size: CGSize(width: 400, height: 300))
 
         var blueDominantPixels = 0
         var y = Int(geometry.frame.minY)
