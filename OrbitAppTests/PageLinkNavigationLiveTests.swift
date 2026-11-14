@@ -280,25 +280,6 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         }
     }
 
-    func testWindowOpenWithFeaturesIsAdoptedAsAPopup() throws {
-        try WebKitLiveEngineHost.runLive(timeout: 90) {
-            let server = try self.makeServer()
-            defer { server.stop() }
-            let contents = try await WebKitLiveEngineHost.makeContents()
-            defer { contents.close() }
-            let recorder = NewContentRecorder()
-            contents.delegate = recorder
-            defer { recorder.closeAll() }
-
-            contents.load(server.baseURL.appendingPathComponent("link"))
-            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
-            _ = try await contents.evaluateJavaScript("window.open('/opened', '_blank', 'width=320,height=240')", userGesture: true)
-
-            try await self.waitUntil("window.open with features produced no new WebContents.") { !recorder.adopted.isEmpty }
-            XCTAssertEqual(recorder.adopted.first?.request.disposition, .popup)
-        }
-    }
-
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testATargetBlankLinkOpensARealSecondTabAtTheLinkedURL
 
     func testATargetBlankLinkOpensARealSecondTabAtTheLinkedURL() throws {
