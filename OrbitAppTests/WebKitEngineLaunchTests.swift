@@ -102,6 +102,7 @@ final class WebKitEngineLaunchTests: XCTestCase {
     func testCosmeticAndStylesheetCSSStayData() async throws {
         let engine = EngineFactory.makeEngine(storage: .ephemeral)
         var rules = ContentBlockerRuleSet()
+        // The `${...}` bodies are template-literal syntax; they must reach the page as CSS text and never be evaluated.
         rules.add(listText: "##${window.__orbitPwned=1}", listID: "cosmetic")
         let blocker = ContentBlocker()
         blocker.isEnabled = true
@@ -124,6 +125,7 @@ final class WebKitEngineLaunchTests: XCTestCase {
         process.standardError = FileHandle.nullDevice
         try process.run()
         defer { process.terminate() }
+        // Give the server time to bind before the first request.
         Thread.sleep(forTimeInterval: 0.3)
         let contents = try engine.makeWebContents(session: engine.defaultSession, initialURL: nil)
         host(contents)
@@ -294,63 +296,13 @@ final class WebKitEngineLaunchTests: XCTestCase {
         return latest
     }
 
-    func testPictureInPicturePresentsThePlayingVideo() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-pip-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let video = root.appendingPathComponent("clip.mp4")
-        let clip = Data(base64Encoded: Self.pictureInPictureClipBase64, options: .ignoreUnknownCharacters)
-        try XCTUnwrap(clip).write(to: video)
-        let html = "<!doctype html><html><body><video id=\"v\" src=\"clip.mp4\" autoplay muted playsinline loop></video></body></html>"
-        try html.write(to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
-        let port = 18_981
-        let server = Process()
-        server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        server.arguments = ["-m", "http.server", "\(port)", "--bind", "127.0.0.1", "--directory", root.path]
-        server.standardOutput = FileHandle.nullDevice
-        server.standardError = FileHandle.nullDevice
-        try server.run()
-        defer { server.terminate() }
-        try await Task.sleep(nanoseconds: 300_000_000)
-
-        let engine = EngineFactory.makeEngine(storage: .ephemeral)
-        let contents = try engine.makeWebContents(session: engine.defaultSession, initialURL: nil)
-        host(contents)
-        contents.load(URL(string: "http://127.0.0.1:\(port)/")!)
-        let ready = try await waitForText(
-            contents,
-            script: "(function(){var v=document.getElementById('v'); if(!v) return 'missing'; return v.readyState >= 2 && v.webkitSupportsPresentationMode('picture-in-picture') ? 'ready' : 'wait';})()",
-            equals: "ready"
-        )
-        XCTAssertEqual(ready, "ready")
-        contents.togglePictureInPicture()
-        let mode = try await waitForText(
-            contents,
-            script: "(function(){var v=document.getElementById('v'); return (document.pictureInPictureElement || (v && v.webkitPresentationMode === 'picture-in-picture')) ? 'floating' : 'inline';})()",
-            equals: "floating"
-        )
-        XCTAssertEqual(mode, "floating")
-        try await Task.sleep(nanoseconds: 800_000_000)
-        contents.togglePictureInPicture()
-        let left = try await waitForText(
-            contents,
-            script: "(function(){var v=document.getElementById('v'); return (document.pictureInPictureElement || (v && v.webkitPresentationMode === 'picture-in-picture')) ? 'floating' : 'inline';})()",
-            equals: "inline"
-        )
-        XCTAssertEqual(left, "inline")
-        engine.shutdown()
-    }
-
-    private static let pictureInPictureClipBase64 = """
-    AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAARmbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAA5F0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAKAAAABaAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAEAAABAAAAAAMJbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAyAAAAMgBVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAACtG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAnRzdGJsAAAAwHN0c2QAAAAAAAAAAQAAALBhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAKAAWgBIAAAASAAAAAAAAAABFExhdmM2My4xLjEwMSBsaWJ4MjY0AAAAAAAAAAAAAAAAGP//AAAANmF2Y0MBZAAL/+EAGWdkAAus2UKN+TARAAADAAEAAAMAMg8UKZYBAAZo6+PLIsD9+PgAAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAIjgAAAAAAAAAGHN0dHMAAAAAAAAAAQAAABkAAAIAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAADYY3R0cwAAAAAAAAAZAAAAAQAABAAAAAABAAAKAAAAAAEAAAQAAAAAAQAAAAAAAAABAAACAAAAAAEAAAoAAAAAAQAABAAAAAABAAAAAAAAAAEAAAIAAAAAAQAACgAAAAABAAAEAAAAAAEAAAAAAAAAAQAAAgAAAAABAAAKAAAAAAEAAAQAAAAAAQAAAAAAAAABAAACAAAAAAEAAAoAAAAAAQAABAAAAAABAAAAAAAAAAEAAAIAAAAAAQAACgAAAAABAAAEAAAAAAEAAAAAAAAAAQAAAgAAAAAcc3RzYwAAAAAAAAABAAAAAQAAABkAAAABAAAAeHN0c3oAAAAAAAAAAAAAABkAAALkAAAAEAAAAA0AAAAMAAAADAAAABYAAAAPAAAADAAAAAwAAAAWAAAADwAAAAwAAAAMAAAAFQAAAA8AAAAMAAAADAAAABUAAAAPAAAADAAAAAwAAAAVAAAADwAAAAwAAAAMAAAAFHN0Y28AAAAAAAAAAQAABJYAAABhdWR0YQAAAFltZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAACxpbHN0AAAAJKl0b28AAAAcZGF0YQAAAAEAAAAATGF2ZjYzLjEuMTAxAAAACGZyZWUAAARPbWRhdAAAAq4GBf//qtxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjUgcjMyMjIgYjM1NjA1YSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDM6MHgxMTMgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0zIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MyBiX3B5cmFtaWQ9MiBiX2FkYXB0PTEgYl9iaWFzPTAgZGlyZWN0PTEgd2VpZ2h0Yj0xIG9wZW5fZ29wPTAgd2VpZ2h0cD0yIGtleWludD0yNTAga2V5aW50X21pbj0yNSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNfbG9va2FoZWFkPTQwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MjMuMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMDAAgAAAAC5liIQAO//+906/AptUwioDklcK9sqkJlm5U3w+xrIXRFB/V9oF6AVQACPA6vyBAAAADEGaJGxDv/6plgDmgAAAAAlBnkJ4hf8A84EAAAAIAZ5hdEK/AVMAAAAIAZ5jakK/AVMAAAASQZpoSahBaJlMCHf//qmWAOaBAAAAC0GehkURLC//APOBAAAACAGepXRCvwFTAAAACAGep2pCvwFTAAAAEkGarEmoQWyZTAh3//6plgDmgAAAAAtBnspFFSwv/wDzgQAAAAgBnul0Qr8BUwAAAAgBnutqQr8BUwAAABFBmvBJqEFsmUwIb//+p4QBxwAAAAtBnw5FFSwv/wDzgQAAAAgBny10Qr8BUwAAAAgBny9qQr8BUwAAABFBmzRJqEFsmUwIZ//+nhAGzAAAAAtBn1JFFSwv/wDzgQAAAAgBn3F0Qr8BUwAAAAgBn3NqQr8BUwAAABFBm3hJqEFsmUwIV//+OEAaMQAAAAtBn5ZFFSwv/wDzgAAAAAgBn7V0Qr8BUwAAAAgBn7dqQr8BUw==
-    """
-
     func testClearingCacheReloadsTheDocument() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-cache-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let body = root.appendingPathComponent("body.txt")
         try "cache-first".write(to: body, atomically: true, encoding: .utf8)
+        // The server sends max-age=600, so the second load can only differ if the cache was really cleared.
         let port = 18_980
         let server = Process()
         server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")

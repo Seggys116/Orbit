@@ -79,8 +79,13 @@ enum LevelDBReader {
         guard let current = try? String(contentsOf: currentURL, encoding: .utf8) else {
             throw LevelDBReadError.unreadable("CURRENT", reason: "missing")
         }
-        let name = current.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, isValidManifestName(name) else { throw LevelDBReadError.malformed("CURRENT") }
+        let requested = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isValidManifestName(requested) else { throw LevelDBReadError.malformed("CURRENT") }
+        // The path is built from the directory listing, never from CURRENT's bytes, so file content cannot steer the read elsewhere.
+        let listing = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        guard let name = listing.first(where: { $0 == requested && isValidManifestName($0) }) else {
+            throw LevelDBReadError.unreadable(requested, reason: "missing")
+        }
 
         var manifest = Manifest()
         let data = try mapped(directory.appendingPathComponent(name, isDirectory: false))
@@ -92,10 +97,11 @@ enum LevelDBReader {
         return manifest
     }
 
-    private static func isValidManifestName(_ name: String) -> Bool {
-        guard !name.contains("/"), !name.contains("\\") else { return false }
-        guard name != ".", name != ".." else { return false }
-        return !name.hasPrefix("~")
+    static func isValidManifestName(_ name: String) -> Bool {
+        let prefix = "MANIFEST-"
+        guard name.hasPrefix(prefix) else { return false }
+        let digits = name.dropFirst(prefix.count)
+        return !digits.isEmpty && digits.count <= 20 && digits.allSatisfy { $0.isASCII && $0.isNumber }
     }
 
     private static func applyVersionEdit(_ payload: UnsafeRawBufferPointer, to manifest: inout Manifest) {

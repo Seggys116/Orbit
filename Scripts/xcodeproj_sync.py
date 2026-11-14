@@ -119,7 +119,9 @@ ORBIT_APP_TESTS_REUSED_SOURCES = [
 
 # Loose files are only copied into a bundle when they are named here: the scan below adds
 # sources and resource directories, and nothing else.
-APP_RESOURCES: list[str] = []
+APP_RESOURCES: list[str] = [
+    "Orbit/Resources/GlyphPlanet.metallib",
+]
 
 TARGETS = {
     "Orbit": {
@@ -177,6 +179,8 @@ FILE_TYPES = {
     ".hpp": "sourcecode.cpp.h",
     ".hh": "sourcecode.cpp.h",
     ".metal": "sourcecode.metal",
+    ".metallib": "archive.metal-library",
+    ".sha256": "text",
     ".entitlements": "text.plist.entitlements",
     ".plist": "text.plist.xml",
     ".template": "text.xml",

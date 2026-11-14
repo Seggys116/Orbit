@@ -1,0 +1,27 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+SOURCE="${ROOT}/Shaders/GlyphPlanet.metal"
+OUTPUT="${ROOT}/Orbit/Resources/GlyphPlanet.metallib"
+STAMP="${OUTPUT}.sha256"
+PBXPROJ="${ROOT}/Orbit.xcodeproj/project.pbxproj"
+
+TARGET="$(grep -m1 'MACOSX_DEPLOYMENT_TARGET' "${PBXPROJ}" | sed -E 's/.*= *([0-9.]+);.*/\1/')"
+if [ -z "${TARGET}" ]; then
+  echo "error: could not read MACOSX_DEPLOYMENT_TARGET from ${PBXPROJ}" >&2
+  exit 1
+fi
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "${WORK}"' EXIT
+
+# Matches Xcode's defaults for a macOS target, so the shader behaves as the Xcode-compiled one did.
+xcrun -sdk macosx metal -c -ffast-math -mmacosx-version-min="${TARGET}" \
+  "${SOURCE}" -o "${WORK}/GlyphPlanet.air"
+xcrun -sdk macosx metallib "${WORK}/GlyphPlanet.air" -o "${OUTPUT}"
+
+shasum -a 256 "${SOURCE}" | awk '{print $1}' > "${STAMP}"
+echo "wrote ${OUTPUT}"

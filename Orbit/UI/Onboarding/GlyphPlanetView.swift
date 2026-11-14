@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// A live dithered glyph planet (GlyphPlanet.metal colorEffect); Reduce Motion freezes spin and twinkle and snaps changes, and the timeline pauses while the window is occluded or minimised.
+/// A live dithered glyph planet (Shaders/GlyphPlanet.metal colorEffect, shipped as GlyphPlanet.metallib); Reduce Motion freezes spin and twinkle and snaps changes, and the timeline pauses while the window is occluded or minimised.
 struct GlyphPlanetView: View {
     var palette: GlyphPlanetPalette
     var tiltDegrees: Double
@@ -72,17 +72,22 @@ private struct GlyphPlanetCanvas: View, Animatable {
         set { params = newValue }
     }
 
+    private static let shaderLibrary: ShaderLibrary? = {
+        guard let url = Bundle.main.url(forResource: "GlyphPlanet", withExtension: "metallib") else { return nil }
+        return ShaderLibrary(url: url)
+    }()
+
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isAnimating)) { context in
             let time = Self.restingTime + clock.elapsed(at: context.date, running: isAnimating)
             let values = params
             let inkFlag: Float = ink ? 1 : 0
             let spin = Float(spinRate)
-            Rectangle()
-                .fill(OrbitNeutral.bg)
-                .visualEffect { content, proxy in
+            let backdrop = Rectangle().fill(OrbitNeutral.bg)
+            if let library = Self.shaderLibrary {
+                backdrop.visualEffect { content, proxy in
                     content.colorEffect(
-                        ShaderLibrary.glyphPlanet(
+                        library.glyphPlanet(
                             .float2(proxy.size),
                             .float(Float(time)),
                             .float(spin),
@@ -96,6 +101,9 @@ private struct GlyphPlanetCanvas: View, Animatable {
                         )
                     )
                 }
+            } else {
+                backdrop
+            }
         }
     }
 }

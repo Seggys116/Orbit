@@ -69,6 +69,11 @@ private func wire<Option: Hashable>(
 @MainActor
 final class OrbitPopupButtonClickTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        OrbitMenuClickGuard._test_reset()
+    }
+
     private let policies: [String] = ["Never", "After 12 Hours", "After 24 Hours", "After 7 Days"]
 
     private func makeControl(
@@ -279,6 +284,11 @@ final class OrbitPopupButtonKeyboardTests: XCTestCase {
 
 @MainActor
 final class OrbitPopupButtonCallSiteTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        OrbitMenuClickGuard._test_reset()
+    }
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
 

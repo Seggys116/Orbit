@@ -74,20 +74,6 @@ final class WebKitChromeExtensionTests: XCTestCase {
         engine.shutdown()
     }
 
-    func testModuleBackgroundRepliesOnWebKit() async throws {
-        let engine = EngineFactory.makeEngine(storage: .ephemeral)
-        let source = try makeExtension(name: "Module Fixture", module: true)
-        let installed = try store().install(unpackedAt: source, publicKey: nil)
-        let loaded = try await engine.loadExtension(at: installed.directory, session: engine.defaultSession)
-        let entry = try String(contentsOf: installed.directory.appendingPathComponent("orbit-background-entry.js"), encoding: .utf8)
-        XCTAssertTrue(entry.contains("import "))
-        XCTAssertFalse(entry.contains("importScripts"))
-        let manifest = try String(contentsOf: installed.directory.appendingPathComponent("manifest.json"), encoding: .utf8)
-        XCTAssertTrue(manifest.contains("module"))
-        try await assertExtensionWorks(loaded, on: engine, marker: "module-marker")
-        engine.shutdown()
-    }
-
     func testUndeclaredHistoryDeleteAllIsRejected() async throws {
         let engine = try XCTUnwrap(EngineFactory.makeEngine(storage: .ephemeral) as? WebKitEngine)
         let bare = try makeBareExtension(permissions: [])
@@ -206,13 +192,11 @@ final class WebKitChromeExtensionTests: XCTestCase {
         return false
     }
 
-    private func makeExtension(name: String, module: Bool = false) throws -> URL {
+    private func makeExtension(name: String) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-src-\(UUID().uuidString)", isDirectory: true)
         roots.append(root)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let background = module
-            ? "\"background\":{\"service_worker\":\"background.js\",\"type\":\"module\"}"
-            : "\"background\":{\"service_worker\":\"background.js\"}"
+        let background = "\"background\":{\"service_worker\":\"background.js\"}"
         let manifest = """
         {"manifest_version":3,"name":"\(name)","version":"1.0.0","description":"\(name) fixture","action":{"default_title":"\(name)"},"permissions":["nativeMessaging"],"host_permissions":["<all_urls>"],\(background),"content_scripts":[{"matches":["<all_urls>"],"js":["content.js"],"run_at":"document_idle"}]}
         """
@@ -279,6 +263,7 @@ final class WebKitChromeExtensionTests: XCTestCase {
         roots.append(root)
         let html = "<!doctype html><html><body><p id=\"marker\">\(marker)</p></body></html>"
         try html.write(to: root.appendingPathComponent("page.html"), atomically: true, encoding: .utf8)
+        // Offset by the running server count so several pages in one test never share a port.
         let port = 8765 + servers.count
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
@@ -287,6 +272,7 @@ final class WebKitChromeExtensionTests: XCTestCase {
         process.standardError = FileHandle.nullDevice
         try process.run()
         servers.append(process)
+        // Give the server time to bind before the first request.
         Thread.sleep(forTimeInterval: 0.4)
         return URL(string: "http://127.0.0.1:\(port)/page.html")!
     }

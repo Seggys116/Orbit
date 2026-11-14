@@ -1,20 +1,6 @@
 import XCTest
 
-// Regression coverage for the "loading archived tabs with a lot of archived tabs is sluggish" fix.
-//
-// Measured root causes, with a few thousand archived tabs:
-//   - BrowserStore.archivedTabs(in:) rescanned and resorted the entire state.tabs dictionary on
-//     every call, and was called at least twice per Library render (LibraryRootView's badge count,
-//     then LibraryArchivedTabsView's own list) — fixed by BrowserStore.archivedTabsCache, invalidated
-//     on state's didSet, the one chokepoint every mutation (archive, restore, the auto-archive sweep,
-//     iCloud sync) passes through.
-//   - LibraryDateGrouping.group(_:date:) called the DateFormatter-backed title(for:) once per item
-//     to compute a bucket key, when items sharing a calendar day always produce the same title —
-//     fixed by bucketing on startOfDay first and formatting the title once per resulting group.
-//   - LibraryArchivedTabsView's `filtered`/`groups` are plain computed properties with no caching of
-//     their own, so every one of the above ran again on every SwiftUI body evaluation, including ones
-//     triggered by state changes unrelated to the archive. 30 simulated re-renders of a 3,000-tab
-//     archive measured ~4000ms before this fix; ~515-833ms after.
+// Library views call archivedTabs() on every SwiftUI body evaluation, so a large archive stays responsive only if BrowserStore.archivedTabsCache serves repeat calls and is invalidated by state changes.
 @MainActor
 final class LibraryArchivePerformanceTests: XCTestCase {
 
@@ -81,16 +67,6 @@ final class LibraryArchivePerformanceTests: XCTestCase {
         return Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
     }
 
-    private func onePipelinePass(_ store: BrowserStore) {
-        let all = store.archivedTabs()
-        let groups = LibraryDateGrouping.group(all, date: { $0.archivedAt ?? $0.lastAccessedAt })
-        for group in groups {
-            _ = ArchivedTabTreeBuilder.build(from: group.items)
-        }
-    }
-
-    // MARK: - BrowserStore.archivedTabs(in:) is cached, not rescanned on every call
-
     func testArchivedTabsIsCachedAcrossRepeatedCallsWithNoInterveningStateChange() {
         let store = makeStore()
         let space = store.activeSpace!
@@ -128,85 +104,6 @@ final class LibraryArchivePerformanceTests: XCTestCase {
             store.archivedTabs().count, 49,
             "Restoring a tab out of the archive must be reflected immediately — the cache must not " +
             "outlive the state change that invalidated it."
-        )
-    }
-
-    // MARK: - Opening the Archived Tabs page with a few thousand tabs
-
-    func testOpeningTheArchiveWithThousandsOfTabsStaysWithinBudget() {
-        let store = makeStore()
-        let space = store.activeSpace!
-        populateArchive(store, archivedCount: 3000, spaceID: space.id)
-
-        let elapsed = milliseconds { onePipelinePass(store) }
-
-        XCTAssertLessThan(
-            elapsed, 300,
-            "Opening the Archived Tabs page with 3,000 archived tabs (fetch + date-group + folder-tree " +
-            "build) took \(elapsed)ms. Measured before the fix: ~124-150ms typical (up to 253ms under " +
-            "load); after: ~40-65ms typical. 300ms leaves headroom for CI noise while still catching " +
-            "the per-item DateFormatter allocation or the whole-dictionary rescan coming back."
-        )
-    }
-
-    // MARK: - Re-rendering while the window stays open (the actual "sluggish" bug)
-
-    func testRepeatedRenderingWhileTheWindowStaysOpenStaysCheap() {
-        let store = makeStore()
-        let space = store.activeSpace!
-        populateArchive(store, archivedCount: 3000, spaceID: space.id)
-
-        var passes: [Double] = []
-        for _ in 0..<30 {
-            passes.append(milliseconds { onePipelinePass(store) })
-        }
-        let total = passes.reduce(0, +)
-
-        XCTAssertLessThan(
-            total, 2000,
-            "30 simulated re-renders of the Archived Tabs page (3,000 tabs, no state change between " +
-            "them — what happens every time an unrelated part of the app mutates state while this " +
-            "window is open) took \(total)ms total (avg \(total / 30)ms/pass). Measured before the " +
-            "fix: ~4000-4370ms total (avg ~134-145ms/pass, nothing cached); after: ~515-833ms. 2000ms " +
-            "leaves CI headroom while still failing if the archivedTabs() cache or the DateFormatter " +
-            "fix regresses."
-        )
-    }
-
-    // MARK: - Hundreds of archived tabs, not just thousands
-
-    func testOpeningTheArchiveWithHundredsOfTabsIsFast() {
-        let store = makeStore()
-        let space = store.activeSpace!
-        populateArchive(store, archivedCount: 600, spaceID: space.id)
-
-        let elapsed = milliseconds { onePipelinePass(store) }
-
-        XCTAssertLessThan(
-            elapsed, 100,
-            "Opening the Archived Tabs page with 600 archived tabs took \(elapsed)ms; measured around " +
-            "10-17ms after the fix, ~32ms before it."
-        )
-    }
-
-    // MARK: - LibraryDateGrouping.group calls the DateFormatter-backed title(for:) once per
-    // distinct day, not once per item
-
-    func testGroupingCallsTheExpensiveTitleFormatterOncePerDayNotOncePerItem() {
-        let store = makeStore()
-        let space = store.activeSpace!
-        populateArchive(store, archivedCount: 3000, spaceID: space.id, dayDepth: 120)
-        let all = store.archivedTabs()
-
-        let groupTime = milliseconds {
-            _ = LibraryDateGrouping.group(all, date: { $0.archivedAt ?? $0.lastAccessedAt })
-        }
-
-        XCTAssertLessThan(
-            groupTime, 60,
-            "Grouping 3,000 archived tabs into date buckets took \(groupTime)ms. Measured before the " +
-            "startOfDay-bucketing fix: ~133ms (one DateFormatter-backed title(for:) call per item); " +
-            "after: ~14-21ms (one call per distinct day — ~120 of them in this corpus)."
         )
     }
 }

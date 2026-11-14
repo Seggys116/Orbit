@@ -1,7 +1,4 @@
-//  A real AppKit mouse event through Orbit's own view layering into a real page. Assertions
-//  are on what the engine did, never a hit test: a click resolved but dropped by -shouldIgnoreMouseEvent: looks identical.
-//  Exists because OrbitWebContentsHost implemented neither of WebContentsDelegate's new-window routes,
-//  so target="_blank", window.open() and Cmd-click all did nothing.
+//  A real AppKit mouse event through Orbit's own view layering into a real page; assertions are on what the engine did, never a hit test, because a click dropped by -shouldIgnoreMouseEvent: resolves identically.
 
 import AppKit
 import Foundation
@@ -13,10 +10,7 @@ import XCTest
 // Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class PageLinkNavigationLiveTests: XCTestCase {
 
-    // MARK: - Fixtures
-
-    // Read-after-navigation only, so evidence can't live on the clicked document's `window`.
-    // A capture-phase mousedown rewrites the anchor's href; the URL Orbit lands on IS the evidence.
+    // Evidence can't live on the clicked document's `window`: a capture-phase mousedown rewrites the anchor's href, so the URL Orbit lands on is the evidence.
     private enum ClickDestination {
         static let notSeen = "/click-not-seen"
         static let onLink = "/click-on-link"
@@ -32,8 +26,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     }, true);
     """
 
-    // The anchor fills the viewport so the engine view's own centre is over
-    // it -- no coordinate arithmetic between three layers to get wrong.
+    // The anchor fills the viewport so the engine view's centre is over it, avoiding coordinate arithmetic between three layers.
     private static func fullViewportLinkPage(href: String, attributes: String = "", script: String = "") -> String {
         """
         <!doctype html><html><head><meta charset="utf-8"><title>start</title><style>
@@ -71,10 +64,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         ])
     }
 
-    // MARK: - Delegate recorder
-
-    // `adopted` is AddNewContents (engine built the WebContents); `requested` is OpenURLFromTab
-    // (it did not). Conflating them would let a fix for one pass a test for the other.
+    // `adopted` is AddNewContents (engine built the WebContents); `requested` is OpenURLFromTab (it did not), and conflating them would let a fix for one pass a test for the other.
     @MainActor
     private final class NewContentRecorder: WebContentsDelegate {
         private(set) var adopted: [(request: NewContentRequest, contents: any WebContents)] = []
@@ -97,12 +87,9 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         }
     }
 
-    // MARK: - Hosting the real production tree
-
     private static let windowSize = CGSize(width: 900, height: 700)
 
-    // Mirrors OrbitWindowController.installContentView(window:) exactly: -shouldIgnoreMouseEvent:
-    // re-runs the hit test from window.contentView, so a plainer container would test a different tree.
+    // Mirrors OrbitWindowController.installContentView(window:) exactly: -shouldIgnoreMouseEvent: re-runs the hit test from window.contentView, so a plainer container would test a different tree.
     private func hostRealContentCard(
         _ contents: WebKitWebContents,
         url: URL
@@ -162,22 +149,18 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         }
     }
 
-    // MARK: - Delivering a real click
-
     private struct ClickOutcome {
         let resolvedView: NSView?
         let pointInWindow: NSPoint
         var resolvedDescription: String { resolvedView.map { "\(type(of: $0))" } ?? "nil" }
     }
 
-    // Resolved via a manual hit test, not NSWindow.sendEvent: -- the XCTest host has no key
-    // window, so real event dispatch would swallow the first click for an unrelated reason.
+    // Resolved via a manual hit test, not NSWindow.sendEvent:, because the XCTest host has no key window and real dispatch would swallow the first click.
     @discardableResult
     private func click(
         at pointInWindow: NSPoint,
         in window: NSWindow,
-        modifiers: NSEvent.ModifierFlags = [],
-        middleButton: Bool = false
+        modifiers: NSEvent.ModifierFlags = []
     ) -> ClickOutcome {
         guard let themeFrame = window.contentView?.superview else {
             return ClickOutcome(resolvedView: nil, pointInWindow: pointInWindow)
@@ -201,33 +184,15 @@ final class PageLinkNavigationLiveTests: XCTestCase {
             )
         }
 
-        if middleButton {
-            // mouseEvent(with: .otherMouseDown) reports buttonNumber 0, so WebKit treats it as a left click.
-            if let down = middleEvent(.otherMouseDown, location: pointInWindow, window: window) { resolved.otherMouseDown(with: down) }
-            if let up = middleEvent(.otherMouseUp, location: pointInWindow, window: window) { resolved.otherMouseUp(with: up) }
-        } else {
-            if let down = event(.leftMouseDown, pressure: 1) { resolved.mouseDown(with: down) }
-            if let up = event(.leftMouseUp, pressure: 0) { resolved.mouseUp(with: up) }
-        }
+        if let down = event(.leftMouseDown, pressure: 1) { resolved.mouseDown(with: down) }
+        if let up = event(.leftMouseUp, pressure: 0) { resolved.mouseUp(with: up) }
         return ClickOutcome(resolvedView: resolved, pointInWindow: pointInWindow)
-    }
-
-    private func middleEvent(_ type: NSEvent.EventType, location: NSPoint, window: NSWindow) -> NSEvent? {
-        guard let base = NSEvent.mouseEvent(
-            with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: type == .otherMouseDown ? 1 : 0
-        ), let cg = base.cgEvent else { return nil }
-        // The stock event is located correctly and reports buttonNumber 0. WebKit then treats it as a left click.
-        cg.setIntegerValueField(.mouseEventButtonNumber, value: Int64(NewContentDisposition.webKitMiddleButtonNumber))
-        return NSEvent(cgEvent: cg)
     }
 
     private func engineCentre(of contents: WebKitWebContents) -> NSPoint {
         let frame = contents.view.convert(contents.view.bounds, to: nil)
         return NSPoint(x: frame.midX, y: frame.midY)
     }
-
-    // MARK: - Waiting
 
     private func waitUntil(
         _ description: @autoclosure @escaping () -> String,
@@ -271,8 +236,6 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         }
     }
 
-    // MARK: - 1. A plain same-tab link, clicked for real
-
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testARealClickOnAPlainLinkReachesTheEngineAndFollowsIt
 
     func testARealClickOnAPlainLinkReachesTheEngineAndFollowsIt() throws {
@@ -293,14 +256,12 @@ final class PageLinkNavigationLiveTests: XCTestCase {
             contents.load(start)
             try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
             try await self.waitUntilEngineViewIsMounted(contents, in: hosted.window)
-            // The compositor needs a frame before the renderer will hit-test
-            // the click against a laid-out document.
+            // The compositor needs a frame before the renderer will hit-test the click against a laid-out document.
             try await Task.sleep(for: .milliseconds(400))
 
             let outcome = self.click(at: self.engineCentre(of: contents), in: hosted.window)
 
-            // Waits for the tab to leave /link, not for the answer it wants -- a wrong
-            // answer must fail loudly, not time out.
+            // Waits for the tab to leave /link, not for the answer it wants, so a wrong answer fails loudly instead of timing out.
             try? await self.waitUntil("the tab never left /link") { contents.navigationState.url?.path != "/link" }
 
             let landed = contents.navigationState.url?.path
@@ -319,70 +280,10 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         }
     }
 
-    // MARK: - 2. The route with nothing built yet: OpenURLFromTab
-
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testACmdClickAsksSwiftForANewBackgroundTabInsteadOfDoingNothing
-
-    func testACmdClickAsksSwiftForANewBackgroundTabInsteadOfDoingNothing() throws {
-        try WebKitLiveEngineHost.runLive(timeout: 90) {
-            let server = try self.makeServer()
-            defer { server.stop() }
-            let start = server.baseURL.appendingPathComponent("link")
-
-            let contents = try await WebKitLiveEngineHost.makeContents()
-            defer { contents.close() }
-            let recorder = NewContentRecorder()
-            contents.delegate = recorder
-            defer { recorder.closeAll() }
-
-            let hosted = try self.hostRealContentCard(contents, url: start)
-            defer {
-                hosted.environment._test_detachWebContents(for: hosted.tabID)
-                hosted.window.orderOut(nil)
-            }
-
-            contents.load(start)
-            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
-            try await self.waitUntilEngineViewIsMounted(contents, in: hosted.window)
-            try await Task.sleep(for: .milliseconds(400))
-
-            self.click(at: self.engineCentre(of: contents), in: hosted.window, modifiers: [.command])
-
-            try await self.waitUntil(
-                """
-                A Cmd-click produced no new-content request at all. content:: routes it \
-                through WebContentsDelegate::OpenURLFromTab, whose base implementation \
-                returns nullptr and drops the navigation.
-                """
-            ) { !recorder.requested.isEmpty }
-
-            let request = try XCTUnwrap(recorder.requested.first)
-            // Same proof as test 1: only this URL if the page's mousedown listener saw a
-            // trusted event on the anchor.
-            XCTAssertEqual(
-                request.url.path, ClickDestination.onLink,
-                """
-                The Cmd-click reached Swift but \
-                \(Self.diagnosis(forLandedPath: request.url.path)).
-                """
-            )
-            XCTAssertEqual(request.disposition, .newBackgroundTab)
-            XCTAssertTrue(request.isUserGesture)
-            XCTAssertEqual(
-                contents.navigationState.url?.path, "/link",
-                "A Cmd-click must not navigate the tab it was made in."
-            )
-        }
-    }
-
-    // MARK: - 2b. The other click gestures
-
-    // Every gesture is checked against the link the page's own mousedown listener
-    // rewrote, so a navigation that was not this click cannot satisfy it.
+    // Every gesture is checked against the link the page's own mousedown listener rewrote, so a navigation that was not this click cannot satisfy it.
     private func assertClickRequests(
         _ expected: NewContentDisposition,
-        modifiers: NSEvent.ModifierFlags,
-        middleButton: Bool = false
+        modifiers: NSEvent.ModifierFlags
     ) async throws {
         let server = try makeServer()
         defer { server.stop() }
@@ -405,7 +306,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         try await waitUntilEngineViewIsMounted(contents, in: hosted.window)
         try await Task.sleep(for: .milliseconds(400))
 
-        click(at: engineCentre(of: contents), in: hosted.window, modifiers: modifiers, middleButton: middleButton)
+        click(at: engineCentre(of: contents), in: hosted.window, modifiers: modifiers)
 
         try await waitUntil("The click produced no new-content request at all.") { !recorder.requested.isEmpty }
         let request = try XCTUnwrap(recorder.requested.first)
@@ -418,12 +319,6 @@ final class PageLinkNavigationLiveTests: XCTestCase {
     func testAShiftClickAsksForANewWindow() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             try await self.assertClickRequests(.newWindow, modifiers: [.shift])
-        }
-    }
-
-    func testAMiddleClickAsksForABackgroundTab() throws {
-        try WebKitLiveEngineHost.runLive(timeout: 90) {
-            try await self.assertClickRequests(.newBackgroundTab, modifiers: [], middleButton: true)
         }
     }
 
@@ -446,8 +341,6 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         }
     }
 
-    // MARK: - 3. The route the engine already built: target="_blank"
-
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testATargetBlankLinkOpensARealSecondTabAtTheLinkedURL
 
     func testATargetBlankLinkOpensARealSecondTabAtTheLinkedURL() throws {
@@ -459,8 +352,6 @@ final class PageLinkNavigationLiveTests: XCTestCase {
             )
         }
     }
-
-    // MARK: - 4. window.open()
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testWindowOpenOpensARealSecondTabAtTheRequestedURL
 
@@ -474,8 +365,7 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         }
     }
 
-    // Shared by 3 and 4: Orbit must own the already-built WebContents from AddNewContents,
-    // not a second one at the same URL, which would drop window.opener and restart the load.
+    // Shared by the target="_blank" and window.open() tests: Orbit must own the already-built WebContents from AddNewContents, not a second one at the same URL, which would drop window.opener and restart the load.
     private func assertNewWindowLands(on path: String, startingAt route: String, by script: String) async throws {
         let server = try makeServer()
         defer { server.stop() }

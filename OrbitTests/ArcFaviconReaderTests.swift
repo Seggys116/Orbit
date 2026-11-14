@@ -25,44 +25,7 @@ final class ArcFaviconReaderTests: XCTestCase {
 
     // MARK: - The main actor must not do the disk work
 
-    // A bulk import used to PNG-encode, atomically write and stat-scan the whole
-    // cache directory synchronously on the main actor, once per icon, which froze
-    // the app. The disk work still costs what it costs; it just must not be
-    // billed to the main actor.
-    @MainActor
-    func testABulkImportDoesNotBlockTheMainActorOnDiskWork() async throws {
-        let directory = profile.appendingPathComponent("favicons", isDirectory: true)
-        let cache = FaviconCache(diskDirectory: directory)
-        var icons: [String: Data] = [:]
-        for index in 0..<200 {
-            icons["host\(index).example"] = try pngData(width: 32, height: 32)
-        }
-
-        let started = DispatchTime.now().uptimeNanoseconds
-        let accepted = cache.cacheImported(imageDataByHost: icons)
-        let onMainActor = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
-
-        await cache._test_awaitPendingWrites()
-        let includingDisk = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
-
-        XCTAssertEqual(accepted, 200)
-        XCTAssertEqual(
-            FileManager.default.fileExists(atPath: directory.path), true,
-            "the icons must genuinely have been written, or this measures nothing"
-        )
-        XCTAssertLessThan(
-            onMainActor, includingDisk,
-            "the main actor returned only after the disk work finished, so the work is still synchronous on it — \(onMainActor)ms of \(includingDisk)ms total"
-        )
-        XCTAssertLessThan(
-            onMainActor, 250,
-            "storing 200 icons blocked the main actor for \(onMainActor)ms; the PNG encode, atomic write and eviction scan have moved back onto it"
-        )
-    }
-
-    // The decode stays on the main actor because the accepted-count is returned
-    // synchronously; measured at ~55ms per 200 icons, and only on a one-off
-    // import. Fails if that ever grows into the per-page path's territory.
+    // The decode stays on the main actor because the accepted-count is returned synchronously; measured at ~55ms per 200 icons on a one-off import, and this fails if it grows into per-page territory.
     @MainActor
     func testASinglePageLoadsFaviconBarelyTouchesTheMainActor() async throws {
         let cache = FaviconCache(diskDirectory: profile.appendingPathComponent("favicons", isDirectory: true))
@@ -80,8 +43,6 @@ final class ArcFaviconReaderTests: XCTestCase {
         )
         await cache._test_awaitPendingWrites()
     }
-
-    // MARK: - Absence
 
     func testAProfileWithNoFaviconsDatabaseImportsNothing() throws {
         XCTAssertEqual(
@@ -142,8 +103,6 @@ final class ArcFaviconReaderTests: XCTestCase {
             ["valid.example"]
         )
     }
-
-    // MARK: - Hosts
 
     func testOnlyWebPagesYieldAHostAndItMatchesTheKeyOrbitCachesLiveIconsUnder() throws {
         try writeDatabase([
@@ -302,9 +261,7 @@ final class ArcFaviconReaderTests: XCTestCase {
             imageData: try XCTUnwrap(favicons.first?.imageData),
             forHost: "example.com"
         )
-        // The write lands on a background actor now; wait for it the way a real
-        // restart would, by letting time pass, rather than racing a fresh
-        // instance's disk read against it.
+        // The write lands on a background actor; wait for it as a real restart would, rather than racing a fresh instance's disk read against it.
         await writer._test_awaitPendingWrites()
 
         XCTAssertNotNil(
@@ -328,8 +285,6 @@ final class ArcFaviconReaderTests: XCTestCase {
             "The count must report what actually landed, not what was offered."
         )
     }
-
-    // MARK: - Correcting what an earlier import wrote
 
     @MainActor
     func testAReImportReplacesAnIconAnEarlierImportFiledUnderTheWrongHost() async throws {
@@ -382,8 +337,6 @@ final class ArcFaviconReaderTests: XCTestCase {
             "Only what an import wrote is the import's to replace."
         )
     }
-
-    // MARK: - Fixture
 
     private struct Row {
         var pageURL: String

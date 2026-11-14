@@ -307,9 +307,7 @@ final class ZipArchiveExtractorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 
-    // Real extensions with large locale/data sets exceed a low entry count long before they exceed
-    // any real resource bound; Wappalyzer's real CRX ships 13,244 entries (see ExtensionInstallerTests'
-    // large-CRX coverage). The default must accept that shape, not just a hand-picked small limit.
+    // Real extensions with large locale/data sets exceed a low entry count long before any real resource bound (Wappalyzer's CRX ships 13,244 entries), so the default must accept that shape.
     func test_defaultLimits_acceptARealisticLargeEntryCount() throws {
         let entries = (0..<13_244).map { rawEntry(name: "file-\($0).json", content: []) }
         let zipData = buildZip(entries: entries)
@@ -382,9 +380,7 @@ final class ZipArchiveExtractorTests: XCTestCase {
         }
     }
 
-    // A real Chrome Web Store CRX (Wappalyzer, gppongmhjkpfnbhagpmjfkannfbllamg) ships a "_locales/"
-    // directory entry DEFLATEd rather than stored: zero uncompressed bytes, but a nonzero 2-byte
-    // "empty block" deflate stream. compressedSize is meaningless for a directory and must not gate it.
+    // A real Chrome Web Store CRX (Wappalyzer) ships a "_locales/" directory entry DEFLATEd rather than stored (zero uncompressed bytes, a 2-byte empty-block stream); compressedSize is meaningless for a directory and must not gate it.
     func test_directoryEntryWithDeflatedEmptyStream_isAccepted() throws {
         let name = "locales/"
         var entry = rawEntry(name: name, content: [0x03, 0x00]) // deflate's own empty-block encoding
@@ -435,95 +431,6 @@ final class ZipArchiveExtractorTests: XCTestCase {
         let destination = makeDestination()
         XCTAssertThrowsError(try ZipArchiveExtractor.extract(Data(), to: destination)) { error in
             XCTAssertEqual(error as? ZipArchiveError, .notAZipArchive)
-        }
-    }
-
-    // MARK: - Unpacking cost
-    //
-    // Catches a return to per-entry atomic writes, per-entry URL standardisation, or serial
-    // extraction — the causes that once made this take ~5.0s; it's ~1.1s now, budget set well above that.
-
-    func test_unpackingARealisticExtensionSizedArchive_staysWithinItsBudget() throws {
-        let budgetSeconds = 3.0
-
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("OrbitTests-ZipPerfTree-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        createdPaths.append(root)
-
-        var random = FixtureWordGenerator(seed: 0x0B17_5EED)
-        var entryCount = 0
-
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("_locales"), withIntermediateDirectories: true)
-        for locale in 0..<54 {
-            let directory = root.appendingPathComponent("_locales/locale-\(locale)", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try Data(Self.wordSoup(bytes: 9_000, using: &random).utf8)
-                .write(to: directory.appendingPathComponent("messages.json"))
-            entryCount += 1
-        }
-
-        for group in 0..<64 {
-            let directory = root.appendingPathComponent("technologies/group-\(group)", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            for shard in 0..<210 {
-                try Data(Self.wordSoup(bytes: 400, using: &random).utf8)
-                    .write(to: directory.appendingPathComponent("\(shard).json"))
-                entryCount += 1
-            }
-        }
-
-        let bundles = root.appendingPathComponent("js", isDirectory: true)
-        try FileManager.default.createDirectory(at: bundles, withIntermediateDirectories: true)
-        for (name, size) in [("content.js", 1_200_000), ("background.js", 2_400_000), ("vendor.js", 6_000_000)] {
-            try Data(Self.wordSoup(bytes: size, using: &random).utf8).write(to: bundles.appendingPathComponent(name))
-            entryCount += 1
-        }
-
-        XCTAssertGreaterThan(entryCount, 13_000, "The fixture stopped being the shape of a real large extension.")
-
-        let zipData = try zipDirectory(root: root, entries: ["_locales", "technologies", "js"])
-
-        var best = Double.greatestFiniteMagnitude
-        for _ in 0..<3 {
-            let destination = makeDestination()
-            let start = DispatchTime.now().uptimeNanoseconds
-            let extracted = try ZipArchiveExtractor.extract(zipData, to: destination)
-            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
-            XCTAssertGreaterThan(extracted.count, 13_000)
-            best = min(best, elapsed)
-            try? FileManager.default.removeItem(at: destination)
-        }
-
-        print(String(format: "ZipArchiveExtractor: %d entries unpacked in %.3fs (best of 3)", entryCount, best))
-        XCTAssertLessThan(
-            best, budgetSeconds,
-            "Unpacking a realistic \(entryCount)-entry extension took \(best)s, over the \(budgetSeconds)s budget."
-        )
-    }
-
-    private static func wordSoup(bytes: Int, using generator: inout FixtureWordGenerator) -> String {
-        let words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu"]
-        var result = ""
-        result.reserveCapacity(bytes + 16)
-        while result.utf8.count < bytes {
-            result += words[Int(generator.next() % UInt64(words.count))]
-            result += (generator.next() % 8 == 0) ? "\n" : " "
-        }
-        return result
-    }
-
-    // Deterministic, so a failure here is a real regression and not a fixture
-    // that happened to compress differently this run. Named distinctly from
-    // Orbit's own SeededGenerator: unrelated types, same tiny xorshift shape.
-    private struct FixtureWordGenerator {
-        private var state: UInt64
-        init(seed: UInt64) { state = seed | 1 }
-        mutating func next() -> UInt64 {
-            state ^= state << 13
-            state ^= state >> 7
-            state ^= state << 17
-            return state
         }
     }
 

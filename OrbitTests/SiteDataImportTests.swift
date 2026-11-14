@@ -36,6 +36,28 @@ final class SiteDataImportTests: XCTestCase {
     }
 
     /// A value spanning LevelDB's 32 KB log blocks must be fragmented or it is unrecoverable.
+    func testOnlyAManifestNameLevelDBItselfWritesIsAccepted() {
+        XCTAssertTrue(LevelDBReader.isValidManifestName("MANIFEST-000001"))
+        for name in ["", "MANIFEST-", "../MANIFEST-000001", "MANIFEST-1/../../etc", "/etc/passwd", "~/MANIFEST-1", "MANIFEST-12a", "CURRENT"] {
+            XCTAssertFalse(LevelDBReader.isValidManifestName(name), name)
+        }
+    }
+
+    func testACurrentFilePointingOutsideTheDatabaseIsRefused() throws {
+        let directory = root.appendingPathComponent("leveldb", isDirectory: true)
+        let writer = try LevelDBWriter(directory: directory)
+        try writer.append([record("VERSION", "1")])
+        try writer.finish()
+        let outside = root.appendingPathComponent("MANIFEST-000009")
+        try Data("not a manifest".utf8).write(to: outside)
+
+        try "../MANIFEST-000009\n".write(to: directory.appendingPathComponent("CURRENT"), atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try LevelDBReader.readManifest(directory: directory))
+        try "MANIFEST-000009\n".write(to: directory.appendingPathComponent("CURRENT"), atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try LevelDBReader.readManifest(directory: directory))
+        XCTAssertEqual(try LevelDBReader.readAll(directory: directory), [record("VERSION", "1")])
+    }
+
     func testAValueLargerThanALogBlockSurvivesTheRoundTrip() throws {
         let large = String(repeating: "excalidraw scene ", count: 20_000)
         let records = [record("_https://excalidraw.com\u{0}\u{1}scene", large)]

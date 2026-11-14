@@ -1,5 +1,4 @@
-//  Borderless custom panel Orbit paints itself (no NSPopover chrome, no vibrancy).
-//  No NSMenu.popUp, runModal or nested run loop anywhere in this file (safe for tests).
+//  Borderless custom panel Orbit paints itself; it never uses NSMenu.popUp, runModal or a nested run loop, so tests can drive it.
 
 import AppKit
 import SwiftUI
@@ -17,6 +16,11 @@ enum OrbitMenuClickGuard {
     }
 
     static var wasDismissedThisTurn: Bool { dismissedToken != 0 }
+
+    /// Clears the dismissal flag at once; tests use it so one test's dismissal cannot swallow the next test's click.
+    static func _test_reset() {
+        dismissedToken = 0
+    }
 }
 
 final class OrbitMenuPanel: NSPanel {
@@ -33,7 +37,6 @@ final class OrbitMenuPanelController {
         var entries: [OrbitContextMenuEntry]
         let selection: OrbitMenuSelectionModel
         let arrow: OrbitMenuArrow?
-        /// The parent item this level was opened for; `nil` for the root menu.
         let parentItemID: UUID?
     }
 
@@ -51,8 +54,6 @@ final class OrbitMenuPanelController {
     private var observers: [NSObjectProtocol] = []
 
     var isPresented: Bool { !levels.isEmpty }
-
-    // MARK: - Presenting
 
     func present(
         entries: [OrbitContextMenuEntry],
@@ -110,12 +111,7 @@ final class OrbitMenuPanelController {
         }
         levels.removeAll()
         ownerWindow = nil
-        // A .nonactivatingPanel child does not reliably hand key status back to its
-        // parent when it closes -- without this an action chosen from the menu (e.g.
-        // "New Tab") can run with no key window at all, silently dropping any focus
-        // request it makes.
-        // The panel we just closed can still be reported as key until the run loop
-        // turns. That is not another window taking focus.
+        // A .nonactivatingPanel child does not reliably hand key status back to its parent on close, and a menu action (e.g. "New Tab") would then run with no key window and lose its focus request; the closed panel can still read as key until the run loop turns.
         let key = NSApp.keyWindow
         let nothingElseIsKey = key == nil || keyWasOurs
         if nothingElseIsKey, let owner, owner.isVisible, owner.canBecomeKey {
@@ -126,8 +122,6 @@ final class OrbitMenuPanelController {
         OrbitMenuClickGuard.noteDismissed()
         callback?()
     }
-
-    // MARK: - Levels
 
     private func pushLevel(
         entries: [OrbitContextMenuEntry],
@@ -161,9 +155,7 @@ final class OrbitMenuPanelController {
             panel.appearance = appearance
         }
 
-        // Two passes: the beak's height is already in the measured size, but
-        // which edge it lands on -- and where along that edge it points -- is
-        // only known once the container has been placed and clamped.
+        // Two passes: the beak's edge and offset are only known after the container is placed and clamped.
         let hosting = NSHostingView(
             rootView: makeContent(
                 entries: entries,
@@ -206,9 +198,7 @@ final class OrbitMenuPanelController {
         )
     }
 
-    /// Refreshes the open root menu in place -- an item's enablement can change
-    /// underneath a menu that is already on screen. Entry count and order are
-    /// the caller's contract, so nothing is re-measured or re-placed.
+    /// Refreshes the open root menu in place; entry count and order are the caller's contract, so nothing is re-measured or re-placed.
     func updateRootEntries(_ entries: [OrbitContextMenuEntry]) {
         guard let root = levels.first, root.entries.count == entries.count else { return }
         levels[0].entries = entries
@@ -239,11 +229,7 @@ final class OrbitMenuPanelController {
             ?? NSScreen.screens[0]
     }
 
-    // MARK: - Submenus
-
-    // Hopped off the current turn: this fires from inside a SwiftUI update, and
-    // opening or closing a window there is re-entrant. The selection is
-    // re-checked on arrival so a hop that lost its race does nothing.
+    // Hopped off the current turn because this fires inside a SwiftUI update, where opening or closing a window is re-entrant; the selection is re-checked on arrival.
     private func rowDidActivate(_ item: OrbitContextMenuItem, frameInMenu: CGRect, depth: Int) {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
@@ -277,9 +263,7 @@ final class OrbitMenuPanelController {
         child.panel.orderFront(nil)
     }
 
-    /// `frameInMenu` is SwiftUI-space (origin top-left, y down) inside the
-    /// hosted container; the container itself is inset from the panel by the
-    /// shadow padding.
+    /// `frameInMenu` is SwiftUI-space (origin top-left, y down) inside the hosted container, which is inset from the panel by the shadow padding.
     private func screenRect(ofRowFrame frameInMenu: CGRect, in level: Level) -> CGRect {
         let container = level.panel.frame.insetBy(
             dx: OrbitMetrics.contextMenuShadowPadding, dy: OrbitMetrics.contextMenuShadowPadding
@@ -301,10 +285,7 @@ final class OrbitMenuPanelController {
         }
     }
 
-    // MARK: - Keyboard
-
-    /// `true` when the menu consumed the key. Never blocks and never runs a
-    /// nested event loop -- it inspects one already-delivered event.
+    /// `true` when the menu consumed the key; it inspects one already-delivered event and never runs a nested event loop.
     @discardableResult
     func handleKey(code: UInt16) -> Bool {
         guard let action = OrbitMenuKeyAction.from(keyCode: code), let level = levels.last else { return false }
@@ -318,9 +299,7 @@ final class OrbitMenuPanelController {
         case .moveToLast:
             level.selection.selectedItemID = level.selection.navigableItems.last?.id
         case .openSubmenu:
-            // Opening happens through the same rowDidActivate path the pointer
-            // uses; selecting an item with a submenu already triggered it, so
-            // this only has to move focus into the submenu that is now open.
+            // Selecting an item with a submenu already opened it via rowDidActivate, so this only moves focus into it.
             guard levels.count > 1, let deepest = levels.last else { return true }
             deepest.selection.selectedItemID = deepest.selection.navigableItems.first?.id
         case .closeSubmenu:
@@ -340,16 +319,12 @@ final class OrbitMenuPanelController {
         return true
     }
 
-    // MARK: - Dismissal
-
     private func installMonitors(ownerWindow: NSWindow, rootPanel: NSWindow) {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.isPresented else { return event }
             return self.handleKey(code: event.keyCode) ? nil : event
         }
-        // Local, not a .transient popover monitor: the event is returned
-        // unmodified so the click still reaches whatever it hit; only the
-        // menu's own dismissal rides along.
+        // Local rather than a .transient popover monitor: the event is returned unmodified so the click still reaches its target.
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             guard let self else { return event }
             if self.clickClosesAnchor(event) {
@@ -426,8 +401,6 @@ final class OrbitMenuPanelController {
     }
 }
 
-// MARK: - Hosted content
-
 struct OrbitMenuPanelContent: View {
     var entries: [OrbitContextMenuEntry]
     var arrow: OrbitMenuArrow?
@@ -453,10 +426,7 @@ struct OrbitMenuPanelContent: View {
     }
 }
 
-// MARK: - Anchor lifetime
-
-/// Zero-sized, non-hit-testable probe reporting when its host view leaves the window.
-/// `NSView.window` isn't KVO-observable; this is how the menu learns its anchor is gone.
+/// Zero-sized, non-hit-testable probe reporting when its host view leaves the window, since `NSView.window` isn't KVO-observable.
 final class OrbitMenuAnchorSentinel: NSView {
     var onWindowLost: (() -> Void)?
 

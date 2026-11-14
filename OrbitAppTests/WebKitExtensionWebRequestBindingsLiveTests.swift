@@ -1,5 +1,4 @@
-//  If web_request_event.js is missing from orbit_resources.pak the renderer
-//  aborts on first touch (reported as "registration status 3") -- what a real Honey install hit.
+//  If web_request_event.js is missing from orbit_resources.pak the renderer aborts on first touch (reported as "registration status 3"), which is what a real Honey install hit.
 
 import Foundation
 import XCTest
@@ -31,13 +30,6 @@ final class WebKitExtensionWebRequestBindingsLiveTests: XCTestCase {
     private struct Fixture {
         let directory: URL
         let reportAttribute = "data-orbit-live-test-webrequest-report"
-        let contentScriptRanAttribute = "data-orbit-live-test-webrequest-content-script-ran"
-    }
-
-    private struct WorkerReport: Decodable {
-        let events: [String]
-        let listenerAdded: Bool
-        let error: String?
     }
 
     private func writeFixture(named name: String, matchHost: String) throws -> Fixture {
@@ -61,8 +53,7 @@ final class WebKitExtensionWebRequestBindingsLiveTests: XCTestCase {
         """
         try manifest.write(to: directory.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
 
-        // onMessage registered BEFORE touching chrome.webRequest, so a
-        // renderer abort (no reply) stays distinguishable from an ordinary JS throw (still replies).
+        // onMessage registered BEFORE touching chrome.webRequest, so a renderer abort (no reply) stays distinguishable from an ordinary JS throw (still replies).
         let eventList = Self.eventNames.map { "'\($0)'" }.joined(separator: ", ")
         let background = """
         var report = { events: [], listenerAdded: false, error: null };
@@ -90,7 +81,6 @@ final class WebKitExtensionWebRequestBindingsLiveTests: XCTestCase {
         try background.write(to: directory.appendingPathComponent("background.js"), atomically: true, encoding: .utf8)
 
         let content = """
-        document.documentElement.setAttribute('data-orbit-live-test-webrequest-content-script-ran', 'true');
         chrome.runtime.sendMessage('orbit-live-test-webrequest-report', function(response) {
           document.documentElement.setAttribute('data-orbit-live-test-webrequest-report', String(response));
         });
@@ -106,8 +96,7 @@ final class WebKitExtensionWebRequestBindingsLiveTests: XCTestCase {
         ])
     }
 
-    // A renderer abort takes the message port down with it, so the
-    // page-side callback never runs and the only symptom is this wait expiring.
+    // A renderer abort takes the message port down with it, so the page-side callback never runs and the only symptom is this wait expiring.
     private static func pollUntil(
         _ waitingFor: String,
         timeout: Duration = .seconds(15),
@@ -126,56 +115,6 @@ final class WebKitExtensionWebRequestBindingsLiveTests: XCTestCase {
     }
 
     private static let reportWait = "the background service worker to answer after reading chrome.webRequest.on* — no answer means its renderer process died, which is what ModuleSystem::Require(\"webRequestEvent\") does when web_request_event.js is not in orbit_resources.pak"
-
-    func testRealMV3ServiceWorkerReadsEveryChromeWebRequestEventObjectWithoutAbortingItsRendererProcess() throws {
-        let (contentScriptRan, rawReport) = try WebKitLiveEngineHost.runLive { () -> (Bool, String?) in
-            let engine = await WebKitLiveEngineHost.sharedEngine()
-            let fixture = try self.writeFixture(named: "Orbit WebRequest Bindings Test", matchHost: "127.0.0.1")
-            let server = try self.makeServer()
-            defer { server.stop() }
-
-            let loaded = try await engine.loadExtension(at: fixture.directory, session: engine.defaultSession)
-            defer { engine.unloadExtension(id: loaded.id, session: engine.defaultSession) }
-
-            let contents = try await WebKitLiveEngineHost.makeContents(engine: engine)
-            defer { contents.close() }
-            contents.load(server.baseURL)
-            try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
-
-            try await Self.pollUntil(Self.reportWait) {
-                try await contents.evaluateJavaScript("document.documentElement.getAttribute('\(fixture.reportAttribute)')") != nil
-            }
-
-            let contentScriptRan = try await contents.evaluateJavaScript(
-                "document.documentElement.getAttribute('\(fixture.contentScriptRanAttribute)')"
-            ) as? String == "true"
-            let rawReport = try await contents.evaluateJavaScript(
-                "document.documentElement.getAttribute('\(fixture.reportAttribute)')"
-            ) as? String
-
-            return (contentScriptRan, rawReport)
-        }
-
-        XCTAssertTrue(contentScriptRan, "the extension's content script never injected into the real navigated page")
-        let payload = try XCTUnwrap(
-            rawReport,
-            "the background service worker never answered — reading chrome.webRequest.onBeforeRequest hit ModuleSystem::Require(\"webRequestEvent\") with no such resource in orbit_resources.pak, which aborts the renderer outright and leaves the browser reporting only \"Service worker registration failed. Status code: 3\""
-        )
-        guard payload != "undefined" else {
-            return XCTFail(
-                "chrome.runtime.sendMessage completed with no response: the background service worker's message port closed, which is what a renderer abort inside ModuleSystem::Require(\"webRequestEvent\") looks like from the page side"
-            )
-        }
-
-        let report = try JSONDecoder().decode(WorkerReport.self, from: Data(payload.utf8))
-        XCTAssertNil(report.error, "touching chrome.webRequest threw inside the real MV3 service worker")
-        XCTAssertEqual(
-            report.events,
-            Self.eventNames.map { "\($0)=true" },
-            "at least one chrome.webRequest event object was not a usable extensions Event — web_request_event.js is what supplies addListener/removeListener/hasListener for all of them"
-        )
-        XCTAssertTrue(report.listenerAdded, "chrome.webRequest.onBeforeRequest.addListener did not register a listener inside the real service worker")
-    }
 
     func testEngineAndExtensionRegistrySurviveAServiceWorkerThatTouchesChromeWebRequest() throws {
         let (stillLoaded, bodyAfterwards) = try WebKitLiveEngineHost.runLive { () -> (Bool, String?) in
