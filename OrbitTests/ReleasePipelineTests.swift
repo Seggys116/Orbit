@@ -405,9 +405,26 @@ final class ReleasePipelineTests: XCTestCase {
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
         let bogus = scratch.appendingPathComponent("bogus.provisionprofile")
         try Data("not a CMS envelope".utf8).write(to: bogus)
-        let run = try release(["sign", "--app", app.path, "--adhoc", "--profile", bogus.path])
+        let run = try release([
+            "sign", "--app", app.path, "--identity", "Developer ID Application: Nobody (XXXXXXXXXX)",
+            "--profile", bogus.path,
+        ])
         XCTAssertFalse(run.succeeded)
         XCTAssertTrue(run.output.contains("is not a readable provisioning profile"), run.output)
+    }
+
+    func testSignRefusesAProvisioningProfileWithAnAdHocSignature() throws {
+        let scratch = try makeScratchDirectory()
+        let app = scratch.appendingPathComponent("Orbit.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let profile = scratch.appendingPathComponent("any.provisionprofile")
+        try Data("placeholder".utf8).write(to: profile)
+        let run = try release(["sign", "--app", app.path, "--adhoc", "--profile", profile.path])
+        XCTAssertFalse(run.succeeded)
+        XCTAssertTrue(
+            run.output.contains("cannot be used with an ad hoc signature"),
+            "an ad hoc signature has no team or certificate for a profile to match, so the result could never launch:\n\(run.output)"
+        )
     }
 
     func testTheRoleListingNamesTheKeysAProfileMustGrant() throws {

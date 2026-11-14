@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import datetime
+import hashlib
 import json
 import os
 import plistlib
@@ -419,7 +421,7 @@ def check_entitlement_policy(checks) -> None:
         )
 
     for role in ALL_ROLES:
-        for key in role.entitlements:
+        for key in role.keys(provisioned=True):
             if key not in FORBIDDEN_ENTITLEMENTS:
                 continue
             waiver = live_waivers.get(key)
@@ -617,34 +619,86 @@ PROVISIONING_PROFILE_NOTE = (
     "the process is not signed for."
 )
 
-def read_provisioning_profile(path: str) -> dict:
-    """What a .provisionprofile grants. The file is CMS signed, so the plist only comes out through `security cms -D`."""
+class ProfileError(Exception):
+    pass
+
+def load_provisioning_profile(path: str) -> dict:
+    """What a .provisionprofile grants. The file is CMS signed, so the plist only comes out through `security cms -D`. Raises ProfileError."""
     decoded = run(["security", "cms", "-D", "-i", path], capture=True, check=False)
     if decoded.returncode != 0 or not (decoded.stdout or "").strip():
-        die(
+        raise ProfileError(
             f"{path} is not a readable provisioning profile: security could not "
             "decode its CMS envelope. Download it again from the developer "
             "account rather than editing it."
         )
     return parse_provisioning_profile(decoded.stdout.encode("utf-8"), path)
 
+def read_provisioning_profile(path: str) -> dict:
+    try:
+        return load_provisioning_profile(path)
+    except ProfileError as exc:
+        die(str(exc))
+
 def parse_provisioning_profile(payload: bytes, path: str) -> dict:
     try:
         parsed = plistlib.loads(payload)
     except (plistlib.InvalidFileException, ValueError) as exc:
-        die(f"{path} decoded, but its payload is not a property list: {exc}")
+        raise ProfileError(f"{path} decoded, but its payload is not a property list: {exc}")
     grants = parsed.get("Entitlements")
     if not isinstance(grants, dict):
-        die(f"{path} has no Entitlements dictionary, so it grants nothing at all.")
+        raise ProfileError(f"{path} has no Entitlements dictionary, so it grants nothing at all.")
     teams = parsed.get("TeamIdentifier") or [None]
+    certificates = [
+        hashlib.sha1(der).hexdigest().upper()
+        for der in parsed.get("DeveloperCertificates") or []
+        if isinstance(der, (bytes, bytearray))
+    ]
     return {
         "path": path,
         "name": parsed.get("Name") or "(unnamed)",
         "uuid": parsed.get("UUID") or "(no uuid)",
         "team": teams[0],
         "expires": parsed.get("ExpirationDate"),
+        "developer_id": parsed.get("ProvisionsAllDevices") is True,
+        "certificates": certificates,
         "grants": grants,
     }
+
+def profile_expired(profile: dict, now: datetime.datetime | None = None) -> bool:
+    expires = profile.get("expires")
+    if not isinstance(expires, datetime.datetime):
+        return False
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=datetime.timezone.utc)
+    return expires <= (now or datetime.datetime.now(datetime.timezone.utc))
+
+def profile_problems(profile: dict, role: "SignedRole") -> list:
+    """Everything that would get a Developer ID build carrying this profile killed at launch, short of the signing certificate, which only `sign` knows."""
+    problems = []
+    if profile["team"] != TEAM_ID:
+        problems.append(
+            f"issued to team {profile['team'] or '(none)'}, but this app signs as {TEAM_ID}"
+        )
+    if not profile.get("developer_id"):
+        problems.append(
+            "not a Developer ID profile (ProvisionsAllDevices is not set). A "
+            "development or Mac App Store profile does not cover a Developer ID "
+            "signature"
+        )
+    if profile_expired(profile):
+        problems.append(f"expired on {profile['expires']}")
+    shortfall = profile_shortfall(profile, role)
+    if shortfall:
+        problems.append("does not grant " + ", ".join(k for k, _, _ in shortfall))
+    return problems
+
+def identity_sha1(identity: str, keychain: str | None) -> str | None:
+    """The SHA-1 of the codesigning certificate an identity name or hash refers to, as `security find-identity` prints it."""
+    wanted = identity.strip()
+    for candidate in available_identities(keychain):
+        if candidate["sha1"] == wanted.upper() or candidate["name"] == wanted:
+            return candidate["sha1"]
+    return None
 
 def _profile_pattern_matches(granted, wanted: str) -> bool:
     if not isinstance(granted, str):
@@ -676,11 +730,24 @@ def profile_shortfall(profile: dict, role: SignedRole) -> list:
     return missing
 
 def require_profile_covers(profile: dict, role: SignedRole) -> None:
-    if profile["team"] and profile["team"] != TEAM_ID:
+    name = os.path.basename(profile["path"])
+    if profile["team"] != TEAM_ID:
         die(
-            f"{os.path.basename(profile['path'])} was issued to team "
-            f"{profile['team']}, but this app signs as {TEAM_ID}. A profile from "
-            "another team grants nothing to this signature."
+            f"{name} was issued to team {profile['team'] or '(none)'}, but this app "
+            f"signs as {TEAM_ID}. A profile from another team grants nothing to "
+            "this signature."
+        )
+    if not profile.get("developer_id"):
+        die(
+            f"{name} ('{profile['name']}') is not a Developer ID profile: "
+            "ProvisionsAllDevices is not set, so it is a development or Mac App "
+            "Store profile. macOS kills a Developer ID signed app carrying one. "
+            "Create a Developer ID profile for the App ID in the developer account."
+        )
+    if profile_expired(profile):
+        die(
+            f"{name} ('{profile['name']}') expired on {profile['expires']}. "
+            "Regenerate it in the developer account."
         )
     missing = profile_shortfall(profile, role)
     if not missing:
@@ -1285,7 +1352,7 @@ def cmd_doctor(args) -> int:
     )
 
     checks.section("Provisioning profile")
-    profile_path = os.environ.get(PROVISIONING_PROFILE_ENV)
+    profile_path = getattr(args, "profile", None) or os.environ.get(PROVISIONING_PROFILE_ENV)
     if not profile_path:
         checks.note(
             PROVISIONING_PROFILE_ENV,
@@ -1297,23 +1364,21 @@ def cmd_doctor(args) -> int:
     elif not os.path.isfile(profile_path):
         checks.check(PROVISIONING_PROFILE_ENV, False, f"no file at {profile_path}")
     else:
-        profile = read_provisioning_profile(profile_path)
-        shortfall = profile_shortfall(profile, BROWSER_ROLE)
-        checks.check(
-            "the profile grants every provisioned entitlement",
-            not shortfall,
-            f"'{profile['name']}' ({profile['uuid']}), expires {profile['expires']}"
-            if not shortfall else
-            "missing " + ", ".join(k for k, _, _ in shortfall)
-            + f". Enable the matching capability on the App ID '{APP_BUNDLE_ID}' and "
-            "regenerate the Developer ID profile",
-        )
-        checks.check(
-            "the profile was issued to this team",
-            profile["team"] == TEAM_ID,
-            TEAM_ID if profile["team"] == TEAM_ID
-            else f"issued to {profile['team']}, this app signs as {TEAM_ID}",
-        )
+        try:
+            profile = load_provisioning_profile(profile_path)
+        except ProfileError as exc:
+            checks.check(PROVISIONING_PROFILE_ENV, False, str(exc))
+        else:
+            problems = profile_problems(profile, BROWSER_ROLE)
+            checks.check(
+                "the profile covers a Developer ID build",
+                not problems,
+                f"'{profile['name']}' ({profile['uuid']}), expires {profile['expires']}"
+                if not problems else
+                "; ".join(problems)
+                + f". Fix the App ID '{APP_BUNDLE_ID}' in the developer account and "
+                "regenerate the Developer ID profile",
+            )
 
     checks.section("Sparkle updater")
     link_ok, link_detail = project_sparkle_link_status()
@@ -1565,8 +1630,30 @@ def cmd_sign(args) -> int:
                 f"{PROVISIONING_PROFILE_ENV} to sign without one, which drops every "
                 "key in the browser role's provisioned set."
             )
+        if adhoc:
+            die(
+                "a provisioning profile cannot be used with an ad hoc signature: "
+                "the profile is matched against a team and a signing certificate, "
+                "and an ad hoc signature has neither, so macOS would kill the "
+                f"result at launch. Unset {PROVISIONING_PROFILE_ENV} (or drop "
+                "--profile) to sign ad hoc."
+            )
         profile = read_provisioning_profile(profile_path)
         require_profile_covers(profile, BROWSER_ROLE)
+        certificate = identity_sha1(identity, keychain)
+        if certificate is None:
+            die(
+                f"could not find the certificate for signing identity '{identity}', "
+                f"so it cannot be checked against {os.path.basename(profile_path)}."
+            )
+        if certificate not in profile["certificates"]:
+            die(
+                f"{os.path.basename(profile_path)} ('{profile['name']}') does not "
+                f"list the certificate '{identity}' ({certificate}) signs with. "
+                "macOS kills an app whose signing certificate is not in its "
+                "embedded profile. Regenerate the profile with this Developer ID "
+                "certificate selected."
+            )
     else:
         warn(
             "no provisioning profile: signing without "
@@ -1880,16 +1967,27 @@ def verify_signature(app: str, checks: Checklist, require_timestamp: bool, requi
     embedded = codesign_entitlements(app)
     embedded_profile = os.path.join(app, "Contents", EMBEDDED_PROFILE_NAME)
     provisioned = os.path.isfile(embedded_profile)
-    granted = sorted(k for k, v in embedded.items() if v is True)
-    expected = sorted(
-        k for k in BROWSER_ROLE.keys(provisioned=provisioned)
-        if ENTITLEMENT_VALUES.get(k, True) is True
-    )
+    expected_keys = BROWSER_ROLE.keys(provisioned=provisioned)
+    expected_values = {k: ENTITLEMENT_VALUES.get(k, True) for k in expected_keys}
+    unexpected = sorted(set(embedded) - set(expected_keys))
+    absent = sorted(set(expected_keys) - set(embedded))
+    wrong = sorted(k for k in expected_keys if k in embedded and embedded[k] != expected_values[k])
+    detail = []
+    if unexpected:
+        detail.append("unexpected " + ", ".join(unexpected))
+    if absent:
+        detail.append("missing " + ", ".join(absent))
+    if wrong:
+        detail.append("wrong value for " + ", ".join(wrong))
+    if not provisioned and set(unexpected) & set(BROWSER_ROLE.provisioned):
+        detail.append(
+            "restricted keys with no embedded provisioning profile: macOS kills "
+            "this app at launch"
+        )
     checks.check(
         f"{BROWSER_ROLE.display} entitlements",
-        granted == expected,
-        "as declared" if granted == expected else
-        f"expected [{', '.join(expected)}], signature carries [{', '.join(granted) or 'none'}]",
+        not detail,
+        "as declared" if not detail else "; ".join(detail),
     )
     if not provisioned:
         checks.note(
@@ -1900,20 +1998,17 @@ def verify_signature(app: str, checks: Checklist, require_timestamp: bool, requi
             "iCloud Passwords extension or iCloud sync",
         )
     else:
-        profile = read_provisioning_profile(embedded_profile)
-        shortfall = profile_shortfall(profile, BROWSER_ROLE)
-        right_team = profile["team"] == TEAM_ID
-        if not right_team:
-            problem = f"issued to team {profile['team']}, not {TEAM_ID}"
-        elif shortfall:
-            problem = "does not grant " + ", ".join(k for k, _, _ in shortfall)
-        else:
-            problem = ""
+        try:
+            profile = load_provisioning_profile(embedded_profile)
+            problems = profile_problems(profile, BROWSER_ROLE)
+            summary = f"'{profile['name']}' ({profile['uuid']}), expires {profile['expires']}"
+        except ProfileError as exc:
+            problems = [str(exc)]
+            summary = ""
         checks.check(
             "embedded provisioning profile",
-            not problem,
-            f"'{profile['name']}' ({profile['uuid']}), expires {profile['expires']}"
-            if not problem else problem + "; the app will be killed at launch",
+            not problems,
+            summary if not problems else "; ".join(problems) + "; the app will be killed at launch",
         )
         for key in BROWSER_ROLE.provisioned:
             wanted = ENTITLEMENT_VALUES.get(key, True)
@@ -2118,7 +2213,8 @@ def cmd_notarize(args) -> int:
 def cmd_all(args) -> int:
     info("Preflight")
     doctor_args = argparse.Namespace(
-        app=None, adhoc=args.adhoc, keychain=args.keychain, identity=args.identity
+        app=None, adhoc=args.adhoc, keychain=args.keychain, identity=args.identity,
+        profile=args.profile,
     )
     if cmd_doctor(doctor_args) != 0 and not args.force:
         die(
@@ -2225,6 +2321,7 @@ def build_parser() -> argparse.ArgumentParser:
                           help="do not require a Developer ID certificate")
     p_doctor.add_argument("--identity", help=argparse.SUPPRESS)
     p_doctor.add_argument("--keychain", help="keychain to search for the identity")
+    add_profile_argument(p_doctor)
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_version = sub.add_parser("version", help="resolve the version this build would carry")
