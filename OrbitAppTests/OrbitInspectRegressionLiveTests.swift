@@ -628,7 +628,8 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
             contents.load(server.baseURL)
             try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
-            // Never opened: nothing observed or numbered (Lighthouse notes the LCP element by id from the start, held weakly).
+            // Never opened: nothing observed or numbered, even after the LCP entry has named its element (held weakly, unnumbered).
+            try await self.waitUntil("the LCP entry", timeout: .seconds(5)) { session.performance.liveData.lcpEntries.last != nil }
             let before = try await self.agentStats(session)
             _ = try await session.evaluate("for (var i = 0; i < 500; i++) { var d = document.createElement('div'); d.textContent = i; document.body.appendChild(d); d.setAttribute('data-x', i); d.remove(); } 1")
             try await Task.sleep(for: .milliseconds(200))
@@ -636,7 +637,9 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
             XCTAssertEqual(stats["presented"] as? Bool, false)
             XCTAssertEqual(stats["observingDOM"] as? Bool, false)
             XCTAssertEqual(stats["trackedNodes"] as? Int, before["trackedNodes"] as? Int, "churn with the inspector closed numbered nodes: \(stats)")
-            XCTAssertLessThanOrEqual(stats["trackedNodes"] as? Int ?? .max, 1, "\(stats)")
+            XCTAssertEqual(stats["trackedNodes"] as? Int, 0, "the inspector numbered nodes while closed: \(stats)")
+            let closedLCPNode = try XCTUnwrap(session.performance.liveData.lcpEntries.last?.nodeID)
+            XCTAssertLessThan(closedLCPNode, 0, "an LCP element seen while closed must be a pending reference, not a node id")
             let baseline = try XCTUnwrap(stats["disposers"] as? Int)
             _ = try await session.evaluate("""
                 document.getElementById('target').addEventListener('click', function closedHandler() { return 1; });
@@ -649,6 +652,8 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
             stats = try await self.agentStats(session)
             XCTAssertEqual(stats["presented"] as? Bool, true)
             XCTAssertEqual(stats["observingDOM"] as? Bool, true)
+            session.reveal(nodeID: closedLCPNode)
+            try await self.waitUntil("the closed-time LCP element revealed", timeout: .seconds(5)) { (session.elements.selectedID ?? 0) > 0 }
             _ = try await session.evaluate("var n = document.createElement('p'); n.id = 'late'; document.body.appendChild(n); 1")
             try await self.waitUntil("added node in the tree", timeout: .seconds(5)) { self.node(session, id: "late") != nil }
 

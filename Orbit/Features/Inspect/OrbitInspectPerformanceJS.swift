@@ -61,7 +61,7 @@ extension OrbitInspectAgent {
 
         perf_observe("largest-contentful-paint", function(entry) {
           var el = entry.element || null;
-          var nid = el ? idOf(el) : 0;
+          var nid = el ? refOf(el) : 0;
           var sel = perf_sel(el);
           var isLazy = el && el.getAttribute && el.getAttribute("loading") === "lazy" ? true : false;
           perf_push({
@@ -87,7 +87,7 @@ extension OrbitInspectAgent {
                 var pr = src.previousRect;
                 var cr = src.currentRect;
                 sources.push({
-                  nid: node ? idOf(node) : 0,
+                  nid: node ? refOf(node) : 0,
                   tag: node ? (node.tagName || "").toLowerCase() : "",
                   sel: perf_sel(node),
                   pr: pr ? { x: finite(pr.x), y: finite(pr.y), w: finite(pr.width), h: finite(pr.height) } : null,
@@ -122,7 +122,7 @@ extension OrbitInspectAgent {
         });
 
         perf_observe("event", function(entry) {
-          var nid = entry.target ? (function() { try { return idOf(entry.target); } catch(e) { return 0; } })() : 0;
+          var nid = entry.target ? (function() { try { return refOf(entry.target); } catch(e) { return 0; } })() : 0;
           perf_push({
             et: "event",
             name: String(entry.name || "").slice(0, 80),
@@ -136,7 +136,7 @@ extension OrbitInspectAgent {
         });
 
         perf_observe("first-input", function(entry) {
-          var nid = entry.target ? (function() { try { return idOf(entry.target); } catch(e) { return 0; } })() : 0;
+          var nid = entry.target ? (function() { try { return refOf(entry.target); } catch(e) { return 0; } })() : 0;
           perf_push({
             et: "first-input",
             name: String(entry.name || "").slice(0, 80),
@@ -197,7 +197,7 @@ extension OrbitInspectAgent {
 
         // element timing (optional — only on elements with elementtiming="..." attribute)
         perf_observe("element", function(entry) {
-          var nid = entry.element ? (function() { try { return idOf(entry.element); } catch(e) { return 0; } })() : 0;
+          var nid = entry.element ? (function() { try { return refOf(entry.element); } catch(e) { return 0; } })() : 0;
           perf_push({
             et: "element",
             id: String(entry.identifier || entry.id || "").slice(0, 100),

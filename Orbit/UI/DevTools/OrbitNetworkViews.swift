@@ -164,7 +164,7 @@ enum NetColumn: String, CaseIterable {
 struct NetworkColumnHeader: View {
     var model: OrbitNetworkModel
 
-    @AppStorage("orbit.net.hiddenColumns") private var hiddenRaw: String = ""
+    @AppStorage("orbit.net.hiddenColumns", store: OrbitDefaults.standard) private var hiddenRaw: String = ""
 
     private var hiddenColumns: Set<String> {
         Set(hiddenRaw.split(separator: ",").map(String.init))
@@ -252,7 +252,7 @@ struct NetworkRow: View {
     var record: OrbitNetworkRecord
     var model: OrbitNetworkModel
 
-    @AppStorage("orbit.net.hiddenColumns") private var hiddenRaw: String = ""
+    @AppStorage("orbit.net.hiddenColumns", store: OrbitDefaults.standard) private var hiddenRaw: String = ""
     private var hiddenColumns: Set<String> { Set(hiddenRaw.split(separator: ",").map(String.init)) }
 
     private var isSelected: Bool { model.selectedID == record.id }

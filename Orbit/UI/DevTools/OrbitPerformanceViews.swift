@@ -137,7 +137,7 @@ struct PerfLCPBreakdownView: View {
                         .foregroundStyle(InspectChrome.attributeValueColor).lineLimit(1)
                 }
                 Spacer()
-                if entry.nodeID > 0 {
+                if entry.nodeID != 0 {
                     InspectTextButton("Reveal") { session.reveal(nodeID: entry.nodeID) }
                 }
             }
@@ -233,7 +233,7 @@ struct PerfCLSCulpritsView: View {
                                 .foregroundStyle(InspectChrome.tagColor)
                         }
                         Spacer()
-                        if src.nodeID > 0 {
+                        if src.nodeID != 0 {
                             InspectTextButton("Reveal") { session.reveal(nodeID: src.nodeID) }
                         }
                     }
@@ -357,7 +357,7 @@ struct PerfInteractionsView: View {
                 Text(OrbitDevToolsFormat.milliseconds(entry.duration)).font(InspectChrome.mono)
                     .foregroundStyle(OrbitPerformanceLogic.ratingForINP(entry.duration).color)
                 Spacer()
-                if entry.nodeID > 0 {
+                if entry.nodeID != 0 {
                     InspectTextButton("Target") { session.reveal(nodeID: entry.nodeID) }
                 }
             }
@@ -899,7 +899,7 @@ struct PerfSelectionDetailList: View {
             if event.duration > 0 {
                 Text("(\(OrbitDevToolsFormat.milliseconds(event.duration)))").font(InspectChrome.mono).foregroundStyle(InspectChrome.muted2)
             }
-            if event.nodeID > 0 {
+            if event.nodeID != 0 {
                 InspectTextButton("→") { session.reveal(nodeID: event.nodeID) }
             }
         }

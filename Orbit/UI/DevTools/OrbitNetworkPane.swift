@@ -125,7 +125,7 @@ struct OrbitNetworkPane: View {
         }
     }
 
-    @AppStorage("orbit.net.hiddenColumns") private var hiddenColumnsRaw: String = ""
+    @AppStorage("orbit.net.hiddenColumns", store: OrbitDefaults.standard) private var hiddenColumnsRaw: String = ""
 
     /// Width the visible columns need: every fixed column, the waterfall at its default width, and row padding.
     private var tableWidth: CGFloat {

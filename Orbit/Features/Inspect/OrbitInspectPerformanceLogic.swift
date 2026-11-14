@@ -592,7 +592,7 @@ enum OrbitPerformanceLogic {
                 detail: "The largest contentful paint element has loading=\"lazy\". Lazy-loading defers the LCP image and directly increases LCP time. Remove the lazy attribute from this image.",
                 severity: .poor,
                 url: lcp.url.isEmpty ? nil : lcp.url,
-                nodeID: lcp.nodeID > 0 ? lcp.nodeID : nil
+                nodeID: lcp.nodeID != 0 ? lcp.nodeID : nil
             ))
         }
 

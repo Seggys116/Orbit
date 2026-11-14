@@ -141,7 +141,36 @@ enum OrbitInspectAgent {
         return id;
       }
 
+      var pendingNodes = new Map();
+      var pendingKeys = new WeakMap();
+      var pendingSeq = 0;
+
+      // Always-on observers name a node with this: while closed it is a negative key held weakly, numbered only if a panel asks for it.
+      function refOf(node) {
+        if (!node) return 0;
+        if (state.presented) return idOf(node);
+        var existing = state.nodes.get(node) || pendingKeys.get(node);
+        if (existing) return existing;
+        if (typeof WeakRef !== "function") return 0;
+        var key = -(++pendingSeq);
+        pendingKeys.set(node, key);
+        pendingNodes.set(key, new WeakRef(node));
+        if (pendingNodes.size > 256) {
+          var oldest = pendingNodes.keys().next().value;
+          var evicted = pendingNodes.get(oldest).deref();
+          if (evicted) pendingKeys.delete(evicted);
+          pendingNodes.delete(oldest);
+        }
+        return key;
+      }
+
       function nodeById(id) {
+        if (id < 0) {
+          var pending = pendingNodes.get(id);
+          var pendingNode = pending ? pending.deref() : null;
+          if (!pendingNode) pendingNodes.delete(id);
+          return pendingNode || null;
+        }
         var ref = state.ids.get(id);
         var node = ref ? ref.deref() : null;
         if (!node && ref) state.ids.delete(id);
@@ -519,6 +548,7 @@ enum OrbitInspectAgent {
             detached: state.detached,
             observingDOM: typeof el_observer !== "undefined" && !!el_observer,
             trackedNodes: state.ids.size,
+            pendingNodes: pendingNodes.size,
             disposers: disposers.length,
             permanentDisposers: permanentDisposerCount
           };

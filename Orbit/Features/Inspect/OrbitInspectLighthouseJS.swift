@@ -4,7 +4,7 @@ extension OrbitInspectAgent {
 
       var lh_fcpMs = null;
       var lh_lcpMs = null;
-      var lh_lcpElement = null;      // node id via idOf
+      var lh_lcpElement = null;      // node id via refOf
       var lh_lcpSelector = "";
       var lh_lcpURL = "";
       var lh_clsScore = 0;
@@ -173,7 +173,7 @@ extension OrbitInspectAgent {
             var last = entries[entries.length - 1];
             lh_lcpMs = last.startTime;
             if (last.element) {
-              lh_lcpElement = idOf(last.element);
+              lh_lcpElement = refOf(last.element);
               lh_lcpSelector = lh_cssSelector(last.element);
             }
             lh_lcpURL = last.url || "";

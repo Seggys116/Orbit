@@ -314,7 +314,7 @@ final class LibraryPreviewTests: XCTestCase {
 
     // MARK: - Router
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testChangingSectionClearsTheSelection
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testChangingSectionClearsTheSelectionAndTheSearch
 
     func testChangingSectionClearsTheSelectionAndTheSearch() {
         let router = env.libraryRouter

@@ -100,9 +100,10 @@ jobs:
           # Generated from the '// ORBIT-HOSTED-RUNNER: CANNOT-RUN' declarations in the
           # sources, so the excluded set lives next to the tests rather than in this file.
           # while-read, not mapfile: the runner's /bin/bash is 3.2 and has no mapfile.
+          # Written to a file first: reading a process substitution drops its exit code, so a stale marker silently emptied the skip list.
+          Scripts/test-verdict excluded --target OrbitTests --target OrbitAppTests > skip-args.txt
           SKIP_ARGS=()
-          while IFS= read -r arg; do SKIP_ARGS+=("$arg"); done \
-            < <(Scripts/test-verdict excluded --target OrbitTests --target OrbitAppTests)
+          while IFS= read -r arg; do SKIP_ARGS+=("$arg"); done < skip-args.txt
           printf 'skipping %d test(s) declared unrunnable on a hosted runner\n' "${#SKIP_ARGS[@]}"
 
           xcodebuild test \

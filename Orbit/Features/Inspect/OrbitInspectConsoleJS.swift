@@ -120,7 +120,7 @@ extension OrbitInspectAgent {
               return { k: "re", id: rid, preview: String(value) };
             }
             if (value instanceof Node) {
-              var nid2 = idOf(value);
+              var nid2 = refOf(value);
               var nid_reg = con_register(value);
               return { k: "dn", id: nid_reg, nid: nid2, preview: nodeLabel(value) };
             }
