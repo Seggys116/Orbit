@@ -7,7 +7,6 @@ import argparse
 import base64
 import binascii
 import datetime
-import hashlib
 import json
 import os
 import plistlib
@@ -649,7 +648,7 @@ def parse_provisioning_profile(payload: bytes, path: str) -> dict:
         raise ProfileError(f"{path} has no Entitlements dictionary, so it grants nothing at all.")
     teams = parsed.get("TeamIdentifier") or [None]
     certificates = [
-        hashlib.sha1(der).hexdigest().upper()
+        bytes(der)
         for der in parsed.get("DeveloperCertificates") or []
         if isinstance(der, (bytes, bytearray))
     ]
@@ -692,13 +691,35 @@ def profile_problems(profile: dict, role: "SignedRole") -> list:
         problems.append("does not grant " + ", ".join(k for k, _, _ in shortfall))
     return problems
 
-def identity_sha1(identity: str, keychain: str | None) -> str | None:
-    """The SHA-1 of the codesigning certificate an identity name or hash refers to, as `security find-identity` prints it."""
+def identity_certificate(identity: str, keychain: str | None) -> bytes | None:
+    """The DER bytes of the codesigning certificate an identity name or `find-identity` hash refers to. Compared byte for byte with a profile's DeveloperCertificates, so nothing here is hashed."""
     wanted = identity.strip()
-    for candidate in available_identities(keychain):
-        if candidate["sha1"] == wanted.upper() or candidate["name"] == wanted:
-            return candidate["sha1"]
-    return None
+    fingerprint = next(
+        (c["sha1"] for c in available_identities(keychain)
+         if c["sha1"] == wanted.upper() or c["name"] == wanted),
+        None,
+    )
+    if fingerprint is None:
+        return None
+    command = ["security", "find-certificate", "-a", "-Z", "-p"]
+    if keychain:
+        command.append(keychain)
+    listing = run(command, capture=True, check=False).stdout or ""
+    current = None
+    for block in re.finditer(
+        r"SHA-1 hash: ([0-9A-F]{40})\s*-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----",
+        listing,
+        re.S,
+    ):
+        if block.group(1) == fingerprint:
+            current = block.group(2)
+            break
+    if current is None:
+        return None
+    try:
+        return base64.b64decode("".join(current.split()), validate=True)
+    except (binascii.Error, ValueError):
+        return None
 
 def _profile_pattern_matches(granted, wanted: str) -> bool:
     if not isinstance(granted, str):
@@ -1640,7 +1661,7 @@ def cmd_sign(args) -> int:
             )
         profile = read_provisioning_profile(profile_path)
         require_profile_covers(profile, BROWSER_ROLE)
-        certificate = identity_sha1(identity, keychain)
+        certificate = identity_certificate(identity, keychain)
         if certificate is None:
             die(
                 f"could not find the certificate for signing identity '{identity}', "
@@ -1649,7 +1670,7 @@ def cmd_sign(args) -> int:
         if certificate not in profile["certificates"]:
             die(
                 f"{os.path.basename(profile_path)} ('{profile['name']}') does not "
-                f"list the certificate '{identity}' ({certificate}) signs with. "
+                f"list the certificate '{identity}' signs with. "
                 "macOS kills an app whose signing certificate is not in its "
                 "embedded profile. Regenerate the profile with this Developer ID "
                 "certificate selected."
