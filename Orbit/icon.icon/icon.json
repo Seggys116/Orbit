@@ -1,69 +1,310 @@
 {
-  "fill" : {
-    "automatic-gradient" : "srgb:0.62901,0.00000,1.00000,1.00000"
-  },
-  "groups" : [
+  "fill-specializations": [
     {
-      "layers" : [
-        {
-          "glass" : true,
-          "image-name" : "Image 2.png",
-          "name" : "Image 2",
-          "opacity-specializations" : [
-            {
-              "value" : 1
-            },
-            {
-              "appearance" : "dark",
-              "value" : 0
-            }
-          ],
-          "position" : {
-            "scale" : 0.86,
-            "translation-in-points" : [
-              0,
-              0
-            ]
-          }
-        },
-        {
-          "glass" : false,
-          "image-name" : "Image.png",
-          "name" : "Image",
-          "opacity-specializations" : [
-            {
-              "value" : 0
-            },
-            {
-              "appearance" : "dark",
-              "value" : 1
-            }
-          ],
-          "position" : {
-            "scale" : 0.86,
-            "translation-in-points" : [
-              0,
-              0
-            ]
-          }
-        }
-      ],
-      "lighting" : "individual",
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
-      },
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.5
+      "value": {
+        "solid": "extended-srgb:0.01961,0.01176,0.05490,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "extended-srgb:0.00000,0.00000,0.00000,1.00000"
       }
     }
   ],
-  "supported-platforms" : {
-    "circles" : [
+  "groups": [
+    {
+      "name": "Icon",
+      "layers": [
+        {
+          "name": "Glass",
+          "image-name-specializations": [
+            {
+              "value": "mark-light.png"
+            },
+            {
+              "appearance": "dark",
+              "value": "mark-dark.png"
+            },
+            {
+              "appearance": "tinted",
+              "value": "mark-clear.png"
+            }
+          ],
+          "glass-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": false
+            }
+          ],
+          "specular-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": false
+            }
+          ],
+          "blur-material-specializations": [
+            {
+              "value": 0
+            },
+            {
+              "appearance": "dark",
+              "value": 0
+            },
+            {
+              "appearance": "tinted",
+              "value": 0
+            }
+          ],
+          "translucency-specializations": [
+            {
+              "value": {
+                "enabled": false,
+                "value": 0
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "enabled": false,
+                "value": 0
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "enabled": false,
+                "value": 0
+              }
+            }
+          ],
+          "shadow-specializations": [
+            {
+              "value": {
+                "kind": "none",
+                "opacity": 0
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "kind": "none",
+                "opacity": 0
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "kind": "none",
+                "opacity": 0
+              }
+            }
+          ]
+        },
+        {
+          "name": "Plate",
+          "image-name-specializations": [
+            {
+              "value": "plate-light.png"
+            },
+            {
+              "appearance": "dark",
+              "value": "plate-dark.png"
+            },
+            {
+              "appearance": "tinted",
+              "value": "plate-clear.png"
+            }
+          ],
+          "glass-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": false
+            }
+          ],
+          "specular-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": false
+            }
+          ],
+          "blur-material-specializations": [
+            {
+              "value": 0
+            },
+            {
+              "appearance": "dark",
+              "value": 0
+            },
+            {
+              "appearance": "tinted",
+              "value": 0
+            }
+          ],
+          "translucency-specializations": [
+            {
+              "value": {
+                "enabled": false,
+                "value": 0
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "enabled": false,
+                "value": 0
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "enabled": false,
+                "value": 0
+              }
+            }
+          ],
+          "shadow-specializations": [
+            {
+              "value": {
+                "kind": "none",
+                "opacity": 0
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "kind": "none",
+                "opacity": 0
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "kind": "none",
+                "opacity": 0
+              }
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "glass-specializations": [
+        {
+          "value": false
+        },
+        {
+          "appearance": "dark",
+          "value": false
+        },
+        {
+          "appearance": "tinted",
+          "value": false
+        }
+      ],
+      "specular-specializations": [
+        {
+          "value": false
+        },
+        {
+          "appearance": "dark",
+          "value": false
+        },
+        {
+          "appearance": "tinted",
+          "value": false
+        }
+      ],
+      "blur-material-specializations": [
+        {
+          "value": 0
+        },
+        {
+          "appearance": "dark",
+          "value": 0
+        },
+        {
+          "appearance": "tinted",
+          "value": 0
+        }
+      ],
+      "translucency-specializations": [
+        {
+          "value": {
+            "enabled": false,
+            "value": 0
+          }
+        },
+        {
+          "appearance": "dark",
+          "value": {
+            "enabled": false,
+            "value": 0
+          }
+        },
+        {
+          "appearance": "tinted",
+          "value": {
+            "enabled": false,
+            "value": 0
+          }
+        }
+      ],
+      "shadow-specializations": [
+        {
+          "value": {
+            "kind": "none",
+            "opacity": 0
+          }
+        },
+        {
+          "appearance": "dark",
+          "value": {
+            "kind": "none",
+            "opacity": 0
+          }
+        },
+        {
+          "appearance": "tinted",
+          "value": {
+            "kind": "none",
+            "opacity": 0
+          }
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared",
+    "circles": [
       "watchOS"
-    ],
-    "squares" : "shared"
+    ]
   }
 }
