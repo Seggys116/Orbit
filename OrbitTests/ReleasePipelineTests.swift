@@ -340,6 +340,109 @@ final class ReleasePipelineTests: XCTestCase {
         )
     }
 
+    // MARK: - Passkeys and the provisioning profile
+
+    func testProvisionedKeysShipOnlyWithAProvisioningProfile() throws {
+        let plain = try entitlementsPlist(role: "app", provisioned: false)
+        let provisioned = try entitlementsPlist(role: "app", provisioned: true)
+        for key in [
+            "com.apple.application-identifier",
+            "com.apple.developer.team-identifier",
+            "com.apple.developer.icloud-container-identifiers",
+            "com.apple.developer.web-browser.public-key-credential",
+        ] {
+            XCTAssertNil(
+                plain[key],
+                "\(key) is restricted: AMFI kills a process claiming it without an embedded "
+                    + "profile granting it, so the plist an unprovisioned build signs with must not carry it"
+            )
+            XCTAssertNotNil(provisioned[key], "\(key) is missing from the provisioned rendering")
+        }
+    }
+
+    func testTheProvisionedRenderingCarriesValuesAProfileCanGrant() throws {
+        let provisioned = try entitlementsPlist(role: "app", provisioned: true)
+        XCTAssertEqual(
+            provisioned["com.apple.developer.web-browser.public-key-credential"] as? Bool, true,
+            "WKWebView only runs WebAuthn for arbitrary sites when this is true"
+        )
+        XCTAssertEqual(
+            provisioned["com.apple.application-identifier"] as? String,
+            "H2X57PJPJ6.com.zak-noble-clarke.Orbit"
+        )
+        XCTAssertEqual(provisioned["com.apple.developer.team-identifier"] as? String, "H2X57PJPJ6")
+        XCTAssertEqual(
+            provisioned["com.apple.developer.icloud-container-identifiers"] as? [String],
+            ["iCloud.com.zak-noble-clarke.Orbit"]
+        )
+        XCTAssertEqual(
+            provisioned["com.apple.developer.ubiquity-kvstore-identifier"] as? String,
+            "H2X57PJPJ6.com.zak-noble-clarke.Orbit",
+            "a Developer ID profile grants this as 'TEAMID.*'; any other prefix gets the app killed at launch"
+        )
+        XCTAssertEqual(
+            provisioned["com.apple.developer.icloud-container-environment"] as? String, "Production",
+            "a Developer ID build that omits this syncs into the Development CloudKit environment"
+        )
+        XCTAssertNil(
+            provisioned["keychain-access-groups"],
+            "WebKit stores passkeys through the system; Orbit has no keychain group of its own to claim"
+        )
+    }
+
+    func testSignRefusesAProvisioningProfileThatIsNotThere() throws {
+        let app = try makeScratchDirectory().appendingPathComponent("Orbit.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let missing = try makeScratchDirectory().appendingPathComponent("absent.provisionprofile")
+        let run = try release(["sign", "--app", app.path, "--adhoc", "--profile", missing.path])
+        XCTAssertFalse(run.succeeded)
+        XCTAssertTrue(run.output.contains("no provisioning profile at"), run.output)
+    }
+
+    func testSignRefusesAFileThatIsNotAProvisioningProfile() throws {
+        let scratch = try makeScratchDirectory()
+        let app = scratch.appendingPathComponent("Orbit.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let bogus = scratch.appendingPathComponent("bogus.provisionprofile")
+        try Data("not a CMS envelope".utf8).write(to: bogus)
+        let run = try release([
+            "sign", "--app", app.path, "--identity", "Developer ID Application: Nobody (XXXXXXXXXX)",
+            "--profile", bogus.path,
+        ])
+        XCTAssertFalse(run.succeeded)
+        XCTAssertTrue(run.output.contains("is not a readable provisioning profile"), run.output)
+    }
+
+    func testSignRefusesAProvisioningProfileWithAnAdHocSignature() throws {
+        let scratch = try makeScratchDirectory()
+        let app = scratch.appendingPathComponent("Orbit.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let profile = scratch.appendingPathComponent("any.provisionprofile")
+        try Data("placeholder".utf8).write(to: profile)
+        let run = try release(["sign", "--app", app.path, "--adhoc", "--profile", profile.path])
+        XCTAssertFalse(run.succeeded)
+        XCTAssertTrue(
+            run.output.contains("cannot be used with an ad hoc signature"),
+            "an ad hoc signature has no team or certificate for a profile to match, so the result could never launch:\n\(run.output)"
+        )
+    }
+
+    func testTheRoleListingNamesTheKeysAProfileMustGrant() throws {
+        let run = try release(["entitlements"])
+        XCTAssertTrue(run.succeeded, run.output)
+        XCTAssertTrue(
+            run.output.contains("com.apple.developer.web-browser.public-key-credential (only with a provisioning profile)"),
+            run.output
+        )
+    }
+
+    private func entitlementsPlist(role: String, provisioned: Bool) throws -> [String: Any] {
+        let run = try release(["entitlements", "--print", role] + (provisioned ? ["--provisioned"] : []))
+        XCTAssertTrue(run.succeeded, run.output)
+        let parsed = try PropertyListSerialization.propertyList(from: Data(run.output.utf8), format: nil)
+        return try XCTUnwrap(parsed as? [String: Any], "entitlements --print \(role) did not emit a plist")
+    }
+
     // MARK: - Fixtures
 
     private static let entitlementFileNames = [

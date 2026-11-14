@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import datetime
 import json
 import os
 import plistlib
@@ -13,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import urllib.parse
 import xml.etree.ElementTree as ElementTree
@@ -208,7 +210,39 @@ ENTITLEMENT_RATIONALE = {
         "alongside CloudKit. Orbit does not use NSUbiquitousKeyValueStore; it "
         "is listed because removing it by hand makes the capability editor "
         "re-add it on the next save, which would then fail this table's own "
-        "check mode."
+        "check mode. Its value is the team prefixed bundle identifier, the "
+        "only form a Developer ID profile's 'TEAMID.*' grant covers."
+    ),
+    "com.apple.developer.icloud-container-environment": (
+        "Which CloudKit environment the container is used in. Xcode writes "
+        "it at export for a Developer ID build, and a signature without it "
+        "reaches the Development environment, where every user's data would "
+        "land in a database that is reset and is not the one Orbit's schema "
+        "is deployed to. Orbit signs outside Xcode's export, so it is named "
+        "here."
+    ),
+    "com.apple.application-identifier": (
+        "Names this process as its team identifier followed by its bundle "
+        "identifier. AMFI matches it against the embedded provisioning "
+        "profile's own application identifier before it honours any of the "
+        "restricted keys below, so every profile backed grant depends on it."
+    ),
+    "com.apple.developer.team-identifier": (
+        "The Developer Team ID the provisioning profile was issued to. A "
+        "binary carrying it with no embedded profile granting it is killed by "
+        "AMFI at exec, which is why it is a provisioned key here rather than a "
+        "plain one."
+    ),
+    "com.apple.developer.web-browser.public-key-credential": (
+        "Apple's managed entitlement for an application that acts as the "
+        "user's web browser. With it, WKWebView performs WebAuthn registration "
+        "and assertion for any relying party: iCloud Keychain passkeys, "
+        "passkeys from another device over the QR code flow, and hardware "
+        "security keys. Without it WebKit allows a ceremony only for domains "
+        "the app has an associated domain for, which for a browser means "
+        "none. It cannot be self granted: Apple enables it on the App ID as a "
+        "managed capability and it reaches a build only through a "
+        "provisioning profile."
     ),
 }
 
@@ -255,9 +289,13 @@ BROWSER_ROLE = SignedRole(
         "com.apple.security.cs.disable-library-validation",
     ),
     provisioned=(
+        "com.apple.application-identifier",
+        "com.apple.developer.team-identifier",
         "com.apple.developer.icloud-container-identifiers",
         "com.apple.developer.icloud-services",
+        "com.apple.developer.icloud-container-environment",
         "com.apple.developer.ubiquity-kvstore-identifier",
+        "com.apple.developer.web-browser.public-key-credential",
     ),
 )
 
@@ -347,6 +385,19 @@ ENTITLEMENT_BASELINE = {
     "app": ("com.apple.security.cs.disable-library-validation",),
 }
 
+# The same record for the keys only a provisioning profile can grant. They ship whenever one is present, so a change here is as much a decision as one above.
+PROVISIONED_BASELINE = {
+    "app": (
+        "com.apple.application-identifier",
+        "com.apple.developer.team-identifier",
+        "com.apple.developer.icloud-container-identifiers",
+        "com.apple.developer.icloud-services",
+        "com.apple.developer.icloud-container-environment",
+        "com.apple.developer.ubiquity-kvstore-identifier",
+        "com.apple.developer.web-browser.public-key-credential",
+    ),
+}
+
 def check_entitlement_policy(checks) -> None:
     """The invariants the role table itself cannot express. Every failure names the invariant and why it matters, because a guard nobody understands gets deleted the first time it goes red."""
     live_waivers = {}
@@ -369,7 +420,7 @@ def check_entitlement_policy(checks) -> None:
         )
 
     for role in ALL_ROLES:
-        for key in role.entitlements:
+        for key in role.keys(provisioned=True):
             if key not in FORBIDDEN_ENTITLEMENTS:
                 continue
             waiver = live_waivers.get(key)
@@ -414,6 +465,33 @@ def check_entitlement_policy(checks) -> None:
                "ENTITLEMENT_RATIONALE explaining what it turns off."),
         )
 
+    for role in ALL_ROLES:
+        declared = tuple(PROVISIONED_BASELINE.get(role.key, ()))
+        if tuple(role.provisioned) == declared:
+            checks.check(
+                f"{role.key} requests exactly its recorded provisioned baseline",
+                True,
+                ", ".join(declared) or "nothing",
+            )
+            continue
+        added = sorted(set(role.provisioned) - set(declared))
+        removed = sorted(set(declared) - set(role.provisioned))
+        checks.check(
+            f"{role.key} requests exactly its recorded provisioned baseline",
+            False,
+            f"added {added}, removed {removed}. These keys ship the moment a "
+            "provisioning profile is present, and each is a capability the "
+            "developer account had to grant, so record the change in "
+            "PROVISIONED_BASELINE in the same commit.",
+        )
+        unexplained = sorted(k for k in role.provisioned if k not in ENTITLEMENT_RATIONALE)
+        if unexplained:
+            checks.check(
+                f"{role.key} provisioned keys all have a rationale",
+                False,
+                f"{unexplained} has no entry in ENTITLEMENT_RATIONALE",
+            )
+
     claimed = {r.filename for r in ALL_ROLES}
     on_disk = sorted(f for f in os.listdir(RESOURCES_DIR) if f.endswith(".entitlements")) \
         if os.path.isdir(RESOURCES_DIR) else []
@@ -440,14 +518,22 @@ def _wrap_comment(text: str, indent: str) -> list:
         )
     return textwrap.wrap(collapsed, width=72 - len(indent.expandtabs()))
 
+TEAM_ID = "H2X57PJPJ6"
+APP_BUNDLE_ID = "com.zak-noble-clarke.Orbit"
+APPLICATION_IDENTIFIER = f"{TEAM_ID}.{APP_BUNDLE_ID}"
+ICLOUD_CONTAINER = f"iCloud.{APP_BUNDLE_ID}"
+CLOUD_SYNC_SOURCE = os.path.join(REPO_ROOT, "Orbit", "Sync", "CloudSyncEngine.swift")
+
 # Entitlements whose value is not `<true/>`: a malformed CloudKit key reads to the app exactly like having no entitlement at all.
 ENTITLEMENT_VALUES: dict[str, object] = {
+    "com.apple.application-identifier": APPLICATION_IDENTIFIER,
+    "com.apple.developer.team-identifier": TEAM_ID,
     # Byte-for-byte identical to CloudSyncEngine.containerIdentifier; `doctor` cross-checks.
-    "com.apple.developer.icloud-container-identifiers": [
-        "iCloud.com.zak-noble-clarke.Orbit",
-    ],
+    "com.apple.developer.icloud-container-identifiers": [ICLOUD_CONTAINER],
     "com.apple.developer.icloud-services": ["CloudKit"],
-    "com.apple.developer.ubiquity-kvstore-identifier": "iCloud.com.zak-noble-clarke.Orbit",
+    "com.apple.developer.icloud-container-environment": "Production",
+    # A Developer ID profile grants this as 'TEAMID.*', which an 'iCloud.' value does not match, and AMFI kills a process claiming one its profile does not cover.
+    "com.apple.developer.ubiquity-kvstore-identifier": APPLICATION_IDENTIFIER,
 }
 
 def _render_entitlement_value(key: str) -> list[str]:
@@ -514,6 +600,199 @@ def render_entitlements(role: SignedRole, provisioned: bool = False) -> str:
     rendered = "\n".join(lines) + "\n"
     strict_xml_error(rendered)
     return rendered
+
+PROVISIONING_PROFILE_ENV = "ORBIT_PROVISIONING_PROFILE"
+EMBEDDED_PROFILE_NAME = "embedded.provisionprofile"
+
+PROVISIONING_PROFILE_NOTE = (
+    "The keys in a role's provisioned set are restricted: AMFI reads them out "
+    "of the signature at exec, looks for an embedded.provisionprofile that "
+    "grants each one, and kills the process with SIGKILL when it cannot find "
+    "one. That holds for a Developer ID signature as much as an ad hoc one. "
+    "So these keys are emitted only when a profile is supplied, through "
+    "ORBIT_PROVISIONING_PROFILE or `sign --profile`, and each is checked "
+    "against what that profile grants before anything is signed. A build "
+    "with no profile launches, but has no passkeys, no security keys and no "
+    "iCloud sync: WebKit refuses WebAuthn for arbitrary sites without the "
+    "web browser credential entitlement, and CloudKit refuses a container "
+    "the process is not signed for."
+)
+
+class ProfileError(Exception):
+    pass
+
+def load_provisioning_profile(path: str) -> dict:
+    """What a .provisionprofile grants. The file is CMS signed, so the plist only comes out through `security cms -D`. Raises ProfileError."""
+    decoded = run(["security", "cms", "-D", "-i", path], capture=True, check=False)
+    if decoded.returncode != 0 or not (decoded.stdout or "").strip():
+        raise ProfileError(
+            f"{path} is not a readable provisioning profile: security could not "
+            "decode its CMS envelope. Download it again from the developer "
+            "account rather than editing it."
+        )
+    return parse_provisioning_profile(decoded.stdout.encode("utf-8"), path)
+
+def read_provisioning_profile(path: str) -> dict:
+    try:
+        return load_provisioning_profile(path)
+    except ProfileError as exc:
+        die(str(exc))
+
+def parse_provisioning_profile(payload: bytes, path: str) -> dict:
+    try:
+        parsed = plistlib.loads(payload)
+    except (plistlib.InvalidFileException, ValueError) as exc:
+        raise ProfileError(f"{path} decoded, but its payload is not a property list: {exc}")
+    grants = parsed.get("Entitlements")
+    if not isinstance(grants, dict):
+        raise ProfileError(f"{path} has no Entitlements dictionary, so it grants nothing at all.")
+    teams = parsed.get("TeamIdentifier") or [None]
+    certificates = [
+        bytes(der)
+        for der in parsed.get("DeveloperCertificates") or []
+        if isinstance(der, (bytes, bytearray))
+    ]
+    return {
+        "path": path,
+        "name": parsed.get("Name") or "(unnamed)",
+        "uuid": parsed.get("UUID") or "(no uuid)",
+        "team": teams[0],
+        "expires": parsed.get("ExpirationDate"),
+        "developer_id": parsed.get("ProvisionsAllDevices") is True,
+        "certificates": certificates,
+        "grants": grants,
+    }
+
+def profile_expired(profile: dict, now: datetime.datetime | None = None) -> bool:
+    expires = profile.get("expires")
+    if not isinstance(expires, datetime.datetime):
+        return False
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=datetime.timezone.utc)
+    return expires <= (now or datetime.datetime.now(datetime.timezone.utc))
+
+def profile_problems(profile: dict, role: "SignedRole") -> list:
+    """Everything that would get a Developer ID build carrying this profile killed at launch, short of the signing certificate, which only `sign` knows."""
+    problems = []
+    if profile["team"] != TEAM_ID:
+        problems.append(
+            f"issued to team {profile['team'] or '(none)'}, but this app signs as {TEAM_ID}"
+        )
+    if not profile.get("developer_id"):
+        problems.append(
+            "not a Developer ID profile (ProvisionsAllDevices is not set). A "
+            "development or Mac App Store profile does not cover a Developer ID "
+            "signature"
+        )
+    if profile_expired(profile):
+        problems.append(f"expired on {profile['expires']}")
+    shortfall = profile_shortfall(profile, role)
+    if shortfall:
+        problems.append("does not grant " + ", ".join(k for k, _, _ in shortfall))
+    return problems
+
+def identity_certificate(identity: str, keychain: str | None) -> bytes | None:
+    """The DER bytes of the codesigning certificate an identity name or `find-identity` hash refers to. Compared byte for byte with a profile's DeveloperCertificates, so nothing here is hashed."""
+    wanted = identity.strip()
+    fingerprint = next(
+        (c["sha1"] for c in available_identities(keychain)
+         if c["sha1"] == wanted.upper() or c["name"] == wanted),
+        None,
+    )
+    if fingerprint is None:
+        return None
+    command = ["security", "find-certificate", "-a", "-Z", "-p"]
+    if keychain:
+        command.append(keychain)
+    listing = run(command, capture=True, check=False).stdout or ""
+    current = None
+    for block in re.finditer(
+        r"SHA-1 hash: ([0-9A-F]{40})\s*-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----",
+        listing,
+        re.S,
+    ):
+        if block.group(1) == fingerprint:
+            current = block.group(2)
+            break
+    if current is None:
+        return None
+    try:
+        return base64.b64decode("".join(current.split()), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+def _profile_pattern_matches(granted, wanted: str) -> bool:
+    if not isinstance(granted, str):
+        return False
+    if granted == "*":
+        return True
+    if granted.endswith("*"):
+        return wanted.startswith(granted[:-1])
+    return granted == wanted
+
+def profile_allows(granted, wanted) -> bool:
+    """Whether a profile's grant covers the value a role wants. A profile writes a capability as a wildcard, `TEAMID.*` or `*`, where the signed entitlement names one concrete value."""
+    if isinstance(wanted, bool):
+        return granted is True if wanted else True
+    wanted_items = wanted if isinstance(wanted, list) else [wanted]
+    granted_items = granted if isinstance(granted, list) else [granted]
+    return all(
+        any(_profile_pattern_matches(g, w) for g in granted_items) for w in wanted_items
+    )
+
+def profile_shortfall(profile: dict, role: SignedRole) -> list:
+    """Every provisioned key the profile does not cover, as (key, wanted, granted)."""
+    missing = []
+    for key in role.provisioned:
+        wanted = ENTITLEMENT_VALUES.get(key, True)
+        granted = profile["grants"].get(key)
+        if key not in profile["grants"] or not profile_allows(granted, wanted):
+            missing.append((key, wanted, granted))
+    return missing
+
+def require_profile_covers(profile: dict, role: SignedRole) -> None:
+    name = os.path.basename(profile["path"])
+    if profile["team"] != TEAM_ID:
+        die(
+            f"{name} was issued to team {profile['team'] or '(none)'}, but this app "
+            f"signs as {TEAM_ID}. A profile from another team grants nothing to "
+            "this signature."
+        )
+    if not profile.get("developer_id"):
+        die(
+            f"{name} ('{profile['name']}') is not a Developer ID profile: "
+            "ProvisionsAllDevices is not set, so it is a development or Mac App "
+            "Store profile. macOS kills a Developer ID signed app carrying one. "
+            "Create a Developer ID profile for the App ID in the developer account."
+        )
+    if profile_expired(profile):
+        die(
+            f"{name} ('{profile['name']}') expired on {profile['expires']}. "
+            "Regenerate it in the developer account."
+        )
+    missing = profile_shortfall(profile, role)
+    if not missing:
+        return
+    lines = [
+        f"{os.path.basename(profile['path'])} ('{profile['name']}') does not grant "
+        f"{len(missing)} of the entitlements {role.display} needs:",
+        "",
+    ]
+    for key, wanted, granted in missing:
+        lines.append(f"  {key}")
+        lines.append(f"    wanted:  {wanted!r}")
+        lines.append(f"    profile: {granted!r}" if key in profile["grants"] else "    profile: absent")
+    lines += [
+        "",
+        "Signing anyway would produce an app that codesign and notarisation "
+        "accept and macOS kills with SIGKILL the first time anyone opens it. "
+        f"Enable the matching capability on the App ID '{APP_BUNDLE_ID}' in the "
+        "developer account (iCloud with the "
+        f"'{ICLOUD_CONTAINER}' container, and macOS Web Browser Public Key "
+        "Credential), regenerate the Developer ID provisioning profile, and "
+        "pass the new one.",
+    ]
+    die("\n".join(lines))
 
 def strict_xml_error(text: str) -> str:
     """'' when well-formed, else the parser's complaint. Not `plutil -lint`, which accepts entitlement plists codesign's stricter parser rejects."""
@@ -1078,6 +1357,50 @@ def cmd_doctor(args) -> int:
             "in sync" if current == render_entitlements(role) else "run: Scripts/release entitlements --write",
         )
 
+    cloud_source = ""
+    if os.path.isfile(CLOUD_SYNC_SOURCE):
+        with open(CLOUD_SYNC_SOURCE, "r", encoding="utf-8") as handle:
+            cloud_source = handle.read()
+    container_literal = f'"{ICLOUD_CONTAINER}"'
+    checks.check(
+        "the CloudKit container matches CloudSyncEngine",
+        container_literal in cloud_source,
+        ICLOUD_CONTAINER if container_literal in cloud_source else (
+            f"{os.path.relpath(CLOUD_SYNC_SOURCE, REPO_ROOT)} does not name "
+            f"{container_literal}. CKContainer(identifier:) raises for a container "
+            "the signature does not claim"
+        ),
+    )
+
+    checks.section("Provisioning profile")
+    profile_path = getattr(args, "profile", None) or os.environ.get(PROVISIONING_PROFILE_ENV)
+    if not profile_path:
+        checks.note(
+            PROVISIONING_PROFILE_ENV,
+            False,
+            "unset. A signed build would carry none of "
+            f"[{', '.join(BROWSER_ROLE.provisioned)}]: no passkeys, security keys, "
+            "iCloud Passwords extension or iCloud sync",
+        )
+    elif not os.path.isfile(profile_path):
+        checks.check(PROVISIONING_PROFILE_ENV, False, f"no file at {profile_path}")
+    else:
+        try:
+            profile = load_provisioning_profile(profile_path)
+        except ProfileError as exc:
+            checks.check(PROVISIONING_PROFILE_ENV, False, str(exc))
+        else:
+            problems = profile_problems(profile, BROWSER_ROLE)
+            checks.check(
+                "the profile covers a Developer ID build",
+                not problems,
+                f"'{profile['name']}' ({profile['uuid']}), expires {profile['expires']}"
+                if not problems else
+                "; ".join(problems)
+                + f". Fix the App ID '{APP_BUNDLE_ID}' in the developer account and "
+                "regenerate the Developer ID profile",
+            )
+
     checks.section("Sparkle updater")
     link_ok, link_detail = project_sparkle_link_status()
     checks.check("the Orbit target links the Sparkle package", link_ok, link_detail)
@@ -1169,7 +1492,7 @@ def cmd_entitlements(args) -> int:
                 f"unknown role '{args.print}'. Known roles: "
                 + ", ".join(sorted(ROLES_BY_KEY))
             )
-        sys.stdout.write(render_entitlements(role))
+        sys.stdout.write(render_entitlements(role, provisioned=args.provisioned))
         return 0
 
     if args.write:
@@ -1224,7 +1547,14 @@ def cmd_entitlements(args) -> int:
         print(f"    {dim(os.path.relpath(role.path, REPO_ROOT))}")
         for key in role.entitlements:
             print(f"    - {key}")
+        for key in role.provisioned:
+            print(f"    - {key} {dim('(only with a provisioning profile)')}")
         print()
+    print(bold("Entitlements a provisioning profile has to grant"))
+    print()
+    print(textwrap.fill(PROVISIONING_PROFILE_NOTE, width=76,
+                        initial_indent="  ", subsequent_indent="  "))
+    print()
     print(bold("Signed executables that deliberately carry no entitlements"))
     print()
     for note in (SPARKLE_UPDATER_ENTITLEMENTS_NOTE, SPARKLE_XPC_NOTE):
@@ -1310,6 +1640,50 @@ def cmd_sign(args) -> int:
                 f"{os.path.relpath(role.path, REPO_ROOT)} is missing. "
                 "Run: Scripts/release entitlements --write"
             )
+
+    profile_path = getattr(args, "profile", None) or os.environ.get(PROVISIONING_PROFILE_ENV)
+    profile = None
+    if profile_path:
+        profile_path = os.path.abspath(profile_path)
+        if not os.path.isfile(profile_path):
+            die(
+                f"no provisioning profile at {profile_path}. Unset "
+                f"{PROVISIONING_PROFILE_ENV} to sign without one, which drops every "
+                "key in the browser role's provisioned set."
+            )
+        if adhoc:
+            die(
+                "a provisioning profile cannot be used with an ad hoc signature: "
+                "the profile is matched against a team and a signing certificate, "
+                "and an ad hoc signature has neither, so macOS would kill the "
+                f"result at launch. Unset {PROVISIONING_PROFILE_ENV} (or drop "
+                "--profile) to sign ad hoc."
+            )
+        profile = read_provisioning_profile(profile_path)
+        require_profile_covers(profile, BROWSER_ROLE)
+        certificate = identity_certificate(identity, keychain)
+        if certificate is None:
+            die(
+                f"could not find the certificate for signing identity '{identity}', "
+                f"so it cannot be checked against {os.path.basename(profile_path)}."
+            )
+        if certificate not in profile["certificates"]:
+            die(
+                f"{os.path.basename(profile_path)} ('{profile['name']}') does not "
+                f"list the certificate '{identity}' signs with. "
+                "macOS kills an app whose signing certificate is not in its "
+                "embedded profile. Regenerate the profile with this Developer ID "
+                "certificate selected."
+            )
+    else:
+        warn(
+            "no provisioning profile: signing without "
+            + ", ".join(BROWSER_ROLE.provisioned)
+            + f". Set {PROVISIONING_PROFILE_ENV} to a Developer ID profile for "
+            f"{APP_BUNDLE_ID} to ship them. Without them this build has no "
+            "passkeys, no security keys, no iCloud Passwords extension and no "
+            "iCloud sync."
+        )
 
     def sign(path: str, entitlements: str | None = None, label: str = "") -> None:
         command = ["codesign", "--force", "--sign", identity, "--options", "runtime"]
@@ -1424,8 +1798,36 @@ def cmd_sign(args) -> int:
             continue
         sign(path, label=f"{os.path.relpath(path, app)}  (additional nested code)")
 
-    # 3. Last, the outer bundle, which seals everything above it.
-    sign(app, BROWSER_ROLE.path, label=f"{os.path.basename(app)}  (browser process)")
+    # 3. The profile goes in before step 4 seals it: a resource added after signing invalidates the signature, and AMFI only looks for it here.
+    embedded_profile = os.path.join(app, "Contents", EMBEDDED_PROFILE_NAME)
+    browser_entitlements = BROWSER_ROLE.path
+    scratch = None
+    if profile:
+        shutil.copyfile(profile_path, embedded_profile)
+        step(
+            f"Contents/{EMBEDDED_PROFILE_NAME}  ('{profile['name']}', "
+            f"{profile['uuid']}, expires {profile['expires']})"
+        )
+        scratch = tempfile.mkdtemp(prefix="orbit-entitlements-")
+        browser_entitlements = os.path.join(scratch, BROWSER_ROLE.filename)
+        with open(browser_entitlements, "w", encoding="utf-8") as handle:
+            handle.write(render_entitlements(BROWSER_ROLE, provisioned=True))
+        step("browser entitlements: " + ", ".join(BROWSER_ROLE.keys(provisioned=True)))
+    elif os.path.isfile(embedded_profile):
+        die(
+            f"{os.path.relpath(embedded_profile, app)} is already in this bundle, but "
+            "no profile was passed, so it would be sealed alongside entitlements "
+            "that claim none of what it grants. Pass the same profile through "
+            f"{PROVISIONING_PROFILE_ENV} or --profile, or start from an archive "
+            "without one."
+        )
+
+    # 4. Last, the outer bundle, which seals everything above it.
+    try:
+        sign(app, browser_entitlements, label=f"{os.path.basename(app)}  (browser process)")
+    finally:
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
 
     info("Signed. Verifying.")
     run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", app], capture=True)
@@ -1584,14 +1986,60 @@ def verify_signature(app: str, checks: Checklist, require_timestamp: bool, requi
 
     # The browser process is the only signed role to check.
     embedded = codesign_entitlements(app)
-    granted = sorted(k for k, v in embedded.items() if v is True)
-    expected = sorted(BROWSER_ROLE.entitlements)
+    embedded_profile = os.path.join(app, "Contents", EMBEDDED_PROFILE_NAME)
+    provisioned = os.path.isfile(embedded_profile)
+    expected_keys = BROWSER_ROLE.keys(provisioned=provisioned)
+    expected_values = {k: ENTITLEMENT_VALUES.get(k, True) for k in expected_keys}
+    unexpected = sorted(set(embedded) - set(expected_keys))
+    absent = sorted(set(expected_keys) - set(embedded))
+    wrong = sorted(k for k in expected_keys if k in embedded and embedded[k] != expected_values[k])
+    detail = []
+    if unexpected:
+        detail.append("unexpected " + ", ".join(unexpected))
+    if absent:
+        detail.append("missing " + ", ".join(absent))
+    if wrong:
+        detail.append("wrong value for " + ", ".join(wrong))
+    if not provisioned and set(unexpected) & set(BROWSER_ROLE.provisioned):
+        detail.append(
+            "restricted keys with no embedded provisioning profile: macOS kills "
+            "this app at launch"
+        )
     checks.check(
         f"{BROWSER_ROLE.display} entitlements",
-        granted == expected,
-        "as declared" if granted == expected else
-        f"expected [{', '.join(expected)}], signature carries [{', '.join(granted) or 'none'}]",
+        not detail,
+        "as declared" if not detail else "; ".join(detail),
     )
+    if not provisioned:
+        checks.note(
+            "provisioning profile",
+            False,
+            "none embedded, so this build carries none of "
+            f"[{', '.join(BROWSER_ROLE.provisioned)}]: no passkeys, security keys, "
+            "iCloud Passwords extension or iCloud sync",
+        )
+    else:
+        try:
+            profile = load_provisioning_profile(embedded_profile)
+            problems = profile_problems(profile, BROWSER_ROLE)
+            summary = f"'{profile['name']}' ({profile['uuid']}), expires {profile['expires']}"
+        except ProfileError as exc:
+            problems = [str(exc)]
+            summary = ""
+        checks.check(
+            "embedded provisioning profile",
+            not problems,
+            summary if not problems else "; ".join(problems) + "; the app will be killed at launch",
+        )
+        for key in BROWSER_ROLE.provisioned:
+            wanted = ENTITLEMENT_VALUES.get(key, True)
+            actual = embedded.get(key)
+            checks.check(
+                f"signature carries {key}",
+                actual == wanted,
+                repr(wanted) if actual == wanted else
+                f"expected {wanted!r}, signature carries {actual!r}",
+            )
     checks.check(
         f"{BROWSER_ROLE.display} uses the hardened runtime",
         outer["hardened_runtime"],
@@ -1786,7 +2234,8 @@ def cmd_notarize(args) -> int:
 def cmd_all(args) -> int:
     info("Preflight")
     doctor_args = argparse.Namespace(
-        app=None, adhoc=args.adhoc, keychain=args.keychain, identity=args.identity
+        app=None, adhoc=args.adhoc, keychain=args.keychain, identity=args.identity,
+        profile=args.profile,
     )
     if cmd_doctor(doctor_args) != 0 and not args.force:
         die(
@@ -1814,7 +2263,7 @@ def cmd_all(args) -> int:
     run(["ditto", app_from_archive(archive_path), app], capture=True)
 
     sign_args = argparse.Namespace(app=app, identity=args.identity, adhoc=args.adhoc,
-                                   keychain=args.keychain)
+                                   keychain=args.keychain, profile=args.profile)
     if cmd_sign(sign_args) != 0:
         return 1
 
@@ -1863,6 +2312,13 @@ def add_signing_arguments(parser: argparse.ArgumentParser) -> None:
                         help="sign ad-hoc: verifiable, but not distributable and not notarisable")
     parser.add_argument("--keychain", help="keychain to search for the identity")
 
+def add_profile_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--profile",
+        help=f"Developer ID provisioning profile to embed (default: ${PROVISIONING_PROFILE_ENV}); "
+             "without one the passkey and iCloud entitlements are left out",
+    )
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="Scripts/release",
@@ -1886,6 +2342,7 @@ def build_parser() -> argparse.ArgumentParser:
                           help="do not require a Developer ID certificate")
     p_doctor.add_argument("--identity", help=argparse.SUPPRESS)
     p_doctor.add_argument("--keychain", help="keychain to search for the identity")
+    add_profile_argument(p_doctor)
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_version = sub.add_parser("version", help="resolve the version this build would carry")
@@ -1901,6 +2358,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="print one role's generated plist (" + ", ".join(r.key for r in ALL_ROLES) + ")")
     group.add_argument("--write", action="store_true", help="rewrite every plist from the role table")
     group.add_argument("--check", action="store_true", help="fail if any plist has drifted from the table")
+    p_ent.add_argument("--provisioned", action="store_true",
+                       help="with --print: include the keys only a provisioning profile can grant")
     p_ent.set_defaults(func=cmd_entitlements)
 
     p_archive = sub.add_parser("archive", help="xcodebuild archive a Release Orbit.app")
@@ -1916,6 +2375,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sign = sub.add_parser("sign", help="sign an Orbit.app inside out, for distribution")
     p_sign.add_argument("--app", required=True, help="the Orbit.app to sign")
     add_signing_arguments(p_sign)
+    add_profile_argument(p_sign)
     p_sign.set_defaults(func=cmd_sign)
 
     p_verify = sub.add_parser("verify", help="prove a bundle is structurally and cryptographically sound")
@@ -1954,6 +2414,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_all.add_argument("--timeout", default="45m", help="how long to wait for each notary verdict")
     p_all.add_argument("--force", action="store_true", help="continue even if preflight fails")
     add_signing_arguments(p_all)
+    add_profile_argument(p_all)
     p_all.set_defaults(func=cmd_all)
 
     return parser
