@@ -1,11 +1,6 @@
 import Foundation
 
-// Onboarding's import step runs before any browser window exists, so
-// AppEnvironment.engine is nil at that point unless something starts it —
-// without a live engine session, ArcImportCoordinator has nowhere to store
-// decrypted cookies and reports .decryptedButEngineCannotInstall even when
-// the user asked to bring logins across. The menu-driven import in Settings
-// never hits this because the app is already running with an engine by then.
+// Onboarding imports run before any window exists, so without a live engine session ArcImportCoordinator reports .decryptedButEngineCannotInstall for cookies; Settings never hits this.
 @MainActor
 enum OnboardingImportRunner {
 
@@ -25,15 +20,42 @@ enum OnboardingImportRunner {
         env: AppEnvironment,
         importLoginSessions: Bool,
         engineStarter: @MainActor (AppEnvironment) -> Void = { $0.startEngineIfNeeded() },
-        performImport: @MainActor (AppEnvironment, Bool) async throws -> ArcImportSummary = { env, importCookies in
-            try await ArcImportCoordinator.performImport(env: env, importCookies: importCookies)
-        }
+        performImport: (@MainActor (AppEnvironment, Bool) async throws -> ArcImportSummary)? = nil,
+        progress: ImportProgressHandler? = nil
     ) async -> OnboardingView.ImportState {
         let importCookies = resolvedImportCookies(toggleOn: importLoginSessions, browser: .arc)
         ensureEngineReady(env: env, starter: engineStarter)
         do {
-            let summary = try await performImport(env, importCookies)
+            let summary: ArcImportSummary
+            if let performImport {
+                summary = try await performImport(env, importCookies)
+            } else {
+                summary = try await ArcImportCoordinator.performImport(
+                    env: env,
+                    importCookies: importCookies,
+                    progress: progress
+                )
+            }
             return .finishedArc(summary)
+        } catch {
+            return .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+        }
+    }
+
+    static func runStandardImport(
+        _ browser: ImportableBrowser,
+        into spaceID: SpaceID,
+        env: AppEnvironment,
+        progress: ImportProgressHandler? = nil
+    ) async -> OnboardingView.ImportState {
+        do {
+            let summary = try await BrowserImportCoordinator.performImport(
+                browser,
+                into: spaceID,
+                env: env,
+                progress: progress
+            )
+            return .finished(summary)
         } catch {
             return .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }

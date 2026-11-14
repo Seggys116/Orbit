@@ -8,8 +8,7 @@ extension AppEnvironment {
     }
 
     func moveTodayTab(_ tabID: TabID, toIndex index: Int, in spaceID: SpaceID) {
-        // extensionTabIndex, not the Space-scoped Today position: onMoved's
-        // fromIndex/toIndex must be in the same coordinate space as Tab.index.
+        // extensionTabIndex, not the Today position: onMoved indices must share Tab.index's coordinate space.
         let fromIndex = extensionTabIndex(for: tabID)
         store.reorderTab(tabID, toIndex: index, in: spaceID)
         pushExtensionTabMoved(tabID, fromIndex: fromIndex)
@@ -56,9 +55,9 @@ extension AppEnvironment {
         store.setFolderIcon(icon, isEmoji: isEmoji, forFolder: id, in: spaceID)
     }
 
-    // Animated here, at the one place every caller (the row, its context menu, "New Folder Inside") funnels through, so a folder opens and closes the same way however it was asked to.
+    // Animated here, the one funnel for every caller, so folders open and close the same way.
     func toggleFolderExpanded(_ id: FolderID, in spaceID: SpaceID) {
-        withAnimation(OrbitMotion.standard) {
+        withOrbitAnimation(OrbitMotion.standard) {
             store.toggleFolderExpanded(id, in: spaceID)
         }
     }
@@ -81,8 +80,6 @@ extension AppEnvironment {
     func shouldShowTidyTabsBroom(in spaceID: SpaceID) -> Bool {
         todayTabs(in: spaceID).count > AssistRuntime.tidyTabsMinimumTabs
     }
-
-    // MARK: - Tidy Tabs
 
     @discardableResult
     func applyTidyTabGroups(_ groups: [AssistRuntime.TidyTabGroup], in spaceID: SpaceID) -> [String] {

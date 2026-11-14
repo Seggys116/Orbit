@@ -42,6 +42,7 @@ struct ShortcutsSettingsPane: View {
     }
 
     private var commandsByID: [ShortcutCommandID: ShortcutCommand] {
+        // uniqueKeysWithValues traps on a duplicate key, so registry command ids must stay unique.
         Dictionary(uniqueKeysWithValues: registry.commands.map { ($0.id, $0) })
     }
 
@@ -219,7 +220,7 @@ private struct KeybindRow: View {
         .overlay(cardBorder(hasConflict: hasConflict))
         .contentShape(RoundedRectangle(cornerRadius: Self.rowCornerRadius, style: .continuous))
         .onHover { isHovering = $0 }
-        .animation(OrbitMotion.quick, value: isHovering)
+        .orbitAnimation(OrbitMotion.quick, value: isHovering)
         .onTapGesture {
             recordingCommandID = command.id
             recordingConflictNotice = nil

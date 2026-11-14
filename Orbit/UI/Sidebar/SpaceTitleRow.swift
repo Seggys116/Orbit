@@ -95,7 +95,7 @@ struct SpaceTitleRow: View {
                 title: space.isPinnedSectionCollapsed ? "Expand Pinned" : "Collapse Pinned",
                 systemImage: space.isPinnedSectionCollapsed ? "chevron.down" : "chevron.up"
             ) {
-                withAnimation(OrbitMotion.standard) {
+                withOrbitAnimation(OrbitMotion.standard) {
                     env.store.mutateSpace(space.id) { $0.isPinnedSectionCollapsed.toggle() }
                 }
             }),
@@ -171,7 +171,7 @@ struct SpaceTitleRow: View {
     }
 
     private func presentManageSpaces() {
-        LibraryWindowController.show(section: .spaces)
+        env.openLibrary(section: .spaces)
     }
 }
 

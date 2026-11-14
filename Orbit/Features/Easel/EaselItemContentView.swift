@@ -66,8 +66,8 @@ struct EaselItemContentView: View {
                     .controlSize(.mini)
             }
             .padding(6)
-            .background(RoundedRectangle(cornerRadius: 8).fill(.background))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor.opacity(0.4)))
+            .background(RoundedRectangle(cornerRadius: OrbitRadius.md).fill(.background))
+            .overlay(RoundedRectangle(cornerRadius: OrbitRadius.md).strokeBorder(Color.accentColor.opacity(0.4)))
             .onAppear { textDraft = text }
         } else {
             Text(text.isEmpty ? "Double-click to edit" : text)
@@ -75,7 +75,7 @@ struct EaselItemContentView: View {
                 .foregroundStyle(text.isEmpty ? .secondary : .primary)
                 .padding(8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.yellow.opacity(0.18)))
+                .background(RoundedRectangle(cornerRadius: OrbitRadius.md).fill(Color.yellow.opacity(0.18)))
                 .onTapGesture(count: 2) {
                     textDraft = text
                     isEditingText = true
@@ -111,12 +111,12 @@ struct EaselItemContentView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: OrbitRadius.md)
                     .fill(.quaternary)
                     .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: OrbitRadius.md))
     }
 
     // MARK: - Link
@@ -135,8 +135,8 @@ struct EaselItemContentView: View {
                 Spacer()
             }
             .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(.background))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+            .background(RoundedRectangle(cornerRadius: OrbitRadius.md).fill(.background))
+            .overlay(RoundedRectangle(cornerRadius: OrbitRadius.md).strokeBorder(.separator))
         }
         .buttonStyle(.plain)
     }
@@ -166,7 +166,7 @@ private struct LiveWebRegionView: View {
                 if let image {
                     Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
                 } else {
-                    RoundedRectangle(cornerRadius: 8).fill(.quaternary)
+                    RoundedRectangle(cornerRadius: OrbitRadius.md).fill(.quaternary)
                     ProgressView().controlSize(.small)
                 }
             }
@@ -180,8 +180,8 @@ private struct LiveWebRegionView: View {
             }
         }
         .buttonStyle(.plain)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+        .clipShape(RoundedRectangle(cornerRadius: OrbitRadius.md))
+        .overlay(RoundedRectangle(cornerRadius: OrbitRadius.md).strokeBorder(.separator))
         .task(id: url) { await refresh() }
     }
 

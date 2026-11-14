@@ -23,11 +23,9 @@ enum WebKitMediaPreferences {
 
 final class OrbitWebView: WKWebView {
     weak var menuOwner: WebKitWebContents?
-    /// The view stays in a windowless pane container, but WebKit stops painting unless it
-    /// believes the view is in a window. While this is set, `window` reports an off-screen window.
+    /// WebKit stops painting a view it believes is windowless, so while this is set `window` reports an off-screen window.
     var keepsCompositingWithoutWindow = false
     private var reportingCompositingWindow = false
-    /// Set once the view has been in a real window. Leaving that window leaves the last frame behind.
     fileprivate var hasJoinedRealWindow = false
     fileprivate var snapshotIsStale = false
 
@@ -44,8 +42,7 @@ final class OrbitWebView: WKWebView {
         return window
     }()
 
-    /// While the command bar owns the keyboard, WebKit must not take it back.
-    /// A page that is already first responder stays there until the presenter moves it.
+    /// While the command bar owns the keyboard WebKit must not take it back; a page already first responder stays so until moved.
     var suppressesFirstResponder = false
 
     var isInRealWindow: Bool { super.window != nil }
@@ -85,15 +82,13 @@ final class OrbitWebView: WKWebView {
         super.removeFromSuperviewWithoutNeedingDisplay()
     }
 
-    /// An undocked inspector's attach removes the page from its window and the next script
-    /// dies with `removedFromContainer`. Orbit's own moves opt out of the lock.
+    /// An undocked inspector's attach removes the page from its window and the next script dies with `removedFromContainer`.
     private var refusesExternalReparent: Bool {
         guard let owner = menuOwner else { return false }
         if owner.intentionalInspectorReparentCount > 0 { return false }
         return owner.inspectorReparentLock
     }
 
-    /// `createWebArchiveData` never calls back unless the view is actually in a window.
     func attachForArchivingIfNeeded() {
         guard super.window == nil else { return }
         keepsCompositingWithoutWindow = false
@@ -102,8 +97,7 @@ final class OrbitWebView: WKWebView {
         host.addSubview(self)
     }
 
-    /// `_killWebContentProcess` only calls `terminate()`, which does not tell the navigation
-    /// delegate. The reset variant asks the process to exit and reports that exit.
+    /// `_killWebContentProcess` only calls `terminate()`, which does not tell the navigation delegate; the reset variant does.
     @objc(_killWebContentProcess)
     func killWebContentProcess() {
         let reset = NSSelectorFromString("_killWebContentProcessAndResetState")
@@ -252,9 +246,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     private var lastStatusCode = 0
     private var preferredScheme: ContentColorScheme?
     private lazy var webStorePrivateBridge = WebStorePrivateBridge()
-    /// Which main-frame URLs get the Chrome identity; tests swap it to point at a local server.
     var chromeIdentityMatcher: (URL?) -> Bool = { WebKitProduct.usesChromeIdentity(for: $0) }
-    /// showResources opens the window once. A later call dismisses it.
     private var inspectorResourcesPresented = false
     /// Close from the app must not undo itself. WebKit's attach path closes the separate inspector window; the page is put back in its host window without another detach.
     private(set) var inspectorCloseSuppressed = false
@@ -268,7 +260,6 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     private var restoringUndockedPageHost = false
     /// While set, WebKit's attach cannot pull this page out of its window.
     var inspectorReparentLock = false
-    /// Orbit is moving the page itself (dock, restore, close). Those moves are allowed.
     var intentionalInspectorReparentCount = 0
     let extras = WebKitContentsExtras()
 
@@ -309,6 +300,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         attachResourceLoadDelegate(view)
         WebKitContextMenuProbe.install(on: configuration.userContentController)
         Self.installIsolatedWorld(on: configuration.userContentController)
+        OrbitInspectAgent.install(on: configuration.userContentController)
         observeWebView()
         WebKitLiveContents.track(self)
         setPreferredColorScheme(AppearanceSettings.shared.engineColorScheme)
@@ -324,6 +316,8 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         WebKitCosmeticScripts.reset(controller)
         contentSizing?.addScript(to: controller)
         if !isExtensionPage { WebKitContextMenuProbe.install(on: controller) }
+        OrbitInspectAgent.install(on: controller)
+        OrbitDevToolsStore.shared.session(for: self)?.device.reinstallUserScript()
     }
 
     func load(_ url: URL) {
@@ -347,7 +341,6 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         }
     }
 
-    /// Scheme, host, port, path, query and fragment. A fragment-only change is a different navigation.
     private static func sameNavigationURL(_ current: URL, _ requested: URL) -> Bool {
         guard current.scheme?.lowercased() == requested.scheme?.lowercased(),
               current.host?.lowercased() == requested.host?.lowercased(),
@@ -421,8 +414,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         observeWebView()
         contentSizing?.attach(to: replacement)
         if extensionHost == nil { WebKitContextMenuProbe.install(on: configuration.userContentController) }
-        // didOpenTab ran before this view became an extension page, so WebKit
-        // still lists the popup as a browser tab until it is closed.
+        // didOpenTab ran before this view became an extension page, so WebKit still lists the popup as a tab.
         if extensionHost != nil {
             engine.retireExtensionPage(self)
         }
@@ -433,8 +425,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         navigationState.isLoading = true
         publishNavigation()
         guard let baseURL else {
-            // No base URL is an opaque origin. loadHTMLString(nil) is a unique
-            // about:blank, which this WebKit treats as a secure context.
+            // No base URL is an opaque origin; loadHTMLString(nil) is a unique about:blank, a secure context here.
             let encoded = Data(html.utf8).base64EncodedString()
             if let url = URL(string: "data:text/html;base64,\(encoded)") {
                 webView.load(URLRequest(url: url))
@@ -447,8 +438,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     func reload(ignoringCache: Bool) {
         guard !isClosed else { return }
         if ignoringCache {
-            // load() of the committed URL is FrameLoadType::Same and ignores the
-            // reload cache policy. stopLoading() before it also cancels that load.
+            // load() of the committed URL is FrameLoadType::Same and ignores the reload cache policy; stopLoading() first cancels it.
             reloadDocumentFromOrigin()
             return
         }
@@ -488,9 +478,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         return entries
     }
 
-    // A script that ran but produced a value JSON cannot carry (a Window from `window.open`, a DOM
-    // node, a function) did not fail. WebKit reports that as an error, so it is answered with nil,
-    // as a script that returns nothing is. An exception thrown by the script still throws.
+    // A value JSON cannot carry (a Window, DOM node, function) is not a failure though WebKit reports an error; answer nil. Thrown exceptions still throw.
     private static func scriptResult(_ run: () async throws -> Any?) async throws -> Any? {
         do {
             return try await run()
@@ -508,8 +496,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         try await Self.scriptResult { try await webView.evaluateJavaScript(script, withUserGesture: userGesture) }
     }
 
-    /// A named world stays empty until a script is installed in it. Without that, later
-    /// evaluations do not share a global, so a value set in one call is gone in the next.
+    /// A named world stays empty until a script is installed in it; otherwise evaluations do not share a global.
     private static let isolatedWorld = WKContentWorld.world(name: "orbit-isolated")
     private static let isolatedWorldSource = "/* orbit-isolated */"
 
@@ -640,8 +627,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         // WebKit ignores connect() until it has observed the inspectable flag on a later turn.
         RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
         let hostWindow = webView.window
-        // show() attaches and reparents the page. A page with no pane has to stay put: taking
-        // it out of its window while a script runs fails the script with removedFromContainer.
+        // show() reparents the page; a page with no pane must stay put or the running script fails with removedFromContainer.
         if canDockInspector {
             inspectorReparentLock = false
             stopUndockedPageHostWatch()
@@ -657,8 +643,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             if point != nil { Self.voidMessage(inspector, "showConsole") }
             inspectorResourcesPresented = true
         } else if !Self.inspectorWindowIsOnScreen() {
-            // hide() cleared visibility and closed the NSWindow. show() opens a new one.
-            // Detach again only before that show, while nothing is executing in the inspector.
+            // hide() closed the NSWindow; detach again only before the next show(), while nothing executes in the inspector.
             if !canDockInspector { Self.voidMessage(inspector, "detach") }
             Self.voidMessage(inspector, "show")
         }
@@ -671,8 +656,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         EngineAppearance.apply()
     }
 
-    /// Drops the watch that keeps an undocked page in its host window. A pane that can dock
-    /// the inspector owns the page from here on.
+    /// Drops the watch that keeps an undocked page in its host window; a dockable pane owns the page from here on.
     func stopUndockedPageHostWatch() {
         undockedPageHostObservations.removeAll()
         undockedPageHostWindow = nil
@@ -681,9 +665,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     private func watchUndockedPageHost() {
         guard undockedPageHostObservations.isEmpty else { return }
-        // `window` is not always KVO-compliant; superview changes whenever the page is reparented.
-        // The restore is async: this fires inside removeFromSuperview, and setting contentView
-        // there re-enters AppKit and fights the host that is adopting the page.
+        // Watches superview since `window` is not always KVO-compliant; the restore is async because this fires inside removeFromSuperview.
         undockedPageHostObservations.append(webView.observe(\.window, options: [.new]) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.scheduleUndockedPageHostRestore() }
         })
@@ -704,8 +686,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         }
     }
 
-    /// Puts the page back when it has left its host window. Does not detach: detach on an
-    /// already-undocked inspector removes the page while a script is running in it.
+    /// Does not detach: detach on an already-undocked inspector removes the page while a script is running.
     func restoreUndockedPageHost() {
         if canDockInspector {
             stopUndockedPageHostWatch()
@@ -714,14 +695,12 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         guard !isClosed, !restoringUndockedPageHost, let host = undockedPageHostWindow else { return }
         let current = webView.window
         if current === host { return }
-        // A deliberate re-host sets the page as that window's content view (the test does this
-        // between opens). Follow it.
+        // A deliberate re-host sets the page as that window's content view; follow it.
         if let current, !Self.isInspectorWindow(current), current.contentView === webView {
             undockedPageHostWindow = current
             return
         }
-        // The page is already in a window, including Web Inspector's own. Moving it now removes
-        // it from that window mid-script (`removedFromContainer`).
+        // Already in a window, even Web Inspector's own; moving it mid-script fails with `removedFromContainer`.
         if current != nil { return }
         restoringUndockedPageHost = true
         defer { restoringUndockedPageHost = false }
@@ -742,10 +721,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         window.title.hasPrefix("Web Inspector")
     }
 
-    /// Selection becomes active only after the page process answers `StartElementSelection`.
-    /// That answer needs a focused frame, so the page is focused after it is back in its window.
-    /// `toggleElementSelection` sends Start while the flag is false and Stop while it is true;
-    /// a second call before the reply cancels the first. One Start, then wait for the flag.
+    /// `toggleElementSelection` sends Stop while the flag is true, so a second call before the `StartElementSelection` reply cancels the first; send one Start, then wait.
     private func armElementSelection() {
         guard !isClosed, let inspector = webInspector() as? NSObject else { return }
         if !canDockInspector { inspectorReparentLock = true }
@@ -769,8 +745,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             if Self.boolMessage(inspector, "isElementSelectionActive") { return }
             let frontend = inspectorFrontendWebView
             let frontendReady = frontend.map { !$0.isLoading && $0.url != nil } ?? false
-            // Start only once the frontend can receive it. A toggle before that is dropped,
-            // and a second toggle sends Stop.
+            // Start only once the frontend can receive it; an earlier toggle is dropped.
             if !didNativeToggle, frontendReady || Date() >= started.addingTimeInterval(2) {
                 didNativeToggle = true
                 window.makeKey()
@@ -786,7 +761,6 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         }
     }
 
-    /// Makes the page first responder and focuses `document.body` once it is in a window.
     /// Returns whether the document reports focus, which is what gives WebKit a focused frame.
     private func focusInspectedPageForElementSelection() -> Bool {
         restoreUndockedPageHost()
@@ -883,10 +857,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             guard let window = note.object as? NSWindow, window.title.hasPrefix("Web Inspector") else { return }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    // Attach closes the separate inspector window and can take the page with it.
-                    // Put the page back. Do not detach: the inspector is already undocked, and
-                    // detach while a script is running removes the page from its window.
-                    // An outside close of that window must stay closed.
+                    // Attach can take the page into the closing inspector window; put it back without detaching, which removes it mid-script.
                     guard let self, !self.inspectorCloseSuppressed, !self.canDockInspector else { return }
                     self.scheduleUndockedPageHostRestore()
                 }
@@ -912,6 +883,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     func teardown(notifyExtensionController: Bool) {
         guard !isClosed else { return }
         isClosed = true
+        OrbitDevToolsStore.shared.pageClosed(self)
         extras.tearDown()
         inspectorCloseSuppressed = true
         stopUndockedPageHostWatch()
@@ -934,10 +906,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         releaseWebView()
     }
 
-    // A closed contents keeps a non-optional webView. WebKit will not remove a data store while its
-    // view is alive, so the real view is swapped for an inert one. The swap waits until the next
-    // turn: chrome.tabs.remove calls close() on WebKit's own callback stack, and deallocating the
-    // WKWebView there trips idle -> failed(deinit).
+    // WebKit will not remove a data store while its view lives, so close swaps in an inert view next turn; chrome.tabs.remove calls close() on WebKit's callback stack, and deallocating there trips idle -> failed(deinit).
     private func releaseWebView() {
         guard !webViewReleased else { return }
         webViewReleased = true
@@ -1003,6 +972,10 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         navigationState.canGoBack = webView.canGoBack
         navigationState.canGoForward = webView.canGoForward
+        // The inspector's new-page reset and page URL come from here, never from the page agent.
+        let inspectSession = OrbitDevToolsStore.shared.ensureSession(for: self)
+        inspectSession.documentDidCommit(url: webView.url)
+        inspectSession.security.documentDidCommit(webView: webView)
         if let url = webView.url {
             navigationState.url = url
             navigationState.security = Self.security(for: url, mixedContent: !webView.hasOnlySecureContent)
@@ -1028,6 +1001,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         navigationState.canGoBack = webView.canGoBack
         navigationState.canGoForward = webView.canGoForward
         if let url = webView.url { navigationState.url = url }
+        OrbitDevToolsStore.shared.ensureSession(for: self).security.documentDidFinish(webView: webView)
         publishNavigation()
         if let url = webView.url {
             delegate?.webContents(self, didFinishLoading: url, statusCode: lastStatusCode == 0 ? 200 : lastStatusCode)
@@ -1040,7 +1014,6 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         continueOriginReloadIfNeeded()
     }
 
-    // WebKit's loading flag retires the progress bar, including when didFinish never arrives.
     func noteEngineLoading(isLoading: Bool, progress: Double) {
         if isLoading {
             let displayed = min(max(progress, 0.08), 0.99)
@@ -1099,6 +1072,10 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         let http = navigationResponse.response as? HTTPURLResponse
         if let http { lastStatusCode = http.statusCode }
+        if navigationResponse.isForMainFrame, let http {
+            OrbitInspectNativeNetwork.mainFrameDidReceive(contents: self, response: http)
+            OrbitDevToolsStore.shared.ensureSession(for: self).security.noteDocumentResponse(http)
+        }
         let disposition = http?.value(forHTTPHeaderField: "Content-Disposition")?
             .trimmingCharacters(in: .whitespaces).lowercased()
         let isAttachment = disposition?.hasPrefix("attachment") == true
@@ -1128,7 +1105,6 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         webKitSession.userAgent == nil && chromeIdentityMatcher(url)
     }
 
-    // The preferences variant supersedes the plain one, which keeps the policy logic below.
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
@@ -1190,6 +1166,9 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         let allow = delegate?.webContents(
             self, shouldAllowNavigationTo: url, kind: kind, isMainFrame: navigationAction.targetFrame?.isMainFrame ?? true
         ) ?? true
+        if allow, mainFrame {
+            OrbitInspectNativeNetwork.mainFrameWillLoad(contents: self, request: navigationAction.request)
+        }
         decisionHandler(allow ? .allow : .cancel)
     }
 
@@ -1243,10 +1222,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         didReceive challenge: URLAuthenticationChallenge,
         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
-        // Once this delegate is implemented, WebKit treats performDefaultHandling on a
-        // server-trust challenge as "no credential" and cancels the load. A certificate the
-        // system already trusts has to be handed back, including after a redirect
-        // (google.com to www.google.com) and for every other host the page loads (Apple's CDN).
+        // Once this delegate exists, WebKit treats performDefaultHandling on a server-trust challenge as "no credential" and cancels, so trusted certificates must be handed back.
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust
         else {
@@ -1544,12 +1520,12 @@ extension WebKitWebContents {
         view.perform(setter, with: nil)
     }
 
-    /// WebKit calls these on the private resource-load delegate. They are the only place a
-    /// subresource's status and headers are visible, which chrome.webRequest needs.
+    /// The private resource-load delegate is the only place a subresource's status and headers are visible, which chrome.webRequest needs.
     @objc(webView:resourceLoad:didSendRequest:)
     func webView(_ webView: WKWebView, resourceLoad info: NSObject, didSendRequest request: URLRequest) {
         guard let url = request.url else { return }
         let key = Self.resourceLoadKey(info)
+        OrbitInspectNativeNetwork.requestSent(contents: self, info: info, request: request)
         let record = Self.httpRecord(info: info, url: url, method: request.httpMethod ?? "GET")
         extras.httpWebRequests[key] = record
         engine.services.reportHTTPWebRequest(
@@ -1562,6 +1538,7 @@ extension WebKitWebContents {
     @objc(webView:resourceLoad:didReceiveResponse:)
     func webView(_ webView: WKWebView, resourceLoad info: NSObject, didReceiveResponse response: URLResponse) {
         let key = Self.resourceLoadKey(info)
+        OrbitInspectNativeNetwork.responseReceived(contents: self, info: info, response: response)
         var record = extras.httpWebRequests[key] ?? Self.httpRecord(
             info: info,
             url: response.url ?? URL(string: "about:blank")!,
@@ -1576,6 +1553,11 @@ extension WebKitWebContents {
         )
     }
 
+    @objc(webView:resourceLoad:didPerformHTTPRedirection:newRequest:)
+    func webView(_ webView: WKWebView, resourceLoad info: NSObject, didPerformHTTPRedirection response: URLResponse, newRequest request: URLRequest) {
+        OrbitInspectNativeNetwork.redirected(contents: self, info: info, response: response, newRequest: request)
+    }
+
     @objc(webView:resourceLoad:didCompleteWithError:response:)
     func webView(
         _ webView: WKWebView,
@@ -1584,6 +1566,7 @@ extension WebKitWebContents {
         response: URLResponse?
     ) {
         let key = Self.resourceLoadKey(info)
+        OrbitInspectNativeNetwork.completed(contents: self, info: info, error: error, response: response)
         var record = extras.httpWebRequests.removeValue(forKey: key) ?? Self.httpRecord(
             info: info,
             url: response?.url ?? URL(string: "about:blank")!,
@@ -1672,7 +1655,6 @@ extension WebKitWebContents {
         }
     }
 
-    /// `_WKResourceLoadInfoResourceType` in declaration order. `other` is -1.
     private static func chromeResourceType(_ info: NSObject, isMainFrame: Bool) -> String {
         let raw = (info.value(forKey: "resourceType") as? NSNumber)?.intValue ?? -1
         switch raw {

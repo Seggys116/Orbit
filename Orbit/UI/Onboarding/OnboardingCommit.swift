@@ -32,7 +32,6 @@ enum OnboardingCommit {
         return targetID
     }
 
-    // MARK: - Spaces setup
 
     @discardableResult
     static func applySpacesSetup(
@@ -47,11 +46,13 @@ enum OnboardingCommit {
             copy.name = trimmedName
             return copy
         }
-        let effective = trimmed.isEmpty ? OnboardingSpaceDraft.defaults : trimmed
+        // Drafts linked to existing Spaces (an import created them) are edited in place: replacing the first-run document would discard the imported data.
+        let editsExistingSpaces = drafts.contains { $0.existingSpaceID != nil }
+        let effective = (trimmed.isEmpty && !editsExistingSpaces) ? OnboardingSpaceDraft.defaults : trimmed
 
         guard let targetProfileID = profileID ?? state.profiles.first?.id else { return [] }
 
-        if isReplaceableFirstRunDocument(state) {
+        if !editsExistingSpaces, isReplaceableFirstRunDocument(state) {
             return replaceSpaces(with: effective, profileID: targetProfileID, in: &state)
         }
         return mergeSpaces(effective, profileID: targetProfileID, in: &state)
@@ -63,12 +64,26 @@ enum OnboardingCommit {
         return state.tabs.values.allSatisfy { $0.url == BrowserStore.firstRunTabURL }
     }
 
+    /// One theme per draft: its own pick, else the next default no other pick or earlier default uses; with no picks this equals `SpaceThemePalette.defaultThemes(count:)`.
+    static func resolvedThemes(
+        for drafts: [OnboardingSpaceDraft],
+        avoiding existing: [SpaceTheme] = []
+    ) -> [SpaceTheme] {
+        var used = existing + drafts.compactMap(\.theme)
+        return drafts.map { draft in
+            if let chosen = draft.theme { return chosen }
+            let next = SpaceThemePalette.nextDefaultTheme(avoiding: used)
+            used.append(next)
+            return next
+        }
+    }
+
     private static func replaceSpaces(
         with effective: [OnboardingSpaceDraft],
         profileID: ProfileID,
         in state: inout OrbitState
     ) -> [SpaceID] {
-        let themes = SpaceThemePalette.defaultThemes(count: effective.count)
+        let themes = resolvedThemes(for: effective)
         let carriedFavorites = state.spaces.first?.favorites ?? []
         var createdSpaces: [Space] = effective.enumerated().map { index, draft in
             var space = Space(
@@ -121,15 +136,31 @@ enum OnboardingCommit {
         for draft in drafts {
             let trimmedEmoji = draft.emoji.trimmingCharacters(in: .whitespacesAndNewlines)
 
+            if let linkedID = draft.existingSpaceID,
+               let linkedIndex = state.spaces.firstIndex(where: { $0.id == linkedID }) {
+                state.spaces[linkedIndex].name = draft.name
+                if !trimmedEmoji.isEmpty {
+                    state.spaces[linkedIndex].setIcon(emoji: trimmedEmoji)
+                }
+                if let chosen = draft.theme {
+                    state.spaces[linkedIndex].theme = chosen
+                }
+                resolved.append(linkedID)
+                continue
+            }
+
             if let existingIndex = state.spaces.firstIndex(where: { isSameSpaceName($0.name, draft.name) }) {
                 if !trimmedEmoji.isEmpty {
                     state.spaces[existingIndex].setIcon(emoji: trimmedEmoji)
+                }
+                if let chosen = draft.theme {
+                    state.spaces[existingIndex].theme = chosen
                 }
                 resolved.append(state.spaces[existingIndex].id)
                 continue
             }
 
-            let theme = SpaceThemePalette
+            let theme = draft.theme ?? SpaceThemePalette
                 .defaultThemes(count: 1, avoiding: state.spaces.map(\.theme))
                 .first ?? SpaceTheme()
             var space = Space(
@@ -169,11 +200,30 @@ struct OnboardingSpaceDraft: Identifiable, Equatable {
     let id: UUID
     var name: String
     var emoji: String
+    /// The Space's chosen theme; nil lets the commit assign the next unused default.
+    var theme: SpaceTheme?
+    /// Set when the draft stands for a Space an import already created, so the commit renames and re-themes it rather than adding another.
+    var existingSpaceID: SpaceID?
 
-    init(id: UUID = UUID(), name: String, emoji: String) {
+    init(id: UUID = UUID(), name: String, emoji: String, theme: SpaceTheme? = nil, existingSpaceID: SpaceID? = nil) {
         self.id = id
         self.name = name
         self.emoji = emoji
+        self.theme = theme
+        self.existingSpaceID = existingSpaceID
+    }
+
+    static func drafts(from spaces: [Space]) -> [OnboardingSpaceDraft] {
+        spaces.sorted { $0.order < $1.order }.map { space in
+            var emoji = ""
+            if case .emoji(let value) = space.resolvedIcon { emoji = value }
+            return OnboardingSpaceDraft(
+                name: space.name,
+                emoji: emoji,
+                theme: space.theme,
+                existingSpaceID: space.id
+            )
+        }
     }
 
     static var defaults: [OnboardingSpaceDraft] {

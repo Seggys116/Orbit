@@ -1,9 +1,7 @@
 import Observation
 import SwiftUI
 
-// Window-scoped, not routed through the shared Command Bar: a Little Orbit tab is
-// deliberately never AppEnvironment.activeTabID, so the shared bar would silently
-// edit whatever tab the main window is showing instead of this window's own tab.
+// Window-scoped, not the shared Command Bar: a Little Orbit tab is never AppEnvironment.activeTabID, so the shared bar would edit whatever tab the main window shows.
 @MainActor
 @Observable
 final class LittleOrbitAddressBarModel {
@@ -24,9 +22,7 @@ struct LittleOrbitAddressBarOverlay: View {
         ) { width in
             editor(width: width)
         }
-        // .task(id:) against the flag, not .onAppear: this view stays mounted for
-        // the window's whole life once shown, so onAppear would never refire on a
-        // second edit in the same window.
+        // .task(id:) against the flag, not .onAppear: this view stays mounted for the window's life once shown, so onAppear would never refire on a second edit.
         .task(id: model.isPresented) {
             guard model.isPresented else { return }
             await CommandBarFieldFocus.claim(
@@ -54,6 +50,7 @@ struct LittleOrbitAddressBarOverlay: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear")
             }
         }
         .padding(.horizontal, 16)

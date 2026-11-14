@@ -14,6 +14,7 @@ struct SidebarView: View {
     var space: Space?
 
     @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     #if DEBUG
     @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
@@ -47,6 +48,53 @@ struct SidebarView: View {
         return VStack(alignment: .leading, spacing: 0) {
             SidebarTopRow(theme: space.theme)
 
+            // The tab list and the Library trade places on one spring; neither stays mounted behind the other, so a hidden tab list costs nothing.
+            ZStack(alignment: .top) {
+                if env.isLibraryMode {
+                    LibraryModeView(router: env.libraryRouter)
+                        .environment(\.libraryStyle, LibraryStyle(theme: space.theme))
+                        .transition(.librarySlide(offset: LibraryModeMetrics.slideDistance, reduceMotion: reduceMotion))
+                } else {
+                    tabList(
+                        for: space,
+                        hasPinnedNodes: hasPinnedNodes,
+                        showPinnedSection: showPinnedSection,
+                        showsLiveFolderAlone: showsLiveFolderAlone
+                    )
+                    .transition(.librarySlide(offset: -LibraryModeMetrics.slideDistance, reduceMotion: reduceMotion))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .clipped()
+
+            SidebarMiniPlayerTray(theme: space.theme)
+
+            TidyDownloadCardView(theme: space.theme)
+
+            SidebarBottomBar(theme: space.theme)
+                .padding(.bottom, OrbitMetrics.sidebarInterSectionGap)
+                .zIndex(1)
+        }
+        .coordinateSpace(name: SidebarBottomBar.sidebarSpace)
+        .background { chromeDragSurface }
+        .background {
+            if paintsOwnBackground {
+                WindowSlicedThemeBackground(theme: space.theme, blur: SpaceVisualPrefsStore.shared.blur(for: space.id))
+                    .opacity(backgroundOpacity)
+            }
+        }
+        .gitHubLiveFolderToast(for: space, theme: space.theme, presenter: .shared)
+        .persistenceFailureToast(theme: space.theme)
+        .onHover { isHovered = $0 }
+    }
+
+    private func tabList(
+        for space: Space,
+        hasPinnedNodes: Bool,
+        showPinnedSection: Bool,
+        showsLiveFolderAlone: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             if !env.isTornOffWindow(for: space) {
                 SpaceTitleRow(space: space)
             }
@@ -85,32 +133,10 @@ struct SidebarView: View {
                 .padding(.bottom, OrbitMetrics.sidebarSectionSpacing)
             }
             .scrollIndicators(.hidden)
-
-            Spacer(minLength: 0)
-
-            SidebarMiniPlayerTray(theme: space.theme)
-
-            TidyDownloadCardView(theme: space.theme)
-
-            SidebarBottomBar(theme: space.theme)
-                .padding(.bottom, OrbitMetrics.sidebarInterSectionGap)
-                .zIndex(1)
         }
-        .coordinateSpace(name: SidebarBottomBar.sidebarSpace)
-        .background { chromeDragSurface }
-        .background {
-            if paintsOwnBackground {
-                WindowSlicedThemeBackground(theme: space.theme, blur: SpaceVisualPrefsStore.shared.blur(for: space.id))
-                    .opacity(backgroundOpacity)
-            }
-        }
-        .gitHubLiveFolderToast(for: space, theme: space.theme, presenter: .shared)
-        .persistenceFailureToast(theme: space.theme)
-        .onHover { isHovered = $0 }
     }
 
-    // ImageRenderer paints an NSViewRepresentable as an opaque band, so screenshot
-    // mode leaves this out. Real clicks still reach the drag surface.
+    // ImageRenderer paints an NSViewRepresentable as an opaque band, so screenshot mode leaves this out.
     @ViewBuilder
     private var chromeDragSurface: some View {
         #if DEBUG
@@ -124,7 +150,6 @@ struct SidebarView: View {
         #endif
     }
 
-    // MARK: - Self-check (no Screen Recording permission in this environment)
 
     #if DEBUG
     private static let selfCheckLogger = Logger(subsystem: "com.orbit.browser", category: "SidebarMetricsSelfCheck")

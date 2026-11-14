@@ -58,9 +58,7 @@ enum TabRowTrailingAction: Equatable {
     }
 }
 
-// Visible row inputs. lastAccessedAt, zoom, and navigation fields other than the loading
-// bar change on a timer or on every progress tick without moving the title, pin affordance,
-// or favicon. Comparing those here is what lets an unrelated tab's update skip this row.
+// Visible row inputs only: lastAccessedAt, zoom and non-loading navigation fields change on a timer or every progress tick without moving the title, pin affordance or favicon, so excluding them lets an unrelated tab's update skip this row.
 struct TabRowPresentation: Equatable {
     var tab: Tab
     var depth: Int
@@ -172,8 +170,7 @@ struct TabRowView: View {
     var theme: SpaceTheme
     private var forcesHoveredAppearanceForTesting: Bool
 
-    // ImageRenderer has no pointer, so a genuinely hovered row (close button visible, title
-    // narrowed) could never be captured otherwise — see SidebarMiniPlayerView's alwaysExpanded.
+    // ImageRenderer has no pointer, so a genuinely hovered row (close button visible, title narrowed) could never be captured otherwise; see SidebarMiniPlayerView's alwaysExpanded.
     init(tab: Tab, depth: Int = 0, theme: SpaceTheme, forcesHoveredAppearanceForTesting: Bool = false) {
         self.tab = tab
         self.depth = depth
@@ -271,24 +268,19 @@ private struct TabRowChrome: View, Equatable {
                     }
                 }
             }
-            // Trailing padding, not a permanently reserved flow slot: the title gets the row's full width until
-            // the close control is actually visible, at which point this makes exactly as much room as it needs.
+            // Trailing padding, not a permanently reserved flow slot: the title keeps the row's full width until the close control is visible.
             .padding(.trailing, isHovering ? trailingCloseControlReservedWidth : 0)
-            .animation(OrbitMotion.quick, value: isHovering)
+            .orbitAnimation(OrbitMotion.quick, value: isHovering)
 
-            // Overlay, opacity-only: the control sits at a fixed trailing position and never inserts/removes, so
-            // it is exactly as hit-testable the instant it's visible as it is once fully faded in, and a click
-            // aimed at the row body can't land on it just because the layout shifted underneath the pointer.
+            // Overlay, opacity-only: the control never inserts/removes, so a click aimed at the row body can't land on it because the layout shifted under the pointer.
             trailingCloseControl
                 .opacity(isHovering ? 1 : 0)
-                .animation(OrbitMotion.quick, value: isHovering)
+                .orbitAnimation(OrbitMotion.quick, value: isHovering)
         }
         .padding(.leading, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset + CGFloat(depth) * OrbitMetrics.sidebarIndentPerDepth)
         .padding(.trailing, OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset)
         .frame(height: OrbitMetrics.sidebarRowHeight)
-        // Behind the row, filling the whole pitch. A catcher only as tall as the
-        // title let a click on the label hit the text and never activate the tab,
-        // so a short title (lots of empty row) switched and a long one did not.
+        // Behind the row, filling the whole pitch: a catcher only as tall as the title let a click on the label never activate the tab.
         .background(rowActivationCatcher)
         .background(rowBackground)
         .overlay {
@@ -309,10 +301,7 @@ private struct TabRowChrome: View, Equatable {
         .sidebarRecentPagesPreview(tab: tab)
     }
 
-    // Behind the close control and the favicon, which sit later in the tree and
-    // keep their own clicks. The title does not hit-test, so a click on the
-    // words lands here. The whole row pitch is the target: a shrunk pill left
-    // the label itself dead.
+    // Behind the close control and favicon, which keep their own clicks; the title does not hit-test, so a click on the words lands here, and the whole row pitch is the target.
     private var rowActivationCatcher: some View {
         OrbitNSActionButton(onClickCount: { handleRowClick($0) }) {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -328,7 +317,6 @@ private struct TabRowChrome: View, Equatable {
         env.activateTabDismissingCommandBar(tab.id)
     }
 
-    // MARK: - Trailing close control (and what a bookmarked row's one is)
 
     private var trailingCloseControlReservedWidth: CGFloat {
         OrbitMetrics.sidebarCloseButtonSize + OrbitMetrics.sidebarRowContentSpacing
@@ -353,8 +341,7 @@ private struct TabRowChrome: View, Equatable {
         }
     }
 
-    // Padded .horizontal because this pill sits inside body's own already-padded frame; without it the highlight would run edge-to-edge while the favicon/title stay inset.
-    // Inset by sidebarRowContentInset less than the row's own content padding — that difference is the pill's internal margin.
+    // Padded .horizontal because this pill sits inside body's already-padded frame; without it the highlight would run edge-to-edge while the favicon/title stay inset.
     private var rowBackground: some View {
         RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius)
             .fill(
@@ -376,7 +363,7 @@ private struct TabRowChrome: View, Equatable {
                     height: OrbitMetrics.sidebarRowLoadingBarHeight
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                .animation(.linear(duration: 0.15), value: navigationState.progress)
+                .orbitAnimation(OrbitMotion.fade, value: navigationState.progress)
         }
         .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius))
         .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
@@ -384,7 +371,6 @@ private struct TabRowChrome: View, Equatable {
         .allowsHitTesting(false)
     }
 
-    // MARK: - Pinned-tab reset ("Resetting" a Pinned Tab)
 
     // Never fires by itself — do not add a timer, an onAppear or an activation hook that resets a pinned tab.
 
@@ -663,7 +649,6 @@ struct TabContextMenu {
     }
 }
 
-// MARK: - Pinned folder row
 
 struct PinnedFolderRowView: View {
     @Environment(AppEnvironment.self) private var env
@@ -677,8 +662,7 @@ struct PinnedFolderRowView: View {
     @State private var draftName = ""
     @FocusState private var focused: Bool
 
-    // Deferred, not toggle-then-revert: a row re-renders within tens of ms of folder.isExpanded changing, well inside a real double click's inter-click gap, so toggling on the first click would flash the folder open/closed on every rename.
-    // Holds the Task the first click schedules so a second click can cancel it before it runs.
+    // Deferred, not toggle-then-revert: a row re-renders within tens of ms of folder.isExpanded changing, well inside a double click's gap, so toggling on the first click would flash the folder on every rename; the held Task lets a second click cancel it.
     @State private var pendingNameLabelToggleTask: Task<Void, Never>?
 
     @State private var previewState: FolderPreviewState?
@@ -928,7 +912,6 @@ extension PinnedFolderRowView: Equatable {
     }
 }
 
-// MARK: - Pinned folder row: name-label click arbitration
 
 enum PinnedFolderNameLabelClick: Equatable {
     case scheduleDeferredToggle
@@ -939,10 +922,8 @@ enum PinnedFolderNameLabelClick: Equatable {
     }
 }
 
-// MARK: - SF Symbol name resolvability
 
-// Image(systemName:) fails silently for an unresolvable name: no placeholder, no reserved ink, just a blank slot.
-// Cached because NSImage(systemSymbolName:) allocates on every call and this is asked from body on rows that re-render often.
+// Image(systemName:) fails silently for an unresolvable name (a blank slot); cached because NSImage(systemSymbolName:) allocates on every call and this is asked from body on often re-rendered rows.
 @MainActor
 enum OrbitSymbolName {
     private static var resolvable: [String: Bool] = [:]
@@ -967,7 +948,6 @@ extension TabRowView {
     }
 }
 
-// MARK: - Folder icon prompt parsing
 
 enum FolderIconInput: Equatable {
     case clearToDefault

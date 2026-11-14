@@ -1,5 +1,4 @@
-// SwiftUI resolves overlapping gestures by letting the more deeply nested view win, so
-// headerDoubleClickObserver never steals a click meant for a real descendant control.
+// SwiftUI lets the more deeply nested view win overlapping gestures, so headerDoubleClickObserver never steals a click meant for a descendant control.
 
 import AppKit
 import SwiftUI
@@ -46,9 +45,6 @@ enum OrbitToolbarMetrics {
 
     static let addressPillGap: CGFloat = 2
 
-    static let backgroundCrossFadeDuration: Double = 0.48
-
-    // MARK: Toolbar mode
 
     static let navClusterWidth: CGFloat = navIconSize * 3 + navIconSpacing * 2
     static let trailingClusterWidth: CGFloat = trailingIconSize * 2 + trailingIconSpacing
@@ -72,7 +68,6 @@ enum OrbitToolbarMetrics {
     static let contentDividerThickness: CGFloat = 1
     static let contentDividerOpacity: Double = 0.12
 
-    // MARK: Hover highlight
 
     static let hoverHighlightCornerRadius: CGFloat = 6
 
@@ -137,8 +132,7 @@ struct ToolbarTrailingGlyph: View {
     }
 }
 
-// Three presets, not inferred flags: inferring split capability let a click create a SplitGroup with no container, stealing the main window's active tab via the shared processRoot.
-// env.isSidebarVisible also reflects only the main window's sidebar, so it can't gate a toggle on a window with none of its own.
+// Three presets, not inferred flags: inferring split capability let a click create a SplitGroup with no container, stealing the main window's active tab via the shared processRoot; env.isSidebarVisible reflects only the main window's sidebar, so it can't gate a toggle elsewhere.
 struct ToolbarPaneCapabilities: Equatable {
     var allowsSplit: Bool = true
 
@@ -182,10 +176,8 @@ struct ToolbarView: View {
         env.navigationStates[tab.id] ?? .empty
     }
 
-    // MARK: Header background colour
 
-    // Resolution order: document surface colour, then env.themeColors, then PaneHeaderColorResolver's pulled colour, then env.documentColors, then neutralBackground.
-    // Document colour must be checked first: env.themeColors is never cleared on navigation, so a tab that becomes a document page would otherwise keep a stale pushed colour forever.
+    // Resolution order: document surface colour, env.themeColors, PaneHeaderColorResolver's pulled colour, env.documentColors, neutralBackground; the document colour is first because env.themeColors is never cleared on navigation and would leave a stale pushed colour.
     private var headerBackground: ThemeColor {
         rawPageColor?.composited(over: neutralBackground) ?? neutralBackground
     }
@@ -211,8 +203,7 @@ struct ToolbarView: View {
             : ThemeColor(red: 0.945, green: 0.945, blue: 0.955)
     }
 
-    // Derived from headerBackground itself, never system appearance: a dark page under a light appearance still needs light glyphs.
-    // Glyphs chosen from a different value than the fill paints is the near-black-on-near-black regression PaneHeaderColorResolver guards against.
+    // Derived from headerBackground itself, never system appearance: a dark page under a light appearance still needs light glyphs, and a mismatch is the near-black-on-near-black case PaneHeaderColorResolver guards against.
     private var headerForeground: Color {
         Self.color(PaneHeaderColorResolver.foregroundColor(for: headerBackground))
     }
@@ -246,11 +237,19 @@ struct ToolbarView: View {
             Spacer(minLength: 0).frame(height: OrbitToolbarMetrics.topPadding)
 
             ZStack {
-                HStack(spacing: 0) {
-                    navigationCluster
-                    // minLength: 0, not positive: a nonzero minimum inflates the header's minimum width and overflows narrow split panes, sliding the cluster row past the rounded edges.
-                    Spacer(minLength: 0)
-                    trailingCluster
+                // Full row first; when it cannot fit the pane the secondary trailing buttons fold into an overflow menu.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 0) {
+                        navigationCluster
+                        // minLength: 0, not positive: a nonzero minimum inflates the header's minimum width and overflows narrow split panes, sliding the cluster row past the rounded edges.
+                        Spacer(minLength: 0)
+                        trailingCluster
+                    }
+                    HStack(spacing: 0) {
+                        navigationCluster
+                        Spacer(minLength: 0)
+                        compactTrailingCluster
+                    }
                 }
 
                 centredAddressRegion
@@ -278,7 +277,7 @@ struct ToolbarView: View {
         }
         .background(headerDoubleClickObserver)
         .animation(
-            OrbitThemeMotion.animation(reduceMotion: reduceMotion, token: .easeInOut(duration: OrbitToolbarMetrics.backgroundCrossFadeDuration)),
+            OrbitThemeMotion.animation(reduceMotion: reduceMotion, token: OrbitMotion.fade),
             value: headerBackground
         )
         .task(id: sampleTaskID) { await sampleHeaderColorIfNeeded() }
@@ -289,10 +288,8 @@ struct ToolbarView: View {
         #endif
     }
 
-    // MARK: Colour sampling
 
-    // isLoading matters: a reload keeps the same URL and engine, so without it the tab would never re-sample and would keep the previous document's colour.
-    // attached/detached matters too: a pane can lay out before materializeWebContents registers its WebContents, so without it a .task that saw contents == nil would never re-run.
+    // isLoading matters because a reload keeps the same URL and engine; attached/detached matters because a pane can lay out before materializeWebContents registers its WebContents, so a .task that saw nil would never re-run.
     private var sampleTaskID: String {
         let isLoading = navigationState.isLoading
         return "\(tab.id.uuidString)#\(tab.url.absoluteString)#\(contents == nil ? "detached" : "attached")#\(isLoading)"
@@ -312,7 +309,6 @@ struct ToolbarView: View {
         env.focusSplitPane(index: tab.splitIndex)
     }
 
-    // MARK: Navigation cluster
 
     private var showsSidebarToggle: Bool {
         paneCapabilities.allowsSidebarToggle && !env.isSidebarVisible && tab.splitIndex == 0
@@ -383,7 +379,6 @@ struct ToolbarView: View {
         )
     }
 
-    // MARK: Address field
 
     // OR'd with developerModeSettings.isEnabled: Arc also forces the full URL on in Developer Mode, a second and independent reason from toolbarSettings.showsFullURL, and neither flag may be folded into the other.
     private var addressText: String? {
@@ -472,16 +467,13 @@ struct ToolbarView: View {
         .orbitTooltip("Search or Enter URL (\u{2318}L)")
     }
 
-    // Document pages route to .blankPane(tab.id), not .editURL(tab.url): orbit://note/<uuid> must never be shown for editing.
-    // blankPaneMode(for:) is the single decision this click and Cmd+L both consult, so they can't disagree.
+    // Document pages route to .blankPane(tab.id), not .editURL(tab.url), so orbit://note/<uuid> is never shown for editing; blankPaneMode(for:) is the one decision this click and Cmd+L share.
     private func openAddressBar() {
         env.perform(.addressBarCommandBar)
     }
 
-    // MARK: Trailing cluster
 
-    // Keyed by tab id, not a bare Bool: a Bool can't say which pane's popover is open once multiple panes share one AppEnvironment.
-    // The setter only clears the id when it's still this pane's own, so two panes opening/closing in the same instant can't race.
+    // Keyed by tab id, not a bare Bool, since a Bool can't say which pane's popover is open; the setter only clears the id when it is still this pane's own, so two panes can't race.
     private var siteControlPopoverBinding: Binding<Bool> {
         Binding(
             get: { env.siteControlPresentedTabID == tab.id },
@@ -495,16 +487,65 @@ struct ToolbarView: View {
         )
     }
 
+    private var siteControlButton: some View {
+        trailingIconButton(.siteControl) {
+            focusPaneIfNeeded()
+            env.siteControlPresentedTabID = tab.id
+        }
+        .popover(isPresented: siteControlPopoverBinding, arrowEdge: .bottom) {
+            SiteControlPopoverView(tab: tab)
+                .environment(\.orbitSpaceTheme, spaceTheme)
+        }
+    }
+
+    private var hasSecondaryTrailingControls: Bool {
+        paneCapabilities.allowsSplit || paneCapabilities.showsOpenInOrbit
+    }
+
+    // Narrow fallback: the split, close-pane and open-in-Orbit buttons fold into one overflow menu so the cluster never collides with the navigation cluster or the address.
+    private func overflowEntries() -> [OrbitContextMenuEntry] {
+        adoptMenuTheme()
+        var entries: [OrbitContextMenuEntry] = []
+        if paneCapabilities.allowsSplit {
+            entries += SplitLayoutOption.menuEntries(forPaneOf: tab, in: env)
+            if showsSplitClose {
+                entries.append(.divider())
+                entries.append(.item(OrbitContextMenuItem(title: "Close This Pane", systemImage: "xmark") {
+                    env.closeSplitPane(tab.id)
+                }))
+            }
+        }
+        if paneCapabilities.showsOpenInOrbit {
+            if !entries.isEmpty { entries.append(.divider()) }
+            entries.append(.item(OrbitContextMenuItem(title: "Open in Orbit", systemImage: "arrow.up.forward.app", shortcut: "\u{2318}O") {
+                env.perform(.openIntoMainWindow)
+            }))
+        }
+        return entries
+    }
+
+    private var compactTrailingCluster: some View {
+        HStack(spacing: OrbitToolbarMetrics.trailingIconSpacing) {
+            siteControlButton
+            if hasSecondaryTrailingControls {
+                OrbitMenuButton(entries: overflowEntries) {
+                    ToolbarTrailingGlyph(symbol: "ellipsis", glyphSize: OrbitToolbarMetrics.trailingGlyphSize)
+                        .foregroundStyle(headerForeground)
+                }
+                .frame(width: OrbitToolbarMetrics.trailingIconSize, height: OrbitToolbarMetrics.trailingIconSize)
+                .orbitHoverHighlight(
+                    fill: headerHoverFill,
+                    cornerRadius: OrbitToolbarMetrics.hoverHighlightCornerRadius
+                )
+                .orbitTooltip("More")
+                .accessibilityLabel("More")
+            }
+        }
+    }
+
     private var trailingCluster: some View {
         HStack(spacing: OrbitToolbarMetrics.trailingIconSpacing) {
-            trailingIconButton(.siteControl) {
-                focusPaneIfNeeded()
-                env.siteControlPresentedTabID = tab.id
-            }
-            .popover(isPresented: siteControlPopoverBinding, arrowEdge: .bottom) {
-                SiteControlPopoverView(tab: tab)
-                    .environment(\.orbitSpaceTheme, spaceTheme)
-            }
+            siteControlButton
             if paneCapabilities.allowsSplit {
                 OrbitMenuButton(entries: {
                     adoptMenuTheme()
@@ -547,7 +588,6 @@ struct ToolbarView: View {
         glyph.foregroundStyle(headerForeground)
     }
 
-    // MARK: Self-check (no Screen Recording permission in this environment)
 
     #if DEBUG
     private static let selfCheckLogger = Logger(subsystem: "com.orbit.browser", category: "ToolbarSelfCheck")
@@ -562,8 +602,7 @@ struct ToolbarView: View {
         }
     }
 
-    // Enable via ORBIT_LOG_TOOLBAR_COLOUR=1 or `defaults write com.orbit.browser OrbitLogToolbarColour -bool YES`.
-    // Gated on DiagnosticChannel.toolbarColour, not just #if DEBUG: OrbitDemo is itself a DEBUG build and would otherwise log every navigation.
+    // Gated on DiagnosticChannel.toolbarColour (ORBIT_LOG_TOOLBAR_COLOUR=1), not just #if DEBUG: OrbitDemo is itself a DEBUG build and would otherwise log every navigation.
     private var colourProbe: some View {
         Color.clear.onChange(of: headerBackground, initial: true) { _, background in
             guard DiagnosticChannel.toolbarColour.isEnabled else { return }
@@ -591,7 +630,6 @@ struct ToolbarView: View {
     }
     #endif
 
-    // MARK: Double-click-to-zoom
 
     private var headerDoubleClickObserver: some View {
         HeaderDoubleClickObserver(onDoubleClick: { OrbitTitleBarDoubleClick.handle(on: NSApp.keyWindow) })

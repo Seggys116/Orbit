@@ -112,7 +112,7 @@ struct LiveCalendarJoinRow: View {
                     .font(.system(size: 10, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
-                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(joinFill))
+                    .background(RoundedRectangle(cornerRadius: OrbitRadius.sm, style: .continuous).fill(joinFill))
                     .foregroundStyle(.white)
             }
             .buttonStyle(.plain)

@@ -15,7 +15,7 @@ enum TodayDividerTidyAction {
         if TidyTabsCoordinator.shouldUseModel(todayTabCount: env.todayTabs(in: spaceID).count) {
             TidyTabsCoordinator.shared.tidy(spaceID: spaceID, env: env)
         } else {
-            withAnimation(OrbitMotion.interactive) {
+            withOrbitAnimation(OrbitMotion.interactive) {
                 _ = env.tidyTodayTabsByHost(in: spaceID)
             }
         }
@@ -30,7 +30,6 @@ struct TodayDividerRow: View {
     // nil inside the Manage Spaces panel, which sits on a system surface rather than a full-bleed theme and takes Color.primary instead.
     var theme: SpaceTheme?
 
-    // True while the pointer is anywhere over the sidebar; Manage Spaces never reveals the broom.
     var revealsBroom: Bool = false
 
     private var foreground: Color {

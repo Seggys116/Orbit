@@ -3,7 +3,6 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Pure glyph-state resolution
 
 enum ToolbarAddressCopyGlyph: Equatable {
     case resting(symbol: String, isWarning: Bool)
@@ -21,7 +20,6 @@ enum ToolbarAddressCopyGlyph: Equatable {
     }
 }
 
-// MARK: - AppKit click + hover surface
 
 final class ToolbarAddressCopyClickCatchingNSView: NSView, OrbitClickCatching {
     var onClick: (() -> Void)?
@@ -36,7 +34,6 @@ final class ToolbarAddressCopyClickCatchingNSView: NSView, OrbitClickCatching {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    // point arrives in the superview's coordinate space, not this view's own bounds.
     override func hitTest(_ point: NSPoint) -> NSView? {
         orbitContainsHitTestPoint(point) ? self : nil
     }
@@ -100,7 +97,6 @@ private struct ToolbarAddressCopyClickCatcher: NSViewRepresentable {
     }
 }
 
-// MARK: - The SwiftUI control
 
 struct ToolbarAddressCopyControl: View {
     var security: SecurityLevel
@@ -134,7 +130,7 @@ struct ToolbarAddressCopyControl: View {
                     onHoverChanged: { isHovering = $0 }
                 )
             )
-            .animation(OrbitMotion.quick, value: glyph)
+            .orbitAnimation(OrbitMotion.quick, value: glyph)
             .task(id: copyGeneration) {
                 guard copyGeneration > 0 else { return }
                 try? await Task.sleep(for: .seconds(OrbitToolbarMetrics.addressCopyCheckmarkLingerDuration))

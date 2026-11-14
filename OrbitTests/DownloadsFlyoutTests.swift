@@ -26,6 +26,111 @@ final class DownloadsFlyoutTests: XCTestCase {
         )
     }
 
+    func testRelativeTimeUnderAMinuteReadsJustNowNotInZeroSeconds() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let locale = Locale(identifier: "en_US")
+
+        XCTAssertEqual(DownloadsFlyoutTime.string(for: now, relativeTo: now, locale: locale), "Just now")
+        XCTAssertEqual(DownloadsFlyoutTime.string(for: now.addingTimeInterval(-59), relativeTo: now, locale: locale), "Just now")
+        XCTAssertEqual(
+            DownloadsFlyoutTime.string(for: now.addingTimeInterval(-24 * 60), relativeTo: now, locale: locale),
+            "24 minutes ago",
+            "The flyout's time line counts in whole minutes from a minute up."
+        )
+    }
+
+    // MARK: - The second line is live: it is a pure function of the clock
+
+    func testDetailTextAdvancesWithTheClockForACompletedDownload() {
+        let finished = Date(timeIntervalSince1970: 1_700_000_000)
+        let item = DownloadItem(
+            sourceURL: URL(string: "https://example.com/a")!,
+            destinationURL: URL(fileURLWithPath: "/tmp/a.pdf"),
+            suggestedFileName: "a.pdf", state: .completed, finishedAt: finished
+        )
+        let locale = Locale(identifier: "en_US")
+
+        XCTAssertEqual(
+            DownloadsPreviewRow.detailText(for: item, fileExists: true, now: finished.addingTimeInterval(24 * 60), locale: locale),
+            "24 minutes ago"
+        )
+        XCTAssertEqual(
+            DownloadsPreviewRow.detailText(for: item, fileExists: true, now: finished.addingTimeInterval(25 * 60), locale: locale),
+            "25 minutes ago",
+            "The same row must read a minute later when the timeline ticks, or the flyout would show a stale time."
+        )
+        XCTAssertEqual(
+            DownloadsPreviewRow.detailText(for: item, fileExists: false, now: finished, locale: locale),
+            "Moved or deleted"
+        )
+    }
+
+    func testDetailTextForCancelledFailedAndRunningDownloads() {
+        let started = Date(timeIntervalSince1970: 1_700_000_000)
+        let locale = Locale(identifier: "en_US")
+        func item(_ state: DownloadState, received: Int64 = 0, total: Int64 = 0, finishedAt: Date? = nil) -> DownloadItem {
+            DownloadItem(
+                sourceURL: URL(string: "https://example.com/a")!,
+                destinationURL: URL(fileURLWithPath: "/tmp/a.bin"),
+                suggestedFileName: "a.bin", totalBytes: total, receivedBytes: received,
+                state: state, startedAt: started, finishedAt: finishedAt
+            )
+        }
+        let later = started.addingTimeInterval(2 * 60)
+
+        XCTAssertEqual(
+            DownloadsPreviewRow.detailText(for: item(.cancelled, finishedAt: started), fileExists: false, now: later, locale: locale),
+            "Cancelled · 2 minutes ago"
+        )
+        XCTAssertEqual(
+            DownloadsPreviewRow.detailText(for: item(.interrupted, finishedAt: started), fileExists: false, now: later, locale: locale),
+            "Failed · 2 minutes ago"
+        )
+        XCTAssertEqual(DownloadsPreviewRow.detailText(for: item(.pending), fileExists: false, now: later, locale: locale), "Starting…")
+        XCTAssertTrue(
+            DownloadsPreviewRow.detailText(for: item(.inProgress, received: 400, total: 1_000), fileExists: false, now: later, locale: locale).contains(" of "),
+            "A running download reads its progress, not a time."
+        )
+        XCTAssertTrue(
+            DownloadsPreviewRow.detailText(for: item(.paused, received: 400, total: 1_000), fileExists: false, now: later, locale: locale).hasPrefix("Paused"),
+            "A paused download says so."
+        )
+    }
+
+    // MARK: - Exactly the last four downloads, newest first
+
+    func testSelectionShowsAtMostFourDownloadsNewestFirst() {
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let items = (0..<7).map { index in
+            DownloadItem(
+                sourceURL: URL(string: "https://example.com/\(index)")!,
+                destinationURL: URL(fileURLWithPath: "/tmp/\(index).bin"),
+                suggestedFileName: "\(index).bin",
+                startedAt: base.addingTimeInterval(TimeInterval(index))
+            )
+        }
+
+        let visible = DownloadsFlyoutSelection.visible(from: items.shuffled())
+
+        XCTAssertEqual(visible.count, 4, "The flyout lists exactly four downloads when more exist.")
+        XCTAssertEqual(visible.map(\.suggestedFileName), ["6.bin", "5.bin", "4.bin", "3.bin"], "Newest first, and only the newest four.")
+    }
+
+    func testSelectionShowsFewerWhenFewerExistAndKeepsTiesInGivenOrder() {
+        let moment = Date(timeIntervalSince1970: 1_700_000_000)
+        let items = ["a", "b"].map { name in
+            DownloadItem(
+                sourceURL: URL(string: "https://example.com/\(name)")!,
+                destinationURL: URL(fileURLWithPath: "/tmp/\(name).bin"),
+                suggestedFileName: "\(name).bin",
+                startedAt: moment
+            )
+        }
+
+        XCTAssertEqual(DownloadsFlyoutSelection.visible(from: items).map(\.suggestedFileName), ["a.bin", "b.bin"])
+        XCTAssertEqual(DownloadsFlyoutSelection.visible(from: []).count, 0)
+    }
+
     // MARK: - Real thumbnails, really cached
 
     func testThumbnailStoreGeneratesAndThenCachesARealFilesPreview() async throws {
@@ -106,52 +211,42 @@ final class DownloadsFlyoutTests: XCTestCase {
 
     // MARK: - The panel stays inside the sidebar
 
-    func testPlacementKeepsThePanelInsideTheContainerAtEveryWidth() {
-        for containerWidth in stride(from: CGFloat(100), through: 600, by: 10) {
-            for anchorMinX in [CGFloat(0), 6, 40, containerWidth, containerWidth + 200] {
-                let placement = DownloadsPreviewLayout.placement(containerWidth: containerWidth, anchorMinX: anchorMinX)
-                XCTAssertGreaterThanOrEqual(
-                    placement.originX, DownloadsPreviewLayout.edgeInset,
-                    "The panel starts left of the sidebar's padding at container \(containerWidth), anchor \(anchorMinX)."
-                )
-                XCTAssertLessThanOrEqual(
-                    placement.originX + placement.width, max(containerWidth - DownloadsPreviewLayout.edgeInset, DownloadsPreviewLayout.edgeInset),
-                    "The panel runs past the sidebar's right padding at container \(containerWidth), anchor \(anchorMinX)."
-                )
-                XCTAssertLessThanOrEqual(placement.width, DownloadsPreviewLayout.maxWidth)
-            }
+    func testPlacementSpansTheSidebarWithTheBottomBarsEdgeInsetAtEveryWidth() {
+        for containerWidth in stride(from: CGFloat(100), through: 700, by: 10) {
+            let placement = DownloadsPreviewLayout.placement(containerWidth: containerWidth)
+            XCTAssertEqual(placement.originX, DownloadsPreviewLayout.edgeInset, "The panel starts at the bar's inset at container \(containerWidth).")
+            XCTAssertEqual(
+                placement.width, max(0, containerWidth - 2 * DownloadsPreviewLayout.edgeInset),
+                "The panel is the sidebar's full width less one inset per side at container \(containerWidth); it never stops short at a maximum."
+            )
+            XCTAssertLessThanOrEqual(placement.originX + placement.width, max(containerWidth - DownloadsPreviewLayout.edgeInset, DownloadsPreviewLayout.edgeInset))
         }
-    }
-
-    func testPlacementShrinksThePanelToANarrowSidebarAndKeepsItAtFullWidthInAWideOne() {
-        let narrow = DownloadsPreviewLayout.placement(containerWidth: 220, anchorMinX: 6)
-        XCTAssertEqual(narrow.width, 220 - 2 * DownloadsPreviewLayout.edgeInset, "A 220pt sidebar leaves the panel the width between its paddings.")
-        XCTAssertEqual(narrow.originX, DownloadsPreviewLayout.edgeInset, "The library button sits at the far left; the panel aligns to the sidebar padding, not to the button's own inset.")
-
-        let wide = DownloadsPreviewLayout.placement(containerWidth: 600, anchorMinX: 6)
-        XCTAssertEqual(wide.width, DownloadsPreviewLayout.maxWidth, "A wide sidebar does not stretch the panel.")
-    }
-
-    func testVisibleRowCountNeverLetsThePanelOutgrowTheSpaceAboveTheBar() {
-        for spaceAbove in stride(from: CGFloat(0), through: 900, by: 5) {
-            let maxHeight = DownloadsPreviewLayout.maxHeight(spaceAbove: spaceAbove)
-            let rows = DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: maxHeight)
-            let worstCase = DownloadsPreviewLayout.chromeHeightBound + CGFloat(rows) * DownloadsPreviewLayout.rowHeightBound
-            if rows > 0 {
-                XCTAssertLessThanOrEqual(worstCase, maxHeight ?? .infinity, "\(rows) rows overflow \(spaceAbove)pt above the bar.")
-            }
-            XCTAssertLessThanOrEqual(rows, 6)
-        }
-    }
-
-    func testShortContainersShowFewerRowsAndTallOnesShowAll() {
-        XCTAssertEqual(DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: DownloadsPreviewLayout.maxHeight(spaceAbove: 900)), 6)
-        XCTAssertEqual(DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: DownloadsPreviewLayout.maxHeight(spaceAbove: 200)), 2)
         XCTAssertEqual(
-            DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: DownloadsPreviewLayout.maxHeight(spaceAbove: 40)), 0,
-            "With almost no room only the footer is kept."
+            DownloadsPreviewLayout.edgeInset, OrbitMetrics.sidebarBottomBarHorizontalPadding,
+            "The panel's edge inset is the bottom bar's own horizontal padding token."
         )
-        XCTAssertEqual(DownloadsPreviewLayout.visibleRowCount(rowCount: 6, maxHeight: nil), 6, "An unknown bar position applies no cap.")
+    }
+
+    func testRowsMaxHeightLeavesRoomForTheChromeAndNeverGoesNegative() {
+        for spaceAbove in stride(from: CGFloat(0), through: 900, by: 5) {
+            let panelMax = DownloadsPreviewLayout.maxHeight(spaceAbove: spaceAbove)
+            let rowsMax = DownloadsPreviewLayout.rowsMaxHeight(panelMaxHeight: panelMax)
+            XCTAssertGreaterThanOrEqual(rowsMax ?? 0, 0)
+            if let panelMax, let rowsMax {
+                XCTAssertLessThanOrEqual(rowsMax + DownloadsPreviewLayout.chromeHeightBound, max(panelMax, DownloadsPreviewLayout.chromeHeightBound))
+            }
+        }
+        XCTAssertNil(DownloadsPreviewLayout.rowsMaxHeight(panelMaxHeight: nil), "An unknown bar position applies no cap.")
+    }
+
+    func testRowsScrollOnlyWhenTheRoomAboveTheBarCannotHoldThemAll() {
+        let fourRows = 4 * DownloadsPreviewLayout.rowHeight
+        XCTAssertFalse(DownloadsPreviewLayout.rowsScroll(rowCount: 4, rowsMaxHeight: fourRows), "Exactly enough room keeps all four rows unscrolled.")
+        XCTAssertFalse(DownloadsPreviewLayout.rowsScroll(rowCount: 4, rowsMaxHeight: fourRows + 100))
+        XCTAssertTrue(DownloadsPreviewLayout.rowsScroll(rowCount: 4, rowsMaxHeight: fourRows - 1), "One point short must scroll rather than clip a row.")
+        XCTAssertTrue(DownloadsPreviewLayout.rowsScroll(rowCount: 1, rowsMaxHeight: 0))
+        XCTAssertFalse(DownloadsPreviewLayout.rowsScroll(rowCount: 4, rowsMaxHeight: nil), "An unknown bar position applies no cap.")
+        XCTAssertFalse(DownloadsPreviewLayout.rowsScroll(rowCount: 0, rowsMaxHeight: 0))
     }
 
     func testPanelRenderedInAShortContainerStaysUnderItsMaxHeight() throws {
@@ -251,7 +346,6 @@ final class DownloadsFlyoutTests: XCTestCase {
             ]
         }
 
-        let inset = (OrbitMetrics.sidebarBottomBarHeight - OrbitMetrics.sidebarBottomBarIconSize) / 2
         let size = CGSize(width: containerWidth, height: 480)
         let scene = VStack(spacing: 0) {
             Spacer(minLength: 0)
@@ -262,8 +356,6 @@ final class DownloadsFlyoutTests: XCTestCase {
                         theme: theme,
                         containerWidth: containerWidth,
                         spaceAbove: spaceAbove,
-                        anchorMinX: inset,
-                        anchorMidX: inset + OrbitMetrics.sidebarBottomBarIconSize / 2,
                         reduceMotion: true,
                         onHoverChange: { _ in },
                         onDismiss: {}

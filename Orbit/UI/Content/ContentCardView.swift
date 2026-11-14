@@ -81,6 +81,7 @@ struct PageScrollerColorScheme: ViewModifier {
 
 struct ContentCardView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var askOnPage = AskOnPageController.shared
 
     var body: some View {
@@ -104,18 +105,18 @@ struct ContentCardView: View {
             VStack(alignment: .trailing, spacing: 8) {
                 if env.isFindBarPresented {
                     FindBarView()
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                 }
                 if askOnPage.isPresented {
                     AskOnPagePanelView()
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                 }
             }
             .padding(.top, 14)
             .padding(.trailing, 14)
         }
-        .animation(OrbitMotion.standard, value: env.isFindBarPresented)
-        .animation(OrbitMotion.standard, value: askOnPage.isPresented)
+        .animation(reduceMotion ? OrbitMotion.fade : OrbitMotion.standard, value: env.isFindBarPresented)
+        .animation(reduceMotion ? OrbitMotion.fade : OrbitMotion.standard, value: askOnPage.isPresented)
         .onChange(of: env.activeTabID) { _, newValue in askOnPage.tabDidChange(to: newValue) }
         #if DEBUG
         .background(contentCardFrameProbe)
@@ -152,7 +153,11 @@ struct SingleTabContentView: View {
     var tab: Tab
     var isFocusedPane: Bool = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var isInSplit: Bool { env.splitGroup(for: tab.id) != nil }
+
+    private var isPeeking: Bool { PeekState.shared.activePreview?.sourceTabID == tab.id }
 
     @State private var toolbarSettings = ToolbarSettings.shared
 
@@ -174,10 +179,9 @@ struct SingleTabContentView: View {
                 peekOverlay(preview)
             }
         }
+        .animation(reduceMotion ? OrbitMotion.fade : OrbitMotion.standard, value: isPeeking)
         .commandBarAnchor(.pane(tab.id))
-        // The whole chrome.webstorePrivate install flow -- download and unpack
-        // progress, the consent decision, the outcome -- in one sheet, so it
-        // reads as one dialog.
+        // The whole chrome.webstorePrivate install flow (progress, consent, outcome) in one sheet so it reads as one dialog.
         .sheet(isPresented: Binding(
             get: { env.extensionInstallModalPhase(for: tab.id) != nil },
             set: { isPresented in
@@ -196,7 +200,7 @@ struct SingleTabContentView: View {
                     onCancel: { env.dismissExtensionInstallModal(for: tab.id) },
                     onDismiss: { env.dismissExtensionInstallModal(for: tab.id) }
                 )
-                .animation(OrbitMotion.quick, value: phase)
+                .orbitAnimation(OrbitMotion.quick, value: phase)
             }
         }
     }
@@ -214,7 +218,7 @@ struct SingleTabContentView: View {
             }
         }
         .clipShape(UnevenRoundedRectangle(cornerRadii: BorderlessSettings.cardCornerRadii(flushEdges: flushEdges), style: .continuous))
-        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .center)))
+        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97, anchor: .center)))
     }
 
     @ViewBuilder
@@ -288,9 +292,7 @@ enum OrbitScheme {
         }
     }
 
-    /// Required as `.id(_:)` on the `.note`/`.easel` branch: without it,
-    /// switching `tab` between two Notes is not seen by SwiftUI as a remount,
-    /// and the editor silently keeps writing into the first document.
+    /// Required as `.id(_:)` on the `.note`/`.easel` branch: without it SwiftUI sees no remount between two Notes and the editor keeps writing into the first document.
     static func documentSurfaceIdentity(kind: String, id: UUID) -> String {
         "\(kind):\(id.uuidString)"
     }
@@ -300,8 +302,7 @@ struct SplitDropZoneOverlay: View {
     @Environment(AppEnvironment.self) private var env
 
     #if DEBUG
-    // ImageRenderer draws a circle-slash artifact over .dropDestination
-    // views; screenshot mode disables drag here to avoid it.
+    // ImageRenderer draws a circle-slash artifact over .dropDestination views, so screenshot mode disables drag here.
     @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
     #endif
 

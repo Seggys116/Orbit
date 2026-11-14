@@ -31,14 +31,26 @@ public enum BrowserImportCoordinator {
         into spaceID: SpaceID,
         env: AppEnvironment,
         reader: BrowserDataReader = BrowserDataReader(),
-        historyStore: HistoryStore? = nil
+        historyStore: HistoryStore? = nil,
+        progress: ImportProgressHandler? = nil
     ) async throws -> BrowserImportSummary {
         let payload = try await Task.detached(priority: .userInitiated) {
             try reader.read(browser)
         }.value
 
+        progress?(.planned(.bookmarks, total: payload.bookmarkRoot.totalBookmarkCount))
+        progress?(.planned(.history, total: payload.visits.count))
+
         let bookmarkResult = applyBookmarks(payload.bookmarkRoot, into: spaceID, env: env)
-        let recorded = await applyHistory(payload.visits, into: spaceID, env: env, historyStore: historyStore)
+        progress?(.finished(.bookmarks, completed: bookmarkResult.bookmarksImported))
+        let recorded = await applyHistory(
+            payload.visits,
+            into: spaceID,
+            env: env,
+            historyStore: historyStore,
+            progress: progress
+        )
+        progress?(.finished(.history, completed: recorded))
 
         return BrowserImportSummary(
             browser: browser,
@@ -117,7 +129,8 @@ public enum BrowserImportCoordinator {
         _ visits: [ImportedVisit],
         into spaceID: SpaceID,
         env: AppEnvironment,
-        historyStore: HistoryStore?
+        historyStore: HistoryStore?,
+        progress: ImportProgressHandler?
     ) async -> Int {
         guard !visits.isEmpty else { return 0 }
         guard let space = env.store.space(spaceID) else { return 0 }
@@ -132,7 +145,7 @@ public enum BrowserImportCoordinator {
         }
 
         var recorded = 0
-        for visit in visits {
+        for (processed, visit) in visits.enumerated() {
             let historyVisit = HistoryVisit(
                 url: visit.url,
                 title: visit.title,
@@ -145,7 +158,10 @@ public enum BrowserImportCoordinator {
                 _ = try await store.record(visit: historyVisit)
                 recorded += 1
             } catch {
-                continue
+                // A visit the store rejects still counts as processed, so the bar reaches its total.
+            }
+            if (processed + 1) % ImportProgressCadence.historyBatch == 0 {
+                progress?(.advanced(.history, completed: processed + 1))
             }
         }
 

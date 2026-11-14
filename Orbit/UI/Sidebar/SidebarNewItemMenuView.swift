@@ -23,9 +23,7 @@ extension SidebarNewItemOption {
         }
     }
 
-    // The same ShortcutCommandID the menu bar and Shortcuts settings bind —
-    // reading a live binding through it means a user-remapped shortcut shows
-    // up here automatically, never a hardcoded string that can drift from it.
+    // The same ShortcutCommandID the menu bar and Shortcuts settings bind, so a user-remapped shortcut shows up here and never drifts from a hardcoded string.
     var shortcutCommandID: ShortcutCommandID {
         switch self {
         case .newTab: return .newTabCommandBar
@@ -43,8 +41,7 @@ extension SidebarNewItemOption {
         registry.binding(for: shortcutCommandID)?.displayString
     }
 
-    // Mirrors MainMenuBuilder's gating for New Folder (hasActiveSpace) and
-    // New Boost (activeHost != nil); the other five commands are never gated.
+    // Mirrors MainMenuBuilder's gating for New Folder (hasActiveSpace) and New Boost (activeHost != nil); the other five are never gated.
     func isAvailable(in env: AppEnvironment) -> Bool {
         switch self {
         case .newFolder:
@@ -70,18 +67,14 @@ extension SidebarNewItemOption {
         return host
     }
 
-    // Grouped for presentation only — order and membership are asserted
-    // against SidebarNewItemOption.allCases in SidebarNewItemMenuViewTests so
-    // this grouping can never silently drop or duplicate a real option.
+    // Grouped for presentation only; SidebarNewItemMenuViewTests asserts order and membership against SidebarNewItemOption.allCases so no option is silently dropped or duplicated.
     static let menuSections: [SidebarNewItemMenuSection] = [
         SidebarNewItemMenuSection(title: "Browse", options: [.newTab, .newSplitView]),
         SidebarNewItemMenuSection(title: "Organize", options: [.newFolder, .newSpace]),
         SidebarNewItemMenuSection(title: "Create", options: [.newNote, .newEasel, .newBoost]),
     ]
 
-    // What SidebarBottomBar's "+" button presents through OrbitContextMenuView.
-    // menuSections still decides the grouping, but a divider alone separates
-    // the groups -- no uppercase section label.
+    // What SidebarBottomBar's "+" button presents through OrbitContextMenuView: menuSections still decides the grouping, but a divider alone separates groups.
     static func contextMenuEntries(in env: AppEnvironment, registry: ShortcutRegistry = .shared) -> [OrbitContextMenuEntry] {
         menuSections.enumerated().flatMap { index, section -> [OrbitContextMenuEntry] in
             let items: [OrbitContextMenuEntry] = section.options.map { option in
@@ -99,7 +92,6 @@ extension SidebarNewItemOption {
     }
 }
 
-// MARK: - Pure row styling (kept free of @State so it is directly unit-testable)
 
 enum SidebarNewItemMenuStyle {
     static func rowForeground(isAvailable: Bool, colorScheme: ColorScheme) -> Color {
@@ -136,7 +128,6 @@ enum SidebarNewItemMenuMetrics {
     static let dividerVerticalPadding: CGFloat = 4
 }
 
-// MARK: - Content view
 
 struct SidebarNewItemMenuView: View {
     @Environment(AppEnvironment.self) private var env
@@ -160,7 +151,7 @@ struct SidebarNewItemMenuView: View {
 
     private func sectionView(_ section: SidebarNewItemMenuSection) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(section.title.uppercased())
+            Text(section.title)
                 .font(.system(size: OrbitControlMetrics.sectionHeaderFontSize, weight: .semibold))
                 .foregroundStyle(SidebarNewItemMenuStyle.sectionHeaderForeground(colorScheme: colorScheme))
                 .padding(.horizontal, SidebarNewItemMenuMetrics.rowHorizontalPadding)
@@ -181,7 +172,6 @@ struct SidebarNewItemMenuView: View {
     }
 }
 
-// MARK: - One row
 
 struct SidebarNewItemMenuRow: View {
     var option: SidebarNewItemOption

@@ -130,7 +130,7 @@ struct OrbitHoverHighlight: ViewModifier {
                     .allowsHitTesting(false)
             }
             .background(tracker)
-            .animation(OrbitMotion.quick, value: isHighlighted)
+            .orbitAnimation(OrbitMotion.quick, value: isHighlighted)
     }
 
     @ViewBuilder

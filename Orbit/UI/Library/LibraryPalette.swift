@@ -1,5 +1,67 @@
 import SwiftUI
 
+// LibraryPalette and LibraryMetrics are only read by Settings now; Library mode is themed through LibraryStyle below.
+
+/// Colours for the in-sidebar Library, derived from the Space's theme so it matches the rest of the sidebar in light and dark Spaces.
+struct LibraryStyle {
+    var theme: SpaceTheme
+
+    private var isDark: Bool { theme.isDarkSurface }
+
+    var foreground: Color { theme.readableForeground }
+    var secondary: Color { theme.readableSecondaryForeground }
+    var hoverFill: Color { isDark ? OrbitColor.hoverFillDark : OrbitColor.hoverFillLight }
+    var selectedFill: Color { isDark ? OrbitColor.selectionFillDark : OrbitColor.selectionFillLight }
+    var divider: Color { isDark ? OrbitColor.sidebarDividerDark : OrbitColor.sidebarDividerLight }
+    var quietFill: Color { foreground.opacity(OrbitMetrics.sidebarSplitGroupContainerOpacity) }
+    var fieldFill: Color { foreground.opacity(OrbitMetrics.sidebarHoverRowOpacity) }
+    var border: Color { foreground.opacity(OrbitMetrics.cardBorderOpacity) }
+    var focusRing: Color { foreground.opacity(OrbitMetrics.sidebarRowLabelOpacityInactive) }
+    var progressTrack: Color { foreground.opacity(OrbitMetrics.sidebarActiveRowOpacity * 2) }
+}
+
+private struct LibraryStyleKey: EnvironmentKey {
+    static var defaultValue: LibraryStyle { LibraryStyle(theme: SpaceTheme()) }
+}
+
+extension EnvironmentValues {
+    var libraryStyle: LibraryStyle {
+        get { self[LibraryStyleKey.self] }
+        set { self[LibraryStyleKey.self] = newValue }
+    }
+}
+
+enum LibraryModeMetrics {
+    static let railWidth: CGFloat = 72
+    static let railPadding: CGFloat = 6
+    static let railTileSpacing: CGFloat = 2
+    static let railTileVerticalPadding: CGFloat = 8
+    static let railTileIconSize: CGFloat = OrbitMetrics.iconMedium
+    static let railTileLabelFontSize: CGFloat = 10.5
+
+    static let headerHeight: CGFloat = 32
+    static let headerHorizontalPadding: CGFloat = OrbitMetrics.sidebarHorizontalPadding
+    static let backButtonSize: CGFloat = OrbitMetrics.sidebarCloseButtonSize
+
+    static let contentPadding: CGFloat = OrbitSpacing.md
+    static let rowSpacing: CGFloat = OrbitSpacing.xxs
+    static let rowHorizontalPadding: CGFloat = OrbitSpacing.md
+    static let rowVerticalPadding: CGFloat = OrbitSpacing.sm
+    static let rowIconSize: CGFloat = 28
+    static let rowContentSpacing: CGFloat = OrbitSpacing.md
+    static let groupSpacing: CGFloat = OrbitSpacing.lg
+    static let actionButtonSize: CGFloat = 22
+    static let searchFieldHeight: CGFloat = 28
+
+    /// Space for the section's own header (title row plus search) above the list.
+    static let sectionHeaderSpacing: CGFloat = OrbitSpacing.md
+
+    /// Travel of the tab list and the Library as they trade places.
+    static let slideDistance: CGFloat = 28
+
+    static let detailCornerRadius: CGFloat = OrbitRadius.row
+}
+
 enum LibraryPalette {
     static let sidebarBackground = Color(red: 0.1647, green: 0.1451, blue: 0.1961)
     static let contentBackground = Color(red: 0.2000, green: 0.1725, blue: 0.2275)
@@ -50,13 +112,11 @@ enum LibraryMetrics {
 
     static let actionButtonSize: CGFloat = 22
 
-    // MARK: Wide-row columns (used once the list has the full window to itself, i.e. no preview selection)
 
     static let rowMetaColumnWidth: CGFloat = 160
     static let rowSecondaryColumnWidth: CGFloat = 120
     static let rowDateColumnWidth: CGFloat = 76
 
-    // MARK: Three-column layout (rail + list + preview)
 
     static let listColumnWidth: CGFloat = 346
     static let previewMinWidth: CGFloat = 440

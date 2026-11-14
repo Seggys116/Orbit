@@ -30,8 +30,7 @@ struct EaselCanvasView: View {
         .orbitDocumentAppearance()
     }
 
-    // Two different easels routed through the same tree position can be mistaken by SwiftUI
-    // for the same view being updated; this rebuilds model whenever easelID disagrees with it.
+    // SwiftUI can mistake two easels at the same tree position for one view updating; rebuild model whenever easelID disagrees with it.
     private func rebuildModelIfNeeded() {
         guard model?.easelID != easelID else { return }
         if let outgoingModel = model {
@@ -55,7 +54,7 @@ struct EaselCanvasView: View {
                     .overlay(EaselGridBackground(zoom: model.viewportZoom, origin: model.viewportOrigin))
 
                 ZStack(alignment: .topLeading) {
-                    ForEach(model.items.sorted(by: { $0.zIndex < $1.zIndex })) { item in
+                    ForEach(model.itemsByZIndex) { item in
                         EaselItemContainerView(
                             model: model,
                             item: item,
@@ -147,7 +146,7 @@ struct EaselCanvasView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OrbitRadius.row))
         .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
         .padding(.top, 10)
     }
@@ -164,7 +163,7 @@ struct EaselCanvasView: View {
                         .frame(width: 26, height: 22)
                         .background(
                             model.activeTool == tool ? Color.accentColor.opacity(0.25) : .clear,
-                            in: RoundedRectangle(cornerRadius: 6)
+                            in: RoundedRectangle(cornerRadius: OrbitRadius.sm)
                         )
                 }
                 .buttonStyle(.plain)
@@ -188,7 +187,7 @@ struct EaselCanvasView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OrbitRadius.lg))
         .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
         .padding(.leading, 12)
         .padding(.bottom, 12)
@@ -253,7 +252,7 @@ struct EaselCanvasView: View {
         .orbitTooltip("Export Easel as Image")
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OrbitRadius.row))
         .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
         .padding(.trailing, 12)
         .padding(.bottom, 12)
@@ -267,7 +266,7 @@ struct EaselCanvasView: View {
             Button { zoom(model, by: 1.2) } label: { Image(systemName: "plus.magnifyingglass") }
                 .buttonStyle(.plain)
             Button("Reset View") {
-                withAnimation(OrbitMotion.standard) { model.viewportOrigin = .zero; model.viewportZoom = 1.0 }
+                withOrbitAnimation(OrbitMotion.standard) { model.viewportOrigin = .zero; model.viewportZoom = 1.0 }
                 model.persistViewport()
             }
             .buttonStyle(.plain)
@@ -283,7 +282,7 @@ struct EaselCanvasView: View {
     }
 
     private func zoom(_ model: EaselCanvasModel, by factor: Double) {
-        withAnimation(OrbitMotion.standard) {
+        withOrbitAnimation(OrbitMotion.standard) {
             model.viewportZoom = min(3.0, max(0.15, model.viewportZoom * factor))
         }
         model.persistViewport()

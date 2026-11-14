@@ -46,8 +46,8 @@ struct LinkHoverStatusView: View {
                     .padding(.vertical, 4)
                     .frame(maxWidth: proxy.size.width * maximumWidthFraction, alignment: .leading)
                     .fixedSize(horizontal: true, vertical: false)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.white.opacity(0.08)))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OrbitRadius.sm))
+                    .overlay(RoundedRectangle(cornerRadius: OrbitRadius.sm).strokeBorder(.white.opacity(0.08)))
                     .padding(.leading, 8)
                     .padding(.bottom, 8)
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottomLeading)
@@ -55,7 +55,7 @@ struct LinkHoverStatusView: View {
             }
         }
         .allowsHitTesting(false)
-        .animation(OrbitMotion.quick, value: displayText)
+        .orbitAnimation(OrbitMotion.quick, value: displayText)
     }
 
     private var displayText: String? {

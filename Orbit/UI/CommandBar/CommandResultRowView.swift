@@ -41,7 +41,7 @@ struct CommandResultRow: View {
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.15)))
+                        .background(RoundedRectangle(cornerRadius: OrbitRadius.xs).fill(Color.secondary.opacity(0.15)))
                 }
             } else if showsAskChatGPTHint {
                 trailingHint(label: "Ask ChatGPT") {
@@ -49,13 +49,13 @@ struct CommandResultRow: View {
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 16, height: 16)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.15)))
+                        .background(RoundedRectangle(cornerRadius: OrbitRadius.xs).fill(Color.secondary.opacity(0.15)))
                 }
             }
         }
         .padding(.horizontal, 10)
         .frame(height: OrbitMetrics.commandBarRowHeight)
-        .background(RoundedRectangle(cornerRadius: 8).fill(selectionFill))
+        .background(RoundedRectangle(cornerRadius: OrbitRadius.md).fill(selectionFill))
         .contentShape(Rectangle())
     }
 
@@ -96,7 +96,7 @@ struct CommandResultRow: View {
         if let host = result.faviconHost {
             FaviconView(url: result.faviconURL, host: host)
                 .frame(width: 16, height: 16)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .clipShape(RoundedRectangle(cornerRadius: OrbitRadius.xs))
         } else {
             Image(systemName: result.symbolName)
                 .frame(width: 16, height: 16)

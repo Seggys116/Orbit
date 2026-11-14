@@ -3,8 +3,6 @@ import Observation
 import SwiftUI
 
 enum OrbitMetrics {
-    // MARK: Icon scale
-
     static let iconFavicon: CGFloat = 15
     static let iconChrome: CGFloat = 17
     static let iconMedium: CGFloat = 20
@@ -14,15 +12,12 @@ enum OrbitMetrics {
 
     // Apple Color Emoji draw near edge-to-edge, unlike SF Symbols, so they need a smaller fraction.
     static let spaceIconEmojiScaleFraction: CGFloat = 0.58
-    // Leaves a margin so a symbol icon never crops against its container.
     static let spaceIconSymbolScaleFraction: CGFloat = 0.78
-
-    // MARK: Sidebar
 
     static let sidebarDefaultWidth: CGFloat = 240
     static let sidebarMinWidth: CGFloat = 180
     static let sidebarMaxWidth: CGFloat = 560
-    // Hit column. The hover pill fills it; anything wider is empty padding that also steals clicks from the tab edge.
+    // Hit column: anything wider is empty padding that steals clicks from the tab edge.
     static let sidebarResizeHandleWidth: CGFloat = 4
     static let sidebarHoverEdgeWidth: CGFloat = 8
     static let sidebarAutoHideDelay: Double = 0.45
@@ -33,8 +28,6 @@ enum OrbitMetrics {
     static let sidebarRowPillVerticalInset: CGFloat = 3
     static let sidebarRowCornerRadius: CGFloat = 10
     static let sidebarRowLoadingBarHeight: CGFloat = 2
-
-    // MARK: Drag insertion indicator
 
     static let sidebarInsertionIndicatorThickness: CGFloat = 2
     static let sidebarInsertionIndicatorKnobDiameter: CGFloat = 8
@@ -60,8 +53,6 @@ enum OrbitMetrics {
     static let sidebarActiveRowOpacity: Double = 0.10
     static let sidebarHoverRowOpacity: Double = 0.06
 
-    // MARK: Split-group row (`Orbit/UI/Sidebar/SplitGroupRowView.swift`)
-
     static let sidebarSplitGroupContainerOpacity: Double = 0.04
     static let sidebarSplitGroupPaneOpacity: Double = sidebarHoverRowOpacity
     static let sidebarSplitGroupPaneHoverOpacity: Double = (sidebarSplitGroupPaneOpacity + sidebarActiveRowOpacity) / 2
@@ -84,8 +75,6 @@ enum OrbitMetrics {
     static let faviconSize: CGFloat = 16
     static let spaceBadgeSize: CGFloat = 40
 
-    // MARK: Favorites/"Top Apps" tiles
-
     static let favoriteTileMinWidth: CGFloat = 52
     static let favoriteTileHeight: CGFloat = 52
     static let favoriteIconGlyphSize: CGFloat = 24
@@ -95,22 +84,16 @@ enum OrbitMetrics {
 
     static let favoritesMaximumCount = 12
 
-    // MARK: Sidebar bottom bar
-
     static let sidebarBottomBarHeight: CGFloat = 36
     static let sidebarBottomBarIconSize: CGFloat = 24
     static let sidebarBottomBarSpacing: CGFloat = 12
     static let sidebarBottomBarHorizontalPadding: CGFloat = sidebarHorizontalPadding
-
-    // MARK: Live Calendar row (LiveCalendarRowView)
 
     static let liveCalendarRowInnerSpacing: CGFloat = 6
     static let liveCalendarJoinButtonHorizontalPadding: CGFloat = 9
     static let liveCalendarJoinButtonVerticalPadding: CGFloat = 4
     static let liveCalendarCardHorizontalPadding: CGFloat = 10
     static let liveCalendarCardVerticalPadding: CGFloat = 7
-
-    // MARK: Now-playing card (SidebarMiniPlayerView)
 
     static let miniPlayerCornerRadius: CGFloat = 12
 
@@ -126,8 +109,6 @@ enum OrbitMetrics {
 
     static let miniPlayerSurfaceOpacity: Double = 0.16
 
-    // MARK: Space pager (SpaceSwitcherPagerView)
-
     static let spacePagerDotSize: CGFloat = sidebarBottomBarIconSize
     static let spacePagerDotSpacing: CGFloat = 2
     static let spacePagerContainerPadding: CGFloat = 2
@@ -136,8 +117,6 @@ enum OrbitMetrics {
 
     static let spacePagerMinimumSizeScale: CGFloat = 0.6
 
-    // MARK: Traffic lights
-
     static let trafficLightDiameter: CGFloat = 12
     static let trafficLightSpacing: CGFloat = 8
     // Must equal sidebarHorizontalPadding: aligns with the real, AppKit-hosted traffic lights.
@@ -145,13 +124,11 @@ enum OrbitMetrics {
 
     static let trafficLightTopInset: CGFloat = (sidebarTopRowHeight - trafficLightDiameter) / 2
 
-    // MARK: Content card
-
     static let cardCornerRadius: CGFloat = 10
 
     static let cardInset: CGFloat = 9
 
-    // Docked leading padding. The handle sits in the rest of cardInset, so the page stays one inset from the sidebar. Top, bottom, and trailing keep the full cardInset; a hidden sidebar uses cardInset on the leading window edge too.
+    // Docked leading padding: the resize handle occupies the rest of cardInset, so the page stays one inset from the sidebar.
     static let contentCardLeadingSeam: CGFloat = cardInset - sidebarResizeHandleWidth
 
     static let cardBorderWidth: CGFloat = 1
@@ -159,8 +136,6 @@ enum OrbitMetrics {
     static let cardShadowRadius: CGFloat = 0
     static let cardShadowOpacity: Double = 0
     static let cardShadowYOffset: CGFloat = 0
-
-    // MARK: Command Bar
 
     static let commandBarWidth: CGFloat = 620
     static let commandBarMaxHeight: CGFloat = 460
@@ -173,18 +148,12 @@ enum OrbitMetrics {
     static let commandBarSeparatorHeight: CGFloat = 1
     static let commandBarSeparatorInset: CGFloat = 16
 
-    // MARK: Split view
-
     static let splitDividerThickness: CGFloat = 6
     static let splitMinimumFraction: Double = 0.15
-
-    // MARK: Popovers
 
     static let popoverCornerRadius: CGFloat = 14
     static let tabPreviewWidth: CGFloat = 280
     static let tabPreviewHeight: CGFloat = 180
-
-    // MARK: Folder hover preview
 
     static let folderPreviewWidth: CGFloat = tabPreviewWidth
     static let folderPreviewVisibleRows: CGFloat = 8
@@ -192,12 +161,8 @@ enum OrbitMetrics {
 
     static let folderPreviewHoverDelay: Double = 0.45
 
-    // MARK: Modal accessory fields
-
     static let alertAccessoryFieldWidth: CGFloat = 260
     static let alertAccessoryFieldHeight: CGFloat = 22
-
-    // MARK: Site Control Center (SiteControlPopoverView)
 
     static let siteControlActionButtonHeight: CGFloat = 32
     static let siteControlActionButtonGap: CGFloat = 8
@@ -215,9 +180,6 @@ enum OrbitMetrics {
     static let siteControlFooterLabelFontSize: CGFloat = 14
     static let siteControlFooterGlyphToTextGap: CGFloat = 9
 
-    // MARK: Extension install flow (ExtensionConsentSheetView is this flow's
-    // reference dialog — every other visual state shares its scale).
-
     static let extensionInstallSheetWidth: CGFloat = 420
     static let extensionInstallSheetPadding: CGFloat = 20
     static let extensionInstallStackSpacing: CGFloat = 14
@@ -229,7 +191,6 @@ enum OrbitMetrics {
     static let extensionInstallCaptionFontSize: CGFloat = 11
     static let extensionInstallFailureGlyphSize: CGFloat = 15
 
-    // Spans the consent dialog's own text column rather than a width of its own.
     static let extensionInstallProgressBarHeight: CGFloat = 4
     static let extensionInstallProgressBarWidth: CGFloat =
         extensionInstallSheetWidth - (extensionInstallSheetPadding * 2)
@@ -238,19 +199,14 @@ enum OrbitMetrics {
     static let extensionInstallProgressIndeterminateOpacity: Double = 0.45
     static let extensionInstallProgressTrackOpacityDark: Double = 0.16
     static let extensionInstallProgressTrackOpacityLight: Double = 0.12
-    // The sheet has to hold its height across a stage change, or the window
-    // resizes under the pointer every time the installer moves on.
+    // Held across stage changes so the window does not resize under the pointer.
     static let extensionInstallProgressMinimumBodyHeight: CGFloat = 52
 
-    // MARK: Context menu (OrbitContextMenuView), the custom non-NSMenu menu
-
     static let contextMenuWidth: CGFloat = 250
-    // Deliberately not popoverCornerRadius: the menu panel reads as its own
-    // Orbit-drawn surface and carries a wider radius than a system popover.
+    // Deliberately not popoverCornerRadius: the menu is its own Orbit-drawn surface with a wider radius.
     static let contextMenuCornerRadius: CGFloat = 18
     static let contextMenuRowHeight: CGFloat = 32
-    // Close to a pill against a 32pt row -- a selected row must never read as
-    // a squared-off system selection bar.
+    // Close to a pill against a 32pt row, so a selected row never reads as a squared-off system bar.
     static let contextMenuRowCornerRadius: CGFloat = 11
     static let contextMenuRowHorizontalPadding: CGFloat = 8
     static let contextMenuRowHorizontalInset: CGFloat = 6
@@ -267,14 +223,10 @@ enum OrbitMetrics {
     static let contextMenuDisabledOpacity: Double = 0.38
     static let contextMenuDividerThickness: CGFloat = 1
 
-    // MARK: Floating menu panel (OrbitMenuPanel) — Orbit draws all of this
-    // itself; the panel is borderless and fully transparent.
-
     static let contextMenuShadowRadius: CGFloat = 22
     static let contextMenuShadowOpacity: Double = 0.34
     static let contextMenuShadowYOffset: CGFloat = 8
-    // Must stay >= contextMenuShadowRadius + contextMenuShadowYOffset, or the
-    // panel clips its own shadow.
+    // Must stay >= contextMenuShadowRadius + contextMenuShadowYOffset, or the panel clips its own shadow.
     static let contextMenuShadowPadding: CGFloat = 34
     static let contextMenuArrowWidth: CGFloat = 24
     static let contextMenuArrowHeight: CGFloat = 10
@@ -357,6 +309,104 @@ enum OrbitMotion {
     static let quick = Animation.spring(response: 0.22, dampingFraction: 0.86)
     static let dramatic = Animation.spring(response: 0.48, dampingFraction: 0.78)
     static let interactive = Animation.interactiveSpring(response: 0.3, dampingFraction: 0.8)
+
+    static let fade = Animation.easeOut(duration: 0.16)
+
+    @MainActor static var prefersReducedMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// Nil under Reduce Motion so the change snaps; fades survive because they carry no movement.
+    static func resolved(_ token: Animation, reduceMotion: Bool) -> Animation? {
+        reduceMotion && token != fade ? nil : token
+    }
+}
+
+/// For use outside a view, where `accessibilityReduceMotion` is not available from the environment.
+@MainActor
+@discardableResult
+func withOrbitAnimation<Result>(_ token: Animation = OrbitMotion.standard, _ body: () throws -> Result) rethrows -> Result {
+    try withAnimation(OrbitMotion.resolved(token, reduceMotion: OrbitMotion.prefersReducedMotion), body)
+}
+
+private struct OrbitAnimationModifier<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let token: Animation
+    let value: Value
+
+    func body(content: Content) -> some View {
+        content.animation(OrbitMotion.resolved(token, reduceMotion: reduceMotion), value: value)
+    }
+}
+
+extension View {
+    func orbitAnimation<Value: Equatable>(_ token: Animation = OrbitMotion.standard, value: Value) -> some View {
+        modifier(OrbitAnimationModifier(token: token, value: value))
+    }
+}
+
+/// Shared corner-radius scale. Nested shapes are concentric: inner = outer - inset, via `concentric`.
+enum OrbitRadius {
+    static let xs: CGFloat = 4
+    static let sm: CGFloat = 6
+    static let md: CGFloat = 8
+    static let row: CGFloat = OrbitMetrics.sidebarRowCornerRadius
+    static let lg: CGFloat = 12
+    static let panel: CGFloat = OrbitMetrics.popoverCornerRadius
+    static let window: CGFloat = 16
+
+    static func concentric(outer: CGFloat, inset: CGFloat) -> CGFloat {
+        max(0, outer - inset)
+    }
+}
+
+enum OrbitSpacing {
+    static let xxs: CGFloat = 2
+    static let xs: CGFloat = 4
+    static let sm: CGFloat = 6
+    static let md: CGFloat = 8
+    static let lg: CGFloat = 12
+    static let xl: CGFloat = 16
+    static let xxl: CGFloat = 24
+    static let xxxl: CGFloat = 32
+}
+
+/// Neutral palette shared with the Orbit website; every text colour passes WCAG AA on `bg`, `bg2` and `card`.
+enum OrbitNeutral {
+    static let bg = adaptive(light: 0xF7F7F8, dark: 0x06060C)
+    static let bg2 = adaptive(light: 0xEFEFF2, dark: 0x0B0B14)
+    static let card = adaptive(light: 0xFFFFFF, dark: 0x101019)
+    static let raised = adaptive(light: 0xFFFFFF, dark: 0x16161F)
+    static let ink = adaptive(light: 0x0B0B12, dark: 0xF4F4F8)
+    static let ink2 = adaptive(light: 0x2A2A36, dark: 0xD6D6E0)
+    static let muted = adaptive(light: 0x5B5B6B, dark: 0xA3A3B5)
+    static let muted2 = adaptive(light: 0x6E6E7E, dark: 0x8D8DA0)
+    static let line = adaptive(light: 0x0B0B12, lightAlpha: 0.09, dark: 0xFFFFFF, darkAlpha: 0.08)
+    static let hairline = adaptive(light: 0x0B0B12, lightAlpha: 0.06, dark: 0xFFFFFF, darkAlpha: 0.06)
+    static let chip = adaptive(light: 0x0B0B12, lightAlpha: 0.06, dark: 0xFFFFFF, darkAlpha: 0.07)
+    static let chipStrong = adaptive(light: 0x0B0B12, lightAlpha: 0.10, dark: 0xFFFFFF, darkAlpha: 0.12)
+    static let sunk = adaptive(light: 0x0B0B12, lightAlpha: 0.035, dark: 0x000000, darkAlpha: 0.30)
+    static let accent = adaptive(light: 0x6D3FE0, dark: 0xB49CFF)
+    static let onAccent = adaptive(light: 0xFFFFFF, dark: 0x0B0B12)
+    static let good = adaptive(light: 0x15703B, dark: 0x4CC38A)
+    static let warn = adaptive(light: 0x9A5500, dark: 0xF0A443)
+    static let bad = adaptive(light: 0xC4302B, dark: 0xFF7A70)
+
+    static func adaptive(light: UInt32, lightAlpha: CGFloat = 1, dark: UInt32, darkAlpha: CGFloat = 1) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return rgb(isDark ? dark : light, alpha: isDark ? darkAlpha : lightAlpha)
+        })
+    }
+
+    private static func rgb(_ hex: UInt32, alpha: CGFloat) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: alpha
+        )
+    }
 }
 
 enum OrbitFont {
@@ -401,11 +451,9 @@ enum OrbitColor {
         scheme == .dark ? sidebarDividerDark : sidebarDividerLight
     }
 
-    // A selected row must whisper, not read as the system's saturated accent bar; these constants
-    // pull the hue toward a warm rose and strip most of the saturation.
+    // A selected row must whisper, not read as the system's saturated accent bar.
     static let menuHighlightWarmHue: Double = 0.94
     static let menuHighlightWarmth: Double = 0.78
-    // Light washes hue out over near-white at low alpha; dark needs far less.
     static let menuHighlightSaturationScaleDark: Double = 0.40
     static let menuHighlightSaturationScaleLight: Double = 0.95
     static let menuHighlightBrightnessDark: Double = 0.88
@@ -423,8 +471,7 @@ enum OrbitColor {
         )
     }
 
-    /// Travels the shorter way round the wheel, so an accent already past the
-    /// rose anchor is pulled back to it rather than dragged the long way.
+    /// Travels the shorter way round the hue wheel toward the rose anchor.
     private static func warmedHue(from hue: Double) -> Double {
         var delta = menuHighlightWarmHue - hue
         if delta > 0.5 { delta -= 1 }

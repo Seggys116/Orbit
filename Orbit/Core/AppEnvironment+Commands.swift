@@ -6,29 +6,23 @@ extension AppEnvironment {
 
     func presentCommandBar(mode: CommandBarMode) {
         commandBarMode = mode
-        // Before the bar exists. WebKit otherwise becomes first responder again
-        // on the turn after Cmd-T, and the field's own claim has already given up.
+        // Set before the bar exists: WebKit otherwise retakes first responder a turn after Cmd-T.
         setWebContentsFocusSuppressed(true)
         commandBarPresentationSerial &+= 1
         isCommandBarPresented = true
     }
 
-    // Returning false means "nobody acted on this" — the signal
-    // GlobalKeyEventMonitor uses to pass the key event on rather than consume it.
+    // Returning false tells GlobalKeyEventMonitor to pass the key event on rather than consume it.
     @discardableResult
     func perform(_ command: ShortcutCommandID) -> Bool {
-        // A presented Peek is modal over the page beneath it and gets first
-        // refusal — without this, Cmd+W over an open Peek would close the tab
-        // the user is reading behind it instead of dismissing the Peek.
+        // A presented Peek gets first refusal, or Cmd+W would close the tab behind it.
         if let handled = performWhilePeekPresented(command) { return handled }
 
         switch command {
         case .newTabCommandBar:
             presentCommandBar(mode: newTabCommandBarMode())
         case .addressBarCommandBar:
-            // A Little Orbit window's address field fires this exact command
-            // too, but every case below targets the shared activeTabID,
-            // which a Little Orbit tab is never — must route there first.
+            // A Little Orbit tab is never activeTabID, so route it before the cases below.
             if let controller = LittleOrbitWindowController.frontmostController {
                 controller.presentAddressCommandBar()
                 return true
@@ -59,11 +53,9 @@ extension AppEnvironment {
         case .quit:
             NSApp.terminate(nil)
         case .toggleSidebar:
-            // A Little Orbit window has no sidebar of its own; this is a
-            // global shortcut, so without this guard it would silently
-            // toggle the main window's sidebar while a Little Orbit window is frontmost.
+            // A Little Orbit window has no sidebar; without this guard the main window's would toggle.
             guard LittleOrbitWindowController.frontmostController == nil else { return true }
-            withAnimation(OrbitMotion.standard) { isSidebarVisible.toggle() }
+            withOrbitAnimation(OrbitMotion.standard) { isSidebarVisible.toggle() }
         case .toggleFullScreen:
             NSApp.keyWindow?.toggleFullScreen(nil)
         case .openSettings:
@@ -128,14 +120,13 @@ extension AppEnvironment {
         case .resetZoom: activeWebContents?.setZoomFactor(1.0)
 
         case .findOnPage:
-            withAnimation(OrbitMotion.standard) { isFindBarPresented = true }
+            withOrbitAnimation(OrbitMotion.standard) { isFindBarPresented = true }
         case .findNext:
             activeWebContents?.find(findQuery, options: FindOptions(forward: true, findNext: true))
         case .findPrevious:
             activeWebContents?.find(findQuery, options: FindOptions(forward: false, findNext: true))
         case .findAndReplace:
-            // No engine hook for in-page replace — must stay unhandled so the
-            // key event reaches a focused text view's own Find/Replace instead.
+            // No engine hook for replace; stay unhandled so a focused text view's own Find/Replace gets the key.
             return false
         case .jumpToSelection:
             Task { try? await activeWebContents?.evaluateJavaScript(
@@ -150,10 +141,11 @@ extension AppEnvironment {
         case .screenCaptureRegion:
             if let activeTabID { extensionPoints.presentCaptureTool?(activeTabID, false) }
         case .viewSource: openViewSource()
-        case .inspectElement: activeWebContents?.showDeveloperTools(inspectAt: nil)
-        case .javaScriptConsole: activeWebContents?.showDeveloperTools(inspectAt: nil)
+        case .inspectElement: activeWebContents?.showInspectElement(at: nil)
+        case .toggleDeviceToolbar: (activeWebContents as? WebKitWebContents)?.toggleDeviceToolbar()
+        case .javaScriptConsole: activeWebContents?.showJavaScriptConsole()
         case .toggleDeveloperMode: DeveloperModeSettings.toggle()
-        case .openDeveloperTools: activeWebContents?.showDeveloperTools(inspectAt: nil)
+        case .openDeveloperTools: activeWebContents?.showOrbitDeveloperTools()
         case .captureFullPage:
             return captureActiveTabFullPage()
         case .clearCookiesAndRefresh:
@@ -167,8 +159,8 @@ extension AppEnvironment {
         case .editBoost:
             return presentBoostsEditorForActiveTab(requiringExistingBoost: true)
 
-        case .nextSpace: withAnimation(OrbitMotion.dramatic) { nextSpace() }
-        case .previousSpace: withAnimation(OrbitMotion.dramatic) { previousSpace() }
+        case .nextSpace: withOrbitAnimation(OrbitMotion.dramatic) { nextSpace() }
+        case .previousSpace: withOrbitAnimation(OrbitMotion.dramatic) { previousSpace() }
         case .jumpToSpace1: jumpToSpaceAnimated(0)
         case .jumpToSpace2: jumpToSpaceAnimated(1)
         case .jumpToSpace3: jumpToSpaceAnimated(2)
@@ -204,18 +196,12 @@ extension AppEnvironment {
         case .newEasel: createAndOpenEasel()
 
         case .library, .downloads, .archivedTabs, .mediaLibrary, .easelsAndNotesLibrary, .boostsLibrary:
-            if let section = AppEnvironment.librarySection(for: command) {
-                LibraryWindowController.show(section: section)
-            } else {
-                LibraryWindowController.toggleVisible()
-            }
+            toggleLibrary(section: AppEnvironment.librarySection(for: command))
         case .clearArchive:
             return clearArchiveEverywhere()
         case .history: HistoryWindowController.show()
         case .siteControls:
-            // Must route to this window's own detached tab when a Little
-            // Orbit window is frontmost — its tab is never any Space's
-            // activeTabID, so falling through would open the main window's popover instead.
+            // A Little Orbit tab is never any Space's activeTabID, so falling through would open the main window's popover.
             if let littleOrbitTabID = LittleOrbitWindowController.frontmostController?.tabID {
                 siteControlPresentedTabID = littleOrbitTabID
             } else if let activeTabID {
@@ -248,11 +234,7 @@ extension AppEnvironment {
         return webContents[activeTabID]
     }
 
-    // MARK: - Overlay dismissal and focus hand-back
-
-    // While either overlay is presented, the user is typing into a real
-    // editable text field — moving first responder to the page underneath
-    // would yank the keyboard out from under them mid-word.
+    // While either overlay is up the user is typing in its field; focusing the page would yank the keyboard mid-word.
     func focusActivePage() {
         guard !isCommandBarPresented, !isFindBarPresented else { return }
         activeWebContents?.focus()
@@ -264,13 +246,9 @@ extension AppEnvironment {
         }
     }
 
-    /// _execute_action's landing point. Opens the Site Control popover that hosts
-    /// the extension's icon and names which extension's own popup it must then
-    /// open, which is the whole difference from the plain .siteControls command.
+    /// _execute_action's landing point: opens Site Controls and names the extension whose popup to open next.
     @discardableResult
     func activateExtensionAction(_ extensionID: String) -> Bool {
-        // Same routing as .siteControls: a frontmost Little Orbit window's tab is
-        // never any Space's activeTabID.
         if let littleOrbitTabID = LittleOrbitWindowController.frontmostController?.tabID {
             siteControlPresentedTabID = littleOrbitTabID
         } else if let activeTabID {
@@ -282,10 +260,7 @@ extension AppEnvironment {
         return true
     }
 
-    /// A sidebar click both selects the tab and takes the Command Bar down.
-    /// `activateTab` itself must leave the bar up: the bar's own result row
-    /// activates first and dismisses second, and focusing in between would
-    /// pull the keyboard out of the field mid-keystroke.
+    /// A sidebar click selects the tab and dismisses the bar; `activateTab` must leave the bar up so focus cannot move mid-keystroke.
     func activateTabDismissingCommandBar(_ id: TabID) {
         activateTab(id)
         if isCommandBarPresented { dismissCommandBar() }
@@ -293,7 +268,7 @@ extension AppEnvironment {
 
     // Must clear isCommandBarPresented before handing focus back here, since CommandBarView.activate(_:) navigates before dismissing and activateTab(_:) refuses to focus the page while the flag is still set.
     func dismissCommandBar() {
-        withAnimation(OrbitMotion.standard) { isCommandBarPresented = false }
+        withOrbitAnimation(OrbitMotion.standard) { isCommandBarPresented = false }
         setWebContentsFocusSuppressed(false)
         focusActivePage()
     }
@@ -368,8 +343,7 @@ extension AppEnvironment {
         }
     }
 
-    // Refuses while a bar is already up: a split created from the Command
-    // Bar mounts its blank pane mid-dismissal, and re-presenting here would reset the user's query.
+    // Refuses while a bar is up: a split made from the Command Bar mounts its pane mid-dismissal, and re-presenting would reset the query.
     func presentBlankPaneCommandBar(_ tabID: TabID) {
         guard !isCommandBarPresented, !isFindBarPresented else { return }
         guard let mode = blankPaneMode(for: tabID) else { return }
@@ -379,7 +353,7 @@ extension AppEnvironment {
     func dismissFindBar() {
         activeWebContents?.stopFinding(clearSelection: true)
         findQuery = ""
-        withAnimation(OrbitMotion.standard) { isFindBarPresented = false }
+        withOrbitAnimation(OrbitMotion.standard) { isFindBarPresented = false }
         focusActivePage()
     }
 
@@ -394,8 +368,6 @@ extension AppEnvironment {
         }
     }
 
-    // MARK: - Peek and detached-tab routing
-
     // nil means no Peek is up, or it doesn't claim this command — dispatch continues to the main table.
     private func performWhilePeekPresented(_ command: ShortcutCommandID) -> Bool? {
         guard PeekState.shared.activePreview != nil else { return nil }
@@ -404,9 +376,7 @@ extension AppEnvironment {
             PeekState.shared.dismiss()
             return true
         case .pinUnpinTab:
-            // Claimed here, not left to fall through: the main table would
-            // resolve activeTabID (the tab behind the Peek) and pin that
-            // instead of the page actually on screen.
+            // Claimed here: the main table would pin activeTabID, the tab behind the Peek.
             if let previewTabID = PeekState.shared.previewTabID {
                 togglePin(previewTabID)
             }
@@ -560,14 +530,13 @@ extension AppEnvironment {
         openTab(url: sourceURL, in: spaceID)
     }
 
-    // self, not AppEnvironment.shared: correct whether the shortcut was
-    // pressed in an ordinary window or an already-Incognito one.
+    // self, not AppEnvironment.shared, so it is right from an ordinary or an Incognito window.
     private func openIncognitoWindow() {
         OrbitWindowController.openIncognitoWindow(on: self)
     }
 
     private func jumpToSpaceAnimated(_ index: Int) {
-        withAnimation(OrbitMotion.dramatic) { jumpToSpace(index: index) }
+        withOrbitAnimation(OrbitMotion.dramatic) { jumpToSpace(index: index) }
     }
 
     // MARK: - Notes / Easels
@@ -599,8 +568,7 @@ extension AppEnvironment {
         if let group = activeSplitGroup, group.tabIDs.count >= SplitGroup.maximumPanes { return }
         let blankTabID = openTab(url: URL(string: "orbit://new-tab")!, in: spaceID, section: .today, activate: false)
         if let groupID = state.tabs[currentActive]?.splitGroupID {
-            // Edge follows the group's existing axis, not always .right — a
-            // hard-coded .right would flip a top-and-bottom split to side-by-side on every extend.
+            // Follow the group's axis; a fixed .right would flip a top-and-bottom split to side-by-side.
             let edge: SplitEdge = state.splitGroups[groupID]?.axis == .vertical ? .bottom : .right
             addToSplit(tabID: blankTabID, groupID: groupID, edge: edge)
         } else {

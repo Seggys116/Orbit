@@ -249,7 +249,7 @@ struct BoostsEditorView: View {
             }),
             .divider(),
             .item(OrbitContextMenuItem(title: "All Boosts…") {
-                Task { @MainActor in LibraryWindowController.show(section: .boosts) }
+                Task { @MainActor in AppEnvironment.openLibraryInFrontmostWindow(section: .boosts) }
             })
         ]
     }
@@ -309,7 +309,7 @@ struct BoostsEditorView: View {
 
             Divider()
 
-            Text("ZAPPED ELEMENTS").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+            Text("Zapped elements").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
 
             if boost.zappedSelectors.isEmpty {
                 Text("Nothing zapped on this site yet.")
@@ -333,7 +333,7 @@ struct BoostsEditorView: View {
                                 .orbitTooltip("Restore this element")
                             }
                             .padding(6)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.3)))
+                            .background(RoundedRectangle(cornerRadius: OrbitRadius.sm).fill(.quaternary.opacity(0.3)))
                         }
                     }
                 }
@@ -377,8 +377,8 @@ struct BoostsEditorView: View {
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.orange.opacity(0.4)))
+        .background(RoundedRectangle(cornerRadius: OrbitRadius.md).fill(Color.orange.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: OrbitRadius.md).strokeBorder(Color.orange.opacity(0.4)))
         .task(id: pick) { schedulePreview(for: pick, immediate: true) }
     }
 
@@ -524,7 +524,7 @@ struct BoostsEditorView: View {
     @ViewBuilder
     private func colorSection(_ boost: Boost) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("COLOR")
+            sectionHeader("Color")
 
             ColorPicker("Background", selection: colorBinding(\.backgroundColor, boostID: boost.id), supportsOpacity: true)
             ColorPicker("Text", selection: colorBinding(\.textColor, boostID: boost.id), supportsOpacity: true)
@@ -609,7 +609,7 @@ struct BoostsEditorView: View {
     @ViewBuilder
     private func fontSection(_ boost: Boost) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("FONT")
+            sectionHeader("Font")
 
             Picker("Family", selection: Binding(
                 get: { boost.fontFamily ?? "" },
@@ -641,7 +641,7 @@ struct BoostsEditorView: View {
     @ViewBuilder
     private func sizeAndCaseSection(_ boost: Boost) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("SIZE & CASE")
+            sectionHeader("Size and case")
 
             HStack(spacing: 8) {
                 Button(boost.pageSizeButtonLabel) {

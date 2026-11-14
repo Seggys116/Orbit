@@ -122,11 +122,22 @@ public enum ArcImportCoordinator {
         archiveLimit: Int = 2000,
         faviconLimit: Int = 2000,
         extensionStore: ExtensionStore? = nil,
-        extensionInstaller: ExtensionInstaller? = nil
+        extensionInstaller: ExtensionInstaller? = nil,
+        progress: ImportProgressHandler? = nil
     ) async throws -> ArcImportSummary {
         let payload = try await Task.detached(priority: .userInitiated) {
             try reader.readArc(historyLimit: historyLimit, archiveLimit: archiveLimit, faviconLimit: faviconLimit)
         }.value
+
+        // Totals are the size of what the reader returned, so every bar has a real denominator.
+        progress?(.planned(.spaces, total: payload.sidebar.spaces.count))
+        progress?(.planned(.tabs, total: max(0, payload.totalLiveTabCount - payload.sidebar.topApps.count) + payload.archived.count))
+        progress?(.planned(.history, total: payload.visits.count))
+        if !payload.extensions.isEmpty {
+            progress?(.planned(.extensions, total: payload.extensions.count))
+        }
+        if importCookies { progress?(.planned(.sessions, total: nil)) }
+        if importSiteData { progress?(.planned(.siteData, total: nil)) }
 
         // A plist Orbit cannot parse must not cost the user their Spaces — failure here is swallowed.
         let appPreferences = try? await Task.detached(priority: .userInitiated) {
@@ -134,19 +145,28 @@ public enum ArcImportCoordinator {
         }.value
 
         var summary = apply(payload, appPreferences: appPreferences, env: env, profileID: profileID)
+        progress?(.finished(.spaces, completed: summary.spacesCreated))
+        progress?(.finished(.tabs, completed: summary.totalTabsImported))
+
         summary.historyEntriesImported = await applyHistory(
             payload.visits,
             env: env,
             profileID: resolvedProfileID(profileID, env: env),
-            historyStore: historyStore
+            historyStore: historyStore,
+            progress: progress
         )
+        progress?(.finished(.history, completed: summary.historyEntriesImported))
 
         await installExtensions(
             payload.extensions,
             installer: extensionInstaller,
             store: extensionStore ?? env.extensionStore,
-            summary: &summary
+            summary: &summary,
+            progress: progress
         )
+        if !payload.extensions.isEmpty {
+            progress?(.finished(.extensions, completed: summary.extensionsInstalled + summary.extensionsAlreadyInstalled))
+        }
 
         if importCookies {
             summary.cookies = await importArcCookies(
@@ -154,13 +174,23 @@ public enum ArcImportCoordinator {
                 env: env,
                 profileID: resolvedProfileID(profileID, env: env)
             )
+            progress?(.finished(.sessions, completed: storedCookieCount(summary.cookies)))
         }
 
         if importSiteData {
             summary.siteData = await stageArcSiteData(reader: reader, stagingDirectory: env.dataRoot.pendingSiteData)
+            progress?(.finished(.siteData, completed: summary.siteData.stagedSiteCount))
         }
 
         return summary
+    }
+
+    static func storedCookieCount(_ outcome: ArcCookieImportOutcome) -> Int {
+        switch outcome {
+        case .imported(let count): return count
+        case .partiallyImported(let stored, _): return stored
+        case .notAttempted, .decryptedButEngineCannotInstall, .keychainDenied, .failed: return 0
+        }
     }
 
     // MARK: - Site data
@@ -302,7 +332,6 @@ public enum ArcImportCoordinator {
         return summary
     }
 
-    // MARK: Favicons
 
     static func applyFavicons(_ favicons: [ArcFavicon], cache: FaviconCache) -> Int {
         guard !favicons.isEmpty else { return 0 }
@@ -310,7 +339,6 @@ public enum ArcImportCoordinator {
         return cache.cacheImported(imageDataByHost: byHost)
     }
 
-    // MARK: Key bindings
 
     private static func applyKeyBindings(
         _ imported: ArcKeyBindingImport,
@@ -338,18 +366,19 @@ public enum ArcImportCoordinator {
 
     // MARK: Extensions
 
-    // Downloads and CRX3-verifies each id from the Web Store — never copies Arc's unpacked disk directory, which carries no signature.
-    // Import-then-review consent: the "Import from Arc" click is the one approval; the default installer auto-approves rather than prompting per extension, and the summary reports what happened.
+    // Downloads and CRX3-verifies each id from the Web Store, never Arc's unpacked disk copy, which carries no signature; the "Import from Arc" click is the one consent.
     static func installExtensions(
         _ extensions: [ArcExtension],
         installer: ExtensionInstaller?,
         store: ExtensionStore,
-        summary: inout ArcImportSummary
+        summary: inout ArcImportSummary,
+        progress: ImportProgressHandler? = nil
     ) async {
         guard !extensions.isEmpty else { return }
         let installer = installer ?? ExtensionInstaller(store: store) { _ in true }
 
-        for arcExtension in extensions {
+        for (processed, arcExtension) in extensions.enumerated() {
+            defer { progress?(.advanced(.extensions, completed: processed + 1)) }
             do {
                 let result = try await installer.install(arcExtension.identifier)
                 guard case .installed(let loaded, _, _) = result else {
@@ -658,8 +687,7 @@ public enum ArcImportCoordinator {
         return await installOutcome(cookies, session: session(for: profileID, env: env))
     }
 
-    /// Isolated from decryption so the "no engine session to receive them" branch — the one onboarding
-    /// used to hit, since it runs before any window has started the engine — is directly testable.
+    /// Isolated from decryption so the "no engine session to receive them" branch (onboarding runs before any window starts the engine) is directly testable.
     static func installOutcome(_ cookies: [ArcCookie], session: EngineSession?) async -> ArcCookieImportOutcome {
         guard !cookies.isEmpty else { return .imported(count: 0) }
         guard let session else { return .decryptedButEngineCannotInstall(count: cookies.count) }
@@ -711,7 +739,8 @@ public enum ArcImportCoordinator {
         _ visits: [ImportedVisit],
         env: AppEnvironment,
         profileID: ProfileID?,
-        historyStore: HistoryStore?
+        historyStore: HistoryStore?,
+        progress: ImportProgressHandler?
     ) async -> Int {
         guard !visits.isEmpty, let profileID else { return 0 }
 
@@ -724,7 +753,7 @@ public enum ArcImportCoordinator {
         }
 
         var recorded = 0
-        for visit in visits {
+        for (processed, visit) in visits.enumerated() {
             let historyVisit = HistoryVisit(
                 url: visit.url,
                 title: visit.title,
@@ -736,7 +765,10 @@ public enum ArcImportCoordinator {
                 _ = try await store.record(visit: historyVisit)
                 recorded += 1
             } catch {
-                continue
+                // A visit the store rejects still counts as processed, so the bar reaches its total.
+            }
+            if (processed + 1) % ImportProgressCadence.historyBatch == 0 {
+                progress?(.advanced(.history, completed: processed + 1))
             }
         }
 

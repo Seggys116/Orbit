@@ -20,13 +20,12 @@ struct LibraryArchivedTabsView: View {
 
     var body: some View {
         if !groups.isEmpty {
-            // Lazy, not VStack: with a few thousand archived tabs a plain VStack built and laid
-            // out every row up front, on open, before any of it was scrolled into view.
-            LazyVStack(alignment: .leading, spacing: LibraryMetrics.dateGroupSpacing) {
+            // Lazy, not VStack: with a few thousand archived tabs a plain VStack laid out every row up front on open.
+            LazyVStack(alignment: .leading, spacing: LibraryModeMetrics.groupSpacing) {
                 ForEach(groups) { group in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: OrbitSpacing.xs) {
                         LibraryDateSectionHeader(title: group.title)
-                        LazyVStack(spacing: LibraryMetrics.rowSpacing) {
+                        LazyVStack(spacing: LibraryModeMetrics.rowSpacing) {
                             ForEach(ArchivedTabTreeBuilder.build(from: group.items)) { node in
                                 ArchivedTreeNodeRow(node: node, depth: 0)
                             }
@@ -41,14 +40,10 @@ struct LibraryArchivedTabsView: View {
     }
 }
 
-// MARK: - Row rendering
-// ArchivedTabNode/ArchivedFolderNode/ArchivedTabTreeBuilder live in PinnedNodeTree.swift, next to
-// the ArchivedFolderCrumb trail they rebuild from — model-layer, not view-layer, and they need to
-// be reachable from OrbitTests, whose target membership does not include this view file.
+// ArchivedTabNode/ArchivedFolderNode/ArchivedTabTreeBuilder live in PinnedNodeTree.swift so OrbitTests can reach them; its target does not include this view file.
 
 private enum ArchivedRowMetrics {
-    // Same per-depth indent the sidebar uses for pinned folder nesting, so a tab's Archive row
-    // lines up visually the way it would have in the sidebar.
+    // Same per-depth indent the sidebar uses for pinned folder nesting, so an Archive row lines up as it did in the sidebar.
     static let indentPerDepth = OrbitMetrics.sidebarIndentPerDepth
 }
 
@@ -70,43 +65,50 @@ private struct ArchivedFolderRow: View {
     var folder: ArchivedFolderNode
     var depth: Int
 
+    @Environment(\.libraryStyle) private var style
     @State private var isExpanded = true
+    @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: LibraryMetrics.rowSpacing) {
+        VStack(alignment: .leading, spacing: LibraryModeMetrics.rowSpacing) {
             Button {
-                isExpanded.toggle()
+                withOrbitAnimation(OrbitMotion.quick) { isExpanded.toggle() }
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: OrbitSpacing.md) {
                     folderGlyph
                     Text(folder.name)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(LibraryPalette.textPrimary)
+                        .font(OrbitFont.sidebarRowActive)
+                        .foregroundStyle(style.foreground)
                         .lineLimit(1)
-                    Spacer(minLength: 8)
+                    Spacer(minLength: OrbitSpacing.md)
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(LibraryPalette.textTertiary)
+                        .foregroundStyle(style.secondary)
                         .frame(width: 10, height: 10)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, LibraryMetrics.rowHorizontalPadding)
-                .padding(.vertical, LibraryMetrics.rowVerticalPadding)
+                .padding(.horizontal, LibraryModeMetrics.rowHorizontalPadding)
+                .padding(.vertical, LibraryModeMetrics.rowVerticalPadding)
                 .background(
-                    RoundedRectangle(cornerRadius: LibraryMetrics.rowCornerRadius)
-                        .fill(LibraryPalette.cardFill)
+                    RoundedRectangle(cornerRadius: OrbitRadius.row, style: .continuous)
+                        .fill(isHovering ? style.hoverFill : style.quietFill)
                 )
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .orbitAnimation(OrbitMotion.quick, value: isHovering)
+            .accessibilityLabel(folder.name)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
             .padding(.leading, CGFloat(depth) * ArchivedRowMetrics.indentPerDepth)
 
             if isExpanded {
-                VStack(spacing: LibraryMetrics.rowSpacing) {
+                VStack(spacing: LibraryModeMetrics.rowSpacing) {
                     ForEach(folder.children) { child in
                         ArchivedTreeNodeRow(node: child, depth: depth + 1)
                     }
                 }
+                .transition(.opacity)
             }
         }
     }
@@ -115,25 +117,27 @@ private struct ArchivedFolderRow: View {
     private var folderGlyph: some View {
         if let icon = folder.icon, !icon.isEmpty, folder.iconIsEmoji || OrbitSymbolName.isResolvable(icon) {
             if folder.iconIsEmoji {
-                Text(icon).font(.system(size: 13))
+                Text(icon).font(.system(size: OrbitMetrics.sidebarRowFontSize))
             } else {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(LibraryPalette.textSecondary)
+                    .font(.system(size: OrbitMetrics.sidebarRowFontSize - 1, weight: .medium))
+                    .foregroundStyle(style.secondary)
                     .frame(width: OrbitMetrics.sidebarFolderToggleSize, height: OrbitMetrics.sidebarFolderToggleSize)
             }
         } else {
             FolderToggleGlyph(isOpen: isExpanded)
-                .foregroundStyle(LibraryPalette.textSecondary)
+                .foregroundStyle(style.secondary)
         }
     }
 }
 
 private struct ArchivedTabRow: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var router = LibraryRouter.shared
+    @Environment(\.libraryStyle) private var style
     var tab: Tab
     var depth: Int = 0
+
+    private var router: LibraryRouter { env.libraryRouter }
 
     private var spaceName: String? {
         env.spaces.first(where: { $0.id == tab.spaceID })?.name
@@ -143,71 +147,56 @@ private struct ArchivedTabRow: View {
         router.selection == .archivedTab(tab.id)
     }
 
-    // Only worth spreading into columns once the list isn't squeezed down to make room for the
-    // preview pane (see LibraryRootView.showsPreview).
-    private var isWide: Bool { router.selection == nil }
-
     private var hostText: String { tab.url.host() ?? tab.url.absoluteString }
 
-    private var archivedTimeText: String {
-        (tab.archivedAt ?? tab.lastAccessedAt).formatted(date: .omitted, time: .shortened)
+    private var subtitle: String {
+        guard let spaceName else { return hostText }
+        return "\(hostText) · \(spaceName)"
+    }
+
+    private var actions: [LibraryRowAction] {
+        [LibraryRowAction(title: "Restore to Today", symbol: "arrow.uturn.backward") {
+            env.restoreFromArchive(tab.id, section: .today)
+        }]
     }
 
     var body: some View {
-        LibraryRowCard(isSelected: isSelected) {
-            HStack(spacing: 10) {
-                FaviconView(url: tab.faviconURL, host: tab.url.host() ?? "")
-                    .frame(width: 16, height: 16)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                if isWide {
-                    Text(tab.displayTitle)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(LibraryPalette.textPrimary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    LibraryColumnText(text: hostText, width: LibraryMetrics.rowMetaColumnWidth)
-                    LibraryColumnText(text: spaceName ?? "", width: LibraryMetrics.rowSecondaryColumnWidth)
-                    LibraryColumnText(text: archivedTimeText, width: LibraryMetrics.rowDateColumnWidth, alignment: .trailing, color: LibraryPalette.textTertiary)
-                } else {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(tab.displayTitle)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(LibraryPalette.textPrimary)
-                            .lineLimit(1)
-                        HStack(spacing: 4) {
-                            Text(hostText)
-                            if let spaceName {
-                                Text("·")
-                                Text(spaceName)
-                            }
-                        }
-                        .font(.system(size: 11))
-                        .foregroundStyle(LibraryPalette.textSecondary)
-                        .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                LibraryActionButton(symbol: "arrow.uturn.backward", help: "Restore to Today") {
-                    env.restoreFromArchive(tab.id, section: .today)
-                }
+        LibraryRowCard(
+            isSelected: isSelected,
+            actions: actions,
+            menu: {
+                [
+                    .item(OrbitContextMenuItem(title: "Restore to Today") { env.restoreFromArchive(tab.id, section: .today) }),
+                    .item(OrbitContextMenuItem(title: "Restore to Pinned") { env.restoreFromArchive(tab.id, section: .pinned) }),
+                ]
             }
+        ) {
+            FaviconView(url: tab.faviconURL, host: tab.url.host() ?? "")
+                .frame(width: OrbitMetrics.faviconSize, height: OrbitMetrics.faviconSize)
+                .clipShape(RoundedRectangle(cornerRadius: OrbitRadius.xs))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: OrbitSpacing.xxs) {
+                Text(tab.displayTitle)
+                    .font(OrbitFont.sidebarRowActive)
+                    .foregroundStyle(style.foreground)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(OrbitFont.commandBarRowSubtitle)
+                    .foregroundStyle(style.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.leading, CGFloat(depth) * ArchivedRowMetrics.indentPerDepth)
         .contentShape(Rectangle())
-        .orbitRightClickMenu {
-            [
-                .item(OrbitContextMenuItem(title: "Restore to Today") { env.restoreFromArchive(tab.id, section: .today) }),
-                .item(OrbitContextMenuItem(title: "Restore to Pinned") { env.restoreFromArchive(tab.id, section: .pinned) })
-            ]
-        }
         // Order matters: double-tap must be declared before single-tap.
         .onTapGesture(count: 2) {
             env.restoreFromArchive(tab.id, section: .today)
             env.activateTab(tab.id)
         }
-        .onTapGesture { router.select(.archivedTab(tab.id)) }
+        .onTapGesture {
+            withOrbitAnimation(OrbitMotion.standard) { router.select(.archivedTab(tab.id)) }
+        }
     }
 }

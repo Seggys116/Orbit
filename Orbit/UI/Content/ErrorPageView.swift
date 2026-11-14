@@ -97,18 +97,16 @@ struct CertificateInterstitialView: View {
                 if !problem.issuer.isEmpty { detailRow("Issuer", problem.issuer) }
                 if !problem.subject.isEmpty { detailRow("Subject", problem.subject) }
                 if let validUntil = problem.validUntil {
-                    detailRow("Valid Until", validUntil.formatted(date: .abbreviated, time: .omitted))
+                    detailRow("Valid until", validUntil.formatted(date: .abbreviated, time: .omitted))
                 }
             }
             .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary))
+            .background(RoundedRectangle(cornerRadius: OrbitRadius.md).fill(.quaternary))
 
             HStack(spacing: 12) {
                 Button("Go Back") { env.resolveCertificateDecision(for: tabID, proceed: false) }
                     .buttonStyle(.bordered)
-                // Absent, not disabled, when the engine reported the error as
-                // strictly enforced: there is no way through, and the engine
-                // refuses a proceed for it regardless of what is clicked.
+                // Absent, not disabled, for a strictly enforced error: the engine refuses a proceed for it regardless of the click.
                 if problem.isOverridable {
                     Button("Proceed Anyway") { env.resolveCertificateDecision(for: tabID, proceed: true) }
                         .buttonStyle(.borderedProminent)
@@ -116,6 +114,7 @@ struct CertificateInterstitialView: View {
                 }
             }
             .padding(.top, 6)
+            // Explains the missing Proceed button above.
             if !problem.isOverridable {
                 Text("This site requires a valid certificate, so there is no way to continue.")
                     .font(.system(size: 11))

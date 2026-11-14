@@ -16,8 +16,7 @@ final class LittleOrbitWindowController: NSWindowController, NSWindowDelegate {
     let addressBarModel = LittleOrbitAddressBarModel()
     private var autoCloseTimer: Timer?
 
-    // Once true, windowWillClose must not tear the tab down: closeDetachedTab would
-    // delete it from state.tabs while its id already sits in a Space's today list.
+    // Once true, windowWillClose must not tear the tab down: closeDetachedTab would delete it from state.tabs while its id sits in a Space's today list.
     private var hasRelinquishedTab = false
 
     private init(tabID: TabID, window: NSWindow) {
@@ -33,9 +32,7 @@ final class LittleOrbitWindowController: NSWindowController, NSWindowDelegate {
         return open(tabID: AppEnvironment.processRoot.makeDetachedTab(url: target))
     }
 
-    /// A `window.open()` the engine has already built the WebContents for --
-    /// hosted around that live contents rather than materialising a second
-    /// one, which is what keeps `window.opener` and the in-flight navigation.
+    /// A `window.open()` hosted around the engine's live WebContents rather than a second one, which keeps `window.opener` and the in-flight navigation.
     @discardableResult
     static func open(adopting contents: any WebContents, url: URL) -> LittleOrbitWindowController {
         open(tabID: AppEnvironment.processRoot.adoptPageCreatedDetachedTab(contents, url: url))
@@ -52,8 +49,7 @@ final class LittleOrbitWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.minSize = minimumSize
-        // Hidden, not removed: Cmd+W and Mission Control's window menu still need the
-        // real buttons. WindowControlsView draws the visible three dots separately.
+        // Hidden, not removed: Cmd+W and Mission Control's window menu still need the real buttons; WindowControlsView draws the visible dots.
         window.standardWindowButton(.closeButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
@@ -153,10 +149,11 @@ private struct LittleOrbitView: View {
 
             if addressBarModel.isPresented {
                 LittleOrbitAddressBarOverlay(model: addressBarModel, tabID: tabID)
+                    .transition(.opacity.animation(OrbitMotion.fade))
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .animation(OrbitMotion.standard, value: addressBarModel.isPresented)
+        .orbitAnimation(OrbitMotion.standard, value: addressBarModel.isPresented)
         .frame(minWidth: LittleOrbitWindowController.minimumSize.width, minHeight: LittleOrbitWindowController.minimumSize.height)
     }
 
@@ -180,9 +177,7 @@ private struct LittleOrbitView: View {
         }
     }
 
-    // .id(_:) is load-bearing: this window never remounts paneCard when its tab is
-    // navigated from one document to another, so without it the old document's editor
-    // keeps running against the new one's id instead of being torn down.
+    // .id(_:) is load-bearing: this window never remounts paneCard when its tab navigates between documents, so without it the old editor keeps running against the new id.
     @ViewBuilder
     private func paneContent(for tab: Tab) -> some View {
         switch OrbitScheme.parse(tab.url) {

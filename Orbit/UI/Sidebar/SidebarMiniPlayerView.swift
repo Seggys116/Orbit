@@ -46,11 +46,10 @@ struct SidebarMiniPlayerView: View {
                 .fill(theme.readableForeground.opacity(OrbitMetrics.miniPlayerSurfaceOpacity))
         )
         .onHover { hovering in
-            withAnimation(OrbitMotion.quick) { isHovering = hovering }
+            withOrbitAnimation(OrbitMotion.quick) { isHovering = hovering }
         }
     }
 
-    // MARK: Title row
 
     // ZStack so AppKit's hit test gives the close button its region and the catcher the rest.
     private var titleRow: some View {
@@ -96,8 +95,7 @@ struct SidebarMiniPlayerView: View {
             .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius))
     }
 
-    // Collapsed control-row favicon: no sibling shares its frame here, so wrapping it directly in
-    // its own catcher (rather than a row-wide overlay) is enough.
+    // Collapsed control-row favicon: no sibling shares its frame, so wrapping it in its own catcher rather than a row-wide overlay is enough.
     private var favicon: some View {
         OrbitNSActionButton(action: {
             env.activateTab(tab.id)
@@ -107,7 +105,6 @@ struct SidebarMiniPlayerView: View {
         .orbitTooltip("Go to Tab")
     }
 
-    // MARK: Control row
 
     private var controlRow: some View {
         HStack(spacing: 0) {

@@ -198,14 +198,7 @@ final class ArcImportCompletenessTests: XCTestCase {
         XCTAssertTrue(text.contains("Shortcuts"), "The user must be told where to set them again: \(text)")
     }
 
-    // MARK: - Onboarding's login-session toggle vs the Settings import
-    //
-    // The reported bug: "import sign ins from Arc doesn't work" in onboarding
-    // but does in Settings. Root cause — onboarding runs before any browser
-    // window exists, so AppEnvironment.engine is nil (OrbitWindowController is
-    // the only startEngineIfNeeded() caller), so a decrypted cookie has no
-    // session to be stored into (see ArcCookieImportOutcome.decryptedButEngineCannotInstall's
-    // doc comment). Settings never hits this because the app is already running.
+    // Onboarding runs before any window starts the engine, so a decrypted cookie has no session to land in.
 
     private func sampleArcCookie(name: String = "session") -> ArcCookie {
         ArcCookie(
@@ -333,7 +326,7 @@ final class ArcImportCompletenessTests: XCTestCase {
 
         XCTAssertEqual(
             OnboardingView.continueButtonTitle(step: .importBrowser, selectedImportSource: .arc, importState: .idle),
-            "Import From Arc"
+            "Import from Arc"
         )
         XCTAssertEqual(
             OnboardingView.continueButtonTitle(step: .importBrowser, selectedImportSource: .arc, importState: .finishedArc(cookieShortfall)),
@@ -477,8 +470,7 @@ private final class RecordingEngineSession: EngineSession {
     func setContentSetting(_ setting: ContentSetting, for kind: PermissionKind, url: URL) {}
 }
 
-/// Stands in for a started engine purely so AppEnvironment.engine is non-nil — none of the
-/// process a real one needs.
+/// Makes AppEnvironment.engine non-nil without the process a real engine needs.
 @MainActor
 private final class StubEngineForOnboardingImportTests: BrowserEngine {
     static let kind: EngineKind = .webkit

@@ -17,14 +17,6 @@ struct LibraryPreviewPaneView: View {
     var body: some View {
         body(for: content)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipShape(
-                UnevenRoundedRectangle(
-                    topLeadingRadius: LibraryMetrics.previewLeadingCornerRadius,
-                    bottomLeadingRadius: LibraryMetrics.previewLeadingCornerRadius,
-                    bottomTrailingRadius: 0,
-                    topTrailingRadius: 0
-                )
-            )
             .onAppear {
                 let created = session ?? LibraryLiveWebSession(
                     open: { env.makeDetachedTab(url: $0) },
@@ -81,8 +73,7 @@ struct LibraryPreviewPaneView: View {
 struct LibraryQuickLookPreviewView: NSViewRepresentable {
     var url: URL
 
-    // QLPreviewView.init imports as failable; force-unwrapping it would crash
-    // when QuickLook fails to start, so this coordinator lets the nil case draw nothing.
+    // QLPreviewView.init imports as failable; force-unwrapping would crash when QuickLook fails to start, so the nil case draws nothing.
     final class Coordinator {
         var preview: QLPreviewView?
     }
@@ -126,16 +117,18 @@ struct LibraryQuickLookPreviewView: NSViewRepresentable {
 struct LibraryNotePreviewView: View {
     var noteBody: NSAttributedString
 
+    @Environment(\.libraryStyle) private var style
+
     var body: some View {
         ScrollView {
             Text(AttributedString(noteBody))
                 .textSelection(.enabled)
-                .foregroundStyle(LibraryPalette.textPrimary)
+                .foregroundStyle(style.foreground)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(LibraryMetrics.previewContentPadding)
+                .padding(LibraryModeMetrics.contentPadding)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(LibraryPalette.previewBackground)
+        .background(style.quietFill)
     }
 }
 
@@ -143,6 +136,7 @@ struct LibraryNotePreviewView: View {
 
 struct LibraryEaselPreviewView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.libraryStyle) private var style
     var easelID: UUID
     var items: [EaselItem]
 
@@ -156,8 +150,8 @@ struct LibraryEaselPreviewView: View {
         GeometryReader { proxy in
             let bounds = contentBounds
             let available = CGSize(
-                width: max(1, proxy.size.width - LibraryMetrics.previewContentPadding * 2),
-                height: max(1, proxy.size.height - LibraryMetrics.previewContentPadding * 2)
+                width: max(1, proxy.size.width - LibraryModeMetrics.contentPadding * 2),
+                height: max(1, proxy.size.height - LibraryModeMetrics.contentPadding * 2)
             )
             let scale = min(1, min(
                 available.width / max(1, bounds.width),
@@ -188,7 +182,7 @@ struct LibraryEaselPreviewView: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
             .allowsHitTesting(false)
         }
-        .background(LibraryPalette.previewBackground)
+        .background(style.quietFill)
         .onAppear { rebuildModelIfNeeded() }
         .onChange(of: easelID) { _, _ in rebuildModelIfNeeded() }
     }
@@ -203,6 +197,7 @@ struct LibraryEaselPreviewView: View {
 
 struct LibraryMediaPreviewView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.libraryStyle) private var style
     var tabID: TabID
     var state: MediaState
 
@@ -221,7 +216,7 @@ struct LibraryMediaPreviewView: View {
 
     var body: some View {
         ZStack {
-            LibraryPalette.previewBackground
+            style.quietFill
 
             if let frame {
                 Image(nsImage: frame)
@@ -238,7 +233,7 @@ struct LibraryMediaPreviewView: View {
 
     @ViewBuilder
     private var metadataStack: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: OrbitSpacing.xl) {
             if let artwork {
                 Image(nsImage: artwork)
                     .resizable()
@@ -248,18 +243,18 @@ struct LibraryMediaPreviewView: View {
             }
             if let title {
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(LibraryPalette.textPrimary)
+                    .font(OrbitFont.spaceTitle)
+                    .foregroundStyle(style.foreground)
                     .multilineTextAlignment(.center)
             }
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(LibraryPalette.textSecondary)
+                    .font(OrbitFont.commandBarRowSubtitle)
+                    .foregroundStyle(style.secondary)
                     .multilineTextAlignment(.center)
             }
         }
-        .padding(LibraryMetrics.previewContentPadding)
+        .padding(LibraryModeMetrics.contentPadding)
     }
 
     private func loadFrame() async {

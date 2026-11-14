@@ -10,7 +10,20 @@ final class EaselCanvasModel {
 
     private static let logger = Logger(subsystem: "com.orbit.browser", category: "EaselCanvasModel")
 
-    private(set) var items: [EaselItem]
+    private(set) var items: [EaselItem] {
+        didSet { zOrderCache = nil }
+    }
+
+    // Sorted once per items change, not once per canvas render.
+    @ObservationIgnored private var zOrderCache: [EaselItem]?
+
+    var itemsByZIndex: [EaselItem] {
+        if let zOrderCache { return zOrderCache }
+        let sorted = items.sorted(by: { $0.zIndex < $1.zIndex })
+        zOrderCache = sorted
+        return sorted
+    }
+
     var title: String
 
     private(set) var isOrphanedFromStore: Bool

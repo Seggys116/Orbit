@@ -144,7 +144,7 @@ private struct SiteSearchSettingsRow: View {
             HStack(spacing: 8) {
                 FaviconView(url: nil, host: engine.host ?? engine.name.lowercased())
                     .frame(width: 16, height: 16)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .clipShape(RoundedRectangle(cornerRadius: OrbitRadius.xs))
                 Text(engine.name)
                     .font(.system(size: 13))
                     .lineLimit(1)

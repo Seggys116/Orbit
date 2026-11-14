@@ -22,11 +22,11 @@ struct LibraryDownloadsView: View {
 
     var body: some View {
         if !groups.isEmpty {
-            VStack(alignment: .leading, spacing: LibraryMetrics.dateGroupSpacing) {
+            LazyVStack(alignment: .leading, spacing: LibraryModeMetrics.groupSpacing) {
                 ForEach(groups) { group in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: OrbitSpacing.xs) {
                         LibraryDateSectionHeader(title: group.title)
-                        VStack(spacing: LibraryMetrics.rowSpacing) {
+                        LazyVStack(spacing: LibraryModeMetrics.rowSpacing) {
                             ForEach(group.items) { item in
                                 DownloadRow(item: item)
                             }
@@ -43,8 +43,10 @@ struct LibraryDownloadsView: View {
 
 private struct DownloadRow: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var router = LibraryRouter.shared
+    @Environment(\.libraryStyle) private var style
     var item: DownloadItem
+
+    private var router: LibraryRouter { env.libraryRouter }
 
     private var isSelected: Bool {
         router.selection == .download(item.id)
@@ -73,11 +75,13 @@ private struct DownloadRow: View {
         }
     }
 
+    private var isOpenable: Bool { item.state == .completed && fileExists }
+
     private var detailText: String {
         switch item.state {
         case .completed:
             let sizeText = item.totalBytes > 0 ? LibraryByteFormat.string(item.totalBytes) : LibraryByteFormat.string(item.receivedBytes)
-            return fileExists ? sizeText : "file no longer on disk"
+            return fileExists ? sizeText : "File no longer on disk"
         case .cancelled:
             return "Cancelled"
         case .interrupted:
@@ -95,91 +99,70 @@ private struct DownloadRow: View {
 
     private var statusLine: String { "\(sourceHost) · \(detailText)" }
 
-    private var startedTimeText: String {
-        item.startedAt.formatted(date: .omitted, time: .shortened)
-    }
-
-    // Only worth spreading into columns once the list isn't squeezed down to make room for the
-    // preview pane (see LibraryRootView.showsPreview).
-    private var isWide: Bool { router.selection == nil }
-
-    var body: some View {
-        LibraryRowCard(isSelected: isSelected) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    Image(nsImage: DownloadFileIcon.icon(for: item, fileExists: fileExists))
-                        .resizable()
-                        .frame(width: LibraryMetrics.rowIconSize, height: LibraryMetrics.rowIconSize)
-                        .opacity(item.state == .cancelled || item.state == .interrupted ? 0.55 : 1)
-
-                    if isWide {
-                        Text(displayName)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(LibraryPalette.textPrimary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        LibraryColumnText(text: sourceHost, width: LibraryMetrics.rowMetaColumnWidth)
-                        LibraryColumnText(text: detailText, width: LibraryMetrics.rowSecondaryColumnWidth)
-                        LibraryColumnText(text: startedTimeText, width: LibraryMetrics.rowDateColumnWidth, alignment: .trailing, color: LibraryPalette.textTertiary)
-                    } else {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(displayName)
-                                .font(.system(size: 12.5, weight: .medium))
-                                .foregroundStyle(LibraryPalette.textPrimary)
-                                .lineLimit(1)
-                            Text(statusLine)
-                                .font(.system(size: 11))
-                                .foregroundStyle(LibraryPalette.textSecondary)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    Spacer(minLength: 8)
-
-                    actions
-                }
-
-                if isInFlight {
-                    LibraryProgressBar(fraction: progress.fraction)
-                        .frame(maxWidth: isWide ? .infinity : 220)
-                        .padding(.leading, LibraryMetrics.rowIconSize + 10)
-                }
-            }
-        }
-        .contentShape(Rectangle())
-        // Order matters: double-tap must be declared before single-tap.
-        .onTapGesture(count: 2) {
-            if item.state == .completed && fileExists {
-                NSWorkspace.shared.open(item.destinationURL)
-            }
-        }
-        .onTapGesture { router.select(.download(item.id)) }
-    }
-
-    @ViewBuilder
-    private var actions: some View {
+    private var actions: [LibraryRowAction] {
         switch item.state {
         case .pending, .inProgress, .paused:
-            LibraryActionButton(symbol: "xmark", help: "Cancel") {
+            return [LibraryRowAction(title: "Cancel", symbol: "xmark", alwaysVisible: true) {
                 env.cancelDownload(item.id)
-            }
+            }]
         case .completed where fileExists:
-            LibraryActionButton(symbol: "folder", help: "Reveal in Finder") {
-                env.downloadStore.revealInFinder(item.id)
+            return [
+                LibraryRowAction(title: "Show in Finder", symbol: "folder") {
+                    env.downloadStore.revealInFinder(item.id)
+                },
+                LibraryRowAction(title: "Open", symbol: "arrow.up.forward.app") {
+                    NSWorkspace.shared.open(item.destinationURL)
+                },
+                LibraryRowAction(title: "Remove from List", symbol: "xmark", isDestructive: true) {
+                    env.downloadStore.remove(item.id)
+                },
+            ]
+        case .completed, .cancelled, .interrupted:
+            return [
+                LibraryRowAction(title: "Download Again", symbol: "arrow.clockwise") { retry() },
+                LibraryRowAction(title: "Remove from List", symbol: "xmark", isDestructive: true) {
+                    env.downloadStore.remove(item.id)
+                },
+            ]
+        }
+    }
+
+    var body: some View {
+        LibraryRowCard(isSelected: isSelected, actions: actions) {
+            Image(nsImage: DownloadFileIcon.icon(for: item, fileExists: fileExists))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: LibraryModeMetrics.rowIconSize, height: LibraryModeMetrics.rowIconSize)
+                .opacity(item.state == .cancelled || item.state == .interrupted ? OrbitMetrics.spacePagerInactiveOpacity : 1)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: OrbitSpacing.xxs) {
+                Text(displayName)
+                    .font(OrbitFont.sidebarRowActive)
+                    .foregroundStyle(style.foreground)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(statusLine)
+                    .font(OrbitFont.commandBarRowSubtitle)
+                    .foregroundStyle(style.secondary)
+                    .lineLimit(1)
+                if isInFlight {
+                    LibraryProgressBar(fraction: progress.fraction)
+                        .padding(.top, OrbitSpacing.xxs)
+                }
             }
-            LibraryActionButton(symbol: "arrow.up.forward.app", help: "Open") {
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+        .modifier(DownloadDragOutModifier(url: isOpenable ? item.destinationURL : nil))
+        // Order matters: double-tap must be declared before single-tap.
+        .onTapGesture(count: 2) {
+            if isOpenable {
                 NSWorkspace.shared.open(item.destinationURL)
             }
-            LibraryActionButton(symbol: "xmark", help: "Remove from List") {
-                env.downloadStore.remove(item.id)
-            }
-        case .completed, .cancelled, .interrupted:
-            LibraryActionButton(symbol: "arrow.clockwise", help: "Download Again") {
-                retry()
-            }
-            LibraryActionButton(symbol: "xmark", tint: LibraryPalette.destructive, help: "Remove from List") {
-                env.downloadStore.remove(item.id)
-            }
+        }
+        .onTapGesture {
+            withOrbitAnimation(OrbitMotion.standard) { router.select(.download(item.id)) }
         }
     }
 
@@ -187,5 +170,31 @@ private struct DownloadRow: View {
         guard let spaceID = env.activeSpace?.id else { return }
         env.downloadStore.remove(item.id)
         _ = env.openTab(url: item.sourceURL, in: spaceID, section: .today)
+    }
+}
+
+/// Drags the downloaded file itself out of the row, into Finder or another app.
+private struct DownloadDragOutModifier: ViewModifier {
+    var url: URL?
+
+    #if DEBUG
+    @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
+    #endif
+
+    private var isSuppressed: Bool {
+        #if DEBUG
+        screenshotModeDragDisabled
+        #else
+        false
+        #endif
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let url, !isSuppressed {
+            content.onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider() }
+        } else {
+            content
+        }
     }
 }

@@ -4,18 +4,13 @@ import SwiftUI
 
 extension AppEnvironment {
 
-    // MARK: - Capture
-
     func captureActiveTabFullPage() -> Bool {
         guard let tabID = activeTabID, let present = extensionPoints.presentCaptureTool else { return false }
         present(tabID, true)
         return true
     }
 
-    // MARK: - Site data
-
-    // Reload must wait for the delete to complete (deleteCookies(for:) hops
-    // to the IO thread) or it races and can resend the cookies just cleared.
+    // Reload must wait for the delete (deleteCookies(for:) hops to the IO thread) or it can resend the cleared cookies.
     func clearCookiesForActiveTabAndRefresh() -> Bool {
         guard let tabID = activeTabID, let tab = tab(tabID) else { return false }
         guard let contents = webContents[tabID] else { return false }
@@ -28,9 +23,7 @@ extension AppEnvironment {
         return true
     }
 
-    // `reload(ignoringCache:)` loads the URL already on screen. WebKit treats that as the
-    // same document and can paint the cached page again, so the wipe has to be followed
-    // by reloadFromOrigin on every pane actually visible with this tab.
+    // WebKit treats reload(ignoringCache:) as the same document and can repaint the cached page, so every visible pane needs reloadFromOrigin.
     func clearCacheAndRefreshActiveTab() -> Bool {
         guard let tabID = activeTabID, let engine else { return false }
         let pages = visiblePagesForCacheReload(around: tabID)
@@ -41,32 +34,25 @@ extension AppEnvironment {
         return true
     }
 
-    /// The active tab, plus the other panes of its split. Those are the pages on screen.
     func visiblePagesForCacheReload(around tabID: TabID) -> [any WebContents] {
         let ids = CacheReloadPlan.visibleTabIDs(around: tabID, splitTabIDs: splitGroup(for: tabID)?.tabIDs ?? [])
         return ids.compactMap { webContents[$0] }.filter { !$0.isClosed }
     }
 
-    // MARK: - Pinned section
-
     @discardableResult
     func setPinnedSectionCollapsed(_ collapsed: Bool) -> Bool {
         guard let spaceID = activeSpace?.id else { return false }
-        withAnimation(OrbitMotion.standard) {
+        withOrbitAnimation(OrbitMotion.standard) {
             store.mutateSpace(spaceID) { $0.isPinnedSectionCollapsed = collapsed }
         }
         return true
     }
 
-    // MARK: - Reveal
-
-    // Does not scroll — Orbit's sidebar has no scroll-to machinery. Expanding
-    // collapsed ancestors is the substantive half of "reveal", since that's
-    // the only part that can make a row not exist on screen at all.
+    // Does not scroll (no scroll-to machinery); expanding collapsed ancestors is what makes the row exist.
     func revealActiveTabInSidebar() -> Bool {
         guard let spaceID = activeSpace?.id, let tabID = store.activeTab(in: spaceID)?.id else { return false }
 
-        withAnimation(OrbitMotion.standard) {
+        withOrbitAnimation(OrbitMotion.standard) {
             if !isSidebarVisible { isSidebarVisible = true }
 
             let ancestors = AppEnvironment.ancestorFolderIDs(of: tabID, in: store.pinnedNodes(in: spaceID))
@@ -82,8 +68,7 @@ extension AppEnvironment {
         return true
     }
 
-    // nil means nodeID is not in this forest; an empty array means present
-    // at the root, distinct from nil.
+    // nil means nodeID is not in this forest; an empty array means it sits at the root.
     private static func ancestorFolderIDs(of nodeID: UUID, in nodes: [SidebarNode]) -> [FolderID]? {
         for node in nodes {
             if node.id == nodeID { return [] }
@@ -95,22 +80,18 @@ extension AppEnvironment {
         return nil
     }
 
-    // MARK: - Folders
-
     func createFolderInActiveSpace() -> Bool {
         guard let spaceID = activeSpace?.id else { return false }
         createFolder(name: "New Folder", in: spaceID)
         return true
     }
 
-    // One mutateSpace over a recursively rewritten forest, not one
-    // setFolderExpanded call per folder — the latter would push n state
-    // generations through Observation for a single gesture.
+    // One mutateSpace over a rewritten forest; per-folder setFolderExpanded would push n state generations.
     func setAllFoldersExpanded(_ expanded: Bool) -> Bool {
         guard let spaceID = activeSpace?.id else { return false }
         let roots = store.pinnedNodes(in: spaceID)
         guard roots.contains(where: { if case .folder = $0 { return true } else { return false } }) else { return false }
-        withAnimation(OrbitMotion.standard) {
+        withOrbitAnimation(OrbitMotion.standard) {
             store.mutateSpace(spaceID) { space in
                 space.pinned = AppEnvironment.settingFoldersExpanded(expanded, in: space.pinned)
             }
@@ -127,15 +108,12 @@ extension AppEnvironment {
         }
     }
 
-    // MARK: - Tabs
-
     func duplicateActiveTab() -> Bool {
         guard let tabID = activeTabID, let copyID = store.duplicateTab(tabID) else { return false }
         activateTab(copyID)
         return true
     }
 
-    // An empty answer clears the custom name rather than setting one, so the dialog can undo itself.
     func renameActiveItem() -> Bool {
         guard let tabID = activeTabID, let tab = tab(tabID), tab.section == .pinned else { return false }
         guard let answer = MenuPrompt.text(
@@ -161,8 +139,7 @@ extension AppEnvironment {
         return true
     }
 
-    // Permanently removes an archived Tab — every other destructive command
-    // in this app is recoverable, this one is not, hence the confirmation.
+    // Every other destructive command is recoverable; this one is not, hence the confirmation.
     func clearArchiveEverywhere() -> Bool {
         let archived = store.archivedTabs()
         guard !archived.isEmpty else { return false }
@@ -175,8 +152,6 @@ extension AppEnvironment {
         store.clearArchive()
         return true
     }
-
-    // MARK: - Spaces
 
     func presentNewSpaceFlow() -> Bool {
         NotificationCenter.default.post(name: .orbitPresentNewSpaceFlow, object: nil)
@@ -197,14 +172,11 @@ extension AppEnvironment {
         return true
     }
 
-    // self, not AppEnvironment.shared: an Incognito window's own
-    // WindowSession root must edit its own document, not the shared one.
+    // self, not AppEnvironment.shared: an Incognito window must edit its own document.
     func presentThemeEditorForActiveSpace() -> Bool {
         guard let spaceID = activeSpace?.id else { return false }
         return SpaceThemeEditorWindowController.show(spaceID: spaceID, env: self) != nil
     }
-
-    // MARK: - Boosts
 
     func presentBoostsEditorForActiveTab(requiringExistingBoost: Bool) -> Bool {
         guard let host = activeTab?.url.host(), !host.isEmpty else { return false }
@@ -217,8 +189,6 @@ extension AppEnvironment {
         return true
     }
 
-    // MARK: - Share
-
     func shareActivePage() -> Bool {
         guard let url = activeTab?.url else { return false }
         switch OrbitScheme.parse(url) {
@@ -228,15 +198,11 @@ extension AppEnvironment {
         return MenuSharePresenter.shared.present(items: [url])
     }
 
-    // MARK: - Default browser
-
     func requestBecomingDefaultBrowser() -> Bool {
         guard !DefaultBrowser.isDefault else { return false }
         DefaultBrowser.requestBecomingDefault()
         return true
     }
-
-    // MARK: - Split view
 
     func separateActiveTabFromSplit() -> Bool {
         guard let tabID = activeTabID, let tab = tab(tabID), splitGroup(for: tabID) != nil else { return false }
@@ -251,18 +217,13 @@ extension AppEnvironment {
     }
 }
 
-// MARK: - Asking the user something a menu item cannot carry
-
-// runModal() blocks the run loop until a button is pressed, and
-// xcodebuild test presses nothing — isRunningUnderTests must gate every
-// alert here or a hosted test run hangs until the whole suite times out.
+// runModal() blocks until a button is pressed and tests press nothing, so isRunningUnderTests must gate every alert.
 enum MenuPrompt {
 
     private static var isRunningUnderTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
-    // nil under a test run, where nobody can cancel or type.
     @MainActor
     static func text(title: String, message: String, defaultValue: String, acceptTitle: String) -> String? {
         guard !isRunningUnderTests else { return nil }
@@ -293,19 +254,14 @@ enum MenuPrompt {
         let accept = alert.addButton(withTitle: acceptTitle)
         accept.hasDestructiveAction = true
         accept.keyEquivalent = ""
-        // NSAlert.addButton gives the first button "\r" automatically —
-        // must clear it here or Return still fires the destructive button.
+        // NSAlert.addButton gives the first button "\r"; clear it or Return fires the destructive button.
         let cancel = alert.addButton(withTitle: "Cancel")
         cancel.keyEquivalent = "\r"
         return alert.runModal() == .alertFirstButtonReturn
     }
 }
 
-// MARK: - Sharing from a menu item
-
-// A purely local let picker = NSSharingServicePicker(...) has nothing
-// holding it past the call that created it — must be retained here until
-// sharingServicePicker(_:didChoose:) clears it.
+// A local NSSharingServicePicker would be released immediately; retain it until sharingServicePicker(_:didChoose:).
 @MainActor
 final class MenuSharePresenter: NSObject, NSSharingServicePickerDelegate {
 

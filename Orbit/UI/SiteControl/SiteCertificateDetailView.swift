@@ -28,9 +28,9 @@ struct SiteCertificateDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 field("Subject", value: certificate.subject)
                 field("Issuer", value: certificate.issuer)
-                field("Valid From", value: certificate.validFrom.map(Self.dateFormatter.string(from:)))
-                field("Valid Until", value: certificate.validUntil.map(Self.dateFormatter.string(from:)))
-                field("Serial Number", value: certificate.serialNumber)
+                field("Valid from", value: certificate.validFrom.map(Self.dateFormatter.string(from:)))
+                field("Valid until", value: certificate.validUntil.map(Self.dateFormatter.string(from:)))
+                field("Serial number", value: certificate.serialNumber)
             }
         }
         .padding(20)
@@ -39,10 +39,11 @@ struct SiteCertificateDetailView: View {
 
     @ViewBuilder
     private func field(_ label: String, value: String?) -> some View {
+        // A field with no value is omitted entirely rather than shown blank.
         if let value, !value.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                Text(label.uppercased())
-                    .font(.system(size: 9, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Text(value)
                     .font(.system(size: 12, design: .monospaced))

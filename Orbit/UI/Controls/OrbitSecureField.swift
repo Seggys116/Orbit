@@ -41,7 +41,7 @@ struct OrbitSecureField: View {
             RoundedRectangle(cornerRadius: OrbitControlMetrics.textFieldCornerRadius, style: .continuous)
                 .strokeBorder(isFocused ? accentColor.opacity(0.9) : OrbitControlColor.border(for: colorScheme), lineWidth: isFocused ? OrbitControlMetrics.textFieldFocusRingWidth : 1)
         )
-        .animation(OrbitMotion.quick, value: isFocused)
+        .orbitAnimation(OrbitMotion.quick, value: isFocused)
         .accessibilityLabel(accessibilityLabel ?? placeholder)
         // Deliberately no .accessibilityValue(text): would read the secret back out via VoiceOver.
     }

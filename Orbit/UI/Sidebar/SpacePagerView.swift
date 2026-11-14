@@ -16,7 +16,7 @@ struct SpacePagerView: View {
         HStack(spacing: 6) {
             ForEach(env.spaces) { space in
                 Button {
-                    withAnimation(OrbitMotion.dramatic) { env.selectSpace(space.id) }
+                    withOrbitAnimation(OrbitMotion.dramatic) { env.selectSpace(space.id) }
                 } label: {
                     iconView(for: space)
                         .frame(width: OrbitMetrics.sidebarBottomBarIconSize, height: OrbitMetrics.sidebarBottomBarIconSize)

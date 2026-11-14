@@ -34,12 +34,16 @@ struct OrbitSegmentedControl<Option: Hashable>: View {
     private func segment(_ option: Option) -> some View {
         let isSelected = option == selection
         Button {
+            // The early return keeps a tap on the selected segment from restarting the highlight animation.
             guard !isSelected else { return }
-            withAnimation(OrbitMotion.quick) { selection = option }
+            withOrbitAnimation(OrbitMotion.quick) { selection = option }
         } label: {
             Text(label(option))
                 .font(.system(size: OrbitControlMetrics.segmentedFontSize, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? OrbitControlColor.primaryForeground(for: colorScheme) : OrbitControlColor.secondaryForeground(for: colorScheme))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .truncationMode(.tail)
                 .padding(.horizontal, OrbitControlMetrics.segmentedHorizontalPadding)
                 .frame(maxWidth: .infinity)
                 .frame(height: OrbitControlMetrics.segmentedHeight - OrbitControlMetrics.segmentedInset * 2)

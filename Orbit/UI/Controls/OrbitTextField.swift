@@ -6,8 +6,7 @@ struct OrbitTextField: View {
     var systemImage: String? = nil
     var accentColor: Color = .accentColor
     var accessibilityLabel: String? = nil
-    // Attaching .focused(_:) to the outside of this view does nothing; FocusState
-    // binds to the concrete leaf underneath it, not a container. Pass externalFocus instead.
+    // .focused(_:) on the outside of this view does nothing: FocusState binds to the concrete leaf, not a container. Pass externalFocus instead.
     var externalFocus: FocusState<Bool>.Binding? = nil
 
     @Environment(\.colorScheme) private var colorScheme
@@ -43,7 +42,7 @@ struct OrbitTextField: View {
             RoundedRectangle(cornerRadius: OrbitControlMetrics.textFieldCornerRadius, style: .continuous)
                 .strokeBorder(isFocused ? accentColor.opacity(0.9) : OrbitControlColor.border(for: colorScheme), lineWidth: isFocused ? OrbitControlMetrics.textFieldFocusRingWidth : 1)
         )
-        .animation(OrbitMotion.quick, value: isFocused)
+        .orbitAnimation(OrbitMotion.quick, value: isFocused)
         .accessibilityLabel(accessibilityLabel ?? placeholder)
         .accessibilityValue(text)
     }

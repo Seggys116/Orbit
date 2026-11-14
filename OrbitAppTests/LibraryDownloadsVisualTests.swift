@@ -1,5 +1,4 @@
-//  Pixel layer for LibraryDownloadsView: empty state draws nothing, and
-//  in-progress/completed/failed rows are visibly distinct from each other.
+//  Pixel layer for LibraryDownloadsView: empty draws nothing, and each download state looks distinct.
 
 import AppKit
 import SwiftUI
@@ -15,17 +14,15 @@ final class LibraryDownloadsVisualTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        LibraryRouter.shared.selectedSection = .downloads
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .downloads
+        env.libraryRouter.selection = nil
     }
 
     override func tearDown() {
-        LibraryRouter.shared.selectedSection = .downloads
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .downloads
+        env.libraryRouter.selection = nil
         super.tearDown()
     }
-
-    // MARK: - Empty state draws nothing
 
     func test_noDownloads_rendersNothingAtAll() {
         XCTAssertTrue(env.downloads.isEmpty, "test precondition: a fresh demo environment starts with no downloads.")
@@ -36,8 +33,6 @@ final class LibraryDownloadsVisualTests: XCTestCase {
         )
     }
 
-    // MARK: - A real download actually paints something, in both appearances
-
     func test_aCompletedDownload_paintsNonBlankContent_inBothAppearances() {
         seedCompletedDownload(in: env)
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
@@ -46,10 +41,7 @@ final class LibraryDownloadsVisualTests: XCTestCase {
         }
     }
 
-    // MARK: - In-progress vs completed vs failed are visibly distinct states
-
-    // One download driven through all three states, not three separately
-    // seeded ones: otherwise file name/byte count differences taint the diff.
+    // One download driven through all three states: separate seeds would differ in file name and byte count.
     func test_inProgressCompletedAndFailedDownloads_eachRenderVisiblyDifferently() throws {
         let id = seedInProgressDownload(in: env)
         let destination = try XCTUnwrap(env.downloads.first { $0.id == id }?.destinationURL)
@@ -83,8 +75,7 @@ final class LibraryDownloadsVisualTests: XCTestCase {
         )
     }
 
-    // No file on disk here, unlike the transition test above: the row must
-    // fall back to the suggested name and Retry action.
+    // No file on disk, so the row must fall back to the suggested name and Retry.
     func test_aDownloadThatFailedWithNoFileOnDisk_stillPaintsARow() {
         seedInterruptedDownload(in: env)
         let rendered = render(LibraryDownloadsView(searchQuery: "").environment(env), size: Self.size, appearance: .darkAqua)
@@ -94,20 +85,18 @@ final class LibraryDownloadsVisualTests: XCTestCase {
         )
     }
 
-    // MARK: - Selecting a row actually changes what is rendered
-
     func test_selectingADownloadRow_rendersDifferentlyThanNoSelection() {
         let id = seedCompletedDownload(in: env)
 
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selection = nil
         let unselected = render(LibraryDownloadsView(searchQuery: "").environment(env), size: Self.size, appearance: .darkAqua)
 
-        LibraryRouter.shared.selection = .download(id)
+        env.libraryRouter.selection = .download(id)
         let selected = render(LibraryDownloadsView(searchQuery: "").environment(env), size: Self.size, appearance: .darkAqua)
 
         XCTAssertTrue(
             Self.rendersDiffer(unselected, selected, size: Self.size),
-            "Selecting the row (LibraryRouter.shared.selection = .download(id)) did not change anything rendered — LibraryRowCard's isSelected fill/border/shadow is not reaching the row."
+            "Selecting the row (env.libraryRouter.selection = .download(id)) did not change anything rendered — LibraryRowCard's isSelected fill is not reaching the row."
         )
     }
 

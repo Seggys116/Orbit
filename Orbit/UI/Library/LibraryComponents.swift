@@ -1,160 +1,211 @@
 import SwiftUI
 
-// MARK: - Search field
 
 struct LibrarySearchField: View {
     @Binding var text: String
     var placeholder: String = "Search"
+    /// Escape while the field is being edited; the field editor consumes it before any window-level handler.
+    var onExit: (() -> Void)?
 
+    @Environment(\.libraryStyle) private var style
     @FocusState private var isFocused: Bool
 
+    private static let cornerRadius = OrbitRadius.md
+
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: OrbitSpacing.sm) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(LibraryPalette.textTertiary)
+                .font(.system(size: OrbitMetrics.sidebarUtilityGlyphSize - 1, weight: .medium))
+                .foregroundStyle(style.secondary)
+                .accessibilityHidden(true)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundStyle(LibraryPalette.textPrimary)
+                .font(OrbitFont.commandBarRowSubtitle)
+                .foregroundStyle(style.foreground)
                 .focused($isFocused)
+                .onExitCommand { onExit?() }
+                .accessibilityLabel(placeholder)
             if !text.isEmpty {
                 Button {
                     text = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(LibraryPalette.textTertiary)
+                        .font(.system(size: OrbitMetrics.sidebarUtilityGlyphSize - 1))
+                        .foregroundStyle(style.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+                .transition(.opacity)
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: LibraryMetrics.searchFieldHeight)
+        .padding(.horizontal, OrbitSpacing.md)
+        .frame(height: LibraryModeMetrics.searchFieldHeight)
         .background(
-            RoundedRectangle(cornerRadius: LibraryMetrics.searchFieldCornerRadius)
-                .fill(Color.black.opacity(0.18))
+            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                .fill(style.fieldFill)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: LibraryMetrics.searchFieldCornerRadius)
-                .strokeBorder(isFocused ? LibraryPalette.accent.opacity(0.6) : LibraryPalette.cardBorder, lineWidth: 1)
+            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                .strokeBorder(isFocused ? style.focusRing : style.border, lineWidth: OrbitMetrics.cardBorderWidth)
         )
-        .animation(OrbitMotion.quick, value: isFocused)
+        .orbitAnimation(OrbitMotion.quick, value: isFocused)
+        .orbitAnimation(OrbitMotion.quick, value: text.isEmpty)
     }
 }
 
-// MARK: - Row card container
+
+/// One action on a Library row: hover button, context menu entry and accessibility action, so no path depends on the pointer alone.
+struct LibraryRowAction: Identifiable {
+    var title: String
+    var symbol: String
+    var isDestructive = false
+    /// Stays on screen when the row is idle (a running download's Cancel).
+    var alwaysVisible = false
+    var action: () -> Void
+
+    var id: String { title }
+}
+
 
 struct LibraryRowCard<Content: View>: View {
     var isSelected: Bool = false
+    var actions: [LibraryRowAction] = []
+    /// Replaces the menu derived from `actions` when a row needs entries beyond them.
+    var menu: (() -> [OrbitContextMenuEntry])?
     @ViewBuilder var content: Content
+
+    @Environment(\.libraryStyle) private var style
     @State private var isHovering = false
 
     private var fill: Color {
-        if isSelected { return LibraryPalette.selectedFill }
-        return isHovering ? LibraryPalette.cardFillHover : LibraryPalette.cardFill
+        if isSelected { return style.selectedFill }
+        return isHovering ? style.hoverFill : .clear
+    }
+
+    private var visibleActions: [LibraryRowAction] {
+        (isHovering || isSelected) ? actions : actions.filter(\.alwaysVisible)
+    }
+
+    private var contextEntries: [OrbitContextMenuEntry] {
+        if let menu { return menu() }
+        return actions.map { action in
+            .item(OrbitContextMenuItem(
+                title: action.title,
+                systemImage: action.symbol,
+                isDestructive: action.isDestructive,
+                action: action.action
+            ))
+        }
     }
 
     var body: some View {
-        content
-            .padding(.horizontal, LibraryMetrics.rowHorizontalPadding)
-            .padding(.vertical, LibraryMetrics.rowVerticalPadding)
-            .background(
-                RoundedRectangle(cornerRadius: LibraryMetrics.rowCornerRadius)
-                    .fill(fill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LibraryMetrics.rowCornerRadius)
-                    .strokeBorder(
-                        isSelected ? LibraryPalette.cardFillHover : LibraryPalette.cardBorder,
-                        lineWidth: 1
-                    )
-            )
-            .shadow(
-                color: .black.opacity(isSelected ? 0.22 : 0),
-                radius: isSelected ? 6 : 0,
-                y: isSelected ? 2 : 0
-            )
-            .onHover { isHovering = $0 }
-            .animation(OrbitMotion.quick, value: isHovering)
-            .animation(OrbitMotion.quick, value: isSelected)
+        HStack(spacing: LibraryModeMetrics.rowContentSpacing) {
+            content
+            if !visibleActions.isEmpty {
+                HStack(spacing: 0) {
+                    ForEach(visibleActions) { action in
+                        LibraryActionButton(symbol: action.symbol, help: action.title, action: action.action)
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, LibraryModeMetrics.rowHorizontalPadding)
+        .padding(.vertical, LibraryModeMetrics.rowVerticalPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: OrbitRadius.row, style: .continuous)
+                .fill(fill)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: OrbitRadius.row, style: .continuous))
+        .onHover { isHovering = $0 }
+        .orbitAnimation(OrbitMotion.quick, value: isHovering)
+        .orbitAnimation(OrbitMotion.quick, value: isSelected)
+        .modifier(LibraryRowMenuModifier(isEnabled: menu != nil || !actions.isEmpty, entries: { contextEntries }))
+        .accessibilityActions {
+            ForEach(actions) { action in
+                Button(action.title, action: action.action)
+            }
+        }
     }
 }
 
-// MARK: - Fixed-width metadata column (wide-row layout)
+private struct LibraryRowMenuModifier: ViewModifier {
+    var isEnabled: Bool
+    var entries: () -> [OrbitContextMenuEntry]
 
-struct LibraryColumnText: View {
-    var text: String
-    var width: CGFloat
-    var alignment: Alignment = .leading
-    var color: Color = LibraryPalette.textSecondary
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 11.5))
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .frame(width: width, alignment: alignment)
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.orbitRightClickMenu(entries)
+        } else {
+            content
+        }
     }
 }
 
-// MARK: - Date group header
 
 struct LibraryDateSectionHeader: View {
     var title: String
 
+    @Environment(\.libraryStyle) private var style
+
     var body: some View {
-        Text(title.uppercased())
-            .font(.system(size: LibraryMetrics.dateHeaderFontSize, weight: .semibold))
-            .tracking(0.4)
-            .foregroundStyle(LibraryPalette.textTertiary)
-            .padding(.horizontal, 2)
+        Text(title)
+            .font(OrbitFont.sidebarSectionHeader)
+            .foregroundStyle(style.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, LibraryModeMetrics.rowHorizontalPadding)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
-// MARK: - Icon action button
 
 struct LibraryActionButton: View {
     var symbol: String
-    var tint: Color = LibraryPalette.textSecondary
     var help: String
     var action: () -> Void
 
+    @Environment(\.libraryStyle) private var style
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(isHovering ? LibraryPalette.textPrimary : tint)
-                .frame(width: LibraryMetrics.actionButtonSize, height: LibraryMetrics.actionButtonSize)
+                .font(.system(size: OrbitMetrics.sidebarUtilityGlyphSize - 1, weight: .medium))
+                .foregroundStyle(style.foreground)
+                .frame(width: LibraryModeMetrics.actionButtonSize, height: LibraryModeMetrics.actionButtonSize)
                 .background(
-                    Circle().fill(isHovering ? Color.white.opacity(0.12) : Color.clear)
+                    RoundedRectangle(cornerRadius: OrbitRadius.md, style: .continuous)
+                        .fill(isHovering ? style.selectedFill : .clear)
                 )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .orbitTooltip(help)
+        .accessibilityLabel(help)
         .onHover { isHovering = $0 }
-        .animation(OrbitMotion.quick, value: isHovering)
+        .orbitAnimation(OrbitMotion.quick, value: isHovering)
     }
 }
 
-// MARK: - Progress bar
 
 struct LibraryProgressBar: View {
     var fraction: Double?
 
+    @Environment(\.libraryStyle) private var style
+
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(LibraryPalette.progressTrack)
+                Capsule().fill(style.progressTrack)
                 if let fraction {
                     Capsule()
-                        .fill(LibraryPalette.accent)
+                        .fill(style.foreground)
                         .frame(width: max(2, proxy.size.width * CGFloat(min(1, max(0, fraction)))))
                 } else {
                     Capsule()
-                        .fill(LibraryPalette.accent.opacity(0.6))
+                        .fill(style.foreground.opacity(OrbitMetrics.extensionInstallProgressIndeterminateOpacity))
                         .frame(width: proxy.size.width * 0.28)
                 }
             }
@@ -163,7 +214,6 @@ struct LibraryProgressBar: View {
     }
 }
 
-// MARK: - Date grouping
 
 struct LibraryDateGroup<Item>: Identifiable {
     var id: String { title }
@@ -172,9 +222,7 @@ struct LibraryDateGroup<Item>: Identifiable {
 }
 
 enum LibraryDateGrouping {
-    // Reused, not allocated per call: a fresh DateFormatter() pays for ICU calendar/locale setup
-    // every time, and group(_:date:) below calls title(for:) once per item — with a few thousand
-    // archived tabs that allocation alone measured as ~120ms of a ~150ms grouping pass.
+    // Reused, not allocated per call: a fresh DateFormatter() pays ICU setup each time, ~120ms of a ~150ms grouping pass over a few thousand archived tabs.
     private static let weekdayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE"
@@ -210,11 +258,7 @@ enum LibraryDateGrouping {
         return formatter.string(from: date)
     }
 
-    // Buckets by startOfDay, not by the formatted title string: two items share a bucket exactly
-    // when they share a calendar day (title(for:) is a pure function of that day plus `now`), so
-    // this groups identically to keying on the title — it just stops calling the DateFormatter-
-    // backed title(for:) once per item and calls it once per resulting bucket instead. Measured
-    // as the difference between ~90ms and ~3ms grouping 3,000 archived tabs.
+    // Buckets by startOfDay, not by title string: same grouping, but title(for:) runs once per bucket instead of per item (~90ms vs ~3ms for 3,000 archived tabs).
     static func group<Item>(_ items: [Item], now: Date = Date(), date: (Item) -> Date) -> [LibraryDateGroup<Item>] {
         let calendar = Calendar.current
         let sorted = items.sorted { date($0) > date($1) }
@@ -235,7 +279,6 @@ enum LibraryDateGrouping {
     }
 }
 
-// MARK: - Byte formatting
 
 enum LibraryByteFormat {
     private static let formatter: ByteCountFormatter = {

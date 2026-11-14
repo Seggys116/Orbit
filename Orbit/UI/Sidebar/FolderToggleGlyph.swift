@@ -1,9 +1,7 @@
-//  Traced from Primer Octicons v19.14.0 file-directory-fill-24 / file-directory-open-fill-24, normalized to a 1x1 unit square.
-//  SwiftUI's Path.addArc operates in y-down space, inverting the intuitive clockwise flag; the flags below are the visually-correct ones.
+//  Traced from Primer Octicons v19.14.0 file-directory(-open)-fill-24 in a 1x1 unit square; Path.addArc works in y-down space, so the clockwise flags below are the visually correct ones.
 
 import SwiftUI
 
-// MARK: - Closed
 
 struct FolderClosedGlyphShape: Shape {
     func path(in rect: CGRect) -> Path {
@@ -30,7 +28,6 @@ struct FolderClosedGlyphShape: Shape {
     }
 }
 
-// MARK: - Open
 
 struct FolderOpenGlyphShape: Shape {
     func path(in rect: CGRect) -> Path {
@@ -63,7 +60,6 @@ struct FolderOpenGlyphShape: Shape {
     }
 }
 
-// MARK: - The toggle
 
 struct FolderToggleGlyph: View {
     var isOpen: Bool
@@ -79,7 +75,7 @@ struct FolderToggleGlyph: View {
             }
         }
         .frame(width: OrbitMetrics.sidebarFolderToggleSize, height: OrbitMetrics.sidebarFolderToggleSize)
-        .animation(OrbitMotion.quick, value: isOpen)
+        .orbitAnimation(OrbitMotion.quick, value: isOpen)
     }
 }
 

@@ -38,6 +38,7 @@ struct ManageSpacesColumnsView: View {
     var searchQuery: String = ""
     var onAddSpace: () -> Void
 
+    @Environment(\.libraryStyle) private var style
     @State private var orderedSpaceIDs: [SpaceID] = []
     @State private var columnDropTargetID: SpaceID?
 
@@ -71,16 +72,17 @@ struct ManageSpacesColumnsView: View {
             Button(action: onAddSpace) {
                 Image(systemName: "plus")
                     .font(.system(size: OrbitMetrics.sidebarUtilityGlyphSize, weight: .semibold))
-                    .foregroundStyle(LibraryPalette.textPrimary)
+                    .foregroundStyle(style.foreground)
                     .frame(
                         width: ManageSpacesMetrics.addButtonDiameter,
                         height: ManageSpacesMetrics.addButtonDiameter
                     )
-                    .background(Circle().fill(LibraryPalette.cardFill))
-                    .overlay(Circle().strokeBorder(LibraryPalette.cardBorder, lineWidth: 1))
+                    .background(Circle().fill(style.quietFill))
+                    .overlay(Circle().strokeBorder(style.border, lineWidth: OrbitMetrics.cardBorderWidth))
             }
             .buttonStyle(.plain)
             .orbitTooltip("New Space")
+            .accessibilityLabel("New Space")
             .frame(maxHeight: .infinity, alignment: .center)
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -133,6 +135,8 @@ struct ManageSpacesColumnsView: View {
 
             ManageSpacesColumnFooter(space: space, dragSuppressed: dragSuppressed)
         }
+        // Each column is painted in its own Space's theme, so its text follows that theme rather than the active Space's.
+        .environment(\.libraryStyle, LibraryStyle(theme: space.theme))
         .frame(width: ManageSpacesMetrics.columnWidth)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(
@@ -142,8 +146,8 @@ struct ManageSpacesColumnsView: View {
         .overlay(
             RoundedRectangle(cornerRadius: ManageSpacesMetrics.columnCornerRadius)
                 .strokeBorder(
-                    columnDropTargetID == space.id ? Color.accentColor : LibraryPalette.cardBorder,
-                    lineWidth: columnDropTargetID == space.id ? 2 : 1
+                    columnDropTargetID == space.id ? Color.accentColor : style.border,
+                    lineWidth: columnDropTargetID == space.id ? 2 : OrbitMetrics.cardBorderWidth
                 )
         )
         .manageSpacesDropDestination(suppressed: dragSuppressed) { items in
@@ -174,7 +178,7 @@ struct ManageSpacesColumnsView: View {
     // MARK: - Drop handling
 
     private func handleDrop(_ payload: ManageSpacesDragPayload, ontoSpace destinationSpaceID: SpaceID) {
-        withAnimation(OrbitMotion.interactive) {
+        withOrbitAnimation(OrbitMotion.interactive) {
             orderedSpaceIDs = ManageSpacesDropAction.perform(
                 payload,
                 ontoSpace: destinationSpaceID,
@@ -252,6 +256,7 @@ enum ManageSpacesOverflowMenu {
 
 private struct ManageSpacesColumnHeader: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.libraryStyle) private var style
     var space: Space
 
     @State private var isRenaming = false
@@ -279,13 +284,15 @@ private struct ManageSpacesColumnHeader: View {
             if isRenaming {
                 TextField("Space name", text: $draftName)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(OrbitFont.spaceTitle)
+                    .foregroundStyle(style.foreground)
                     .focused($fieldFocused)
                     .onSubmit(commitRename)
                     .onExitCommand { isRenaming = false }
             } else {
                 Text(space.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(OrbitFont.spaceTitle)
+                    .foregroundStyle(style.foreground)
                     .lineLimit(1)
                     .onTapGesture(count: 2) { beginRename() }
             }
@@ -299,8 +306,9 @@ private struct ManageSpacesColumnHeader: View {
                     .font(.system(size: OrbitMetrics.sidebarUtilityGlyphSize, weight: .medium))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(style.secondary)
             .orbitTooltip("Edit Space")
+            .accessibilityLabel("Edit Space")
             .popover(isPresented: $showThemeEditor, arrowEdge: .bottom) {
                 SpaceEditPopover(spaceID: space.id, onDone: { showThemeEditor = false })
             }
@@ -326,6 +334,7 @@ private struct ManageSpacesColumnHeader: View {
 
 private struct ManageSpacesColumnFooter: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.libraryStyle) private var style
     var space: Space
     var dragSuppressed: Bool
 
@@ -339,7 +348,7 @@ private struct ManageSpacesColumnFooter: View {
         HStack {
             Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                 .font(.system(size: OrbitMetrics.sidebarUtilityGlyphSize - 1, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(style.secondary)
                 .contentShape(Rectangle())
                 .manageSpacesDraggable(
                     ManageSpacesDragPayload(id: space.id, kind: .space, originSpaceID: space.id),
@@ -363,9 +372,10 @@ private struct ManageSpacesColumnFooter: View {
             }) {
                 Image(systemName: "ellipsis")
                     .font(.system(size: OrbitMetrics.sidebarUtilityGlyphSize, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(style.secondary)
                     .frame(width: OrbitMetrics.iconChrome, height: OrbitMetrics.iconChrome)
                     .contentShape(Rectangle())
+                    .accessibilityLabel("Space options")
             }
         }
         .padding(.horizontal, ManageSpacesMetrics.headerPadding)
@@ -374,7 +384,7 @@ private struct ManageSpacesColumnFooter: View {
             if isRenaming {
                 TextField("Space name", text: $draftName)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
+                    .font(OrbitFont.commandBarRowSubtitle)
                     .focused($fieldFocused)
                     .onSubmit(commitRename)
                     .onExitCommand { isRenaming = false }
@@ -442,6 +452,7 @@ private struct ManageSpacesFolderRow: View {
     var originSpaceID: SpaceID
     var depth: Int
 
+    @Environment(\.libraryStyle) private var style
     @State private var isExpanded: Bool
 
     init(folder: Folder, originSpaceID: SpaceID, depth: Int) {
@@ -454,24 +465,24 @@ private struct ManageSpacesFolderRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Button {
-                isExpanded.toggle()
+                withOrbitAnimation(OrbitMotion.quick) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
                     folderGlyph
                     Text(folder.name)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(LibraryPalette.textPrimary)
+                        .font(OrbitFont.commandBarRowSubtitle.weight(.medium))
+                        .foregroundStyle(style.foreground)
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     // Immediate-child count, matching the folder's sidebar row.
                     Text("\(folder.children.count)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(LibraryPalette.textTertiary)
+                        .font(OrbitFont.commandBarRowSubtitle)
+                        .foregroundStyle(style.secondary)
                 }
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.001)))
+                .background(RoundedRectangle(cornerRadius: OrbitRadius.sm, style: .continuous).fill(Color.secondary.opacity(0.001)))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -494,12 +505,12 @@ private struct ManageSpacesFolderRow: View {
             } else {
                 Image(systemName: icon)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(LibraryPalette.textSecondary)
+                    .foregroundStyle(style.secondary)
                     .frame(width: OrbitMetrics.sidebarFolderToggleSize, height: OrbitMetrics.sidebarFolderToggleSize)
             }
         } else {
             FolderToggleGlyph(isOpen: isExpanded)
-                .foregroundStyle(LibraryPalette.textSecondary)
+                .foregroundStyle(style.secondary)
         }
     }
 }
@@ -508,6 +519,7 @@ private struct ManageSpacesFolderRow: View {
 
 private struct ManageSpacesTabRow: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.libraryStyle) private var style
     var tab: Tab
     var originSpaceID: SpaceID
 
@@ -515,21 +527,24 @@ private struct ManageSpacesTabRow: View {
         HStack(spacing: 6) {
             FaviconView(url: tab.faviconURL, host: tab.url.host() ?? tab.url.absoluteString)
                 .frame(width: OrbitMetrics.iconFavicon, height: OrbitMetrics.iconFavicon)
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .clipShape(RoundedRectangle(cornerRadius: OrbitRadius.xs))
             Text(tab.displayTitle)
-                .font(.system(size: 11.5))
+                .font(OrbitFont.commandBarRowSubtitle)
+                .foregroundStyle(style.foreground)
                 .lineLimit(1)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.001)))
+        .background(RoundedRectangle(cornerRadius: OrbitRadius.sm, style: .continuous).fill(Color.secondary.opacity(0.001)))
         .contentShape(Rectangle())
         .draggable(ManageSpacesDragPayload(id: tab.id, kind: .tab, originSpaceID: originSpaceID)) {
             HStack(spacing: 6) {
                 FaviconView(url: tab.faviconURL, host: tab.url.host() ?? tab.url.absoluteString)
                     .frame(width: OrbitMetrics.iconFavicon, height: OrbitMetrics.iconFavicon)
-                Text(tab.displayTitle).font(.system(size: 11.5))
+                Text(tab.displayTitle)
+                    .font(OrbitFont.commandBarRowSubtitle)
+                    .foregroundStyle(style.foreground)
             }
             .padding(6)
         }

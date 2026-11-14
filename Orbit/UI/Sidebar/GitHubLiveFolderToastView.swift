@@ -1,6 +1,5 @@
 import SwiftUI
 
-// MARK: - Presenter
 
 @MainActor
 final class GitHubLiveFolderToastPresenter: SidebarToastPresenter {
@@ -14,7 +13,6 @@ final class GitHubLiveFolderToastPresenter: SidebarToastPresenter {
     }
 }
 
-// MARK: - The overlay
 
 @MainActor
 struct GitHubLiveFolderToastView: View {
@@ -26,7 +24,6 @@ struct GitHubLiveFolderToastView: View {
     }
 }
 
-// MARK: - Activation watching
 
 private struct GitHubLiveFolderActivation: Equatable {
     var spaceID: SpaceID
@@ -52,7 +49,7 @@ extension View {
             .onChange(of: activation) { previous, current in
                 guard previous.spaceID == current.spaceID else { return }
                 guard !previous.isEnabled, current.isEnabled else { return }
-                withAnimation(OrbitMotion.quick) {
+                withOrbitAnimation(OrbitMotion.quick) {
                     presenter.announceLiveFolderCreated()
                 }
             }

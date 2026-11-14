@@ -31,7 +31,7 @@ struct HoverRevealSidebarLayer: View {
     #endif
 
     private var hotZoneWidth: CGFloat {
-        env.isSidebarHoverRevealed ? env.sidebarWidth : OrbitMetrics.sidebarHoverEdgeWidth
+        env.isSidebarHoverRevealed ? env.effectiveSidebarWidth : OrbitMetrics.sidebarHoverEdgeWidth
     }
 
     var body: some View {
@@ -40,8 +40,7 @@ struct HoverRevealSidebarLayer: View {
                 .frame(width: hotZoneWidth)
                 .frame(maxHeight: .infinity, alignment: .leading)
 
-            // Always mounted, never inserted/removed: an if-gated insertion would rebuild
-            // and lay out the SidebarView subtree while the panel is already moving.
+            // Always mounted, never inserted/removed: an if-gated insertion would rebuild and lay out the SidebarView subtree while the panel is moving.
             HoverRevealedFloatingPanel(isRevealed: env.isSidebarHoverRevealed)
         }
     }
@@ -67,7 +66,7 @@ struct HoverRevealedFloatingPanel: View {
 
     private var hiddenOffset: CGFloat {
         -(OrbitHoverPanelMetrics.edgeInset
-            + env.sidebarWidth
+            + env.effectiveSidebarWidth
             + OrbitHoverPanelMetrics.shadowRadius
             + OrbitHoverPanelMetrics.shadowXOffset
             + 4)
@@ -75,7 +74,7 @@ struct HoverRevealedFloatingPanel: View {
 
     var body: some View {
         SidebarView(paintsOwnBackground: true, backgroundOpacity: OrbitAcrylic.panelTintOpacity)
-            .frame(width: env.sidebarWidth)
+            .frame(width: env.effectiveSidebarWidth)
             .frame(maxHeight: .infinity, alignment: .leading)
             .overlay(alignment: .topLeading) { PositionedWindowControls() }
             .background(.ultraThinMaterial)
@@ -117,8 +116,7 @@ struct SidebarCollapseModifier: ViewModifier, Animatable {
     }
 
     func body(content: Content) -> some View {
-        // Clamp: OrbitMotion.standard overshoots 0...1 mid-spring, and an unclamped
-        // overshoot would hand the sidebar more width than the user sized it to.
+        // Clamp: OrbitMotion.standard overshoots 0...1 mid-spring, which would hand the sidebar more width than the user sized it to.
         let clamped = min(max(progress, 0), 1)
         content
             .frame(width: fullWidth, alignment: .leading)
@@ -140,8 +138,9 @@ extension AnyTransition {
 struct BrowserWindowView: View {
     @Environment(AppEnvironment.self) private var env
 
+    // env.sidebarWidth is the user's own width; the Library widens the sidebar past it without touching it, so layout and hit-testing read the effective width.
     private var dockedSidebarColumnWidth: CGFloat {
-        env.sidebarWidth + OrbitMetrics.sidebarResizeHandleWidth
+        env.effectiveSidebarWidth + OrbitMetrics.sidebarResizeHandleWidth
     }
 
     var skipOnboarding: Bool = false
@@ -151,8 +150,7 @@ struct BrowserWindowView: View {
     #endif
 
     @State private var showNewSpaceFlow = false
-    // Whether opening the New Space panel is what un-hid the sidebar, so dismissing
-    // it restores the user's own sidebar visibility setting rather than leaving it changed.
+    // Whether opening the New Space panel un-hid the sidebar, so dismissing it restores the user's own visibility setting.
     @State private var newSpaceFlowUnhidTheSidebar = false
     @State private var hoverHideTask: Task<Void, Never>?
     @State private var spaceSwipeBlend: SpaceSwipeBlend?
@@ -167,7 +165,7 @@ struct BrowserWindowView: View {
                 if env.isSidebarVisible {
                     HStack(spacing: 0) {
                         SpaceSwitchingSidebarContainer()
-                            .frame(width: env.sidebarWidth)
+                            .frame(width: env.effectiveSidebarWidth)
                             .orbitRightClickBackdropMenu { sidebarBackgroundMenuEntries }
                             .overlay { newSpaceFlowPanel }
                         resizeHandle
@@ -190,21 +188,21 @@ struct BrowserWindowView: View {
                 commandBarOverlay
             }
         }
-        .animation(OrbitMotion.standard, value: env.isSidebarVisible)
-        // No ambient .animation(value: env.isSidebarHoverRevealed): every mutation of it
-        // already happens inside an explicit withAnimation in handleHoverEdge, and an
-        // ambient modifier here could desynchronize the panel's transition from its content.
-        .animation(OrbitMotion.standard, value: env.isCommandBarPresented)
+        .orbitAnimation(OrbitMotion.standard, value: env.isSidebarVisible)
+        // No ambient .animation(value: env.isSidebarHoverRevealed): every mutation already runs in an explicit withAnimation in handleHoverEdge, and an ambient one could desynchronize the panel from its content.
+        .orbitAnimation(OrbitMotion.standard, value: env.isCommandBarPresented)
         .onChange(of: env.isSidebarVisible) { _, isVisible in
-            guard isVisible else { return }
+            guard isVisible else {
+                env.libraryModeSidebarWasHidden()
+                return
+            }
             hoverHideTask?.cancel()
             hoverHideTask = nil
             hoverPhase = .hidden
             env.isSidebarHoverRevealed = false
         }
         .onChange(of: env.activeTabID) { _, newID in
-            // A click on a real page has to take the new-tab spotlight with it.
-            // A blank pane keeps the bar: that pane is what presents it.
+            // A click on a real page takes the new-tab spotlight with it; a blank pane keeps the bar because that pane presents it.
             guard env.isCommandBarPresented, let newID, env.blankPaneMode(for: newID) == nil else { return }
             env.dismissCommandBar()
         }
@@ -224,27 +222,20 @@ struct BrowserWindowView: View {
             ) { granted in
                 env.resolveExtensionPermissionsConsent(request, granted: granted)
             }
-            // Escape, a click away, and anything else that takes the sheet off
-            // screen without an answer. A no-op once the buttons above have
-            // answered, since resolving removes the request.
+            // Covers Escape, a click away and anything else that dismisses the sheet unanswered; a no-op once the buttons have answered, since resolving removes the request.
             .onDisappear { env.resolveExtensionPermissionsConsent(request, granted: false) }
         }
     }
 
-    // MARK: - Extension permissions consent
-
-    // Presented here, not on SingleTabContentView: that view already carries the install
-    // sheet, and two .sheet modifiers on one view drop whichever arrives second. Also the right scope: process-wide, routed to the frontmost window's active tab.
+    // Presented here, not on SingleTabContentView: that view already carries the install sheet, and two .sheet modifiers on one view drop whichever arrives second.
     private var permissionsConsentBinding: Binding<ExtensionPermissionsConsentRequest?> {
         Binding(
             get: { env.activeTabID.flatMap { env.pendingExtensionPermissionsConsent[$0] } },
-            // Every dismissal is answered by the content's own onDisappear,
-            // which knows which request went away; this setter does not.
+            // Every dismissal is answered by the content's own onDisappear, which knows which request went away; this setter does not.
             set: { _ in }
         )
     }
 
-    // MARK: - New Space (a sidebar-column panel, not a sheet)
 
     @ViewBuilder
     private var newSpaceFlowPanel: some View {
@@ -257,16 +248,16 @@ struct BrowserWindowView: View {
     private func presentNewSpaceFlow() {
         if !env.isSidebarVisible {
             newSpaceFlowUnhidTheSidebar = true
-            withAnimation(OrbitMotion.standard) { env.isSidebarVisible = true }
+            withOrbitAnimation(OrbitMotion.standard) { env.isSidebarVisible = true }
         }
-        withAnimation(OrbitMotion.quick) { showNewSpaceFlow = true }
+        withOrbitAnimation(OrbitMotion.quick) { showNewSpaceFlow = true }
     }
 
     private func dismissNewSpaceFlow() {
-        withAnimation(OrbitMotion.quick) { showNewSpaceFlow = false }
+        withOrbitAnimation(OrbitMotion.quick) { showNewSpaceFlow = false }
         if newSpaceFlowUnhidTheSidebar {
             newSpaceFlowUnhidTheSidebar = false
-            withAnimation(OrbitMotion.standard) { env.isSidebarVisible = false }
+            withOrbitAnimation(OrbitMotion.standard) { env.isSidebarVisible = false }
         }
     }
 
@@ -281,10 +272,7 @@ struct BrowserWindowView: View {
         }
     }
 
-    // MARK: Background
-
-    // The window's one and only Space background: gradient stops are in unit space, so a second copy would resolve to different colors and seam.
-    // SidebarView.paintsOwnBackground is the single sanctioned exception, for the hover-revealed floating panel.
+    // The window's one Space background: gradient stops are in unit space, so a second copy would resolve to different colors and seam (SidebarView.paintsOwnBackground is the one exception, for the hover-revealed panel).
     private var backgroundBleed: some View {
         Group {
             if let blend = spaceSwipeBlend {
@@ -304,14 +292,11 @@ struct BrowserWindowView: View {
                 Color(nsColor: .windowBackgroundColor)
             }
         }
-        // Applied to the whole Group, not per-branch, so the swipe crossfade, the
-        // ordinary themed background and the no-Space fallback are all tinted identically.
+        // Applied to the whole Group, not per-branch, so the swipe crossfade, themed background and no-Space fallback are tinted identically.
         .opacity(OrbitAcrylic.windowTintOpacity)
         .allowsHitTesting(false)
         .ignoresSafeArea()
     }
-
-    // MARK: Content column
 
     // Docked, the handle already takes its share of cardInset. Hidden, the leading edge is the window and keeps the full inset.
     private var contentCardLeadingInset: CGFloat {
@@ -339,9 +324,6 @@ struct BrowserWindowView: View {
     #if DEBUG
     private static let selfCheckLogger = Logger(subsystem: "com.orbit.browser", category: "ContentColumnSelfCheck")
 
-    /// Confirms structurally — no Screen Recording permission in this
-    /// environment — that the content card sits flush with this column's
-    /// own edges (leading/trailing/top/bottom insets applied as expected).
     private var contentCardFrameProbe: some View {
         GeometryReader { proxy in
             Color.clear
@@ -352,12 +334,11 @@ struct BrowserWindowView: View {
         }
     }
 
-    /// Gated on `DiagnosticChannel.contentColumn` (`ORBIT_LOG_CONTENT_COLUMN=1`) to avoid console noise in `OrbitDemo`, a DEBUG build the user browses in.
     private func logColumnFrame(card: CGRect, label: String) {
         guard DiagnosticChannel.contentColumn.isEnabled else { return }
         BrowserWindowView.selfCheckLogger.info("""
         [\(label, privacy: .public)] card=\(String(describing: card), privacy: .public) \
-        sidebarVisible=\(env.isSidebarVisible) sidebarWidth=\(env.sidebarWidth)
+        sidebarVisible=\(env.isSidebarVisible) sidebarWidth=\(env.effectiveSidebarWidth)
         """)
     }
     #endif
@@ -372,7 +353,10 @@ struct BrowserWindowView: View {
 
         switch next {
         case .peeking:
-            withAnimation(OrbitMotion.standard, completionCriteria: .logicallyComplete) {
+            withAnimation(
+                OrbitMotion.resolved(OrbitMotion.standard, reduceMotion: OrbitMotion.prefersReducedMotion),
+                completionCriteria: .logicallyComplete
+            ) {
                 env.isSidebarHoverRevealed = true
             } completion: {
                 hoverPhase = hoverPhase.revealAnimationCompleted()
@@ -388,7 +372,7 @@ struct BrowserWindowView: View {
                 let resolved = hoverPhase.hideDelayElapsed()
                 guard resolved != hoverPhase else { return }
                 hoverPhase = resolved
-                withAnimation(OrbitMotion.standard) {
+                withOrbitAnimation(OrbitMotion.standard) {
                     env.isSidebarHoverRevealed = false
                 }
             }
@@ -398,7 +382,6 @@ struct BrowserWindowView: View {
         }
     }
 
-    // MARK: Command Bar
 
     private var commandBarOverlay: some View {
         CommandBarOverlay(
@@ -407,34 +390,29 @@ struct BrowserWindowView: View {
         )
     }
 
-    /// Width of the sidebar the Command Bar must not cover, including the
-    /// hover-revealed panel. A click there selects a tab instead of only
-    /// dismissing the bar.
     private var commandBarSidebarPassthrough: CGFloat {
         if env.isSidebarVisible {
-            return env.sidebarWidth + OrbitMetrics.sidebarResizeHandleWidth
+            return env.effectiveSidebarWidth + OrbitMetrics.sidebarResizeHandleWidth
         }
         if env.isSidebarHoverRevealed {
-            return env.sidebarWidth
+            return env.effectiveSidebarWidth
         }
         return 0
     }
 
-    // MARK: Sidebar background context menu
 
     private var sidebarBackgroundMenuEntries: [OrbitContextMenuEntry] {
         [
             .item(OrbitContextMenuItem(title: "New Space…") { presentNewSpaceFlow() }),
-            .item(OrbitContextMenuItem(title: "Manage Spaces…") { LibraryWindowController.show(section: .spaces) })
+            .item(OrbitContextMenuItem(title: "Manage Spaces…") { env.openLibrary(section: .spaces) })
         ]
     }
 
-    // MARK: Sidebar resize handle
-
+    // Inert while the Library is open: the handle resizes the user's own width, which the Library's wider column hides, so dragging would jump on release.
     @ViewBuilder
     private var resizeHandle: some View {
         #if DEBUG
-        if screenshotModeDragDisabled {
+        if screenshotModeDragDisabled || env.isLibraryMode {
             Color.clear
                 .frame(width: OrbitMetrics.sidebarResizeHandleWidth)
                 .allowsHitTesting(false)
@@ -442,11 +420,16 @@ struct BrowserWindowView: View {
             SidebarResizeHandle()
         }
         #else
-        SidebarResizeHandle()
+        if env.isLibraryMode {
+            Color.clear
+                .frame(width: OrbitMetrics.sidebarResizeHandleWidth)
+                .allowsHitTesting(false)
+        } else {
+            SidebarResizeHandle()
+        }
         #endif
     }
 
-    // MARK: Archive sweep
 
     private func runArchiveSweepLoop() async {
         while !Task.isCancelled {

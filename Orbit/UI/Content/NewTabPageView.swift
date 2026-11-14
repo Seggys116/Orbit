@@ -170,14 +170,14 @@ private struct NewTabRecentCard: View {
             .frame(height: 56)
             .frame(maxWidth: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: OrbitRadius.panel, style: .continuous)
                     .fill(Color.primary.opacity(isHovering ? 0.10 : 0.05))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: OrbitRadius.panel, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: OrbitRadius.panel, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }

@@ -1,8 +1,6 @@
 import AppKit
 import Foundation
 
-// MARK: - Engine
-
 @MainActor
 public protocol BrowserEngine: AnyObject {
 
@@ -16,30 +14,19 @@ public protocol BrowserEngine: AnyObject {
 
     var versionDescription: String { get }
 
-    /// Must be called once, before any `WebContents` is created.
     func start() throws
 
-    /// `false` if teardown was deferred — some engines cannot shut down
-    /// synchronously while their own message-pump work is still on this
-    /// thread's stack; see the implementation for what it defers on.
+    /// `false` if teardown was deferred: some engines cannot shut down while their own message-pump work is on the stack.
     @discardableResult
     func shutdown() -> Bool
 
-    /// Pumps the engine's message loop. A no-op for an engine that drives
-    /// its own run loop integration instead of being polled from outside.
     func tick()
-
-    // MARK: Sessions
 
     func session(identifier: String, persistent: Bool) throws -> EngineSession
 
     var defaultSession: EngineSession { get }
 
-    // MARK: Tabs
-
     func makeWebContents(session: EngineSession, initialURL: URL?) throws -> WebContents
-
-    // MARK: Global services
 
     func clearBrowsingData(_ scope: BrowsingDataScope, session: EngineSession, since: Date?) async
 
@@ -47,60 +34,41 @@ public protocol BrowserEngine: AnyObject {
 
     func removeUserScript(id: UUID, session: EngineSession)
 
-    // MARK: Content blocking
-
     func applyContentBlocker(_ blocker: ContentBlocker?, session: EngineSession) async
 
-    /// Installs process-wide, not per-session. When it takes effect is given
-    /// by `extensionActivation`, not by this call returning.
+    /// Installs process-wide, not per-session; `extensionActivation` says when it takes effect.
     func loadExtension(at directory: URL, session: EngineSession) async throws -> LoadedExtension
 
-    /// Only the bootstrap pass has any business passing `.browserStartup`;
-    /// everything else is a user action and gets the two-argument form.
     func loadExtension(
         at directory: URL, session: EngineSession, reason: ExtensionLoadReason
     ) async throws -> LoadedExtension
 
-    /// Drops the extension from the running engine but keeps everything it
-    /// has stored, so loading it again resumes with the optional permissions
-    /// the user already granted: a disable, an update or a reload.
+    /// Keeps the extension's stored data, so loading it again resumes with the permissions already granted.
     func unloadExtension(id: String, session: EngineSession)
 
-    /// `unloadExtension` for an extension the user is getting rid of: what it
-    /// stored goes too, so a later install of the same id starts from nothing.
+    /// Like `unloadExtension` but the stored data goes too, so a later install of the same id starts clean.
     func uninstallExtension(id: String, session: EngineSession)
 
     func loadedExtensions(session: EngineSession) -> [LoadedExtension]
 
-    /// Live chrome.action state (badge text/colour, dynamically set icon,
-    /// per-tab enable/disable) as the engine last relayed it.
     var extensionActionStates: ExtensionActionStateStore { get }
 }
 
 public extension BrowserEngine {
-    /// Default: an engine with nothing of its own to forget has nothing to do
-    /// beyond the unload.
     func uninstallExtension(id: String, session: EngineSession) {
         unloadExtension(id: id, session: session)
     }
 
-    /// Default: an engine with no lifecycle of its own to distinguish loads
-    /// the same way for every reason.
     func loadExtension(
         at directory: URL, session: EngineSession, reason: ExtensionLoadReason
     ) async throws -> LoadedExtension {
         try await loadExtension(at: directory, session: session)
     }
 
-    /// Default: engines that do not need external pumping leave this empty.
     func tick() {}
 
-    /// Default: an engine with no chrome.action relay reports nothing, which
-    /// reads as every action plainly enabled with no badge.
     var extensionActionStates: ExtensionActionStateStore { ExtensionActionStateStore.inert }
 }
-
-// MARK: - Session
 
 @MainActor
 public protocol EngineSession: AnyObject {
@@ -116,20 +84,13 @@ public protocol EngineSession: AnyObject {
 
     func deleteCookies(for url: URL) async
 
-    /// Returns the number actually accepted, which can be less than the
-    /// input count.
     func setCookies(_ cookies: [EngineCookie]) async -> Int
-
-    // MARK: Content settings
 
     func contentSetting(_ kind: PermissionKind, for url: URL) -> ContentSetting
 
-    /// `.ask` removes the stored rule (revoke) rather than storing the
-    /// value "ask".
+    /// `.ask` removes the stored rule (revoke) rather than storing the value "ask".
     func setContentSetting(_ setting: ContentSetting, for kind: PermissionKind, url: URL)
 }
-
-// MARK: - Extensions
 
 public struct LoadedExtension: Identifiable, Sendable, Hashable {
     public var id: String
@@ -140,10 +101,9 @@ public struct LoadedExtension: Identifiable, Sendable, Hashable {
     public var hasToolbarAction: Bool
     public var manifestVersion: Int
     public var isEnabled: Bool
-    // False only for an extension the running engine has not actually loaded yet (installed/enabled after start()) — see `extensionActivation`; on a `.nextLaunch` engine its chrome-extension:// origin answers nothing until the next launch.
+    // False for an extension installed or enabled after start(); on a `.nextLaunch` engine its chrome-extension:// origin answers nothing until relaunch.
     public var isActivated: Bool
-    // True when `id` is the id the running engine itself assigned (orbit_extension_loader.cc reports extension.id() verbatim), not one Orbit derived on its own.
-    // The engine's id is the only one its chrome-extension:// origin answers to; see ExtensionActionPopupSupport.isExtensionIDAddressable.
+    // True when `id` is the id the engine itself assigned, the only one its chrome-extension:// origin answers to.
     public var idIsEngineAssigned: Bool
 
     public init(
@@ -171,13 +131,11 @@ public struct LoadedExtension: Identifiable, Sendable, Hashable {
     }
 }
 
-// MARK: - Web contents
-
 /// Call `close()` exactly once; every method after that is a no-op.
 @MainActor
 public protocol WebContents: AnyObject {
 
-    /// Not `Tab.id` — use `AppEnvironment.tabID(for:)` to resolve the tab.
+    /// Not `Tab.id`; use `AppEnvironment.tabID(for:)` to resolve the tab.
     var id: UUID { get }
 
     var view: NSView { get }
@@ -186,8 +144,6 @@ public protocol WebContents: AnyObject {
 
     var delegate: WebContentsDelegate? { get set }
 
-    // MARK: State
-
     var navigationState: NavigationState { get }
 
     var mediaState: MediaState { get }
@@ -195,8 +151,6 @@ public protocol WebContents: AnyObject {
     var zoomFactor: Double { get }
 
     var isClosed: Bool { get }
-
-    // MARK: Navigation
 
     func load(_ url: URL)
     func loadHTML(_ html: String, baseURL: URL?)
@@ -211,82 +165,54 @@ public protocol WebContents: AnyObject {
 
     func currentCertificate() -> SiteCertificate?
 
-    // MARK: Scripting
-
     @discardableResult
     func evaluateJavaScript(_ script: String) async throws -> Any?
 
     func injectUserScript(_ script: UserScript)
 
-    // MARK: Find in page
-
     func find(_ text: String, options: FindOptions)
     func stopFinding(clearSelection: Bool)
 
-    // MARK: Editing
     // Native content::WebContents commands; Paste cannot go through a page script.
-
     func cut()
     func copy()
     func paste()
     func selectAll()
 
-    // MARK: Zoom
-
     func setZoomFactor(_ factor: Double)
 
-    // MARK: Content sizing
-
-    /// Reports each result via `didChangePreferredSize`; pins zoom to neutral
-    /// so a page-zoom-scaled size doesn't size its host wrong.
     func enableContentSizing(minimum: CGSize, maximum: CGSize)
 
-    // MARK: Colour scheme
-
     func setPreferredColorScheme(_ scheme: ContentColorScheme?)
-
-    // MARK: Media
 
     func setMuted(_ muted: Bool)
     func togglePictureInPicture()
 
-    // MARK: Presentation
-
-    /// The host owns this fact; inferring it from window-server events gets it
-    /// wrong for a view adopted into a container not yet in a window.
+    /// The host owns this fact; inferring it from window-server events gets it wrong for a view not yet in a window.
     func setVisible(_ visible: Bool)
 
-    /// Renders via the compositor, never the screen, so it cannot trigger a
-    /// screen-recording prompt.
+    /// Renders via the compositor, never the screen, so it cannot trigger a screen-recording prompt.
     func capturePreview(rect: CGRect?, size: CGSize) async -> NSImage?
 
     func print()
 
     func savePage()
 
-    // MARK: Downloads
-
     func cancelDownload(id: UUID)
 
-    // MARK: Extension context menus
-
-    /// The chrome.contextMenus items matching the gesture behind the context
-    /// menu about to be shown; call only from `showContextMenu`.
     func extensionContextMenuGroups() -> [ExtensionContextMenuGroup]
 
-    /// Fires that item's `onClicked`, with the info payload of the same gesture.
     func performExtensionContextMenuItem(_ id: ExtensionContextMenuItemID)
-
-    // MARK: Developer tools
 
     func showDeveloperTools(inspectAt point: CGPoint?)
     func closeDeveloperTools()
 
-    // MARK: Focus
+    /// Orbit's inspector. A point selects the element under it; nil starts the element picker.
+    func showInspectElement(at point: CGPoint?)
+    func showJavaScriptConsole()
+    func showOrbitDeveloperTools()
 
     func focus()
-
-    // MARK: Lifetime
 
     func close()
 }
@@ -294,13 +220,14 @@ public protocol WebContents: AnyObject {
 public extension WebContents {
     func enableContentSizing(minimum: CGSize, maximum: CGSize) {}
 
-    // An engine with no extension system contributes no menu items.
     func extensionContextMenuGroups() -> [ExtensionContextMenuGroup] { [] }
     func performExtensionContextMenuItem(_ id: ExtensionContextMenuItemID) {}
 
-    // An engine whose view is not a compositor surface has nothing to declare:
-    // its `view` paints whenever AppKit draws it.
     func setVisible(_ visible: Bool) {}
+
+    func showInspectElement(at point: CGPoint?) { showDeveloperTools(inspectAt: point) }
+    func showJavaScriptConsole() { showDeveloperTools(inspectAt: nil) }
+    func showOrbitDeveloperTools() { showDeveloperTools(inspectAt: nil) }
 }
 
 public struct SessionHistoryEntry: Identifiable, Sendable, Hashable {
@@ -317,12 +244,8 @@ public struct SessionHistoryEntry: Identifiable, Sendable, Hashable {
     }
 }
 
-// MARK: - Delegate
-
 @MainActor
 public protocol WebContentsDelegate: AnyObject {
-
-    // MARK: Navigation lifecycle
 
     func webContentsDidChangeNavigationState(_ contents: WebContents)
 
@@ -339,29 +262,21 @@ public protocol WebContentsDelegate: AnyObject {
 
     func webContents(_ contents: WebContents, didFailLoading error: EngineError)
 
-    // MARK: Chrome
-
     func webContents(_ contents: WebContents, didChangeTitle title: String)
     func webContents(_ contents: WebContents, didChangeFavicon image: NSImage?, url: URL?)
     func webContents(_ contents: WebContents, didHoverLink url: URL?)
     func webContents(_ contents: WebContents, didChangeStatusText text: String?)
     func webContents(_ contents: WebContents, didChangeThemeColor color: NSColor?)
 
-    /// Distinct from `didChangeThemeColor`: the document's own background,
-    /// not the header colour.
+    /// Distinct from `didChangeThemeColor`: the document's own background, not the header colour.
     func webContents(_ contents: WebContents, didChangeDocumentColor color: NSColor?)
-
-    // MARK: Content requests
 
     func webContents(_ contents: WebContents, requestsNewContent request: NewContentRequest) -> Bool
 
-    /// `pending` carries a live, mid-navigation WebContents; returning false
-    /// destroys it. Distinct from `requestsNewContent`, for a Cmd-click with nothing built yet.
+    /// `pending` carries a live, mid-navigation WebContents; returning false destroys it.
     func webContents(_ contents: WebContents, requestsAdoptionOf pending: PendingWebContents) -> Bool
 
     func webContentsDidRequestClose(_ contents: WebContents)
-
-    // MARK: User interaction
 
     func webContents(_ contents: WebContents, showContextMenu context: ContextMenuContext) -> Bool
 
@@ -383,8 +298,6 @@ public protocol WebContentsDelegate: AnyObject {
         acceptedTypes: [String]
     ) async -> [URL]
 
-    /// Distinct from the overload above for an input that takes folders (`webkitdirectory`);
-    /// the default forwards there for a delegate that never chooses directories.
     func webContents(
         _ contents: WebContents,
         runOpenPanelAllowingMultiple allowsMultiple: Bool,
@@ -392,54 +305,30 @@ public protocol WebContentsDelegate: AnyObject {
         acceptedTypes: [String]
     ) async -> [URL]
 
-    // MARK: Extensions
-
     func webContents(
         _ contents: WebContents,
         requestsExtensionInstallConsent pending: ExtensionInstaller.PendingInstall
     ) async -> Bool
 
-    /// Progress for a Web Store install driven by `WebStorePrivateBridge`, shown
-    /// in the same sheet as the consent decision; `nil` clears it.
     func webContents(_ contents: WebContents, didUpdateExtensionInstallProgress stage: ExtensionInstallStage?)
 
-    /// Hands the UI a way to stop the install it is showing progress for;
-    /// `nil` clears it once there is nothing left to cancel.
     func webContents(_ contents: WebContents, canCancelExtensionInstallWith cancel: (@Sendable () -> Void)?)
 
-    /// The install's terminal state, so a failure stays readable and
-    /// dismissible instead of disappearing with the progress it replaced.
     func webContents(_ contents: WebContents, didFinishExtensionInstallWith outcome: ExtensionInstallOutcome?)
 
-    /// Confirms an extension removal requested via `chrome.management.uninstall`
-    /// with `showConfirmDialog: true`.
     func webContents(_ contents: WebContents, confirmUninstallExtensionNamed name: String) async -> Bool
 
-    // MARK: Find
-
     func webContents(_ contents: WebContents, didUpdateFindResult result: FindResult)
-
-    // MARK: Media & fullscreen
 
     func webContents(_ contents: WebContents, didChangeMediaState state: MediaState)
     func webContents(_ contents: WebContents, didChangeFullscreen isFullscreen: Bool)
 
-    /// content::WebContentsDelegate::ActivateContents reached this tab, e.g.
-    /// the picture-in-picture window's "back to tab" control (distinct from
-    /// its X, which closes without activating anything).
+    /// Fired by the picture-in-picture window's "back to tab" control, not its X, which closes without activating.
     func webContentsDidRequestActivation(_ contents: WebContents)
-
-    // MARK: Zoom
 
     func webContents(_ contents: WebContents, didChangeZoomFactor factor: Double)
 
-    // MARK: Content sizing
-
-    /// Only ever called for a contents `enableContentSizing(minimum:maximum:)`
-    /// was called on, and always with a size already inside those bounds.
     func webContents(_ contents: WebContents, didChangePreferredSize size: CGSize)
-
-    // MARK: Downloads
 
     func webContents(
         _ contents: WebContents,
@@ -449,8 +338,6 @@ public protocol WebContentsDelegate: AnyObject {
         sourceURL: URL
     ) async -> URL?
 
-    /// Carries the id later `didUpdate` progress calls use; the unused
-    /// default forwards to the id-less overload.
     func webContents(
         _ contents: WebContents,
         willBeginDownload suggestedName: String,
@@ -462,14 +349,10 @@ public protocol WebContentsDelegate: AnyObject {
 
     func webContents(_ contents: WebContents, download id: UUID, didUpdate progress: DownloadProgress)
 
-    // MARK: Process health
-
     func webContentsDidCrash(_ contents: WebContents)
 
     func webContents(_ contents: WebContents, didChangeResponsiveness isResponsive: Bool)
 }
-
-// MARK: - Delegate defaults
 
 public extension WebContentsDelegate {
     func webContentsDidChangeNavigationState(_ contents: WebContents) {}

@@ -578,8 +578,12 @@ final class SpaceThemeChromeTests: XCTestCase {
             "publishing the blend with a bare .preference jumps the window background to its end state when the settle animation starts"
         )
         XCTAssertTrue(
-            container.contains("withAnimation(OrbitMotion.interactive, completionCriteria: .logicallyComplete) {\n                translation = settleTarget"),
+            container.contains("withAnimation(Self.settleAnimation, completionCriteria: .logicallyComplete) {\n                translation = settleTarget"),
             "the settle must animate translation, which is what the publisher interpolates"
+        )
+        XCTAssertTrue(
+            container.contains("OrbitMotion.resolved(OrbitMotion.interactive, reduceMotion: OrbitMotion.prefersReducedMotion)"),
+            "the settle animation must stay the interactive spring, dropped only under Reduce Motion"
         )
 
         let blend = try Self.source("Orbit/UI/Spaces/SpaceGradientBlendView.swift")

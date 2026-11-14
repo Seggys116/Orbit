@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-// NSMenu.autoenablesItems defaults true and silently re-enables items without validateMenuItem(_:).
-// Used by the main menu and its Import submenu.
+// NSMenu.autoenablesItems defaults true and silently re-enables items without validateMenuItem(_:); used by the main menu and its Import submenu.
 final class ClosureMenuItem: NSMenuItem, NSMenuItemValidation {
     private let handler: () -> Void
 
@@ -28,8 +27,7 @@ final class ClosureMenuItem: NSMenuItem, NSMenuItemValidation {
 
 extension AppEnvironment {
 
-    // Presents Orbit's own borderless menu, never NSMenu/NSPopover -- see
-    // OrbitContextMenuPresenter for why. Point is flipped from context.location's top-left WebContents coordinates to the anchor view's AppKit coordinates.
+    // Presents Orbit's own borderless menu, never NSMenu/NSPopover (see OrbitContextMenuPresenter for why).
     func presentContextMenu(for contents: WebContents, context: ContextMenuContext) {
         let entries = buildContextMenuEntries(for: contents, context: context)
         let view = contents.view
@@ -135,9 +133,7 @@ extension AppEnvironment {
         return entries
     }
 
-    // One plain top-level item is shown directly under its own title; anything
-    // else is grouped under the extension's name -- ContextMenuMatcher::
-    // AppendExtensionItems' own rule.
+    // One plain top-level item shows under its own title; anything else groups under the extension's name, as ContextMenuMatcher::AppendExtensionItems does.
     private func extensionMenuEntries(
         for contents: WebContents,
         groups: [ExtensionContextMenuGroup]
@@ -167,8 +163,7 @@ extension AppEnvironment {
         }
 
         for item in items {
-            // A radio "group" is a run of adjacent radio items, and upstream
-            // fences each run with separators.
+            // A radio "group" is a run of adjacent radio items; upstream fences each run with separators.
             let isRadio = item.type == .radio
             if isRadio != previousWasRadio { appendDivider() }
             previousWasRadio = isRadio
@@ -218,16 +213,14 @@ extension AppEnvironment {
             isEnabled: canOpenInspector,
             tooltip: tooltip
         ) {
-            contents.showDeveloperTools(inspectAt: context.location)
+            contents.showInspectElement(at: context.location)
         }
     }
 }
 
-// Kept free of AppEnvironment: this is a one-shot fetch-and-save, not a
-// browsing action any test needs to intercept via the environment.
+// Kept free of AppEnvironment: a one-shot fetch-and-save no test needs to intercept via the environment.
 enum OrbitContextMenuActions {
-    // NSSavePanel.begin(completionHandler:) is asynchronous and returns
-    // immediately -- never .runModal(), which would enter a nested run loop.
+    // NSSavePanel.begin(completionHandler:) returns immediately; never .runModal(), which would enter a nested run loop.
     static func saveImage(from url: URL, session: URLSession = .shared, fileManager: FileManager = .default) {
         Task {
             guard let (data, response) = try? await session.data(from: url) else { return }

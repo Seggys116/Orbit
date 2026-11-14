@@ -1,8 +1,7 @@
 import AppKit
 import WebKit
 
-/// A host whose pane can take the inspector next to the page: WebKit docks by moving the inspector view
-/// beside the page view and resizing both by hand, so the page must be laid out by autoresizing, not constraints.
+/// WebKit docks by moving the inspector view beside the page and resizing both by hand, so the page must use autoresizing, not constraints.
 final class InspectorDockSideRelay: NSObject, WKScriptMessageHandler {
     weak var contents: WebKitWebContents?
 
@@ -20,8 +19,16 @@ final class InspectorDockSideRelay: NSObject, WKScriptMessageHandler {
 final class InspectorDockHost: NSView {
     weak var contents: WebKitWebContents?
 
+    private(set) var layoutPasses = 0
+
     override func layout() {
         super.layout()
+        layoutPasses += 1
+        // Under a scale Auto Layout snaps this host to whole backing pixels (439.6pt for a 440pt pane), leaving the page a CSS pixel narrow; take the pane's exact size.
+        if let superview, superview.bounds.size != frame.size,
+           abs(superview.bounds.width - frame.width) < 2, abs(superview.bounds.height - frame.height) < 2 {
+            setFrameSize(superview.bounds.size)
+        }
         guard let contents else { return }
         MainActor.assumeIsolated {
             if contents.isDeveloperToolsDocked {
@@ -41,7 +48,6 @@ protocol InspectorDockableContents: AnyObject {
     func embedForInspectorDocking(in container: NSView)
 }
 
-/// The Web Inspector's own page, whether it is docked in the pane or in WebKit's separate window.
 @MainActor
 final class WebKitInspectorFrontend {
     let webView: WKWebView
@@ -55,7 +61,6 @@ final class WebKitInspectorFrontend {
     }
 }
 
-/// Where the inspector opens. A side chosen in the inspector's own dock buttons is written back here.
 @MainActor
 enum DevToolsDockPreference {
     private static let key = "orbit.devTools.dockSide"
@@ -66,22 +71,14 @@ enum DevToolsDockPreference {
     }
 }
 
-/// One open inspector's dock steering. `attach` on `_WKInspector` always docks to the bottom, and the
-/// object has no `isAttached` property, so the side the frontend requests is applied by laying the two
-/// views out in the pane after WebKit has parented the inspector view there.
-/// WebKit's own `open` still presents an `NSWindow` first: it only skips that window when its
-/// `inspectorStartsAttached` preference is already set, and a fresh inspector's is not.
+/// `_WKInspector.attach` always docks to the bottom and there is no `isAttached`, so the requested side is applied by laying the views out by hand.
 @MainActor
 private final class InspectorDockSession {
     var requested: DevToolsDockSide
     var task: Task<Void, Never>?
-    /// The dock-button hook is installed. Stays false until Orbit has applied its own side, so the
-    /// frontend's boot `requestSetDockSide` (WebKit just opened detached, so this is "undocked") is not
-    /// stored as the user's choice.
+    /// False until Orbit has applied its own side, so the frontend's boot `requestSetDockSide` is not stored as the user's choice.
     var hooked = false
     var wrapReady = false
-    /// The side last passed to `InspectorFrontendHost.requestSetDockSide`, so WebKit's own attachment
-    /// side tracks the pane. Nil until the first command.
     var commanded: DevToolsDockSide?
     var stopped = false
     var applyingLayout = false
@@ -98,9 +95,7 @@ private enum InspectorDockSteering {
     static var concealing: Set<ObjectIdentifier> = []
     static var closedFrontendWatch: [ObjectIdentifier: [NSKeyValueObservation]] = [:]
 
-    /// Installed when a pane takes the page, which is before Developer Tools can open, so the
-    /// notification runs inside WebKit's `makeKeyAndOrderFront` and the window can be hidden
-    /// before AppKit paints it.
+    /// Installed before Developer Tools can open, so the window can be hidden inside WebKit's `makeKeyAndOrderFront` before AppKit paints it.
     static func installWindowWatch() {
         guard windowWatch.isEmpty else { return }
         let names: [Notification.Name] = [
@@ -119,11 +114,9 @@ private enum InspectorDockSteering {
 
 extension WebKitWebContents: InspectorDockableContents {
 
-    // MARK: - Hosting
 
     func embedForInspectorDocking(in container: NSView) {
-        // Before any inspector can open: show() orders WebKit's window front, and this watch has to
-        // already be in place so that order front can be undone before the window is drawn.
+        // Must precede any inspector: show() orders WebKit's window front and this watch has to undo it before drawing.
         InspectorDockSteering.installWindowWatch()
         // A pane owns the page now. The undocked-host watch would pull it back out of this container.
         stopUndockedPageHostWatch()
@@ -131,14 +124,13 @@ extension WebKitWebContents: InspectorDockableContents {
         let dockHost = container.subviews.compactMap { $0 as? InspectorDockHost }.first ?? InspectorDockHost(frame: container.bounds)
         dockHost.contents = self
         if dockHost.superview !== container {
-            dockHost.translatesAutoresizingMaskIntoConstraints = false
+            // Autoresizing, not constraints: Auto Layout pixel-snapping shrinks the host in a scaled pane.
+            dockHost.translatesAutoresizingMaskIntoConstraints = true
+            dockHost.autoresizingMask = [.width, .height]
+            dockHost.frame = container.bounds
             container.addSubview(dockHost)
-            NSLayoutConstraint.activate([
-                dockHost.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                dockHost.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-                dockHost.topAnchor.constraint(equalTo: container.topAnchor),
-                dockHost.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            ])
+        } else if dockHost.frame != container.bounds {
+            dockHost.frame = container.bounds
         }
         let view = webView
         view.translatesAutoresizingMaskIntoConstraints = true
@@ -158,15 +150,12 @@ extension WebKitWebContents: InspectorDockableContents {
             MainActor.assumeIsolated { self?.relayoutDockedInspector() }
         }
 
-        // The inspector view stayed in the pane this page left: attach again so WebKit parents it
-        // beside the page, then the steering loop lays that side out.
         if !inspectorCloseSuppressed, developerToolsAreOpen(), let session = dockSession, !session.stopped, session.requested != .undocked {
             reparentDockedInspectorIfNeeded()
             relayoutDockedInspector()
         }
     }
 
-    /// True when the page sits in a pane that lays it out by hand, which is what lets the inspector dock.
     var canDockInspector: Bool {
         guard !isExtensionPage, let container = extras.hostContainer else { return false }
         return webView.superview === container && webView.window != nil
@@ -174,14 +163,12 @@ extension WebKitWebContents: InspectorDockableContents {
 
     func scheduleHostedLayoutRestore() {
         stopDockSteering()
-        // The docked frontend is a subview we added. WebKit's isVisible stays true after
-        // close() until that view is gone, so waiting on it leaves the page shrunk.
+        // WebKit's isVisible stays true after close() until the docked view is gone, so waiting on it leaves the page shrunk.
         dropClosedFrontendFromPane()
         restorePageToFillContainer()
         watchClosedFrontend()
     }
 
-    /// The frontend can be a view the inspector no longer reports, so the one Orbit cached is dropped too.
     private func dropClosedFrontendFromPane() {
         guard let container = extras.hostContainer else { return }
         for view in [inspectorFrontendWebView, extras.inspectorFrontend?.webView] {
@@ -190,8 +177,7 @@ extension WebKitWebContents: InspectorDockableContents {
         }
     }
 
-    /// WebKit parents the inspector view again while it tears down, so the pane is cleared on every
-    /// reparent until the close has settled or a new inspector opens.
+    /// WebKit reparents the inspector view while tearing down, so the pane is cleared on every reparent until close settles.
     private func watchClosedFrontend() {
         let key = ObjectIdentifier(self)
         let generation = inspectorCloseGeneration
@@ -233,9 +219,6 @@ extension WebKitWebContents: InspectorDockableContents {
         }
     }
 
-    // MARK: - State
-
-    /// WebKit's inspector page, nil while no inspector exists.
     var inspectorFrontendWebView: WKWebView? {
         guard let inspector = webInspector() as? NSObject,
               inspector.responds(to: NSSelectorFromString("inspectorWebView"))
@@ -254,14 +237,12 @@ extension WebKitWebContents: InspectorDockableContents {
         return frontend
     }
 
-    /// `_WKInspector` does not respond to `isAttached`. The inspector is docked when its page lives in
-    /// this pane rather than in the separate Web Inspector window.
+    /// `_WKInspector` has no `isAttached`; docked means the inspector page lives in this pane.
     var isDeveloperToolsDocked: Bool {
         guard developerToolsAreOpen(), let frontend = inspectorFrontendWebView, let container = extras.hostContainer else { return false }
         return frontend.window === container.window && frontend.isDescendant(of: container)
     }
 
-    /// Read off the page's real frame inside its pane, since WebKit reports no side of its own.
     var developerToolsDockSide: DevToolsDockSide {
         guard developerToolsAreOpen(), isDeveloperToolsDocked, let container = extras.hostContainer,
               webView.superview === container
@@ -297,12 +278,7 @@ extension WebKitWebContents: InspectorDockableContents {
         return json
     }
 
-    // MARK: - Docking
-
-    /// Opens docked to the stored side when a pane can take the inspector, otherwise in WebKit's own window.
-    /// `show()` has already run and, unless WebKit was previously left attached, has ordered a separate
-    /// window front. Hide that window and move the inspector into the pane before returning to the click
-    /// that opened it; the steering loop finishes the job once the inspector page exists.
+    /// `show()` has already ordered a separate window front; hide it and move the inspector into the pane before returning to the click.
     func applyDeveloperToolsDock(_ inspector: NSObject) {
         InspectorDockSteering.installWindowWatch()
         let side = DevToolsDockPreference.current
@@ -311,16 +287,13 @@ extension WebKitWebContents: InspectorDockableContents {
         embedInspectorBesideThePage()
     }
 
-    /// Moves an open inspector to `side` and remembers it for the next one.
     func setDeveloperToolsDockSide(_ side: DevToolsDockSide) {
         DevToolsDockPreference.current = side
         guard developerToolsAreOpen(), webInspector() != nil else { return }
         steerDock(side)
     }
 
-    /// A dock button in the inspector page. Arrives during that page's script call, before the test reads the preference back.
-    /// The frontend also calls this while it boots, echoing the detached window WebKit just opened. That echo is not a choice:
-    /// it is dropped until Orbit has applied the stored side and started accepting clicks.
+    /// The frontend also calls this while booting, echoing the detached window WebKit just opened; that echo is dropped until Orbit has applied the stored side.
     func noteInspectorDockSide(_ side: DevToolsDockSide) {
         guard let session = dockSession, !session.stopped, session.hooked else { return }
         guard side != session.requested else { return }
@@ -359,8 +332,7 @@ extension WebKitWebContents: InspectorDockableContents {
         while !session.stopped, !Task.isCancelled, !isClosed {
             if developerToolsAreOpen() {
                 seenOpen = true
-                // Before any await: a window WebKit ordered front during `show()` is still on screen
-                // until this moves the inspector into the pane.
+                // Before any await: the window WebKit ordered front during `show()` is still on screen.
                 embedInspectorBesideThePage()
             } else if seenOpen {
                 break
@@ -368,9 +340,7 @@ extension WebKitWebContents: InspectorDockableContents {
                 try? await Task.sleep(for: .milliseconds(80))
                 continue
             }
-            // A page with no pane keeps WebKit's own inspector window. Do not move the page
-            // on this loop: a restore while the frontend is evaluating in the page removes it
-            // from its window (`removedFromContainer`).
+            // Do not move a pane-less page here: a restore while the frontend is evaluating removes it from its window (`removedFromContainer`).
             if canDockInspector || isDeveloperToolsDocked {
                 await installDockHookIfNeeded(session)
                 await absorbFrontendDockRequest(session)
@@ -383,14 +353,10 @@ extension WebKitWebContents: InspectorDockableContents {
         if dockSession === session { InspectorDockSteering.sessions[ObjectIdentifier(self)] = nil }
     }
 
-    /// The inspector's dock buttons call `requestSetDockSide` on the global host. Wrapping that global is
-    /// how a click in the frontend becomes the side Orbit remembers and lays out.
     private func installDockHookIfNeeded(_ session: InspectorDockSession) async {
         guard let frontend = developerToolsFrontend else { return }
         installDockSideRelay(on: frontend.webView)
-        // A click in the inspector and Orbit's own command both call requestSetDockSide.
-        // `__orbitSuppressDockEcho` keeps Orbit's command from being read back as a click.
-        // The wrap is checked every pass: the inspector page reloads and drops an earlier assignment.
+        // Wrap is rechecked every pass since the page reloads; `__orbitSuppressDockEcho` keeps Orbit's own command from reading as a click.
         let sideLiteral = JavaScriptLiteral.string(session.requested.rawValue)
         let clicksAccepted = session.hooked ? "true" : "false"
         let script = """
@@ -413,8 +379,6 @@ extension WebKitWebContents: InspectorDockableContents {
           var orig = host.requestSetDockSide.bind(host);
           function wrapped(side) {
             var actual = String(side);
-            // Boot traffic asks for the detached window WebKit just opened. Hold the stored side until
-            // Orbit has applied it; a later call is a dock button and is remembered.
             if (window.__orbitDockLocked && window.__orbitDockSideLock && actual !== window.__orbitDockSideLock) {
               actual = window.__orbitDockSideLock;
             } else {
@@ -501,8 +465,7 @@ extension WebKitWebContents: InspectorDockableContents {
         }
         if side == .undocked || !canDockInspector {
             session.commanded = nil
-            // Only pull a view we parented into the pane. Detach on a page that was never docked
-            // takes WebKit's own inspector window apart while a script is running in it.
+            // Only pull a view we parented; detaching a never-docked page takes WebKit's inspector window apart mid-script.
             if isDeveloperToolsDocked {
                 undockInspector(inspector)
             }
@@ -511,7 +474,6 @@ extension WebKitWebContents: InspectorDockableContents {
         }
         let wasDocked = isDeveloperToolsDocked
         reparentDockedInspectorIfNeeded()
-        // WebKit's boot request detaches again after we have already told it the side. Ask once more.
         if !wasDocked { session.commanded = nil }
         guard !session.stopped, isDeveloperToolsDocked else { return }
         if session.commanded != side {
@@ -524,7 +486,6 @@ extension WebKitWebContents: InspectorDockableContents {
         if session.wrapReady { await acceptFrontendDockClicks(session) }
     }
 
-    /// The stored side has been applied, so a dock button in the frontend is a real choice from here on.
     private func acceptFrontendDockClicks(_ session: InspectorDockSession) async {
         guard !session.hooked, session.wrapReady, developerToolsFrontend != nil else { return }
         if let frontend = developerToolsFrontend {
@@ -535,9 +496,7 @@ extension WebKitWebContents: InspectorDockableContents {
         session.hooked = true
     }
 
-    /// WebKit has ordered an inspector window forward. If this page should be docked, hide the window
-    /// before AppKit paints it and move the inspector into the pane on the next turn. `attach` from
-    /// inside `didBecomeKey` re-enters AppKit.
+    /// Hides the window before AppKit paints it and attaches on the next turn, since `attach` inside `didBecomeKey` re-enters AppKit.
     fileprivate static func inspectorWindowOrderedFront(_ window: NSWindow) {
         guard window.isVisible || window.alphaValue > 0.01 else { return }
         for contents in WebKitLiveContents.all {
@@ -549,8 +508,6 @@ extension WebKitWebContents: InspectorDockableContents {
         }
     }
 
-    /// Docked when a pane can take the inspector and the stored side is not undocked. With no session yet
-    /// (the window can appear inside `show()`, before steering starts) the stored preference decides.
     private var wantsInspectorEmbedded: Bool {
         guard !isClosed, !inspectorCloseSuppressed, !isExtensionPage, extras.hostContainer != nil else { return false }
         if let session = dockSession, !session.stopped {
@@ -600,7 +557,6 @@ extension WebKitWebContents: InspectorDockableContents {
         }
     }
 
-    /// Puts the page back in its pane, parents the inspector beside it, and hides any window WebKit opened.
     private func embedInspectorBesideThePage() {
         guard wantsInspectorEmbedded else { return }
         keepPageInDockHost()
@@ -613,7 +569,6 @@ extension WebKitWebContents: InspectorDockableContents {
         concealOwnedInspectorWindows()
     }
 
-    /// `show()` can pull the page into the inspector window before Orbit docks. The pane is the page's host.
     private func keepPageInDockHost() {
         guard let container = extras.hostContainer, !isExtensionPage else { return }
         guard webView.superview !== container else { return }
@@ -627,8 +582,7 @@ extension WebKitWebContents: InspectorDockableContents {
         }
     }
 
-    /// `attach` puts the inspector view in the pane (WebKit's only attach is the bottom). Calling it
-    /// again after the view is already there would reset that bottom layout over the side we just set.
+    /// Calling `attach` again once the view is in the pane would reset the bottom layout over the side just set.
     private func reparentDockedInspectorIfNeeded() {
         guard canDockInspector, let container = extras.hostContainer, let inspector = webInspector() as? NSObject,
               let frontend = inspectorFrontendWebView else { return }
@@ -644,8 +598,6 @@ extension WebKitWebContents: InspectorDockableContents {
         NSApp.windows.first { $0 !== webView.window && $0.isVisible && $0.title.hasPrefix("Web Inspector") }
     }
 
-    /// A page with no pane gets WebKit's own inspector window. Its frontend belongs in that window, not
-    /// in the page's host window (WebKit attached it there) and not nowhere.
     private func hostUndockedFrontendInWindow() {
         guard !inspectorCloseSuppressed, !isClosed, developerToolsAreOpen(),
               let inspector = webInspector() as? NSObject, let frontend = inspectorFrontendWebView else { return }
@@ -664,7 +616,6 @@ extension WebKitWebContents: InspectorDockableContents {
         Self.voidMessage(inspector, "detach")
         Self.voidMessage(inspector, "show")
         if let window = frontend.window, window !== webView.window {
-            // The dock path may have hidden WebKit's window without closing it. Bring that same window back.
             window.isExcludedFromWindowsMenu = false
             window.alphaValue = 1
             window.makeKeyAndOrderFront(nil)
@@ -703,8 +654,7 @@ extension WebKitWebContents: InspectorDockableContents {
         layoutDockedInspector(session.requested, session: session)
     }
 
-    /// WebKit's attached-window constraints: 750×500 is the embedder default, clamped the way
-    /// `constrainedAttachedWindowWidth` / `Height` clamp it (page keeps at least 320, inspector at least 250).
+    /// Mirrors WebKit's `constrainedAttachedWindowWidth` / `Height`: page keeps at least 320, inspector at least 250.
     private func layoutDockedInspector(_ side: DevToolsDockSide, session: InspectorDockSession?) {
         guard side != .undocked, let container = extras.hostContainer, let frontend = inspectorFrontendWebView,
               frontend.isDescendant(of: container), webView.superview === container else { return }
@@ -758,8 +708,6 @@ extension WebKitWebContents: InspectorDockableContents {
         }
     }
 
-    /// `current` is kept when it is already a split (so a resize does not jump back to the default);
-    /// `reserve` is the space the other view is not allowed to lose.
     private func dockedBreadth(preferred: CGFloat, current: CGFloat, total: CGFloat, minimum: CGFloat, reserve: CGFloat) -> CGFloat {
         let alreadySplit = current >= minimum && current <= total - min(reserve, total * 0.2)
         let chosen = alreadySplit ? current : preferred
@@ -796,8 +744,6 @@ extension WebKitWebContents: InspectorDockableContents {
     }
 }
 
-/// Developer Mode screen sizes. The page's frame is the layout viewport, so a
-/// chosen device is that size, centered in the pane. Desktop is the whole pane.
 @MainActor
 @Observable
 final class InspectorDeviceMode {
@@ -901,8 +847,6 @@ final class InspectorDeviceMode {
         }
     }
 
-    /// The page rect inside `container`. Desktop is the whole container. A
-    /// device is its CSS size, scaled down only when the pane is smaller.
     static func pageRect(cssSize: CGSize?, in container: CGRect) -> CGRect {
         guard let cssSize, cssSize.width > 1, container.width > 1, container.height > 1 else { return container }
         let height = cssSize.height > 1 ? cssSize.height : container.height

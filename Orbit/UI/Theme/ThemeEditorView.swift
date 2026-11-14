@@ -5,11 +5,9 @@ struct ThemeEditorView: View {
     var spaceID: SpaceID?
     var onDone: (() -> Void)?
 
-    // Not part of the frozen SpaceTheme contract, so seeded from and written
-    // back to SpaceVisualPrefsStore only when spaceID is non-nil.
+    // Not part of the frozen SpaceTheme contract, so seeded from and written back to SpaceVisualPrefsStore only when spaceID is non-nil.
     @State private var blur: Double
-    // Always read/written through selectedStopIndexBinding below, so it
-    // stays clamped into theme.colors's bounds after any palette change.
+    // Always read/written through selectedStopIndexBinding below, so it stays clamped into theme.colors's bounds after any palette change.
     @State private var selectedStopIndex = 0
     @State private var hoveredAppearanceScheme: ColorScheme?
 
@@ -62,7 +60,6 @@ struct ThemeEditorView: View {
         }
     }
 
-    // MARK: Appearance row
 
     private var appearanceRow: some View {
         HStack(spacing: 6) {
@@ -72,7 +69,7 @@ struct ThemeEditorView: View {
                 previewScheme: nil,
                 accessibilityLabel: "Follow system appearance"
             ) {
-                withAnimation(OrbitMotion.quick) { theme.followsSystemAppearance = true }
+                withOrbitAnimation(OrbitMotion.quick) { theme.followsSystemAppearance = true }
             }
             appearanceButton(
                 symbol: "sun.max",
@@ -80,7 +77,7 @@ struct ThemeEditorView: View {
                 previewScheme: .light,
                 accessibilityLabel: "Light appearance"
             ) {
-                withAnimation(OrbitMotion.quick) {
+                withOrbitAnimation(OrbitMotion.quick) {
                     theme.followsSystemAppearance = false
                     theme.prefersDarkContent = false
                 }
@@ -91,7 +88,7 @@ struct ThemeEditorView: View {
                 previewScheme: .dark,
                 accessibilityLabel: "Dark appearance"
             ) {
-                withAnimation(OrbitMotion.quick) {
+                withOrbitAnimation(OrbitMotion.quick) {
                     theme.followsSystemAppearance = false
                     theme.prefersDarkContent = true
                 }
@@ -110,7 +107,7 @@ struct ThemeEditorView: View {
         ThemeAppearanceIconButton(symbol: symbol, isSelected: isSelected, colorScheme: colorScheme, action: action)
             .onHover { hovering in
                 guard let previewScheme else { return }
-                withAnimation(OrbitMotion.quick) {
+                withOrbitAnimation(OrbitMotion.quick) {
                     if hovering {
                         hoveredAppearanceScheme = previewScheme
                     } else if hoveredAppearanceScheme == previewScheme {
@@ -122,7 +119,6 @@ struct ThemeEditorView: View {
             .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
-    // MARK: Wave slider + softness dial
 
     private var controlsRow: some View {
         HStack(spacing: 14) {
@@ -138,9 +134,7 @@ struct ThemeEditorView: View {
                 helpText: "Background softness (blur). The knob's own grainy texture previews the theme's grain amount, not the softness value itself.",
                 colorScheme: colorScheme
             ) {
-                // A mid-grey backdrop plus grainPreviewLayerCount stacked
-                // GrainOverlay copies make the deliberately faint grain
-                // texture read at the dial's small inner diameter.
+                // A mid-grey backdrop plus grainPreviewLayerCount stacked GrainOverlay copies make the deliberately faint grain read at the dial's small diameter.
                 ZStack {
                     Circle().fill(Color(white: 0.55))
                     ForEach(0..<Self.grainPreviewLayerCount, id: \.self) { _ in
@@ -154,7 +148,6 @@ struct ThemeEditorView: View {
 
     private static let grainPreviewLayerCount = 5
 
-    // MARK: Footer
 
     private var footer: some View {
         HStack(spacing: 14) {
@@ -216,7 +209,7 @@ private struct ThemeAppearanceIconButton: View {
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                 .frame(width: 34, height: 28)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: OrbitRadius.md, style: .continuous)
                         .fill(isSelected ? selectedFill : (isHovering ? selectedFill.opacity(0.5) : Color.clear))
                 )
         }

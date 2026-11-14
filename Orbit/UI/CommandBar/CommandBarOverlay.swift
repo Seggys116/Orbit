@@ -78,11 +78,8 @@ struct CommandBarOverlayLayout<Content: View>: View {
 
     var targetRect: CGRect?
     var scrimOpacity: Double = 0.18
-    /// Leading width that stays clickable. The sidebar lives there; a scrim
-    /// across it turned a tab click into "dismiss the new-tab bar" and left
-    /// the blank page on screen.
+    /// Leading width that stays clickable: a scrim over the sidebar turned a tab click into "dismiss the new-tab bar" and left the blank page showing.
     var passthroughLeadingWidth: CGFloat = 0
-    /// SwiftUI-only tap; the main window uses CommandBarScrimClickCatcher instead.
     var onScrimTap: (() -> Void)?
     @ViewBuilder var content: (CGFloat) -> Content
 
@@ -146,11 +143,9 @@ struct CommandBarOverlayLayout<Content: View>: View {
     }
 }
 
-/// Clicks on the page dismiss the bar. Clicks on the sidebar fall through
-/// to the tab rows, which both select the tab and take the bar down.
+/// Page clicks dismiss the bar; sidebar clicks fall through to the tab rows, which select the tab and take the bar down.
 struct CommandBarScrimClickCatcher: NSViewRepresentable {
     var leadingInset: CGFloat
-    /// The panel's frame in this view's own top-left-origin space. Nil until the panel has laid out; the catcher claims nothing until then.
     var excludedRect: CGRect?
     var onTap: () -> Void
 
@@ -170,7 +165,6 @@ struct CommandBarScrimClickCatcher: NSViewRepresentable {
 }
 
 // OrbitClickCatching, so OrbitWindowContentView's click recovery can find it: over the page, NSHostingView.hitTest resolves to the hosting view itself rather than to an NSView representable beneath the SwiftUI overlay, and recovery is the only path that then reaches this view.
-// Flipped so its bounds share SwiftUI's top-left origin with excludedRect.
 final class CommandBarScrimClickView: NSView, OrbitClickCatching {
     var leadingInset: CGFloat = 0
     var excludedRect: CGRect?
@@ -201,7 +195,6 @@ final class CommandBarScrimClickView: NSView, OrbitClickCatching {
     override var mouseDownCanMoveWindow: Bool { false }
 }
 
-/// The scrim covers the page and leaves the sidebar strip alone.
 struct CommandBarScrimShape: Shape {
     var leadingInset: CGFloat
 
@@ -220,7 +213,6 @@ struct CommandBarOverlay: View {
     var passthroughLeadingWidth: CGFloat = 0
 
     #if DEBUG
-    // ImageRenderer paints an NSViewRepresentable as an opaque block over the whole overlay.
     @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeRepresentableDisabled
     #endif
 
@@ -248,14 +240,13 @@ struct CommandBarOverlay: View {
         .onPreferenceChange(CommandBarPanelFrameKey.self) { frame in
             panelFrame = frame.isNull ? nil : frame
         }
-        // ImageRenderer fills an NSViewRepresentable with an opaque placeholder the size of
-        // the overlay. The live window still needs the catcher; a flattened render must not include it.
+        // ImageRenderer fills an NSViewRepresentable with an opaque overlay-sized placeholder, so a flattened render must omit the catcher.
         .background {
             if showsScrimClickCatcher {
                 CommandBarScrimClickCatcher(leadingInset: passthroughLeadingWidth, excludedRect: panelFrame, onTap: { env.dismissCommandBar() })
             }
         }
-        .transition(.opacity.animation(.easeOut(duration: 0.13)))
+        .transition(.opacity.animation(OrbitMotion.fade))
         .zIndex(10)
     }
 }

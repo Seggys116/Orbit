@@ -1,5 +1,4 @@
-//  The Command Bar (spec §3): a floating, frosted panel presented/dismissed
-//  with a spring, with a single unified, ranked, fuzzy-matched result list.
+//  The Command Bar (spec §3): a floating, frosted panel with a single ranked, fuzzy-matched result list.
 
 import AppKit
 import SwiftUI
@@ -17,10 +16,7 @@ struct CommandBarView: View {
 
     @State private var focusClaim: Task<Void, Never>?
 
-    // setupInitialState() assigns query itself and already refreshes results for it; without
-    // this, .onChange(of: query) below fires a second, redundant refreshResults() -- a second
-    // history search, a second possible suggestions fetch, and a second scrollRequest bump for
-    // work the seeding call already did.
+    // setupInitialState() already refreshes results for the query it assigns; without this, .onChange(of: query) fires a redundant second refreshResults().
     @State private var isSeedingQuery = false
 
     @State private var lastPointerLocation: CGPoint?
@@ -69,7 +65,6 @@ struct CommandBarView: View {
 
     var width: CGFloat = OrbitMetrics.commandBarWidth
 
-    /// The bar as the New Tab page's search field; lists nothing until something is typed.
     struct Embedding {
         var paneTabID: TabID?
         var seedQuery: String?
@@ -292,14 +287,13 @@ struct CommandBarView: View {
                     // Keyed off scrollRequest, not selectedIndex: watching selectedIndex made hovering also scroll, which fed back into the hover handler in a loop.
                     .onChange(of: scrollRequest) { _, request in
                         guard let id = request.id else { return }
-                        withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id) }
+                        withOrbitAnimation(OrbitMotion.quick) { proxy.scrollTo(id) }
                     }
                 }
             }
         }
     }
 
-    // MARK: - Site Search
 
     private var siteSearchState: SiteSearchState {
         env.siteSearchStore.state(active: activeSiteEngine)
@@ -385,11 +379,9 @@ struct CommandBarView: View {
     private func setupInitialState() {
         SiteSearchSettingsPresenter.present = { SiteSearchSettingsWindowController.show() }
 
-        // query, activeSiteEngine and refreshResults()'s own mutations are batched into one
-        // transaction, and claimFocus() only starts once all of them have been assigned.
+        // query, activeSiteEngine and refreshResults()'s mutations batch into one transaction; claimFocus() starts only after all are assigned.
         isSeedingQuery = true
-        // Backstop for when the re-seeded query is textually identical to what was already
-        // showing: onChange(of: query) below never fires then, so nothing else clears this.
+        // Backstop for a re-seeded query identical to the one showing: onChange(of: query) never fires then, so nothing else clears this.
         DispatchQueue.main.async { isSeedingQuery = false }
 
         // Disables animation only for this seeding call, so the panel never lays out once at 52pt and springs to full height under BrowserWindowView's ambient animation.

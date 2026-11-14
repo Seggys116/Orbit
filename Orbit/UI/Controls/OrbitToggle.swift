@@ -16,7 +16,7 @@ struct OrbitToggle: View {
 
     var body: some View {
         Button {
-            withAnimation(OrbitMotion.quick) { isOn.toggle() }
+            withOrbitAnimation(OrbitMotion.quick) { isOn.toggle() }
         } label: {
             ZStack(alignment: isOn ? .trailing : .leading) {
                 RoundedRectangle(cornerRadius: height / 2, style: .continuous)

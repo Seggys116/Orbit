@@ -1,14 +1,12 @@
 import XCTest
 import SwiftUI
 
-// MARK: - Tests
 
 @MainActor
 final class LibraryTests: XCTestCase {
 
     private let calendar = Calendar(identifier: .gregorian)
 
-    // MARK: Date-group titles
 
     func test_dateGroupTitle_sameDayIsToday() {
         let now = Date()
@@ -51,8 +49,7 @@ final class LibraryTests: XCTestCase {
     // MARK: Grouping order, against the real `DownloadItem` model
 
     func test_group_ordersNewestGroupFirstAndNewestItemFirstWithinAGroup() {
-        // A fixed noon anchor, not Date(): anchoring on the real clock made
-        // this test fail deterministically whenever the suite ran near local midnight.
+        // A fixed noon anchor, not Date(): the real clock made this fail whenever the suite ran near local midnight.
         let now = Self.fixedNoon
         let today1 = makeDownload(startedAt: now.addingTimeInterval(-60))
         let today2 = makeDownload(startedAt: now.addingTimeInterval(-3600))
@@ -238,7 +235,6 @@ final class LibraryTests: XCTestCase {
     // MARK: Palette fidelity — `refs/ARC_VISUAL_REFERENCE.md` §2 measured hex values
 
     func test_libraryPalette_sidebarBackground_matchesMeasuredArcHex() {
-        // #2A2532
         let components = LibraryPalette.sidebarBackground.srgbComponents
         XCTAssertEqual(components.red, (0x2A).u8Fraction, accuracy: 0.01)
         XCTAssertEqual(components.green, (0x25).u8Fraction, accuracy: 0.01)
@@ -246,7 +242,6 @@ final class LibraryTests: XCTestCase {
     }
 
     func test_libraryPalette_contentBackground_matchesMeasuredArcHex() {
-        // #332C3A
         let components = LibraryPalette.contentBackground.srgbComponents
         XCTAssertEqual(components.red, (0x33).u8Fraction, accuracy: 0.01)
         XCTAssertEqual(components.green, (0x2C).u8Fraction, accuracy: 0.01)
@@ -257,6 +252,36 @@ final class LibraryTests: XCTestCase {
         let sidebarLuma = LibraryPalette.sidebarBackground.approximateLuminance
         let contentLuma = LibraryPalette.contentBackground.approximateLuminance
         XCTAssertGreaterThan(contentLuma, sidebarLuma)
+    }
+
+    // MARK: LibraryStyle follows the Space, not a fixed dark palette
+
+    private static let darkSpace = SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.16, green: 0.14, blue: 0.22)], followsSystemAppearance: false)
+    private static let lightSpace = SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.93, green: 0.91, blue: 0.86)], followsSystemAppearance: false)
+
+    func test_libraryStyle_usesTheSpacesReadableForeground() {
+        for theme in [Self.darkSpace, Self.lightSpace] {
+            let style = LibraryStyle(theme: theme)
+            XCTAssertEqual(style.foreground, theme.readableForeground)
+            XCTAssertEqual(style.secondary, theme.readableSecondaryForeground)
+        }
+        XCTAssertNotEqual(
+            LibraryStyle(theme: Self.darkSpace).foreground,
+            LibraryStyle(theme: Self.lightSpace).foreground,
+            "A light Space and a dark Space must not share one text colour."
+        )
+    }
+
+    func test_libraryStyle_hoverAndSelectionFillsAreTheSidebarsOwnTokensPerSurface() {
+        let dark = LibraryStyle(theme: Self.darkSpace)
+        XCTAssertEqual(dark.hoverFill, OrbitColor.hoverFillDark)
+        XCTAssertEqual(dark.selectedFill, OrbitColor.selectionFillDark)
+        XCTAssertEqual(dark.divider, OrbitColor.sidebarDividerDark)
+
+        let light = LibraryStyle(theme: Self.lightSpace)
+        XCTAssertEqual(light.hoverFill, OrbitColor.hoverFillLight)
+        XCTAssertEqual(light.selectedFill, OrbitColor.selectionFillLight)
+        XCTAssertEqual(light.divider, OrbitColor.sidebarDividerLight)
     }
 
     // MARK: - Fixtures

@@ -70,10 +70,10 @@ enum ShortcutCommandID: String, CaseIterable, Codable, Sendable {
     case screenCaptureRegion
     case viewSource
     case inspectElement
+    case toggleDeviceToolbar
     case javaScriptConsole
     case toggleDeveloperMode
-    // F12 carries no modifier, the one exception in this table — GlobalKeyEventMonitor
-    // still ignores it as plain typing because it's a symbolic function key, not a character.
+    // F12 carries no modifier, the one exception here; GlobalKeyEventMonitor still ignores it as typing because it is a symbolic key.
     case openDeveloperTools
     case captureFullPage
     case clearCookiesAndRefresh
@@ -109,9 +109,7 @@ enum ShortcutCommandID: String, CaseIterable, Codable, Sendable {
     case downloads
     case archivedTabs
     case history
-    // Raw value kept as the old "extensionsPopover" spelling: the remap
-    // store persists this as its JSON key, and renaming it would silently
-    // drop any custom binding an existing install already saved.
+    // Raw value stays "extensionsPopover": the remap store persists it as a JSON key, and renaming drops saved bindings.
     case siteControls = "extensionsPopover"
     case readerMode
     case mediaLibrary
@@ -149,9 +147,7 @@ struct KeyBinding: Codable, Hashable, Sendable {
     var key: String
     var modifiers: UInt
 
-    // Not deviceIndependentFlagsMask: that keeps .capsLock/.function/.numericPad,
-    // which took every shortcut down with Caps Lock on and killed every arrow-key
-    // binding, since macOS sets .function/.numericPad on every arrow-key event.
+    // Not deviceIndependentFlagsMask: it keeps .capsLock/.function/.numericPad, which broke shortcuts under Caps Lock and every arrow-key binding.
     static let significantModifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
 
     init(key: String, modifiers: NSEvent.ModifierFlags) {
@@ -164,8 +160,7 @@ struct KeyBinding: Codable, Hashable, Sendable {
         self.modifiers = rawModifiers & KeyBinding.significantModifiers.rawValue
     }
 
-    // Repairs an override persisted by an earlier build under the old
-    // deviceIndependentFlagsMask, which could store bits command(matching:) never produces again.
+    // Repairs overrides saved under the old deviceIndependentFlagsMask, whose bits command(matching:) never produces.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try container.decode(String.self, forKey: .key)
@@ -230,9 +225,7 @@ struct KeyBinding: Codable, Hashable, Sendable {
         }
     }
 
-    // Must use the identical normalisation ShortcutRegistry.command(matching:)
-    // applies at dispatch — recording and dispatch disagreeing means the UI
-    // accepts a shortcut that can never fire.
+    // Must match command(matching:)'s normalisation, or the UI accepts a shortcut that can never fire.
     nonisolated init?(recording event: NSEvent) {
         let resolved = ShortcutRegistry.symbolicKey(for: event)
             ?? event.charactersIgnoringModifiers?.lowercased()
@@ -282,8 +275,7 @@ final class ShortcutRegistry {
 
     static let defaultsKey = "OrbitShortcutOverrides.v1"
 
-    // ExtensionCommandRegistry republishes Orbit's reserved accelerators from
-    // this; posted rather than called so Core keeps no dependency on Engine.
+    // Posted, not called, so Core keeps no dependency on Engine; ExtensionCommandRegistry republishes reserved accelerators from it.
     static let bindingsChanged = Notification.Name("OrbitShortcutBindingsChanged")
 
     #if DEBUG
@@ -298,8 +290,7 @@ final class ShortcutRegistry {
     }
 
     #if DEBUG
-    // Never touches persistent storage — ArcImportCoordinator's tests use
-    // this so importing Arc's bindings doesn't rebind the developer's own copy of Orbit.
+    // Never touches persistent storage, so ArcImportCoordinator's tests do not rebind the developer's own copy.
     init(inMemoryForTesting: Bool) {
         precondition(inMemoryForTesting)
         self.commands = ShortcutRegistry.buildCommandTable()
@@ -356,7 +347,6 @@ final class ShortcutRegistry {
         return nil
     }
 
-    // MARK: Conflict detection
 
     func commands(conflictingWith candidate: KeyBinding, excluding excludedID: ShortcutCommandID? = nil) -> [ShortcutCommandID] {
         commands
@@ -371,8 +361,7 @@ final class ShortcutRegistry {
         return commands(conflictingWith: effective, excluding: id)
     }
 
-    // Do not delete this in favour of calling conflicts(for:) per row again —
-    // that reopens the O(n²) hot path this single-pass method exists to replace.
+    // Do not replace with per-row conflicts(for:); that reopens the O(n²) hot path this single pass avoids.
     func conflictGroups() -> [KeyBinding: [ShortcutCommandID]] {
         var byBinding: [KeyBinding: [ShortcutCommandID]] = [:]
         for command in commands {
@@ -388,9 +377,7 @@ final class ShortcutRegistry {
         return byBinding.filter { $0.value.count > 1 }
     }
 
-    // internal, not private: the Shortcuts recorder must normalise a
-    // recorded key-down through this same table, or it would store the left
-    // arrow as its raw character while dispatch looks up "left".
+    // internal: the Shortcuts recorder must normalise through this table, or it stores the raw arrow character while dispatch looks up "left".
     nonisolated static func symbolicKey(for event: NSEvent) -> String? {
         switch Int(event.keyCode) {
         case 123: return "left"
@@ -419,8 +406,7 @@ final class ShortcutRegistry {
             var deadKeyState: UInt32 = 0
             var chars = [UniChar](repeating: 0, count: 4)
             var length = 0
-            // Only Shift affects the plain character produced; the >> 8 & 0xFF
-            // packing is UCKeyTranslate's own documented keyModifiers convention.
+            // Only Shift changes the plain character; >> 8 & 0xFF is UCKeyTranslate's keyModifiers packing.
             let shiftFlag: UInt32 = modifiers.contains(.shift) ? UInt32(shiftKey) : 0
             let modifierKeyState = (shiftFlag >> 8) & 0xFF
             let status = UCKeyTranslate(
@@ -446,7 +432,6 @@ final class ShortcutRegistry {
         NotificationCenter.default.post(name: ShortcutRegistry.bindingsChanged, object: nil)
     }
 
-    // MARK: Persistence
 
     func reloadOverridesFromStore() {
         overrides = [:]
@@ -476,7 +461,6 @@ final class ShortcutRegistry {
         Self.defaults.set(data, forKey: Self.defaultsKey)
     }
 
-    // MARK: Table
 
     private static func buildCommandTable() -> [ShortcutCommand] {
         [
@@ -543,6 +527,7 @@ final class ShortcutRegistry {
             .init(id: .screenCaptureRegion, title: "Screen Capture (Region)", category: .findAndTools, defaultBinding: .cmdShift("2")),
             .init(id: .viewSource, title: "View Source", category: .findAndTools, defaultBinding: .cmdOption("u")),
             .init(id: .inspectElement, title: "Inspect Element", category: .findAndTools, defaultBinding: .cmdOption("i")),
+            .init(id: .toggleDeviceToolbar, title: "Toggle Device Toolbar", category: .findAndTools, defaultBinding: .cmdShift("m")),
             .init(id: .javaScriptConsole, title: "JavaScript Console", category: .findAndTools, defaultBinding: .cmdOption("j")),
             .init(id: .toggleDeveloperMode, title: "Toggle Developer Mode", category: .findAndTools, defaultBinding: .ctrl("d")),
             .init(id: .openDeveloperTools, title: "Open Developer Tools", category: .findAndTools, defaultBinding: KeyBinding(key: "f12", modifiers: [])),

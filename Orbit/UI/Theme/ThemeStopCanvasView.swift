@@ -78,11 +78,8 @@ struct ThemeStopCanvasView<AppearanceRow: View>: View {
         }
     }
 
-    // MARK: Orbs
 
-    // .position(point) must stay the very last modifier: it returns a view
-    // that fills its parent, so anything chained after it applies to the
-    // whole canvas instead of this orb.
+    // .position(point) must stay the last modifier: it returns a view that fills its parent, so anything after it applies to the whole canvas, not this orb.
     @ViewBuilder
     private func orb(index: Int, themeColor: ThemeColor, canvasSize: CGSize) -> some View {
         let positions = theme.resolvedStopPositions
@@ -116,12 +113,10 @@ struct ThemeStopCanvasView<AppearanceRow: View>: View {
                 .focusEffectDisabled()
                 .focused($focusedStop, equals: index)
                 .onTapGesture {
-                    withAnimation(OrbitMotion.quick) { selectedStopIndex = index }
+                    withOrbitAnimation(OrbitMotion.quick) { selectedStopIndex = index }
                 }
                 .gesture(
-                    // minimumDistance: 0 also fires once on mouse-down with
-                    // translation == .zero; only write a position once
-                    // translation is non-zero, or a click teleports the stop.
+                    // minimumDistance: 0 also fires once on mouse-down with translation == .zero; only write a position once it is non-zero, or a click teleports the stop.
                     DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.coordinateSpaceName))
                         .onChanged { drag in
                             selectedStopIndex = index
@@ -192,7 +187,6 @@ struct ThemeStopCanvasView<AppearanceRow: View>: View {
         return String(format: "#%02X%02X%02X", red, green, blue)
     }
 
-    // MARK: Stop count controls
 
     private var stopCountControls: some View {
         HStack(spacing: Self.countControlSpacing) {
@@ -229,7 +223,7 @@ struct ThemeStopCanvasView<AppearanceRow: View>: View {
         let newCount = theme.colors.count + 1
         let newSlotPosition = SpaceTheme.defaultStopPositions(count: newCount).last ?? ThemeStopPosition(x: 0.5, y: 0.5)
 
-        withAnimation(OrbitMotion.quick) {
+        withOrbitAnimation(OrbitMotion.quick) {
             theme.colors.append(newColor)
             theme.stopPositions = existingPositions + [newSlotPosition]
             selectedStopIndex = theme.colors.count - 1
@@ -242,7 +236,7 @@ struct ThemeStopCanvasView<AppearanceRow: View>: View {
         let indexToRemove = SpaceTheme.clampedStopIndex(selectedStopIndex, count: theme.colors.count)
         var positions = theme.resolvedStopPositions
 
-        withAnimation(OrbitMotion.quick) {
+        withOrbitAnimation(OrbitMotion.quick) {
             theme.colors.remove(at: indexToRemove)
             if positions.indices.contains(indexToRemove) {
                 positions.remove(at: indexToRemove)

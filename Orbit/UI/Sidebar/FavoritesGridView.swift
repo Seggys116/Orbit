@@ -99,7 +99,7 @@ struct FavoritesGridView: View {
                 populatedGrid
             }
         }
-        .animation(OrbitMotion.quick, value: isDropTargeted)
+        .orbitAnimation(OrbitMotion.quick, value: isDropTargeted)
         .overlay(alignment: .bottom) {
             SidebarToastView(theme: theme, presenter: favoritesToastPresenter)
         }
@@ -206,10 +206,10 @@ struct FavoritesGridView: View {
         .frame(height: metrics.tileHeight)
         .clipShape(shape)
         .opacity(draggingID == favorite.id ? 0.35 : 1)
-        .animation(OrbitMotion.quick, value: isFlashing)
+        .orbitAnimation(OrbitMotion.quick, value: isFlashing)
         .contentShape(shape)
         .onHover { hovering in
-            withAnimation(OrbitMotion.quick) {
+            withOrbitAnimation(OrbitMotion.quick) {
                 if hovering {
                     hoveredID = favorite.id
                 } else if hoveredID == favorite.id {

@@ -10,8 +10,7 @@ final class TestFileCoverageGuardTests: XCTestCase {
         thisDirectory.deletingLastPathComponent().appendingPathComponent("Orbit", isDirectory: true)
     }
 
-    // ModalHangGuardObserver.swift is a true positive for check 1's heuristic; CorpusLiveTestCase.swift
-    // and LiveEnvironmentTestCase.swift are base classes their suites subclass and carry no test of their own.
+    // ModalHangGuardObserver.swift is a true positive for check 1; CorpusLiveTestCase and LiveEnvironmentTestCase are base classes with no tests of their own.
     private static let knownSupportFileNames: Set<String> = [
         "RenderHarness.swift", "MockWebContents.swift", "ModalHangGuardObserver.swift",
         "CorpusLiveTestCase.swift", "LiveEnvironmentTestCase.swift",
@@ -105,8 +104,7 @@ final class TestFileCoverageGuardTests: XCTestCase {
         )
     }
 
-    // MARK: - Check 3: `AppEnvironment.demo` is evaluated exactly once per file
-    // Counts per file, not per test method, since a same-file helper calling AppEnvironment.demo is textually invisible from the caller's body.
+    // Check 3: `AppEnvironment.demo` is evaluated once per file; counted per file, not per test method, since a same-file helper calling AppEnvironment.demo is textually invisible from the caller's body.
 
     private static let multipleDemoEnvironmentsExemptFileNames: Set<String> = [
         "TestFileCoverageGuardTests.swift", // matches its own literal string
@@ -114,6 +112,8 @@ final class TestFileCoverageGuardTests: XCTestCase {
         "PageClipShapeHitTestEvidenceTests.swift", // verified: 5 distinct test methods
         // Two XCTestCase classes in one file, each binding its own `private lazy var env`.
         "AppEnvironmentDataResetTests.swift",
+        "LibraryPreviewTests.swift", // verified: one test builds a second window's environment to prove routers are per window
+        "LibraryModeTests.swift", // verified: one test builds a second window's environment to prove library state is per window
     ]
 
     func testEveryTestFileEvaluatesTheDemoEnvironmentAtMostOnce() throws {

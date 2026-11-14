@@ -1,75 +1,75 @@
 import SwiftUI
 
-struct LibrarySidebarView: View {
+/// The Library's narrow rail of icon-over-label tiles, one per section.
+struct LibraryRailView: View {
     @Binding var selection: LibrarySection
-    var counts: [LibrarySection: Int]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Library")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(LibraryPalette.textPrimary)
-                .padding(.horizontal, LibraryMetrics.navHorizontalPadding)
-                .padding(.top, 16)
-                .padding(.bottom, 12)
+        // Falls back to a scroller when the window is too short for every tile, so a tile is never clipped.
+        ViewThatFits(in: .vertical) {
+            tiles
+            ScrollView(.vertical) { tiles }
+                .scrollIndicators(.hidden)
+        }
+        .padding(LibraryModeMetrics.railPadding)
+        .frame(width: LibraryModeMetrics.railWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
 
-            VStack(spacing: LibraryMetrics.navSectionSpacing) {
-                ForEach(LibrarySection.allCases) { section in
-                    LibraryNavRow(
-                        section: section,
-                        isSelected: section == selection,
-                        count: counts[section] ?? 0
-                    ) {
-                        selection = section
-                    }
+    private var tiles: some View {
+        VStack(spacing: LibraryModeMetrics.railTileSpacing) {
+            ForEach(LibrarySection.allCases) { section in
+                LibraryRailTile(section: section, isSelected: section == selection) {
+                    selection = section
                 }
             }
-            .padding(.horizontal, 8)
-
-            Spacer()
         }
-        .frame(width: LibraryMetrics.navWidth, alignment: .leading)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(LibraryPalette.sidebarBackground)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 }
 
-private struct LibraryNavRow: View {
+private struct LibraryRailTile: View {
     var section: LibrarySection
     var isSelected: Bool
-    var count: Int
     var action: () -> Void
 
+    @Environment(\.libraryStyle) private var style
     @State private var isHovering = false
+
+    private var fill: Color {
+        if isSelected { return style.selectedFill }
+        return isHovering ? style.hoverFill : .clear
+    }
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            VStack(spacing: OrbitSpacing.xs) {
                 Image(systemName: section.symbolName)
-                    .font(.system(size: LibraryMetrics.navIconSize, weight: .medium))
-                    .foregroundStyle(isSelected ? LibraryPalette.textPrimary : LibraryPalette.textSecondary)
-                    .frame(width: 18)
+                    .font(.system(size: LibraryModeMetrics.railTileIconSize - 4, weight: .medium))
+                    .foregroundStyle(style.foreground.opacity(isSelected ? OrbitMetrics.sidebarRowLabelOpacityActive : OrbitMetrics.sidebarRowLabelOpacityInactive))
+                    .frame(height: LibraryModeMetrics.railTileIconSize)
                 Text(section.rawValue)
-                    .font(.system(size: LibraryMetrics.navFontSize, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? LibraryPalette.textPrimary : LibraryPalette.textSecondary)
-                Spacer(minLength: 4)
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(LibraryPalette.textTertiary)
-                }
+                    .font(.system(size: LibraryModeMetrics.railTileLabelFontSize, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? style.foreground : style.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, LibraryMetrics.navHorizontalPadding - 8)
-            .frame(height: LibraryMetrics.navRowHeight)
+            .padding(.horizontal, OrbitSpacing.xs)
+            .padding(.vertical, LibraryModeMetrics.railTileVerticalPadding)
+            .frame(maxWidth: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(isSelected ? LibraryPalette.selectedFill : (isHovering ? LibraryPalette.hoverFill : Color.clear))
+                RoundedRectangle(cornerRadius: OrbitRadius.row, style: .continuous)
+                    .fill(fill)
             )
-            .contentShape(Rectangle())
+            .contentShape(RoundedRectangle(cornerRadius: OrbitRadius.row, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .animation(OrbitMotion.quick, value: isHovering)
-        .animation(OrbitMotion.quick, value: isSelected)
+        .orbitAnimation(OrbitMotion.quick, value: isHovering)
+        .orbitAnimation(OrbitMotion.quick, value: isSelected)
+        .accessibilityLabel(section.rawValue)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

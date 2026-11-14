@@ -373,8 +373,7 @@ struct SidebarDropTarget<Content: View>: View {
     @State private var isDragActivityNearby = false
     @State private var dragActivityDecay = SidebarDragActivityDecay()
 
-    // Debounced "a drag is near this row" flag, driven by every zone's dropEntered/dropUpdated ping; without the decay's force-clear, a dwelling drag or an Esc-cancelled one (no dropExited) leaves a stuck caret/highlight.
-    // Only writes state that actually changed: dropUpdated lands here on every pointer move, and an unchanged assignment still invalidates the row.
+    // Debounced "a drag is near this row" flag, driven by every zone's dropEntered/dropUpdated ping; without the decay's force-clear, a dwelling or Esc-cancelled drag (no dropExited) leaves a stuck caret/highlight. Only changed state is written, since an unchanged assignment still invalidates the row.
     private func noteDragActivity() {
         if !isDragActivityNearby { isDragActivityNearby = true }
         dragActivityDecay.ping {
@@ -554,7 +553,7 @@ struct SidebarDropTarget<Content: View>: View {
                         .strokeBorder(accentColor.opacity(insideTargeted && showsBodyHighlight ? 0.9 : 0), lineWidth: 1.5)
                 )
         )
-        .animation(OrbitMotion.quick, value: dropIndicatorState)
+        .orbitAnimation(OrbitMotion.quick, value: dropIndicatorState)
     }
 
     // One animation keyed on the single indicator that can be showing, instead of three modifiers each re-evaluated on every flag change. clearOtherZones keeps at most one of the three true, so this loses no transition.

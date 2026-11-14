@@ -376,9 +376,12 @@ clearly-documented double, not a re-implementation of logic under test:
   D5/D6/D8/D9 need; D7 (the switcher's own look) is explicitly out of this
   target's required scope. The double draws one dot per Space from the same
   `env.spaces`/`env.activeSpace` `AppEnvironment`'s double already has.
-- **`LibraryWindowController`** — the real one opens an `NSWindow`. Only
-  ever referenced from a button/menu *action* in the reused views, never
-  during `body` evaluation, so a no-op is exactly correct here.
+- **`LibrarySection` and `AppEnvironment.openLibrary`/`toggleLibrary`/`isLibraryMode`** —
+  the Library lives in the sidebar now; the real per-window state is in
+  `Orbit/Core/AppEnvironment+LibraryMode.swift` (which needs the real window
+  controller). `SidebarBottomBar` reads `isLibraryMode` while drawing its button and
+  only calls `openLibrary`/`toggleLibrary` from actions, so the double just records
+  them.
 - **`SplitEdge`** — a 4-case enum mirrored from `Orbit/Core/AppEnvironment+SplitView.swift`,
   needed only so `TabRowView`'s `TabContextMenu` menu-action closures
   type-check.

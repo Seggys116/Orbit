@@ -20,7 +20,7 @@ struct LinkPreviewOverlayView: View {
                     LinkPreviewCardView(phase: controller.phase)
                         .frame(width: cardWidth)
                         .offset(clampedOffset(size: proxy.size))
-                        .animation(OrbitMotion.quick, value: controller.phase)
+                        .orbitAnimation(OrbitMotion.quick, value: controller.phase)
                 }
         }
         .allowsHitTesting(false)

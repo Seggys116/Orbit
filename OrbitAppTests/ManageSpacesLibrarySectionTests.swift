@@ -124,16 +124,17 @@ final class ManageSpacesLibrarySectionTests: XCTestCase {
     // MARK: - Placement: it is the Library's Spaces section, not a sheet
 
     func testEveryManageSpacesEntryPointOpensTheLibrarysSpacesSection() throws {
-        let routed = "LibraryWindowController.show(section: .spaces)"
-        for file in [
-            "UI/Sidebar/SpaceTitleRow.swift",
-            "UI/Root/BrowserWindowView.swift",
-            "Core/MainMenuBuilder.swift",
-        ] {
+        // The app menu has no window of its own, so it opens the Library in the frontmost window.
+        let routes: [(file: String, call: String)] = [
+            ("UI/Sidebar/SpaceTitleRow.swift", "env.openLibrary(section: .spaces)"),
+            ("UI/Root/BrowserWindowView.swift", "env.openLibrary(section: .spaces)"),
+            ("Core/MainMenuBuilder.swift", "AppEnvironment.openLibraryInFrontmostWindow(section: .spaces)"),
+        ]
+        for (file, routed) in routes {
             let code = try executableSource(of: file)
             XCTAssertTrue(
                 code.contains(routed),
-                "\(file)'s `Manage Spaces…` no longer opens the Library window's Spaces section. That is where Arc's is — refs/reference/web/arc-manage-spaces-panel-allthingshow.png shows the Library rail beside it."
+                "\(file)'s `Manage Spaces…` no longer opens the Library's Spaces section in the sidebar. That is where Arc's is — refs/reference/web/arc-manage-spaces-panel-allthingshow.png shows the Library rail beside it."
             )
         }
 

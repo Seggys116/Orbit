@@ -38,6 +38,7 @@ struct ToolbarContextMenu {
         let presets: [OrbitContextMenuEntry] = InspectorDeviceMode.Preset.devices.map { preset in
             .item(OrbitContextMenuItem(title: preset.title, isChecked: current == preset) {
                 guard current != preset else { return }
+                OrbitDevToolsStore.shared.session(for: contents)?.device.deactivate()
                 mode.setPreset(preset, for: contents)
             })
         }
@@ -45,6 +46,7 @@ struct ToolbarContextMenu {
             let isCurrent = current == .responsive && mode.responsiveWidth(for: contents) == width
             return .item(OrbitContextMenuItem(title: "\(Int(width))", isChecked: isCurrent) {
                 guard !isCurrent else { return }
+                OrbitDevToolsStore.shared.session(for: contents)?.device.deactivate()
                 mode.setResponsiveWidth(width, for: contents)
                 mode.setPreset(.responsive, for: contents)
             })

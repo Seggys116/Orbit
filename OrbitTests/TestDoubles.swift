@@ -7,8 +7,7 @@ import Observation
 @Observable
 final class AppEnvironment {
 
-    // A separate instance from the fixture a test builds and injects, so the folder
-    // lookup behind it sees empty state and resolvesToFolder always answers false here.
+    // A separate instance from the injected fixture, so the folder lookup sees empty state and resolvesToFolder answers false.
     static let processRoot = AppEnvironment()
 
     var state = OrbitState()
@@ -31,13 +30,10 @@ final class AppEnvironment {
 
     init() {}
 
-    // MARK: Derived read state
 
     var spaces: [Space] { state.spaces.sorted { $0.order < $1.order } }
 
-    // This double has no window-scoping concept, so both always answer with the
-    // ordinary-window branch; the torn-off/window-scoped branches are proven against
-    // the real AppEnvironment in OrbitAppTests.
+    // No window scoping here, so both take the ordinary-window branch; the torn-off branches are tested against the real AppEnvironment in OrbitAppTests.
     var pagerSpaces: [Space] { spaces }
 
     var isTornOffWindow: Bool { false }
@@ -47,8 +43,7 @@ final class AppEnvironment {
         return state.spaces.first { $0.id == id } ?? spaces.first
     }
 
-    // Mirrors the real AppEnvironment's own derivation, which
-    // CommandBarModel.createFolderOfLinks reads before fetching suggestions.
+    // Mirrors the real AppEnvironment derivation that CommandBarModel.createFolderOfLinks reads before fetching suggestions.
     var includesSearchSuggestions: Bool {
         let profileID = activeSpace?.profileID
         if let profileID, let profile = state.profiles.first(where: { $0.id == profileID }) {
@@ -70,7 +65,19 @@ final class AppEnvironment {
 
     func selectSpace(_ id: SpaceID) { state.activeSpaceID = id }
 
-    // MARK: Actions (test doubles — see file header)
+    // The real Library mode is per-window state in AppEnvironment+LibraryMode.swift; the bottom bar only reads and toggles it.
+    var isLibraryMode = false
+
+    func openLibrary(section: LibrarySection? = nil) {
+        recordedActions.append("openLibrary")
+        isLibraryMode = true
+    }
+
+    func toggleLibrary(section: LibrarySection? = nil) {
+        recordedActions.append("toggleLibrary")
+        isLibraryMode.toggle()
+    }
+
 
     func perform(_ command: ShortcutCommandID) { recordedActions.append("perform(\(command.rawValue))") }
     func muteTab(_ id: TabID, muted: Bool) { recordedActions.append("muteTab") }
@@ -80,8 +87,7 @@ final class AppEnvironment {
     func activateTab(_ id: TabID) { recordedActions.append("activateTab") }
     func activateTabDismissingCommandBar(_ id: TabID) { recordedActions.append("activateTab") }
 
-    // Not a recording stub: TabRowView reads this while rendering to pick between the
-    // minus and the X on a bookmarked row, so a render test must drive both branches.
+    // Not a recording stub: TabRowView reads this to pick the minus or the X on a bookmarked row, so render tests must drive both.
     func isTabOpen(_ id: TabID) -> Bool { webContents[id] != nil }
 
     func closeTabKeepingBookmark(_ id: TabID) { recordedActions.append("closeTabKeepingBookmark") }
@@ -127,8 +133,7 @@ final class AppEnvironment {
         return FolderID()
     }
 
-    // Really mutates state, not just a recordedActions note: FolderToggleGlyphRegressionGuardTests
-    // needs a genuinely reactive pinnedNodes(in:) so a live-hosted PinnedFolderRowView re-diffs.
+    // Really mutates state: FolderToggleGlyphRegressionGuardTests needs a reactive pinnedNodes(in:) so a live PinnedFolderRowView re-diffs.
     func toggleFolderExpanded(_ id: FolderID, in spaceID: SpaceID) {
         recordedActions.append("toggleFolderExpanded")
         mutateFolder(id, in: spaceID) { $0.isExpanded.toggle() }
@@ -215,7 +220,6 @@ final class AppEnvironment {
     func prepareHistorySearch(for query: String) async {}
 }
 
-// MARK: - SettingsWindowController double
 
 enum SettingsPane {
     case general, profiles, links, shortcuts, extensions, adBlocker
@@ -225,20 +229,17 @@ enum SettingsWindowController {
     static func show(pane: SettingsPane = .general) {}
 }
 
-// MARK: - TaskManagerWindowController double
 
 enum TaskManagerWindowController {
     static func show() {}
 }
 
-// MARK: - DeveloperModeSettings double
 
 // Must stay backed by its own in-memory flag, never UserDefaults.standard, so this double cannot reach through to a real user's disk-backed defaults.
 enum DeveloperModeSettings {
     static var isEnabled = false
 }
 
-// MARK: - SplitEdge double
 
 enum SplitEdge: Sendable {
     case left, right, top, bottom
@@ -285,23 +286,15 @@ enum SplitDropZoneGeometry {
     }
 }
 
-// MARK: - SiteControlPopoverView double
 
 struct SiteControlPopoverView: View {
     var body: some View { EmptyView() }
 }
 
-// MARK: - LibraryWindowController double
-
+// The real Library entry points are on AppEnvironment (AppEnvironment+LibraryMode.swift); this double only has the section SidebarBottomBar names.
 enum LibrarySection {
     case downloads
 }
-
-enum LibraryWindowController {
-    static func show(section: LibrarySection) {}
-}
-
-// MARK: - SpaceSwitcherPagerView double
 
 // Must reproduce just enough of the real view's layout and sizeScale(forSpaceCount:availableWidth:) so SidebarBottomBar's real, unmodified body type-checks and lays out correctly.
 struct SpaceSwitcherPagerView: View {
@@ -336,7 +329,6 @@ struct SpaceSwitcherPagerView: View {
     }
 }
 
-// MARK: - Notification.Name double
 
 extension Notification.Name {
     static let orbitPresentNewSpaceFlow = Notification.Name("OrbitPresentNewSpaceFlow")

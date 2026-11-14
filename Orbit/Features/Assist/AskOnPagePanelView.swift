@@ -35,8 +35,8 @@ struct AskOnPagePanelView: View {
         }
         .padding(12)
         .frame(width: panelWidth, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.08)))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OrbitRadius.lg, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: OrbitRadius.lg, style: .continuous).strokeBorder(.white.opacity(0.08)))
         .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
         .onAppear { isFieldFocused = true }
         .onExitCommand { controller.dismiss() }
@@ -138,7 +138,7 @@ struct AskOnPagePanelView: View {
         .padding(.trailing, 4)
         .padding(.vertical, 4)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: OrbitRadius.md, style: .continuous)
                 .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
         )
     }

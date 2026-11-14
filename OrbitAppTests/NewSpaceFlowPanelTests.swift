@@ -1,5 +1,4 @@
-//  Regression guard: the New Space flow is a panel filling the sidebar column, not a
-//  centred 400pt modal sheet.
+// Regression guard: the New Space flow is a panel filling the sidebar column, not a centred 400pt modal sheet.
 
 import AppKit
 import SwiftUI
@@ -183,7 +182,7 @@ final class NewSpaceFlowPanelTests: XCTestCase {
             "The New Space panel is no longer overlaid on the sidebar column in BrowserWindowView."
         )
         XCTAssertTrue(
-            source.contains(".frame(width: env.sidebarWidth)"),
+            source.contains(".frame(width: env.effectiveSidebarWidth)"),
             "The view the New Space panel overlays is no longer the sidebar-width column."
         )
     }

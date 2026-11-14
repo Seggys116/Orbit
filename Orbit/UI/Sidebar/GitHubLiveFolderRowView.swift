@@ -321,7 +321,7 @@ struct GitHubLiveFolderRowView: View {
 
     private func toggleExpanded() {
         let expanded = config?.isExpandedOrDefault ?? true
-        withAnimation(OrbitMotion.standard) {
+        withOrbitAnimation(OrbitMotion.standard) {
             mutateConfig { $0.isExpanded = !expanded }
         }
     }

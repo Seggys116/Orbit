@@ -226,7 +226,6 @@ struct SiteControlPopoverView: View {
         }
     }
 
-    // MARK: - Action icon row
 
     // The same lookup CaptureController.present(tabID:fullPage:env:) performs, so this gate and that guard cannot disagree about what counts as "live".
     private var hasLiveContentsForActionRow: Bool {
@@ -285,7 +284,6 @@ struct SiteControlPopoverView: View {
         .accessibilityLabel(disabled ? "\(accessibilityLabel): unavailable" : accessibilityLabel)
     }
 
-    // MARK: - Extensions section
 
     static func isExtensionsSectionVisible(engine: (any BrowserEngine)?) -> Bool {
         engine?.capabilities.contains(.extensions) ?? false
@@ -313,8 +311,7 @@ struct SiteControlPopoverView: View {
         var optionsURL: URL?
         var optionsPresentation: ExtensionActionPopupSupport.OptionsPagePresentation
         var isPendingActivation: Bool
-        // What chrome.action last set for the tab this row is being drawn for
-        // -- badge, dynamically set icon, and the per-tab enabled bit.
+        // What chrome.action last set for this row's tab: badge, dynamically set icon and the per-tab enabled bit.
         var actionState: ExtensionActionState = ExtensionActionState()
 
         var badgeText: String? { ExtensionActionPopupSupport.displayBadgeText(actionState.badgeText) }
@@ -325,7 +322,6 @@ struct SiteControlPopoverView: View {
         }
     }
 
-    // MARK: - Extension popup identity and presentation (pure; drives, and is exercised directly by, the imperative methods below)
 
     struct OpenExtensionPopup: Equatable {
         enum Kind: Equatable { case action, options }
@@ -454,8 +450,7 @@ struct SiteControlPopoverView: View {
                     extensionActionIconImage(entry)
                         .frame(width: 36, height: 36)
                         .orbitThemedTile(chrome, cornerRadius: OrbitMetrics.siteControlActionButtonCornerRadius, dimsWhenDisabled: false)
-                        // Reflects chrome.action.disable() for this tab, using
-                        // the same disabled-opacity token as OrbitButton.
+                        // Reflects chrome.action.disable() for this tab, using the same disabled-opacity token as OrbitButton.
                         .opacity(entry.actionState.isEnabled ? 1 : OrbitControlMetrics.buttonDisabledOpacity)
 
                     if let badgeText = entry.badgeText {
@@ -504,8 +499,7 @@ struct SiteControlPopoverView: View {
 
     @ViewBuilder
     private func extensionActionIconImage(_ entry: ExtensionActionEntry) -> some View {
-        // chrome.action.setIcon wins over anything on disk: the extension set
-        // it for this exact tab, and the manifest icon is only the fallback.
+        // chrome.action.setIcon wins over anything on disk: the extension set it for this exact tab, and the manifest icon is only the fallback.
         switch ExtensionActionPopupSupport.actionIconChoice(
             hasActionIcon: entry.actionIconImage != nil,
             hasExtensionIcon: entry.extensionIconImage != nil
@@ -593,8 +587,7 @@ struct SiteControlPopoverView: View {
         }
     }
 
-    // Cleared whether or not the extension turns out to have an icon here, so a
-    // _execute_action for an extension with no popup does not re-fire later.
+    // Cleared whether or not the extension has an icon here, so an _execute_action for an extension with no popup does not re-fire later.
     private func openPendingExtensionActionIfRequested() {
         guard let requested = env.pendingExtensionActionID else { return }
         env.pendingExtensionActionID = nil
@@ -619,7 +612,6 @@ struct SiteControlPopoverView: View {
         )
     }
 
-    // MARK: - Settings row content (sizing pass)
 
     private func settingsRowContent(symbol: String, title: String, value: String, isInteractive: Bool = true) -> some View {
         HStack(spacing: OrbitMetrics.siteControlRowBadgeToTextGap) {
@@ -660,7 +652,6 @@ struct SiteControlPopoverView: View {
         }
     }
 
-    // MARK: - Settings section
 
     private var settingsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -699,7 +690,6 @@ struct SiteControlPopoverView: View {
         .padding(.vertical, 10)
     }
 
-    // MARK: - Developer Tools row
 
     // Gate and effect must agree: checking only the engine capability while the action reaches through env.webContents[tab.id] would let an engine with no active tab look enabled while pressing it silently does nothing.
     private var isDeveloperToolsAvailable: Bool {
@@ -720,7 +710,7 @@ struct SiteControlPopoverView: View {
     private var developerToolsRow: some View {
         let available = isDeveloperToolsAvailable
         return Button {
-            env.webContents[tab.id]?.showDeveloperTools(inspectAt: nil)
+            env.webContents[tab.id]?.showOrbitDeveloperTools()
         } label: {
             settingsRowContent(
                 symbol: "chevron.left.forwardslash.chevron.right",
@@ -734,11 +724,8 @@ struct SiteControlPopoverView: View {
         .accessibilityLabel(available ? "Developer Tools" : "Developer Tools: unavailable. \(developerToolsUnavailableReason)")
     }
 
-    // MARK: - Site data: Clear Cookies / Clear Cache
 
-    // Kept as two rows: cache clearing is session-wide while cookie clearing is
-    // per-origin. `.done` means the call returned, not that anything was
-    // verified as removed.
+    // Kept as two rows: cache clearing is session-wide while cookie clearing is per-origin; `.done` means the call returned, not that removal was verified.
     private var siteDataRows: some View {
         Group {
             Button {
@@ -803,7 +790,6 @@ struct SiteControlPopoverView: View {
         }
     }
 
-    // MARK: - Permission rows
 
     // EngineSession.contentSetting(_:for:)/setContentSetting(_:for:url:) read and write the session's persisted per-site decisions (WebKitSession's ContentSettings file) — one store, not a shadow copy.
 
@@ -936,7 +922,6 @@ struct SiteControlPopoverView: View {
         return count == 0 ? "No active Boosts" : "\(count) active Boost\(count == 1 ? "" : "s")"
     }
 
-    // MARK: - Share (audit defect C)
 
     // NSSharingServicePicker.show(relativeTo:of:preferredEdge:) needs a real, non-zero-rect NSView to hang the presentation off — SharePickerClickCatchingView below is that anchor.
     private var shareIconButton: some View {

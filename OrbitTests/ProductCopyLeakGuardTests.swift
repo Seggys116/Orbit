@@ -79,7 +79,12 @@ final class ProductCopyLeakGuardTests: XCTestCase {
         #"OrbitMax"#,
     ]
 
-    private static let allowedMaxProductNameLiteralSubstrings: [String] = []
+    // Third-party names that contain "Max" but never name Orbit's feature set: Apple device models and the HTTP cookie attribute.
+    private static let allowedMaxProductNameLiteralSubstrings: [String] = [
+        "iPhone 15 Pro Max",
+        "iPhone 16 Pro Max",
+        "Max-Age: ",
+    ]
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noStringLiteralNamesOrbitsFeatureSetMax
 
@@ -176,9 +181,11 @@ final class ProductCopyLeakGuardTests: XCTestCase {
         "upgrade",
         "unlock",
     ]
+    // "upgrade-insecure-requests" is a CSP directive name, not a product tier.
     private static let allowedPlanTierLiteralSubstrings: [String] = [
         "unlock your keychain",
         "keychain couldn't be unlocked",
+        "upgrade-insecure-requests",
     ]
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noUserFacingStringLiteralDescribesFeaturesAsPlanOrTier

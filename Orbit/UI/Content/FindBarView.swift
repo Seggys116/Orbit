@@ -60,8 +60,8 @@ struct FindBarView: View {
         .padding(.horizontal, 12)
         .frame(height: 34)
         .frame(width: 320)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.08)))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OrbitRadius.row))
+        .overlay(RoundedRectangle(cornerRadius: OrbitRadius.row).strokeBorder(.white.opacity(0.08)))
         .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
         .onAppear { isFocused = true }
         .onExitCommand { dismiss() }
@@ -73,6 +73,7 @@ struct FindBarView: View {
             set: { newValue in
                 guard newValue != env.findQuery else { return }
                 env.findQuery = newValue
+                // Typing starts a fresh search; Return and the chevrons step with findNext: true.
                 contents?.find(newValue, options: FindOptions(forward: true, findNext: false))
             }
         )

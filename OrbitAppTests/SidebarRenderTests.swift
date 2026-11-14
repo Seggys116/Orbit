@@ -257,10 +257,7 @@ final class SidebarRenderTests: XCTestCase {
         var titledTab = hostOnlyTab
         titledTab.title = "Google"
 
-        // orbitScreenshotModeDragDisabled: ImageRenderer paints a corrupted block over an
-        // NSViewRepresentable click catcher it can't flatten (see ToolbarHoverHighlightTests.swift's
-        // own note) — TabRowView's full-row activation catcher is exactly that, and without this flag
-        // its own block dominates boundingBoxOfContent regardless of the title text this test measures.
+        // Without this flag ImageRenderer paints a block over TabRowView's NSViewRepresentable click catcher, which dominates boundingBoxOfContent.
         let hostRender = render(
             TabRowView(tab: hostOnlyTab, theme: theme).environment(env).environment(\.orbitScreenshotModeDragDisabled, true),
             size: rowSize
@@ -981,7 +978,7 @@ final class DownloadsPanelHostedTests: XCTestCase {
                 print("[DOWNLOADS-PANEL] \(label): \(url.path)")
 
                 let swatch = try await expectedSurface(of: theme)
-                let placement = DownloadsPreviewLayout.placement(containerWidth: size.width, anchorMinX: 0)
+                let placement = DownloadsPreviewLayout.placement(containerWidth: size.width)
                 let barTop = size.height - OrbitMetrics.sidebarInterSectionGap - OrbitMetrics.sidebarBottomBarHeight
                 let referenceY = Int(barTop - DownloadsPreviewLayout.gap) - 3
                 let surface = image.color(atX: Int(placement.originX + placement.width / 2), y: referenceY)

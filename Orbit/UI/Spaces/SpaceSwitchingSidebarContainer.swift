@@ -64,19 +64,28 @@ struct SpaceSwitchingSidebarContainer: View {
         }
     }
 
-    // MARK: Gesture catcher
+
+    // The Library owns horizontal scrolling (the Spaces section scrolls sideways), so the swipe between Spaces is off while it is open; the pager still switches.
+    private var swipeIsSuppressed: Bool {
+        #if DEBUG
+        screenshotModeDragDisabled || env.isLibraryMode
+        #else
+        env.isLibraryMode
+        #endif
+    }
+
+    // Nil under Reduce Motion so the settle snaps; its completion still runs.
+    private static var settleAnimation: Animation? {
+        OrbitMotion.resolved(OrbitMotion.interactive, reduceMotion: OrbitMotion.prefersReducedMotion)
+    }
 
     @ViewBuilder
     private func gestureCatcher(width: CGFloat, height: CGFloat, orderedSpaces: [Space], activeIndex: Int?) -> some View {
-        #if DEBUG
-        if screenshotModeDragDisabled {
+        if swipeIsSuppressed {
             Color.clear.allowsHitTesting(false)
         } else {
             realGestureCatcher(width: width, height: height, orderedSpaces: orderedSpaces, activeIndex: activeIndex)
         }
-        #else
-        realGestureCatcher(width: width, height: height, orderedSpaces: orderedSpaces, activeIndex: activeIndex)
-        #endif
     }
 
     private func realGestureCatcher(width: CGFloat, height: CGFloat, orderedSpaces: [Space], activeIndex: Int?) -> some View {
@@ -90,7 +99,6 @@ struct SpaceSwitchingSidebarContainer: View {
         .frame(width: width, height: height)
     }
 
-    // MARK: Panels
 
     @ViewBuilder
     private func currentPanel(_ space: Space, width: CGFloat) -> some View {
@@ -106,7 +114,6 @@ struct SpaceSwitchingSidebarContainer: View {
             .frame(width: width)
     }
 
-    // MARK: Background crossfade (published upward, painted window-wide)
 
     // nil outside a drag lets the window fall back to ThemeBackgroundView.
     private func blendStop(at index: Int?, in orderedSpaces: [Space]) -> SpaceSwipeBlend.Stop? {
@@ -115,7 +122,6 @@ struct SpaceSwitchingSidebarContainer: View {
         return SpaceSwipeBlend.Stop(theme: space.theme, blur: SpaceVisualPrefsStore.shared.blur(for: space.id))
     }
 
-    // MARK: Gesture end
 
     private func handleGestureEnd(
         finalTranslation: CGFloat,
@@ -142,12 +148,10 @@ struct SpaceSwitchingSidebarContainer: View {
             let destination = orderedSpaces[destinationIndex]
             let originID = orderedSpaces[activeIndex].id
             let settleTarget: CGFloat = destinationIndex > activeIndex ? -width : width
-            withAnimation(OrbitMotion.interactive, completionCriteria: .logicallyComplete) {
+            withAnimation(Self.settleAnimation, completionCriteria: .logicallyComplete) {
                 translation = settleTarget
             } completion: {
-                // A click (e.g. on the bottom pager) made while this settle animation was still
-                // running must win, not be clobbered once the animation catches up — only apply
-                // the swipe's own destination if nothing else already moved the active Space.
+                // A click (e.g. on the bottom pager) made while this settle animation ran must win: only apply the swipe's destination if nothing else already moved the active Space.
                 if Self.shouldApplySwipeDestination(activeSpaceIDAtCompletion: env.activeSpace?.id, originSpaceID: originID) {
                     env.selectSpace(destination.id, animated: false)
                 }
@@ -155,7 +159,7 @@ struct SpaceSwitchingSidebarContainer: View {
                 isDragging = false
             }
         } else {
-            withAnimation(OrbitMotion.interactive, completionCriteria: .logicallyComplete) {
+            withAnimation(Self.settleAnimation, completionCriteria: .logicallyComplete) {
                 translation = 0
             } completion: {
                 isDragging = false
@@ -163,11 +167,8 @@ struct SpaceSwitchingSidebarContainer: View {
         }
     }
 
-    // MARK: Gesture end — pure logic (regression-tested directly, no animation/timing involved)
 
-    /// -1 = commit next (index increases), +1 = commit previous (index decreases), 0 = spring back.
-    /// `nil` covers both "spring back" and "no such neighbour Space" — the caller doesn't need to
-    /// tell those apart.
+    /// -1 = commit next (index increases), +1 = commit previous (index decreases), 0 = spring back; `nil` covers both "spring back" and "no such neighbour Space".
     static func commitDestinationIndex(
         finalTranslation: CGFloat,
         velocity: CGFloat,
@@ -192,14 +193,10 @@ struct SpaceSwitchingSidebarContainer: View {
         return destinationIndex
     }
 
-    /// Whether a swipe's own destination should still be applied once its settle animation's
-    /// completion runs, or whether something else (most often a click on the bottom pager) already
-    /// moved the active Space in the meantime and must win instead.
     static func shouldApplySwipeDestination(activeSpaceIDAtCompletion: SpaceID?, originSpaceID: SpaceID) -> Bool {
         activeSpaceIDAtCompletion == originSpaceID
     }
 
-    // MARK: Rubber banding
 
     private func rubberBanded(_ raw: CGFloat, width: CGFloat, canRevealPrevious: Bool, canRevealNext: Bool) -> CGFloat {
         func damp(_ overflow: CGFloat) -> CGFloat {

@@ -2,8 +2,9 @@ import SwiftUI
 
 struct LibraryEaselsNotesView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var router = LibraryRouter.shared
     var searchQuery: String
+
+    private var router: LibraryRouter { env.libraryRouter }
 
     private var notes: [NoteIndexEntry] {
         filter(env.noteStore.index) { $0.title }
@@ -21,18 +22,14 @@ struct LibraryEaselsNotesView: View {
 
     var body: some View {
         if !notes.isEmpty || !easels.isEmpty {
-            // Only worth spreading into columns once the list isn't squeezed down to make room
-            // for the preview pane (see LibraryRootView.showsPreview).
-            let isWide = router.selection == nil
-            VStack(spacing: LibraryMetrics.rowSpacing) {
+            LazyVStack(spacing: LibraryModeMetrics.rowSpacing) {
                 ForEach(notes) { note in
                     EntryRow(
                         symbol: "note.text",
                         title: note.title,
                         updatedAt: note.updatedAt,
                         isSelected: router.selection == .note(note.id),
-                        isWide: isWide,
-                        select: { router.select(.note(note.id)) },
+                        select: { withOrbitAnimation(OrbitMotion.standard) { router.select(.note(note.id)) } },
                         open: { open(url: URL(string: "orbit://note/\(note.id.uuidString)")) }
                     )
                 }
@@ -43,8 +40,7 @@ struct LibraryEaselsNotesView: View {
                         subtitle: "\(easel.itemCount) item\(easel.itemCount == 1 ? "" : "s")",
                         updatedAt: easel.updatedAt,
                         isSelected: router.selection == .easel(easel.id),
-                        isWide: isWide,
-                        select: { router.select(.easel(easel.id)) },
+                        select: { withOrbitAnimation(OrbitMotion.standard) { router.select(.easel(easel.id)) } },
                         open: { open(url: URL(string: "orbit://easel/\(easel.id.uuidString)")) },
                         exportAsImage: { EaselExporter.presentExportPanel(for: easel.id, store: env.easelStore) }
                     )
@@ -66,62 +62,49 @@ private struct EntryRow: View {
     var subtitle: String?
     var updatedAt: Date
     var isSelected: Bool
-    var isWide: Bool
     var select: () -> Void
     var open: () -> Void
     var exportAsImage: (() -> Void)?
 
-    var body: some View {
-        content
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2, perform: open)
-            .onTapGesture(perform: select)
-            .orbitRightClickMenu {
-                var entries: [OrbitContextMenuEntry] = [.item(OrbitContextMenuItem(title: "Open") { open() })]
-                if let exportAsImage {
-                    entries.append(.item(OrbitContextMenuItem(title: "Export as Image…") { exportAsImage() }))
-                }
-                return entries
-            }
+    @Environment(\.libraryStyle) private var style
+
+    private var actions: [LibraryRowAction] {
+        var result = [LibraryRowAction(title: "Open", symbol: "arrow.up.forward.app", action: open)]
+        if let exportAsImage {
+            result.append(LibraryRowAction(title: "Export as Image…", symbol: "square.and.arrow.up", action: exportAsImage))
+        }
+        return result
     }
 
-    private var content: some View {
-        LibraryRowCard(isSelected: isSelected) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .font(.system(size: 13))
-                    .foregroundStyle(LibraryPalette.accent)
-                    .frame(width: LibraryMetrics.rowIconSize, height: LibraryMetrics.rowIconSize)
+    var body: some View {
+        LibraryRowCard(isSelected: isSelected, actions: actions) {
+            Image(systemName: symbol)
+                .font(.system(size: OrbitMetrics.iconChrome - 4))
+                .foregroundStyle(style.foreground)
+                .frame(width: LibraryModeMetrics.rowIconSize, height: LibraryModeMetrics.rowIconSize)
+                .accessibilityHidden(true)
 
-                if isWide {
-                    Text(title)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(LibraryPalette.textPrimary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    LibraryColumnText(text: subtitle ?? "", width: LibraryMetrics.rowSecondaryColumnWidth)
-                } else {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(LibraryPalette.textPrimary)
-                            .lineLimit(1)
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(.system(size: 11))
-                                .foregroundStyle(LibraryPalette.textSecondary)
-                        }
-                    }
-
-                    Spacer(minLength: 8)
-                }
-
-                Text(updatedAt.formatted(date: .abbreviated, time: .omitted))
-                    .font(.system(size: 11))
-                    .foregroundStyle(LibraryPalette.textTertiary)
+            VStack(alignment: .leading, spacing: OrbitSpacing.xxs) {
+                Text(title)
+                    .font(OrbitFont.sidebarRowActive)
+                    .foregroundStyle(style.foreground)
                     .lineLimit(1)
-                    .frame(width: isWide ? LibraryMetrics.rowDateColumnWidth + 30 : nil, alignment: .trailing)
+                Text(detail)
+                    .font(OrbitFont.commandBarRowSubtitle)
+                    .foregroundStyle(style.secondary)
+                    .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .contentShape(Rectangle())
+        // Order matters: double-tap must be declared before single-tap.
+        .onTapGesture(count: 2, perform: open)
+        .onTapGesture(perform: select)
+    }
+
+    private var detail: String {
+        let date = updatedAt.formatted(date: .abbreviated, time: .omitted)
+        guard let subtitle else { return date }
+        return "\(subtitle) · \(date)"
     }
 }

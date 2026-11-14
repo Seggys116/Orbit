@@ -4,8 +4,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
-// Excluded renders below: a MeshGradient theme render stalls past five minutes on a hosted runner.
-// Whole suite excluded on GitHub-hosted runners: needs a real running app, not a headless VM.
+// Excluded on GitHub-hosted runners: the suite needs a running app, and MeshGradient theme renders stall past five minutes.
 final class ScreenshotGenerationTests: XCTestCase {
 
     private lazy var env: AppEnvironment = AppEnvironment.demo
@@ -21,8 +20,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         super.setUp()
         PeekState.shared.dismiss()
     }
-
-    // MARK: - Window
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_windowFull
 
@@ -47,8 +44,8 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // The fixture's Spaces use followsSystemAppearance, so the window background is genuinely
-    // adaptive; Settings/Library paint from a fixed LibraryPalette and are not, so this stays scoped.
+    // Only the window is adaptive here: Settings and Library paint from a fixed LibraryPalette.
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_windowAppearance_lightAndDarkRenderDifferently
     func test_windowAppearance_lightAndDarkRenderDifferently() {
         OrbitScreenshotFixtures.configure(env)
@@ -86,8 +83,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // Real state comparisons, not three individually non-blank renders: each transition must
-    // visibly change the rendered window, or the flags exist without layout reacting to them.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_sidebarVisibilityStates_eachRenderVisiblyDifferently
     func test_sidebarVisibilityStates_eachRenderVisiblyDifferently() {
         OrbitScreenshotFixtures.configure(env)
@@ -114,8 +109,7 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // MARK: - Sidebar alone
-    // NOT a direct render of SidebarView: ImageRenderer renders ScrollView content as entirely blank, so ScreenshotSidebarComposition swaps it for a plain VStack.
+    // Not a direct render of SidebarView: ImageRenderer renders ScrollView content blank, so ScreenshotSidebarComposition swaps it for a plain VStack.
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_sidebar
 
@@ -132,9 +126,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         await renderAndSave(view, name: "sidebar", size: CGSize(width: env.sidebarWidth, height: 900))
     }
 
-    // Goes further than "the sidebar is non-blank": proves the seeded now-playing card actually
-    // reaches the bottom tray band, not just that seedNowPlayingCard()'s own env-level assertions
-    // (nowPlayingTabs/canDrivePictureInPicture) passed while the tray itself stayed empty.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_sidebar_nowPlayingCard_isVisibleInTheBottomTrayBand
     func test_sidebar_nowPlayingCard_isVisibleInTheBottomTrayBand() {
         OrbitScreenshotFixtures.configure(env)
@@ -143,8 +134,7 @@ final class ScreenshotGenerationTests: XCTestCase {
             return
         }
         let size = CGSize(width: env.sidebarWidth, height: 900)
-        // SidebarBottomBar sits below the tray, so this band (~90-140pt above the canvas floor) is
-        // where SidebarMiniPlayerTray paints when, and only when, something is playing.
+        // SidebarBottomBar sits below the tray, so SidebarMiniPlayerTray paints in this band (~90-140pt above the canvas floor).
         let trayBand = CGRect(x: 8, y: size.height - 140, width: size.width - 16, height: 50)
 
         func sidebarView() -> some View {
@@ -194,9 +184,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         await renderAndSave(view, name: "sidebar-single-space", size: CGSize(width: env.sidebarWidth, height: 1100))
     }
 
-    // MARK: - Tab row: close button only on hover, title uses the full row width otherwise
-    // TabRowView's own forcesHoveredAppearanceForTesting init param stands in for a real pointer,
-    // which ImageRenderer never has (see ScreenshotSidebarComposition's alwaysExpanded note above).
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_tabRowHoverCloseButton
 
@@ -223,9 +210,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // Pixel proof, not just a non-blank render: the close control must be absent while not
-    // hovering (and the title's ink must reach further right without it), then present once
-    // hovering starts, at the same fixed trailing position both times.
     func test_tabRowLongTitle_notHoveredUsesFullWidth_hoveredRevealsCloseButtonInPlace() {
         let width: CGFloat = 260
         let theme = SpaceTheme()
@@ -233,9 +217,7 @@ final class ScreenshotGenerationTests: XCTestCase {
         var tab = Orbit.Tab(spaceID: SpaceID(), url: URL(string: "https://long-title.example.com")!)
         tab.title = "[ASMR] How many more years can this channel possibly keep going for, honestly"
 
-        // Screenshot mode, as the sibling render test uses: the close control carries an
-        // .orbitTooltip, and ImageRenderer rasterises that representable as a block whatever
-        // its opacity — without this the not-hovered row reads as having a visible button.
+        // The close control's .orbitTooltip rasterises as a block whatever its opacity, so the not-hovered row would read as having a button.
         let notHovered = render(
             TabRowView(tab: tab, theme: theme, forcesHoveredAppearanceForTesting: false)
                 .environment(env)
@@ -249,9 +231,6 @@ final class ScreenshotGenerationTests: XCTestCase {
             size: size
         )
 
-        // Fixed trailing position: leading padding + row content width, matching the row's own
-        // trailing padding (sidebarHorizontalPadding + sidebarRowContentInset) and the button's
-        // own size (sidebarCloseButtonSize), independent of hover.
         let rowTrailingInset = OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset
         let buttonSize = OrbitMetrics.sidebarCloseButtonSize
         let closeButtonRect = CGRect(
@@ -261,9 +240,7 @@ final class ScreenshotGenerationTests: XCTestCase {
             height: buttonSize + 4
         )
 
-        // Presence/absence is proved with a SHORT title, whose ink never reaches the trailing
-        // slot. Asserting "no ink here" on the long-titled row would fail for the very reason
-        // this feature exists: unhovered, the title legitimately occupies that space.
+        // Use a short title: on the long-titled row, unhovered ink legitimately occupies the trailing slot.
         var shortTab = Orbit.Tab(spaceID: tab.spaceID, url: URL(string: "https://short.example.com")!)
         shortTab.title = "Inbox"
         let shortNotHovered = render(
@@ -295,11 +272,7 @@ final class ScreenshotGenerationTests: XCTestCase {
             "The close (x) button must appear at \(closeButtonRect) once the row is hovered."
         )
 
-        // Not boundingBoxOfContent: it scans the whole row, so it would pick up the (opaque) close
-        // glyph itself in the hovered render and the faint hover-pill tint in the not-hovered one —
-        // neither says anything about how far the title's own ink reaches. This scans only for
-        // clearly-opaque ink (title/favicon, not the ~0.06-alpha hover pill) and ignores the close
-        // button's own fixed column band entirely, in both renders, so only the title is measured.
+        // Not boundingBoxOfContent: it would pick up the close glyph and the ~0.06-alpha hover pill; this scans only opaque ink outside the close column.
         let excludedColumns = closeButtonRect.minX...closeButtonRect.maxX
         guard let notHoveredTitleMaxX = Self.rightmostOpaqueInkX(in: notHovered, size: size, excludingX: excludedColumns),
               let hoveredTitleMaxX = Self.rightmostOpaqueInkX(in: hovered, size: size, excludingX: excludedColumns) else {
@@ -379,8 +352,7 @@ final class ScreenshotGenerationTests: XCTestCase {
         env._test_attachWebContents(contents, for: tabID)
         env._test_engineCapabilitiesOverride = [.pictureInPicture, .audioMuting]
 
-        // The tray shows a tab you are not looking at, so the fixture's
-        // audible tab must not be the active one.
+        // The tray shows a tab you are not looking at, so the audible fixture tab must not be the active one.
         if let spaceID = env.tab(tabID)?.spaceID, env.state.activeTabBySpace[spaceID] == tabID {
             env.state.activeTabBySpace[spaceID] = env.todayTabs(in: spaceID).first { $0.id != tabID }?.id
         }
@@ -389,16 +361,12 @@ final class ScreenshotGenerationTests: XCTestCase {
             env.nowPlayingTabs.contains { $0.id == tabID },
             "The now-playing tray is empty, so refs/screenshots/sidebar.png would show no card at all."
         )
-        // Audio-only, so there is nothing to float: the card correctly offers no
-        // picture-in-picture control. Asserting the opposite is what shipped a
-        // control that silently did nothing when pressed.
+        // Audio-only has nothing to float, so the card must offer no picture-in-picture control.
         XCTAssertFalse(
             env.canDrivePictureInPicture(for: tabID),
             "An audio-only now-playing tab has no video to float, so its card must not offer a picture-in-picture control."
         )
     }
-
-    // MARK: - Split view
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_splitTwoPanes
 
@@ -412,8 +380,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // MARK: - Command Bar
-
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_commandBar
 
     func test_commandBar() async {
@@ -424,8 +390,8 @@ final class ScreenshotGenerationTests: XCTestCase {
         await renderAndSave(view, name: "command-bar", size: CGSize(width: OrbitMetrics.commandBarWidth, height: 520))
     }
 
-    // Scoped to the input row: TextField rasterises as a solid block, and ScrollView
-    // content does not rasterise off-screen at all -- both ImageRenderer limitations.
+    // Scoped to the input row: ImageRenderer rasterises TextField as a solid block and ScrollView content not at all.
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_commandBarSiteSearch
     func test_commandBarSiteSearch() async {
         OrbitScreenshotFixtures.configure(env)
@@ -442,8 +408,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         await renderAndSave(view, name: "command-bar-site-search", size: CGSize(width: OrbitMetrics.commandBarWidth, height: 66))
     }
 
-    // Cropped to the view's declared width/row-height (not padded), with RGBA.clear as the
-    // background reference, since a rounded-rect corner this tight can itself be anti-aliased.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_commandBar_paintsContentAcrossItsFullDeclaredWidth
     func test_commandBar_paintsContentAcrossItsFullDeclaredWidth() {
         OrbitScreenshotFixtures.configure(env)
@@ -465,8 +429,6 @@ final class ScreenshotGenerationTests: XCTestCase {
             "The command bar's trailing edge, well inside its declared \(Int(width))pt width, painted nothing — exactly the class of 'rendered narrower than its declared frame' defect a PNG-only check would miss."
         )
     }
-
-    // MARK: - Settings
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsGeneral
 
@@ -513,8 +475,8 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // Captures the window on the Links pane, not the Air Traffic Control
-    // sheet: a .sheet has no presented content to rasterise off-screen.
+    // Captures the Links pane, not the Air Traffic Control sheet: a .sheet has no presented content off-screen.
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsLinks
     func test_settingsLinks() async {
         OrbitScreenshotFixtures.configure(env)
@@ -588,8 +550,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // Real before/after comparison: turning Assist on must actually change what the pane draws,
-    // not just what the two individual screenshot tests separately claim.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsAssist_turnedOnRendersDifferentlyThanOff
     func test_settingsAssist_turnedOnRendersDifferentlyThanOff() {
         let size = CGSize(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight)
@@ -679,9 +639,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // Kept as its own image, near-identical to settings-general.png, because
-    // it documents the rail-plus-content-column structure rather than the
-    // General pane's own content.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsWindow
     func test_settingsWindow() async {
         OrbitScreenshotFixtures.configure(env)
@@ -695,42 +652,33 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // MARK: - Library
-    // NOT a render of LibraryRootView: ScreenshotLibraryComposition works around the same ScrollView limitation as ScreenshotSidebarComposition.
+    // Not a render of LibraryModeView: ScreenshotLibraryComposition works around the ScrollView limitation, sized as the Library is in the sidebar.
+
+    private static let librarySize = CGSize(width: LibraryModeLayout.baseWidth, height: 720)
+    private static let librarySpacesSize = CGSize(width: LibraryModeLayout.spacesWidth, height: 720)
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloads
 
     func test_libraryDownloads() async {
         OrbitScreenshotFixtures.configure(env)
-        LibraryRouter.shared.selectedSection = .downloads
-        LibraryRouter.shared.selection = env.downloads.first(where: { $0.state == .completed }).map { .download($0.id) }
+        env.libraryRouter.selectedSection = .downloads
+        env.libraryRouter.selection = nil
         let view = ScreenshotLibraryComposition(section: .downloads)
             .environment(env)
-        await renderAndSave(
-            view,
-            name: "library-downloads",
-            size: CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
-        )
+        await renderAndSave(view, name: "library-downloads", size: Self.librarySize)
     }
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_librarySpaces
 
     func test_librarySpaces() async {
         OrbitScreenshotFixtures.configure(env)
-        LibraryRouter.shared.selectedSection = .spaces
+        env.libraryRouter.selectedSection = .spaces
         let view = ScreenshotLibraryComposition(section: .spaces)
             .environment(env)
             .orbitScreenshotModeDragDisabledForTests()
-        await renderAndSave(
-            view,
-            name: "library-spaces",
-            size: CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
-        )
+        await renderAndSave(view, name: "library-spaces", size: Self.librarySpacesSize)
     }
 
-    // Covers a folder, a nested subfolder inside it, and loose (un-foldered) tabs all pinned
-    // together — ManageSpacesColumnsView must render the tree (folder rows with item counts,
-    // nesting intact), not flatten every tab into one list.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_librarySpacesWithFolders
 
     func test_librarySpacesWithFolders() async {
@@ -753,20 +701,13 @@ final class ScreenshotGenerationTests: XCTestCase {
         let looseTabID = env.openTab(url: URL(string: "https://example.com/homelab-dashboard")!, in: spaceID, section: .today, activate: false)
         env.pinTab(looseTabID, toParent: nil, atIndex: 0, in: spaceID)
 
-        LibraryRouter.shared.selectedSection = .spaces
+        env.libraryRouter.selectedSection = .spaces
         let view = ScreenshotLibraryComposition(section: .spaces)
             .environment(env)
             .orbitScreenshotModeDragDisabledForTests()
-        await renderAndSave(
-            view,
-            name: "library-spaces-folders",
-            size: CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
-        )
+        await renderAndSave(view, name: "library-spaces-folders", size: Self.librarySpacesSize)
     }
 
-    // Covers a folder, a nested subfolder inside it, and a loose (un-foldered) tab all archived
-    // together — the mix that exercises LibraryArchivedTabsView's folder reconstruction from
-    // each tab's captured archivedFolderTrail.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryArchivedTabsWithFolders
 
     func test_libraryArchivedTabsWithFolders() async {
@@ -787,17 +728,14 @@ final class ScreenshotGenerationTests: XCTestCase {
         let looseTabID = env.openTab(url: URL(string: "https://example.com/loose")!, in: spaceID, section: .today, activate: false)
         env.archiveTab(looseTabID)
 
-        LibraryRouter.shared.selectedSection = .archivedTabs
+        env.libraryRouter.selectedSection = .archivedTabs
         let view = ScreenshotLibraryComposition(section: .archivedTabs)
             .environment(env)
-        await renderAndSave(
-            view,
-            name: "library-archived-tabs-folders",
-            size: CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
-        )
+        await renderAndSave(view, name: "library-archived-tabs-folders", size: Self.librarySize)
     }
 
-    // The note's body is not shown: LibraryNotePreviewView puts its Text in a ScrollView, which ImageRenderer does not rasterise off-screen; only the preview column's chrome is visible here.
+    // The detail's note body is not shown (LibraryNotePreviewView puts its Text in a ScrollView, which ImageRenderer does not rasterise off-screen), so this renders the section's list with the note in it.
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryEaselsAndNotes
     func test_libraryEaselsAndNotes() async {
         OrbitScreenshotFixtures.configure(env)
@@ -809,7 +747,7 @@ final class ScreenshotGenerationTests: XCTestCase {
             attributes: [.font: NSFont.systemFont(ofSize: 17, weight: .semibold)]
         ))
         body.append(NSAttributedString(
-            string: "\nThe Library preview column renders the note's real decoded body, "
+            string: "\nThe Library preview renders the note's real decoded body, "
                 + "not a thumbnail of it — the same NSAttributedString the editor wrote, "
                 + "with its own per-run attributes intact.\n\nHeadings, weights and colours "
                 + "set in the editor survive into the preview.",
@@ -819,66 +757,51 @@ final class ScreenshotGenerationTests: XCTestCase {
             env.noteStore.setBody(encoded, forNote: note.id)
         }
 
-        LibraryRouter.shared.selectedSection = .easelsAndNotes
-        LibraryRouter.shared.selection = .note(note.id)
+        env.libraryRouter.selectedSection = .easelsAndNotes
+        env.libraryRouter.selection = nil
 
         let view = ScreenshotLibraryComposition(section: .easelsAndNotes)
             .environment(env)
-        await renderAndSave(
-            view,
-            name: "library-easels-notes",
-            size: CGSize(width: LibraryMetrics.windowDefaultWidth, height: LibraryMetrics.windowDefaultHeight)
-        )
+        await renderAndSave(view, name: "library-easels-notes", size: Self.librarySize)
     }
 
-    // MARK: - Library layout: wide window / no selection uses the full width, narrow degrades
-    // With nothing selected the preview pane no longer reserves its width (LibraryRootView.showsPreview),
-    // so these renders exercise the list at both a very wide window and the window's own minimum size.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloadsAtTheUsersWidthWhenWider
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloadsWideNoSelection
-
-    func test_libraryDownloadsWideNoSelection() async {
+    func test_libraryDownloadsAtTheUsersWidthWhenWider() async {
         OrbitScreenshotFixtures.configure(env)
-        LibraryRouter.shared.selectedSection = .downloads
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .downloads
+        env.libraryRouter.selection = nil
+        let width = LibraryModeLayout.width(for: .downloads, userWidth: 420)
         let view = ScreenshotLibraryComposition(section: .downloads).environment(env)
-        await renderAndSave(view, name: "library-downloads-wide", size: CGSize(width: 2000, height: 900))
+        await renderAndSave(view, name: "library-downloads-wide", size: CGSize(width: width, height: 720))
     }
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloadsNarrowMinWidth
-
-    func test_libraryDownloadsNarrowMinWidth() async {
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloads_listUsesTheFullColumnWidth
+    func test_libraryDownloads_listUsesTheFullColumnWidth() {
         OrbitScreenshotFixtures.configure(env)
-        LibraryRouter.shared.selectedSection = .downloads
-        LibraryRouter.shared.selection = nil
-        let view = ScreenshotLibraryComposition(section: .downloads).environment(env)
-        await renderAndSave(
-            view,
-            name: "library-downloads-narrow",
-            size: CGSize(width: LibraryMetrics.windowMinWidth, height: LibraryMetrics.windowMinHeight)
+        env.libraryRouter.selectedSection = .downloads
+        env.libraryRouter.selection = nil
+        let item = env.downloadStore.beginDownload(
+            sourceURL: URL(string: "https://example.com/running.zip")!,
+            destinationURL: FileManager.default.temporaryDirectory.appendingPathComponent("running-\(UUID().uuidString).zip"),
+            suggestedFileName: "running.zip",
+            totalBytes: 1_000
         )
-    }
+        env.downloadStore.updateProgress(id: item.id, progress: DownloadProgress(receivedBytes: 400, totalBytes: 1_000, state: .inProgress))
+        defer { env.downloadStore.remove(item.id) }
 
-    // Proves the fix, not just "non-blank": with nothing selected, ink from the row's own date
-    // column must reach near the right edge of a 2000pt window — the exact region that used to be
-    // idle preview-pane background reserved despite there being nothing to preview.
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryDownloads_noSelectionUsesFullWindowWidth
-    func test_libraryDownloads_noSelectionUsesFullWindowWidth() {
-        OrbitScreenshotFixtures.configure(env)
-        LibraryRouter.shared.selectedSection = .downloads
-        LibraryRouter.shared.selection = nil
-        let size = CGSize(width: 2000, height: 900)
+        let size = Self.librarySize
         let view = ScreenshotLibraryComposition(section: .downloads).environment(env)
         let rendered = render(view, size: size)
 
-        let background = rendered.color(atX: Int(size.width) - 4, y: Int(size.height) - 4)
-        let farRight = CGRect(x: size.width - 110, y: 80, width: 90, height: 160)
+        let background = rendered.color(atX: Int(size.width) - 2, y: Int(size.height) - 4)
+        let farRight = CGRect(x: size.width - 50, y: 80, width: 40, height: 200)
         if !rendered.containsNonBackgroundPixels(in: farRight, background: background) {
-            rendered.writeDiagnosticPNG(named: "library-downloads-FAILED-noSelectionNotFullWidth")
+            rendered.writeDiagnosticPNG(named: "library-downloads-FAILED-listNotFullWidth")
         }
         XCTAssertTrue(
             rendered.containsNonBackgroundPixels(in: farRight, background: background),
-            "With nothing selected, a download row's date column should reach near the right edge of a \(Int(size.width))pt window; found nothing painted at \(farRight) — the list is still pinned to a narrow column."
+            "A running download's Cancel control should sit near the right edge of the \(Int(size.width))pt Library column; found nothing painted at \(farRight)."
         )
     }
 
@@ -902,10 +825,10 @@ final class ScreenshotGenerationTests: XCTestCase {
         let looseTabID = env.openTab(url: URL(string: "https://example.com/loose")!, in: spaceID, section: .today, activate: false)
         env.archiveTab(looseTabID)
 
-        LibraryRouter.shared.selectedSection = .archivedTabs
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .archivedTabs
+        env.libraryRouter.selection = nil
         let view = ScreenshotLibraryComposition(section: .archivedTabs).environment(env)
-        await renderAndSave(view, name: "library-archived-tabs-wide", size: CGSize(width: 2000, height: 900))
+        await renderAndSave(view, name: "library-archived-tabs-wide", size: Self.librarySize)
     }
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryArchivedTabsNarrowMinWidth
@@ -916,24 +839,20 @@ final class ScreenshotGenerationTests: XCTestCase {
         let looseTabID = env.openTab(url: URL(string: "https://example.com/loose")!, in: spaceID, section: .today, activate: false)
         env.archiveTab(looseTabID)
 
-        LibraryRouter.shared.selectedSection = .archivedTabs
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .archivedTabs
+        env.libraryRouter.selection = nil
         let view = ScreenshotLibraryComposition(section: .archivedTabs).environment(env)
-        await renderAndSave(
-            view,
-            name: "library-archived-tabs-narrow",
-            size: CGSize(width: LibraryMetrics.windowMinWidth, height: LibraryMetrics.windowMinHeight)
-        )
+        await renderAndSave(view, name: "library-archived-tabs-narrow", size: CGSize(width: LibraryModeLayout.baseWidth, height: 480))
     }
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryMediaWideNoSelection
 
     func test_libraryMediaWideNoSelection() async {
         OrbitScreenshotFixtures.configure(env)
-        LibraryRouter.shared.selectedSection = .media
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .media
+        env.libraryRouter.selection = nil
         let view = ScreenshotLibraryComposition(section: .media).environment(env)
-        await renderAndSave(view, name: "library-media-wide", size: CGSize(width: 2000, height: 900))
+        await renderAndSave(view, name: "library-media-wide", size: Self.librarySize)
     }
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_libraryEaselsAndNotesWideNoSelection
@@ -943,10 +862,10 @@ final class ScreenshotGenerationTests: XCTestCase {
         let note = env.noteStore.createNote(title: "Q4 launch notes")
         _ = env.easelStore.createEasel(title: "Sprint retro board")
 
-        LibraryRouter.shared.selectedSection = .easelsAndNotes
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .easelsAndNotes
+        env.libraryRouter.selection = nil
         let view = ScreenshotLibraryComposition(section: .easelsAndNotes).environment(env)
-        await renderAndSave(view, name: "library-easels-notes-wide", size: CGSize(width: 2000, height: 900))
+        await renderAndSave(view, name: "library-easels-notes-wide", size: Self.librarySize)
         _ = note
     }
 
@@ -957,14 +876,14 @@ final class ScreenshotGenerationTests: XCTestCase {
         _ = env.boostStore.createBoost(name: "Reader mode", host: "example.com")
         _ = env.boostStore.createBoost(name: "Dark theme", host: "news.ycombinator.com")
 
-        LibraryRouter.shared.selectedSection = .boosts
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .boosts
+        env.libraryRouter.selection = nil
         let view = ScreenshotLibraryComposition(section: .boosts).environment(env)
-        await renderAndSave(view, name: "library-boosts-wide", size: CGSize(width: 2000, height: 900))
+        await renderAndSave(view, name: "library-boosts-wide", size: Self.librarySize)
     }
 
-    // MARK: - Site Control Center
-    // No real engine ever starts in this target, so env.activeWebContents/env.engine are nil after a plain configure(env); seedSiteControlPopover(_:) attaches mock engine/session/webContents so the rows gated on env.engine actually draw.
+    // No real engine starts in this target, so seedSiteControlPopover(_:) attaches a mock engine, session and webContents for the rows gated on env.engine.
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_siteControlPopover
     func test_siteControlPopover() async {
         OrbitScreenshotFixtures.configure(env)
@@ -980,8 +899,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         await renderAndSave(view, name: "site-control-popover", size: CGSize(width: 300, height: 620))
     }
 
-    // MARK: - New Space
-
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_newSpacePanel
 
     func test_newSpacePanel() async {
@@ -995,9 +912,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // MARK: - Space switcher strip
-    // SidebarBottomBar hosts SpaceSwitcherPagerView (SpacePagerView is unused/superseded), so this
-    // renders SidebarBottomBar itself — the real view the sidebar's bottom row mounts.
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_spaceSwitcherMixedIcons
     func test_spaceSwitcherMixedIcons() async {
@@ -1009,8 +923,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // Same fixture in light appearance: theme.readableForeground and the active capsule's
-    // fill must both still read against a light Space background, not just dark.
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_spaceSwitcherMixedIconsLight
     func test_spaceSwitcherMixedIconsLight() async {
         guard let view = spaceSwitcherMixedIconsFixture() else { return }
@@ -1070,9 +982,6 @@ final class ScreenshotGenerationTests: XCTestCase {
             .orbitScreenshotModeDragDisabledForTests()
     }
 
-    // MARK: - Render + write, genuinely asserting
-    // renderAndSave used to only log whether the PNG write succeeded, so a broken layout still
-    // produced a valid-looking PNG and the suite stayed green.
     private func renderAndSave(
         _ view: some View,
         name: String,
@@ -1104,7 +1013,6 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
-    // MARK: - Pixel-sampled comparison, for the "two states of the same surface must differ" checks above
 
     private static func rendersDiffer(_ a: RenderedImage, _ b: RenderedImage, size: CGSize) -> Bool {
         let step = 8
@@ -1124,8 +1032,6 @@ final class ScreenshotGenerationTests: XCTestCase {
     }
 }
 
-// MARK: - Screenshot-only sidebar composition (works around the ScrollView limitation)
-
 /// SidebarView.standardContent(for:)'s body, reproduced here with its ScrollView swapped for a plain VStack since ImageRenderer does not rasterise ScrollView content off-screen; kept local to this file, not a #if DEBUG flag on SidebarView itself, so it cannot mask a real scrolling regression elsewhere.
 private struct ScreenshotSidebarComposition: View {
     @Environment(AppEnvironment.self) private var env
@@ -1136,8 +1042,7 @@ private struct ScreenshotSidebarComposition: View {
 
         VStack(alignment: .leading, spacing: 0) {
             SidebarTopRow(theme: space.theme)
-            // Order must match SidebarView.standardContent(for:) exactly, or
-            // this composition stops being a screenshot of Orbit.
+            // Order must match SidebarView.standardContent(for:) exactly, or this stops being a screenshot of Orbit.
             SpaceTitleRow(space: space)
             FavoritesGridView(spaceID: space.id, theme: space.theme)
 
@@ -1154,8 +1059,7 @@ private struct ScreenshotSidebarComposition: View {
 
             Spacer(minLength: 0)
 
-            // alwaysExpanded deviates from production: ImageRenderer has no pointer, so the
-            // card's hovered two-row form could never be captured otherwise.
+            // alwaysExpanded deviates from production: ImageRenderer has no pointer, so the hovered two-row card could not be captured.
             SidebarMiniPlayerTray(theme: space.theme, alwaysExpanded: true)
 
             SidebarBottomBar(theme: space.theme)
@@ -1167,70 +1071,44 @@ private struct ScreenshotSidebarComposition: View {
     }
 }
 
-/// LibraryRootView's body, reproduced here with its ScrollView swapped for a plain VStack (see ScreenshotSidebarComposition); the preview column's real content is always an NSViewRepresentable, which ImageRenderer cannot rasterise, so this renders the column's real frame and background and draws nothing into it.
+/// LibraryModeView's body, reproduced here with its ScrollView swapped for a plain VStack (see ScreenshotSidebarComposition); the detail's real content is always an NSViewRepresentable, which ImageRenderer cannot rasterise, so this renders the section's list only.
 private struct ScreenshotLibraryComposition: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var router = LibraryRouter.shared
     var section: LibrarySection
 
-    private var counts: [LibrarySection: Int] {
-        [
-            .media: env.mediaStates.values.filter { $0.isMediaActive }.count,
-            .downloads: env.downloads.count,
-            .easelsAndNotes: env.noteStore.index.count + env.easelStore.index.count,
-            .spaces: env.spaces.count,
-            .boosts: env.boostStore.boosts.count,
-            .archivedTabs: env.archivedTabs().count,
-        ]
-    }
-
-    // Mirrors LibraryRootView.showsPreview: gated on an actual selection, not just section capability.
-    private var showsPreview: Bool { section.supportsPreview && router.selection != nil }
+    private var theme: SpaceTheme { env.activeSpace?.theme ?? SpaceTheme() }
 
     var body: some View {
-        HStack(spacing: 0) {
-            LibrarySidebarView(selection: .constant(section), counts: counts)
+        let style = LibraryStyle(theme: theme)
+        HStack(alignment: .top, spacing: 0) {
+            LibraryRailView(selection: .constant(section))
 
             Rectangle()
-                .fill(LibraryPalette.divider)
-                .frame(width: 1)
+                .fill(style.divider)
+                .frame(width: OrbitMetrics.cardBorderWidth)
 
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 12) {
-                    Text(section.rawValue)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(LibraryPalette.textPrimary)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                    LibrarySearchField(text: .constant(""), placeholder: "Search \(section.rawValue)")
-                        .frame(maxWidth: LibraryMetrics.searchFieldMaxWidth)
-                }
-                .padding(.horizontal, LibraryMetrics.contentHorizontalPadding)
-                .padding(.top, LibraryMetrics.contentTopPadding)
-                .padding(.bottom, 12)
+            VStack(alignment: .leading, spacing: LibraryModeMetrics.sectionHeaderSpacing) {
+                Text(section.rawValue)
+                    .font(OrbitFont.spaceTitle)
+                    .foregroundStyle(style.foreground)
+                    .lineLimit(1)
+                LibrarySearchField(text: .constant(""), placeholder: "Search \(section.rawValue)")
 
                 if section.rendersItsOwnScrolling {
                     sectionList
-                        .padding(.top, 4)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                     sectionList
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, LibraryMetrics.contentHorizontalPadding)
-                        .padding(.top, 4)
-                        .padding(.bottom, 24)
                 }
             }
-            .frame(width: showsPreview ? LibraryMetrics.listColumnWidth : nil, alignment: .top)
-            .frame(maxWidth: showsPreview ? nil : .infinity, maxHeight: .infinity, alignment: .top)
-            .background(LibraryPalette.contentBackground)
-
-            if showsPreview {
-                LibraryPreviewPaneView(selection: router.selection)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            .padding(.horizontal, LibraryModeMetrics.contentPadding)
+            .padding(.top, OrbitSpacing.xs)
+            .padding(.bottom, OrbitSpacing.xxl)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .background(LibraryPalette.contentBackground)
+        .environment(\.libraryStyle, style)
+        .background(ThemeBackgroundView(theme: theme, blur: 0))
     }
 
     @ViewBuilder
@@ -1239,12 +1117,9 @@ private struct ScreenshotLibraryComposition: View {
         case .downloads: LibraryDownloadsView(searchQuery: "")
         case .easelsAndNotes: LibraryEaselsNotesView(searchQuery: "")
         case .media: LibraryMediaView(searchQuery: "")
-        // ManageSpacesColumnsView directly: the host's only addition is a horizontal
-        // ScrollView, which ImageRenderer cannot rasterise.
+        // ManageSpacesColumnsView directly: the host only adds a horizontal ScrollView, which ImageRenderer cannot rasterise.
         case .spaces:
             ManageSpacesColumnsView(searchQuery: "", onAddSpace: {})
-                .padding(.horizontal, LibraryMetrics.contentHorizontalPadding)
-                .padding(.bottom, LibraryMetrics.contentHorizontalPadding)
         case .archivedTabs: LibraryArchivedTabsView(searchQuery: "")
         case .boosts: LibraryBoostsFallbackView(searchQuery: "")
         }
@@ -1299,8 +1174,6 @@ private struct ScreenshotSettingsComposition: View {
         }
     }
 }
-
-// MARK: - Screenshot-only drag suppression, applied at the call site
 
 private extension View {
     /// Also the shared flag that elides invisible NSViewRepresentable click-catchers, which rasterise as a solid block.

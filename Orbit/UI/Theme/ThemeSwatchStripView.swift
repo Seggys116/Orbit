@@ -4,9 +4,7 @@ struct ThemeSwatchStripView: View {
     @Binding var theme: SpaceTheme
     @Binding var selectedStopIndex: Int
 
-    // ColorPicker's NSColorPanel would steal key status from the
-    // transient NSPopover this view lives in and dismiss it; this is a
-    // nested SwiftUI popover instead, which stays inside the same window.
+    // ColorPicker's NSColorPanel would steal key status from the transient NSPopover this view lives in and dismiss it; a nested SwiftUI popover stays inside the same window.
     @State private var isCustomEditorPresented = false
 
     @State private var page: Page = .colours
@@ -60,13 +58,13 @@ struct ThemeSwatchStripView: View {
     }
 
     private func pageForward() {
-        withAnimation(OrbitMotion.quick) {
+        withOrbitAnimation(OrbitMotion.quick) {
             page = Page(rawValue: Self.wrappedPageIndex(page.rawValue, by: 1, count: Page.allCases.count)) ?? .palettes
         }
     }
 
     private func pageBackward() {
-        withAnimation(OrbitMotion.quick) {
+        withOrbitAnimation(OrbitMotion.quick) {
             page = Page(rawValue: Self.wrappedPageIndex(page.rawValue, by: -1, count: Page.allCases.count)) ?? .palettes
         }
     }
@@ -110,7 +108,7 @@ struct ThemeSwatchStripView: View {
     private func paletteSwatch(_ palette: [ThemeColor], index: Int) -> some View {
         let isSelected = theme.resolvedPalette == palette
         return Button {
-            withAnimation(OrbitMotion.quick) {
+            withOrbitAnimation(OrbitMotion.quick) {
                 theme.applyPalette(palette)
             }
         } label: {
@@ -138,7 +136,7 @@ struct ThemeSwatchStripView: View {
     private func singleColorSwatch(_ color: ThemeColor) -> some View {
         let isSelected = theme.colors.indices.contains(selectedStopIndex) && theme.colors[selectedStopIndex] == color
         return Button {
-            withAnimation(OrbitMotion.quick) {
+            withOrbitAnimation(OrbitMotion.quick) {
                 theme.setColor(color, atStop: selectedStopIndex)
             }
         } label: {
@@ -285,11 +283,11 @@ private struct ThemeCustomColorEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: OrbitRadius.md, style: .continuous)
                 .fill(composed)
                 .frame(height: 40)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: OrbitRadius.md, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
                 )
 

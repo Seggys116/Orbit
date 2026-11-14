@@ -109,9 +109,7 @@ enum MainMenuBuilder {
         return item
     }
 
-    // Uses a ShortcutRefreshingMenu because Find and Replace's target is nil
-    // on purpose (so a focused Note editor handles it), which means it
-    // cannot re-read its own binding through validateMenuItem(_:) like every other row here.
+    // ShortcutRefreshingMenu: Find and Replace's target is nil so a Note editor handles it, so validateMenuItem(_:) cannot refresh its binding.
     private static func findMenuItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
         let menu = ShortcutRefreshingMenu(title: "Find")
@@ -181,6 +179,7 @@ enum MainMenuBuilder {
         menu.addItem(command("Inspect Element", .inspectElement))
         menu.addItem(command("JavaScript Console", .javaScriptConsole))
         menu.addItem(command("Toggle Developer Mode", .toggleDeveloperMode))
+        menu.addItem(command("Toggle Device Toolbar", .toggleDeviceToolbar))
         item.submenu = menu
         return item
     }
@@ -201,7 +200,7 @@ enum MainMenuBuilder {
         menu.addItem(command("Previous Space", .previousSpace))
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(title: "Manage Spaces…") {
-            LibraryWindowController.show(section: .spaces)
+            AppEnvironment.openLibraryInFrontmostWindow(section: .spaces)
         })
         item.submenu = menu
         return item
@@ -332,9 +331,7 @@ enum MainMenuBuilder {
 
     // MARK: Availability
 
-    // Every predicate below reads AppEnvironment.frontmost, the same
-    // environment CommandMenuItem dispatches into — asking .shared here
-    // would grey a row out based on a document the user isn't looking at.
+    // Predicates read AppEnvironment.frontmost, as dispatch does; .shared could grey a row by a document the user isn't viewing.
 
     private static var env: AppEnvironment { .frontmost }
 

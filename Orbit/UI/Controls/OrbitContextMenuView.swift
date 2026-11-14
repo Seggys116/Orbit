@@ -5,13 +5,10 @@ struct OrbitContextMenuView: View {
 
     var entries: [OrbitContextMenuEntry]
     var onSelect: () -> Void
-    /// Non-nil only for a menu that deliberately points at its own trigger,
-    /// e.g. the sidebar "+" button. The right-click menu never has one.
+    /// Non-nil only for a menu that deliberately points at its own trigger, e.g. the sidebar "+" button; the right-click menu never has one.
     var arrow: OrbitMenuArrow?
     var selection: OrbitMenuSelectionModel?
-    /// Fires whenever a row becomes the active one, with its frame in this
-    /// menu's own coordinate space, so the controller can open or close a
-    /// submenu panel beside it.
+    /// Fires whenever a row becomes active, with its frame in this menu's coordinate space, so the controller can open or close a submenu panel beside it.
     var onRowActivate: ((OrbitContextMenuItem, CGRect) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
@@ -55,9 +52,7 @@ struct OrbitContextMenuView: View {
         .orbitThemeAnimation(value: chrome)
     }
 
-    // AnyView, not `some View`: this recurses into itself for `.section`'s
-    // nested entries, and an opaque return type cannot be defined in terms
-    // of itself.
+    // AnyView, not `some View`: this recurses into itself for `.section`'s nested entries, and an opaque return type cannot be defined in terms of itself.
     private func row(for entry: OrbitContextMenuEntry, chrome: SpaceThemeChrome?) -> AnyView {
         switch entry {
         case .item(let item):
@@ -81,7 +76,7 @@ struct OrbitContextMenuView: View {
         case .section(_, let title, let entries):
             return AnyView(
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(title.uppercased())
+                    Text(title)
                         .font(.system(size: OrbitMetrics.contextMenuSectionHeaderFontSize, weight: .semibold))
                         .foregroundStyle(chrome?.secondaryForeground ?? OrbitControlColor.secondaryForeground(for: colorScheme))
                         .padding(.horizontal, OrbitMetrics.contextMenuRowHorizontalInset + OrbitMetrics.contextMenuRowHorizontalPadding)

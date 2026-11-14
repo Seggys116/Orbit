@@ -1,21 +1,23 @@
 import SwiftUI
 
-enum OnboardingStep: Int, CaseIterable {
-    case welcome, profileSetup, importBrowser, searchEngine, defaultBrowser
-}
-
 struct OnboardingView: View {
     @Environment(AppEnvironment.self) private var env
     var onFinished: () -> Void
 
-    @State private var step: OnboardingStep = .welcome
-    @State private var spaceDrafts: [OnboardingSpaceDraft] = OnboardingSpaceDraft.defaults
+    @State private var flow = OnboardingFlowState()
+    @State private var spaceDrafts: [OnboardingSpaceDraft] = OnboardingView.initialDrafts()
+    @State private var selectedDraftID: UUID?
     @State private var selectedSearchEngine: SearchEngine = .fallback
     @State private var selectedImportSource: ImportableBrowser?
     @State private var importLoginSessions = false
     @State private var importState: ImportState = .idle
+    @State private var importProgress = ImportProgress()
     @State private var availableImportSources: [ImportableBrowser] = []
+    @State private var hasLoadedImportSources = false
     @State private var committedProfileID: ProfileID?
+    // Set when an import lands: the Spaces step then edits the Spaces that now exist instead of a blank draft list.
+    @State private var needsSpaceReseed = false
+    @State private var shortcutPrimer = OnboardingShortcutPrimer()
 
     @State private var offersDefaultBrowserButton = true
     @State private var didRequestDefaultBrowser = false
@@ -28,290 +30,203 @@ struct OnboardingView: View {
         case failed(String)
     }
 
-    var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 24) {
-                Spacer()
-                stepContent
-                Spacer()
-                navigationRow
-            }
-            .padding(48)
-            .frame(width: 420)
+    // Below this width the stage would leave the control column cramped, so the column takes the window.
+    private static let stageMinimumWindowWidth: CGFloat = 640
 
-            OnboardingStageArt(step: step)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+    var body: some View {
+        GeometryReader { proxy in
+            let showsStage = proxy.size.width >= Self.stageMinimumWindowWidth
+            let columnWidth = showsStage ? min(460, max(380, proxy.size.width * 0.5)) : proxy.size.width
+            HStack(spacing: 0) {
+                controlColumn
+                    .frame(width: columnWidth)
+                if showsStage {
+                    OnboardingStageArt(scene: planetScene)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
         }
         // Fills its window rather than pinning 880x560: a hard frame centres and clips the control column when the window is narrower.
         .frame(minWidth: 420, idealWidth: 880, maxWidth: .infinity, minHeight: 400, idealHeight: 560, maxHeight: .infinity)
+        .background(OrbitNeutral.bg)
         .task {
             let reader = BrowserDataReader()
             availableImportSources = await Task.detached(priority: .userInitiated) {
                 reader.availableBrowsers()
             }.value
+            hasLoadedImportSources = true
             offersDefaultBrowserButton = DefaultBrowser.shouldOfferToBecomeDefault
         }
     }
 
+    // MARK: - Column
+
+    private var controlColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            OnboardingStepRail(state: flow) { target in
+                flow.go(to: target)
+            }
+            .padding(.bottom, 22)
+
+            ZStack(alignment: .topLeading) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    stepContent
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                }
+                .scrollClipDisabled()
+                .id(flow.step)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .offset(y: 10)),
+                    removal: .opacity
+                ))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .orbitAnimation(OrbitMotion.dramatic, value: flow.step)
+
+            navigationRow
+                .padding(.top, 16)
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 44)
+        .padding(.bottom, 22)
+        .frame(maxHeight: .infinity)
+        .background(OrbitNeutral.card)
+    }
+
     @ViewBuilder
     private var stepContent: some View {
-        switch step {
+        switch flow.step {
         case .welcome:
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Welcome to Orbit").font(.system(size: 30, weight: .bold))
-                Text("A calmer way to browse. Let's get you set up.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
-        case .profileSetup:
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Set Up Your Spaces").font(.system(size: 24, weight: .bold))
-                Text("Spaces are separate sets of tabs and favourites. No account needed.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                spacesSetupEditor
-            }
+            OnboardingWelcomeStep()
         case .importBrowser:
-            importStepContent
-        case .searchEngine:
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Default Search Engine").font(.system(size: 24, weight: .bold))
-                Text("Used for searches in the Command Bar. Change it later in Settings › Profiles.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                // OrbitPopupButton, not a stock Picker: a menu-style Picker does not present reliably inside this app's NSHostingView.
-                OrbitPopupButton(
-                    options: SearchEngine.allCases,
-                    label: { $0.displayName },
-                    selection: $selectedSearchEngine,
-                    accessibilityLabel: "Default search engine"
-                )
-                .frame(width: 220)
-            }
-        case .defaultBrowser:
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Make Orbit Your Default").font(.system(size: 24, weight: .bold))
-                if offersDefaultBrowserButton {
-                    Text("Open links from other apps in Orbit. macOS asks you to confirm.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button("Set as Default Browser") {
-                        didRequestDefaultBrowser = true
-                        DefaultBrowser.requestBecomingDefault { _ in
-                            Task { @MainActor in
-                                offersDefaultBrowserButton = DefaultBrowser.shouldOfferToBecomeDefault
-                            }
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                } else {
-                    Text("Orbit already opens links from other apps. Nothing to do here.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            OnboardingImportStep(
+                sources: availableImportSources,
+                hasLoadedSources: hasLoadedImportSources,
+                selection: $selectedImportSource,
+                importLoginSessions: $importLoginSessions,
+                state: importState,
+                progress: importProgress,
+                onSelectionChanged: {
+                    importState = .idle
+                    importProgress = ImportProgress()
                 }
-            }
+            )
+            .orbitAnimation(OrbitMotion.dramatic, value: importState)
+        case .spaces:
+            OnboardingSpacesStep(drafts: $spaceDrafts, selectedDraftID: $selectedDraftID)
+        case .shortcuts:
+            OnboardingShortcutsStep(primer: $shortcutPrimer)
+        case .finish:
+            OnboardingFinishStep(
+                searchEngine: $selectedSearchEngine,
+                offersDefaultBrowser: offersDefaultBrowserButton,
+                onSetDefaultBrowser: requestDefaultBrowser
+            )
         }
     }
 
-    // MARK: - Spaces setup step
+    // MARK: - Stage
 
-    private var spacesSetupEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach($spaceDrafts) { $draft in
-                spaceDraftRow(draft: $draft)
-            }
-            if spaceDrafts.isEmpty {
-                Text("With no Space added, you start with one default Space.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Button {
-                spaceDrafts.append(OnboardingSpaceDraft(name: "", emoji: ""))
-            } label: {
-                Label("Add Space", systemImage: "plus.circle.fill")
-                    .font(.system(size: 12, weight: .medium))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor)
-            .padding(.top, 2)
-        }
-        .frame(width: 300, alignment: .leading)
-    }
-
-    private func spaceDraftRow(draft: Binding<OnboardingSpaceDraft>) -> some View {
-        HStack(spacing: 8) {
-            TextField("—", text: draft.emoji)
-                .textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.center)
-                .frame(width: 36)
-                .onChange(of: draft.wrappedValue.emoji) { _, newValue in
-                    guard newValue.count > 1 else { return }
-                    draft.wrappedValue.emoji = String(newValue.suffix(1))
-                }
-                .accessibilityLabel("Emoji for \(draft.wrappedValue.name.isEmpty ? "this Space" : draft.wrappedValue.name), optional")
-            TextField("Space name", text: draft.name)
-                .textFieldStyle(.roundedBorder)
-            Button {
-                spaceDrafts.removeAll { $0.id == draft.wrappedValue.id }
-            } label: {
-                Image(systemName: "minus.circle.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Remove \(draft.wrappedValue.name.isEmpty ? "this Space" : draft.wrappedValue.name)")
-        }
-    }
-
-    // MARK: - Import step
-
-    @ViewBuilder
-    private var importStepContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Import From Your Old Browser").font(.system(size: 24, weight: .bold))
-
-            if availableImportSources.isEmpty {
-                Text("No data found from \(Self.supportedBrowserList). You can import later from Archive › Import from Another Browser.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text(importDescription)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                VStack(spacing: 6) {
-                    ForEach(availableImportSources) { browser in
-                        importSourceRow(browser)
-                    }
-                }
-                .frame(width: 300, alignment: .leading)
-
-                loginSessionToggle
-            }
-
-            importStatusLine
-        }
-    }
-
-    @ViewBuilder
-    private var loginSessionToggle: some View {
-        if selectedImportSource?.importsLoginSessions == true {
-            Toggle(isOn: $importLoginSessions) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Stay signed in to your sites")
-                        .font(.system(size: 12, weight: .medium))
-                    Text("Copies your login sessions. macOS asks permission to read \(selectedImportSource?.displayName ?? "the browser")'s saved key.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .toggleStyle(.checkbox)
-            .frame(width: 300, alignment: .leading)
-            .disabled(isImporting)
-        }
-    }
-
-    static var supportedBrowserList: String {
-        let names = ImportableBrowser.allCases.map(\.displayName)
-        guard let last = names.last else { return "any other browser" }
-        guard names.count > 1 else { return last }
-        return names.dropLast().joined(separator: ", ") + " or " + last
-    }
-
-    private var importDescription: String {
-        guard let source = selectedImportSource else {
-            return "Pick a browser to import bookmarks and history. Passwords are never imported."
-        }
-        guard source.importsNativeStructure else {
-            return "Imports bookmarks and history from \(source.displayName). Passwords are not imported."
-        }
-        return "Imports your Arc Spaces, tabs, folders, history, extensions and shortcuts. Passwords are not imported."
-    }
-
-    private func importSourceRow(_ browser: ImportableBrowser) -> some View {
-        let isSelected = selectedImportSource == browser
-        return HStack(spacing: 10) {
-            Image(systemName: isSelected ? "largecircle.filled.circle" : "circle")
-                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-            Text(browser.displayName)
-                .font(.system(size: 13, weight: .medium))
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08))
+    private var planetScene: OnboardingPlanetScene {
+        let selectedTheme = spaceDrafts.first { $0.id == selectedDraftID }?.theme ?? spaceDrafts.first?.theme
+        return OnboardingPlanetScene.scene(
+            step: flow.step,
+            importPhase: importPhase,
+            hasImportSource: selectedImportSource != nil,
+            importFraction: importProgress.overallFraction,
+            spaceTint: selectedTheme?.primary.planetColor,
+            shortcutsTried: shortcutPrimer.triedCount
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(isSelected ? Color.accentColor.opacity(0.6) : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            selectedImportSource = (selectedImportSource == browser) ? nil : browser
-            importState = .idle
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(browser.displayName)
-        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 
-    @ViewBuilder
-    private var importStatusLine: some View {
-        switch importState {
-        case .idle:
-            EmptyView()
-        case .importing(let browser):
+    // MARK: - Navigation
+
+    private var importPhase: OnboardingImportPhase { Self.phase(of: importState) }
+
+    private var primaryTitle: String {
+        flow.primaryTitle(importSourceName: selectedImportSource?.displayName, importPhase: importPhase)
+    }
+
+    private var navigationRow: some View {
+        let hasSource = selectedImportSource != nil
+        let offersMaybeLater = flow.offersMaybeLater(hasImportSource: hasSource, importPhase: importPhase)
+        let back = Button("Back") { flow.back() }
+            .buttonStyle(OnboardingButtonStyle(variant: .plain))
+            .disabled(!flow.canGoBack)
+            .opacity(flow.isFirst ? 0 : 1)
+            .accessibilityHidden(flow.isFirst)
+        let maybeLater = Button("Maybe later") { skipImport() }
+            .buttonStyle(OnboardingButtonStyle(variant: .plain))
+            .disabled(flow.isBusy)
+        let primary = Button(primaryTitle) { performPrimaryAction() }
+            .buttonStyle(OnboardingButtonStyle(variant: .primary))
+            .keyboardShortcut(.defaultAction)
+            .disabled(flow.isBusy)
+
+        // The long form needs all three controls on one line; a narrow column gives the primary action its own line so nothing clips.
+        return ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Importing from \(browser.displayName)…").font(.system(size: 12)).foregroundStyle(.secondary)
+                back
+                Spacer(minLength: 8)
+                if offersMaybeLater { maybeLater }
+                primary
             }
-        case .finished(let summary):
-            Text("Imported \(summary.bookmarksImported) bookmark\(summary.bookmarksImported == 1 ? "" : "s") into \(summary.foldersCreated) folder\(summary.foldersCreated == 1 ? "" : "s") and \(summary.historyEntriesImported) history entr\(summary.historyEntriesImported == 1 ? "y" : "ies") from \(summary.browser.displayName).")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        case .finishedArc(let summary):
-            VStack(alignment: .leading, spacing: 4) {
-                Text(Self.arcSummaryLine(summary))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                ForEach(Self.arcCaveats(summary), id: \.self) { caveat in
-                    Text(caveat)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .trailing, spacing: 8) {
+                primary
+                HStack(spacing: 8) {
+                    back
+                    Spacer(minLength: 8)
+                    if offersMaybeLater { maybeLater }
                 }
             }
-        case .failed(let message):
-            Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var isImporting: Bool {
-        if case .importing = importState { return true }
-        return false
-    }
-
-    static func isImportComplete(_ state: ImportState) -> Bool {
-        switch state {
-        case .finished, .finishedArc: return true
-        case .idle, .importing, .failed: return false
+    private func performPrimaryAction() {
+        let action = flow.primaryAction(hasImportSource: selectedImportSource != nil, importPhase: importPhase)
+        switch action {
+        case .startImport:
+            if let browser = selectedImportSource { runImport(browser) }
+        case .next:
+            advance()
+        case .finish:
+            finish()
         }
     }
 
-    private var isImportComplete: Bool { Self.isImportComplete(importState) }
+    private func advance() {
+        if flow.step == .spaces { commitSpacesSetup() }
+        if flow.step == .importBrowser { prepareSpacesStep() }
+        flow.advance()
+    }
+
+    private func skipImport() {
+        selectedImportSource = nil
+        importState = .idle
+        importProgress = ImportProgress()
+        advance()
+    }
+
+    private func finish() {
+        commitSearchEngine()
+        Self.commitDefaultBrowserDecision(
+            wasOffered: offersDefaultBrowserButton,
+            didRequest: didRequestDefaultBrowser
+        )
+        onFinished()
+    }
+
+    private func requestDefaultBrowser() {
+        didRequestDefaultBrowser = true
+        DefaultBrowser.requestBecomingDefault { _ in
+            Task { @MainActor in
+                offersDefaultBrowserButton = DefaultBrowser.shouldOfferToBecomeDefault
+            }
+        }
+    }
+
+    // MARK: - Import
 
     // Never advances the step itself: the caller decides when to move on.
     private func runImport(_ browser: ImportableBrowser) {
@@ -319,184 +234,44 @@ struct OnboardingView: View {
             importState = .failed("Orbit has no Space to import into yet.")
             return
         }
+        importProgress = ImportProgress()
         importState = .importing(browser)
+        flow.isBusy = true
         let wantsLoginSessions = importLoginSessions
         Task { @MainActor in
+            let report: ImportProgressHandler = { event in importProgress.apply(event) }
+            let result: ImportState
             if browser.importsNativeStructure {
-                importState = await OnboardingImportRunner.runArcImport(
+                result = await OnboardingImportRunner.runArcImport(
                     env: env,
-                    importLoginSessions: wantsLoginSessions
+                    importLoginSessions: wantsLoginSessions,
+                    progress: report
                 )
             } else {
-                do {
-                    let summary = try await BrowserImportCoordinator.performImport(browser, into: spaceID, env: env)
-                    importState = .finished(summary)
-                } catch {
-                    importState = .failed(
-                        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    )
-                }
+                result = await OnboardingImportRunner.runStandardImport(
+                    browser,
+                    into: spaceID,
+                    env: env,
+                    progress: report
+                )
             }
-        }
-    }
-
-    static func arcSummaryLine(_ summary: ArcImportSummary) -> String {
-        var parts: [String] = []
-        parts.append("\(summary.spacesCreated) Space\(summary.spacesCreated == 1 ? "" : "s")")
-        parts.append("\(summary.totalTabsImported) tab\(summary.totalTabsImported == 1 ? "" : "s")")
-        if summary.foldersCreated > 0 {
-            parts.append("\(summary.foldersCreated) folder\(summary.foldersCreated == 1 ? "" : "s")")
-        }
-        if summary.favoritesImported > 0 {
-            parts.append("\(summary.favoritesImported) favourite\(summary.favoritesImported == 1 ? "" : "s")")
-        }
-        if summary.historyEntriesImported > 0 {
-            parts.append("\(summary.historyEntriesImported) history entr\(summary.historyEntriesImported == 1 ? "y" : "ies")")
-        }
-        if summary.faviconsImported > 0 {
-            parts.append("\(summary.faviconsImported) site icon\(summary.faviconsImported == 1 ? "" : "s")")
-        }
-        if summary.keyBindingsImported > 0 {
-            parts.append("\(summary.keyBindingsImported) keyboard shortcut\(summary.keyBindingsImported == 1 ? "" : "s")")
-        }
-        if case .imported(let count) = summary.cookies, count > 0 {
-            parts.append("\(count) login session\(count == 1 ? "" : "s")")
-        }
-        let sites = summary.siteData.stagedSiteCount
-        if sites > 0 {
-            parts.append("saved site data from \(sites) site\(sites == 1 ? "" : "s")")
-        }
-        return "Imported " + parts.joined(separator: ", ") + " from Arc."
-    }
-
-    static func arcCaveats(_ summary: ArcImportSummary) -> [String] {
-        var caveats: [String] = []
-        if summary.extensionsInstalled > 0, summary.extensionsNeedRestart {
-            caveats.append("\(summary.extensionsInstalled) extension\(summary.extensionsInstalled == 1 ? "" : "s") installed from Arc. Restart Orbit to load \(summary.extensionsInstalled == 1 ? "it" : "them").")
-        }
-        if summary.extensionsAlreadyInstalled > 0 {
-            caveats.append("\(summary.extensionsAlreadyInstalled) extension\(summary.extensionsAlreadyInstalled == 1 ? "" : "s") from Arc \(summary.extensionsAlreadyInstalled == 1 ? "was" : "were") already installed in Orbit.")
-        }
-        if !summary.extensionsNeedingManualInstall.isEmpty {
-            caveats.append("Couldn't install \(summary.extensionsNeedingManualInstall.joined(separator: ", ")) from Arc. Reinstall from the Chrome Web Store.")
-        }
-        if !summary.keyBindingsNeedingManualRebind.isEmpty {
-            let actions = summary.keyBindingsNeedingManualRebind.joined(separator: ", ")
-            caveats.append("Couldn't bring these Arc shortcuts across: \(actions). Set them again in Settings › Shortcuts.")
-        }
-        switch summary.cookies {
-        case .notAttempted, .imported:
-            break
-        case .partiallyImported(let stored, let decrypted):
-            let missed = decrypted - stored
-            caveats.append("\(stored) login session\(stored == 1 ? "" : "s") came across from Arc. \(missed) had already expired or couldn't be re-stored, so you may need to sign in again on some sites.")
-        case .decryptedButEngineCannotInstall(let count):
-            caveats.append("\(count) login session\(count == 1 ? "" : "s") could be read from Arc but there was no browsing session to put \(count == 1 ? "it" : "them") in, so you will need to sign in again.")
-        case .keychainDenied:
-            caveats.append("Orbit was not allowed to read Arc's saved logins, so you will need to sign in again.")
-        case .failed(let reason):
-            caveats.append("Arc's login sessions could not be read: \(reason)")
-        }
-        switch summary.siteData {
-        case .notAttempted, .nothingToImport:
-            break
-        case .staged(let sites, let indexedDBSites, _):
-            let count = max(sites, indexedDBSites)
-            caveats.append("Saved site data came across for \(count) site\(count == 1 ? "" : "s"). Restart Orbit to apply it. Sites Orbit already holds data for keep Orbit's.")
-        case .failed(let reason):
-            caveats.append("Arc's saved site data could not be read: \(reason)")
-        }
-        return caveats
-    }
-
-    // MARK: - Navigation
-
-    private var navigationRow: some View {
-        HStack {
-            if step != .welcome {
-                Button("Back") { move(-1) }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .disabled(isImporting)
+            if Self.isImportComplete(result) {
+                importProgress.finishAll()
+                needsSpaceReseed = true
             }
-            stageIndicator
-            Spacer()
-            if step == .importBrowser, selectedImportSource != nil {
-                Button("Maybe Later") {
-                    selectedImportSource = nil
-                    importState = .idle
-                    move(1)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .disabled(isImporting)
-            }
-            Button(continueButtonTitle) {
-                if step == .profileSetup { commitSpacesSetup() }
-                if step == .searchEngine { commitSearchEngine() }
-                if step == .importBrowser, let browser = selectedImportSource {
-                    if isImportComplete {
-                        move(1)
-                    } else {
-                        runImport(browser)
-                    }
-                    return
-                }
-                if step == .defaultBrowser {
-                    commitSearchEngine()
-                    Self.commitDefaultBrowserDecision(
-                        wasOffered: offersDefaultBrowserButton,
-                        didRequest: didRequestDefaultBrowser
-                    )
-                    onFinished()
-                } else {
-                    move(1)
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.defaultAction)
-            .disabled(isImporting)
+            importState = result
+            flow.isBusy = false
         }
     }
 
-    private var stageIndicator: some View {
-        HStack(spacing: 5) {
-            ForEach(OnboardingStep.allCases, id: \.rawValue) { each in
-                Capsule()
-                    .fill(each == step ? Color.accentColor : Color.secondary.opacity(0.28))
-                    .frame(width: each == step ? 16 : 6, height: 6)
-            }
-        }
-        .padding(.leading, step == .welcome ? 0 : 10)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Step \(step.rawValue + 1) of \(OnboardingStep.allCases.count)")
+    private func prepareSpacesStep() {
+        guard needsSpaceReseed else { return }
+        needsSpaceReseed = false
+        spaceDrafts = OnboardingSpaceDraft.drafts(from: env.spaces)
+        selectedDraftID = spaceDrafts.first?.id
     }
 
-    static func continueButtonTitle(
-        step: OnboardingStep,
-        selectedImportSource: ImportableBrowser?,
-        importState: ImportState
-    ) -> String {
-        if step == .defaultBrowser { return "Finish" }
-        if step == .importBrowser, let browser = selectedImportSource {
-            return isImportComplete(importState) ? "Continue" : "Import From \(browser.displayName)"
-        }
-        return "Continue"
-    }
-
-    private var continueButtonTitle: String {
-        Self.continueButtonTitle(step: step, selectedImportSource: selectedImportSource, importState: importState)
-    }
-
-    private func move(_ delta: Int) {
-        guard let newStep = OnboardingStep(rawValue: step.rawValue + delta) else { return }
-        withAnimation(OrbitMotion.standard) { step = newStep }
-    }
-
-    static func commitDefaultBrowserDecision(wasOffered: Bool, didRequest: Bool) {
-        guard wasOffered, !didRequest else { return }
-        DefaultBrowser.recordDeclined()
-    }
+    // MARK: - Commit
 
     private func commitSpacesSetup() {
         guard let firstProfile = env.state.profiles.first else { return }
@@ -510,5 +285,94 @@ struct OnboardingView: View {
             toProfile: committedProfileID,
             in: &env.state
         )
+    }
+
+    // MARK: - Statics
+
+    // Every draft starts with an explicit theme so the preview and the committed Space always agree.
+    static func initialDrafts() -> [OnboardingSpaceDraft] {
+        var drafts = OnboardingSpaceDraft.defaults
+        let themes = OnboardingCommit.resolvedThemes(for: drafts)
+        for index in drafts.indices { drafts[index].theme = themes[index] }
+        return drafts
+    }
+
+    static var supportedBrowserList: String {
+        let names = ImportableBrowser.allCases.map(\.displayName)
+        guard let last = names.last else { return "any other browser" }
+        guard names.count > 1 else { return last }
+        return names.dropLast().joined(separator: ", ") + " or " + last
+    }
+
+    static func phase(of state: ImportState) -> OnboardingImportPhase {
+        switch state {
+        case .idle: .idle
+        case .importing: .running
+        case .finished, .finishedArc: .done
+        case .failed: .failed
+        }
+    }
+
+    static func isImportComplete(_ state: ImportState) -> Bool {
+        phase(of: state) == .done
+    }
+
+    static func continueButtonTitle(
+        step: OnboardingStep,
+        selectedImportSource: ImportableBrowser?,
+        importState: ImportState
+    ) -> String {
+        OnboardingFlowState(step: step).primaryTitle(
+            importSourceName: selectedImportSource?.displayName,
+            importPhase: phase(of: importState)
+        )
+    }
+
+    static func commitDefaultBrowserDecision(wasOffered: Bool, didRequest: Bool) {
+        guard wasOffered, !didRequest else { return }
+        DefaultBrowser.recordDeclined()
+    }
+}
+
+// MARK: - Welcome
+
+struct OnboardingWelcomeStep: View {
+    private struct Point: Identifiable {
+        let symbol: String
+        let text: String
+        var id: String { symbol }
+    }
+
+    private let points = [
+        Point(symbol: "arrow.down.circle", text: "Bring your tabs, bookmarks and history over"),
+        Point(symbol: "square.stack", text: "Sort your browsing into themed Spaces"),
+        Point(symbol: "keyboard", text: "Learn the few keys that matter"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            OnboardingHeading(
+                title: "Welcome to Orbit.",
+                subtitle: "A calmer way to browse. It takes about a minute to get set up."
+            )
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(points) { point in
+                    HStack(spacing: 10) {
+                        Image(systemName: point.symbol)
+                            .font(.system(size: 13))
+                            .foregroundStyle(OrbitNeutral.ink2)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                RoundedRectangle(cornerRadius: OrbitRadius.md, style: .continuous)
+                                    .fill(OrbitNeutral.chip)
+                            )
+                        Text(point.text)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(OrbitNeutral.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
     }
 }

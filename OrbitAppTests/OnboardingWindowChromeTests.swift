@@ -44,8 +44,7 @@ final class OnboardingWindowChromeTests: XCTestCase {
         }
     }
 
-    /// `CGWindowListCreateImage` is obsoleted in the macOS 15 SDK but still live, and captures this
-    /// process's own windows under no Screen Recording grant — hence dlsym rather than a direct call.
+    /// CGWindowListCreateImage is obsoleted in the macOS 15 SDK but still live, hence dlsym; needs no Screen Recording grant for own windows.
     private func captureBitmap(of window: NSWindow) -> NSBitmapImageRep? {
         typealias WindowListCreateImage = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
         guard
@@ -64,8 +63,7 @@ final class OnboardingWindowChromeTests: XCTestCase {
         return RenderedImage(bitmap: bitmap, pointSize: window.frame.size, scale: window.backingScaleFactor)
     }
 
-    /// OnboardingView paints nothing behind its text column above the first glyph, so x=2, y=40 is
-    /// the bare window background that an inset or an undersized root frame would also expose.
+    /// Nothing is painted behind the text column above the first glyph, so (2, 40) is bare window background.
     private func windowBackground(_ image: RenderedImage) -> RGBA { image.color(atX: 2, y: 40) }
 
     private func isOnboardingContent(_ color: RGBA, background: RGBA) -> Bool {
@@ -165,9 +163,15 @@ final class OnboardingWindowChromeTests: XCTestCase {
             }
             signatures.append(measured.signature)
             edges.append(measured.edge)
+            // Layout contract: column = clamp(half the window, 380...460); the stage starts at its trailing edge.
+            let expectedColumn = Int(min(460, max(380, window.frame.width * 0.5)))
+            XCTAssertTrue(
+                (380...460).contains(measured.edge),
+                "Step \(step): the art panel starts at x=\(measured.edge), outside the 380...460 column range. Measured edges so far: \(edges)."
+            )
             XCTAssertEqual(
-                measured.edge, 420,
-                "Step \(step): the art panel starts at x=\(measured.edge), not the 420pt OnboardingView's control column is drawn at. Measured edges so far: \(edges)."
+                measured.edge, expectedColumn, accuracy: 1,
+                "Step \(step): the art panel starts at x=\(measured.edge), not at the column's trailing edge x=\(expectedColumn): the two overlap or leave a gap. Measured edges so far: \(edges)."
             )
             if step < OnboardingStep.allCases.count - 1 {
                 pressDefaultButton(in: window)
@@ -181,18 +185,78 @@ final class OnboardingWindowChromeTests: XCTestCase {
         )
     }
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testOnboardingControlColumnKeepsItsWidthInAWindowNarrowerThan880
+    /// True when every sampled pixel in the rectangle matches `background` (the column surface).
+    private func isFlat(_ image: RenderedImage, xs: Range<Int>, ys: [Int], background: RGBA) -> Bool {
+        for x in xs {
+            for y in ys where isOnboardingContent(image.color(atX: x, y: y), background: background) {
+                return false
+            }
+        }
+        return true
+    }
 
-    func testOnboardingControlColumnKeepsItsWidthInAWindowNarrowerThan880() throws {
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testOnboardingStageHidesBelow640AndTheColumnFillsTheWindow
+
+    func testOnboardingStageHidesBelow640AndTheColumnFillsTheWindow() throws {
         let width = 600
+        let window = makeOnboardingWindow(width: CGFloat(width), height: 560)
+        guard let image = capture(window) else {
+            throw TestStopped("Could not capture this process's own window pixels on this machine.")
+        }
+        // (2, 40) is bare column surface. With the stage hidden, the right-hand strip is the same surface.
+        let background = windowBackground(image)
+        let rows = Array(stride(from: 60, to: 500, by: 4))
+        XCTAssertTrue(
+            isFlat(image, xs: (width - 60)..<(width - 6), ys: rows, background: background),
+            "In a \(width)pt-wide window (below the 640pt stage threshold) the right edge still shows stage artwork instead of the control column filling the window."
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testOnboardingStageShowsAt640WithAColumnInRange
+
+    func testOnboardingStageShowsAt640WithAColumnInRange() throws {
+        let width = 640
         let window = makeOnboardingWindow(width: CGFloat(width), height: 560)
         guard let measured = settledMeasurement(window) else {
             throw TestStopped("Could not capture this process's own window pixels on this machine.")
         }
-        XCTAssertGreaterThanOrEqual(
-            measured.edge, 415,
-            "In a \(width)pt-wide window the art panel starts at x=\(measured.edge), taking \(width - measured.edge)pt of \(width): OnboardingView's root frame is centring an 880pt layout and clipping the control column instead of letting the art give up its own width."
+        XCTAssertEqual(
+            measured.edge, 380, accuracy: 1,
+            "At \(width)pt the column should be its 380pt floor (half the window is 320); the art starts at x=\(measured.edge)."
         )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testOnboardingNothingClipsAtTheMinimumWindowSize
+
+    func testOnboardingNothingClipsAtTheMinimumWindowSize() throws {
+        let width = 420
+        let height = 400
+        let window = makeOnboardingWindow(width: CGFloat(width), height: CGFloat(height))
+        guard let image = capture(window) else {
+            throw TestStopped("Could not capture this process's own window pixels on this machine.")
+        }
+        let background = windowBackground(image)
+
+        // The 28pt column padding must stay clear of content on both sides: anything touching the edge is clipped.
+        let rows = Array(stride(from: 60, to: height - 40, by: 4))
+        XCTAssertTrue(
+            isFlat(image, xs: (width - 14)..<(width - 2), ys: rows, background: background),
+            "Content reaches the right edge of a \(width)x\(height) window: the column is clipping."
+        )
+        XCTAssertTrue(
+            isFlat(image, xs: 2..<14, ys: rows, background: background),
+            "Content reaches the left edge of a \(width)x\(height) window: the column is clipping."
+        )
+
+        // The navigation row lives in the bottom strip and must still be drawn there.
+        var navigationDrawn = false
+        for y in stride(from: height - 70, to: height - 10, by: 2) {
+            for x in stride(from: 20, to: width - 20, by: 2)
+            where isOnboardingContent(image.color(atX: x, y: y), background: background) {
+                navigationDrawn = true
+            }
+        }
+        XCTAssertTrue(navigationDrawn, "The navigation row is not visible in the bottom strip of a \(width)x\(height) window: it is clipped off.")
     }
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testOnboardingArtworkPanelStartsAtTheWindowsVeryTopEdge

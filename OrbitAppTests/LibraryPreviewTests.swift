@@ -16,13 +16,13 @@ final class LibraryPreviewTests: XCTestCase {
             .appendingPathComponent("LibraryPreviewTests-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
 
-        LibraryRouter.shared.selectedSection = .downloads
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .downloads
+        env.libraryRouter.selection = nil
     }
 
     override func tearDown() {
-        LibraryRouter.shared.selectedSection = .downloads
-        LibraryRouter.shared.selection = nil
+        env.libraryRouter.selectedSection = .downloads
+        env.libraryRouter.selection = nil
         scratchDirectory = nil
         super.tearDown()
     }
@@ -316,29 +316,48 @@ final class LibraryPreviewTests: XCTestCase {
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testChangingSectionClearsTheSelection
 
-    func testChangingSectionClearsTheSelection() {
-        LibraryRouter.shared.selectedSection = .downloads
+    func testChangingSectionClearsTheSelectionAndTheSearch() {
+        let router = env.libraryRouter
+        router.selectedSection = .downloads
         let id = UUID()
-        LibraryRouter.shared.select(.download(id))
-        XCTAssertEqual(LibraryRouter.shared.selection, .download(id), "test precondition: the row was not selected")
+        router.select(.download(id))
+        router.searchQuery = "report"
+        XCTAssertEqual(router.selection, .download(id), "test precondition: the row was not selected")
 
-        LibraryRouter.shared.selectedSection = .archivedTabs
+        router.selectedSection = .archivedTabs
         XCTAssertNil(
-            LibraryRouter.shared.selection,
-            "Switching Library sections must clear the selection, otherwise a stale row drives the new section's preview."
+            router.selection,
+            "Switching Library sections must clear the selection, otherwise a stale row drives the new section's detail."
         )
+        XCTAssertEqual(router.searchQuery, "", "Switching Library sections must clear the search text of the section left.")
     }
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testSelectingTheSameRowTwiceClearsTheSelection
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testSelectingARowPushesItsDetailAndClearingPopsIt
 
-    func testSelectingTheSameRowTwiceClearsTheSelection() {
+    func testSelectingARowPushesItsDetailAndClearingPopsIt() {
+        let router = env.libraryRouter
         let id = UUID()
 
-        LibraryRouter.shared.select(.note(id))
-        XCTAssertEqual(LibraryRouter.shared.selection, .note(id), "First click must select the row.")
+        router.select(.note(id))
+        XCTAssertEqual(router.selection, .note(id), "Selecting a row must push its detail into the column.")
 
-        LibraryRouter.shared.select(.note(id))
-        XCTAssertNil(LibraryRouter.shared.selection, "Clicking the already-selected row must clear the selection.")
+        router.select(.note(id))
+        XCTAssertEqual(router.selection, .note(id), "Selecting the same row again keeps its detail open; only back closes it.")
+
+        router.clearSelection()
+        XCTAssertNil(router.selection, "The detail's back control must return to the list.")
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEachWindowsEnvironmentOwnsItsOwnLibraryRouter
+
+    func testEachWindowsEnvironmentOwnsItsOwnLibraryRouter() {
+        let other = AppEnvironment.demo
+        env.libraryRouter.selectedSection = .boosts
+        other.libraryRouter.selectedSection = .media
+
+        XCTAssertTrue(env.libraryRouter === env.libraryRouter, "An environment must keep returning the same router.")
+        XCTAssertEqual(env.libraryRouter.selectedSection, .boosts, "Another window's section must not leak into this one.")
+        XCTAssertEqual(other.libraryRouter.selectedSection, .media)
     }
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEverySelectionKnowsItsOwnSection

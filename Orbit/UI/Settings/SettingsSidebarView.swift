@@ -57,11 +57,12 @@ private struct SettingsNavRow: View {
                 RoundedRectangle(cornerRadius: 7)
                     .fill(isSelected ? SettingsPalette.selectedFill : (isHovering ? SettingsPalette.hoverFill : Color.clear))
             )
+            // Without a content shape only the icon and title would take clicks, not the whole pill.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .animation(OrbitMotion.quick, value: isHovering)
-        .animation(OrbitMotion.quick, value: isSelected)
+        .orbitAnimation(OrbitMotion.quick, value: isHovering)
+        .orbitAnimation(OrbitMotion.quick, value: isSelected)
     }
 }
