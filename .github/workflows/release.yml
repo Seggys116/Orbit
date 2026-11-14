@@ -110,6 +110,26 @@ jobs:
           NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
         run: printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
 
+      # The passkey (web-browser.public-key-credential) and iCloud entitlements
+      # are managed capabilities: they reach a build only inside a provisioning
+      # profile. Without one the signing step leaves them out and warns. With a
+      # profile that does not grant all of them, Scripts/release refuses to
+      # sign, because macOS would kill the app at launch.
+      - name: Install the provisioning profile
+        id: profile
+        env:
+          PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
+        run: |
+          if [ -z "$PROVISIONING_PROFILE" ]; then
+            echo "::warning::MACOS_PROVISIONING_PROFILE is not set. This release ships without passkeys, security keys, the iCloud Passwords extension or iCloud sync."
+            echo "path=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PROFILE="$RUNNER_TEMP/orbit.provisionprofile"
+          printf '%s' "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE"
+          security cms -D -i "$PROFILE" > /dev/null
+          echo "path=$PROFILE" >> "$GITHUB_OUTPUT"
+
       - name: Archive
         env:
           KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
@@ -150,6 +170,7 @@ jobs:
       - name: Sign for distribution
         env:
           ORBIT_SIGN_KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+          ORBIT_PROVISIONING_PROFILE: ${{ steps.profile.outputs.path }}
           IDENTITY: ${{ steps.keychain.outputs.identity }}
         run: |
           APP="$RUNNER_TEMP/export/Orbit.app"
