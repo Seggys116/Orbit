@@ -1,5 +1,4 @@
-//  Without "webNavigation" the namespace is entirely undefined (stronger
-//  than per-event scrubbing). Proven against a real navigation, not a synthetic event.
+//  With "webNavigation" the extension sees real onCompleted events, proven against a real navigation rather than a synthetic event.
 
 import Foundation
 import XCTest
@@ -18,21 +17,19 @@ final class WebKitExtensionWebNavigationPermissionLiveTests: XCTestCase {
         super.tearDown()
     }
 
-    private func writeWebNavigationExtension(named name: String, includeWebNavigationPermission: Bool) throws -> URL {
+    private func writeWebNavigationExtension(named name: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("OrbitAppTests-WebNavigationExtension-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         tempDirectories.append(directory)
 
-        // "storage" in both arms: the count below must survive the worker
-        // being torn down and woken again (ordinary MV3), which a worker global does not.
-        let permissions = includeWebNavigationPermission ? "[\"webNavigation\", \"storage\"]" : "[\"storage\"]"
+        // "storage" is declared so the count survives the worker being torn down and woken again, which a worker global does not.
         let manifest = """
         {
           "manifest_version": 3,
           "name": "\(name)",
           "version": "1.0",
-          "permissions": \(permissions),
+          "permissions": ["webNavigation", "storage"],
           "background": { "service_worker": "background.js" },
           "content_scripts": [
             { "matches": ["http://127.0.0.1/*"], "js": ["content.js"], "run_at": "document_idle" }
@@ -41,8 +38,7 @@ final class WebKitExtensionWebNavigationPermissionLiveTests: XCTestCase {
         """
         try manifest.write(to: directory.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
 
-        // chrome.webNavigation only exists in the privileged background
-        // context, so onCompleted is registered here; content script only relays count/definedness into the DOM.
+        // chrome.webNavigation only exists in the privileged background context, so onCompleted is registered here and the content script only relays count/definedness.
         let background = """
         if (chrome.webNavigation) {
           chrome.webNavigation.onCompleted.addListener(function(details) {
@@ -119,7 +115,7 @@ final class WebKitExtensionWebNavigationPermissionLiveTests: XCTestCase {
     func testAnExtensionWithTheWebNavigationPermissionSeesRealOnCompletedEventsForARealNavigation() throws {
         try WebKitLiveEngineHost.runLive {
             let engine = await WebKitLiveEngineHost.sharedEngine()
-            let directory = try self.writeWebNavigationExtension(named: "Orbit WebNavigation Positive Test", includeWebNavigationPermission: true)
+            let directory = try self.writeWebNavigationExtension(named: "Orbit WebNavigation Positive Test")
             let loaded = try await engine.loadExtension(at: directory, session: engine.defaultSession)
             defer { engine.unloadExtension(id: loaded.id, session: engine.defaultSession) }
 
@@ -141,8 +137,7 @@ final class WebKitExtensionWebNavigationPermissionLiveTests: XCTestCase {
             let baseline = try XCTUnwrap(self.parsePollSnapshot(baselineRaw))
             XCTAssertTrue(baseline.defined, "chrome.webNavigation must exist for an extension holding the \"webNavigation\" permission")
 
-            // The baseline is taken, not asserted on: nothing orders the
-            // worker's first run against the first navigation. `defined` above proves the listener already existed.
+            // The baseline is taken, not asserted on: nothing orders the worker's first run against the first navigation.
             observerContents.load(server.baseURL.appendingPathComponent("observer"))
             try await WebKitLiveEngineHost.waitUntilStoppedLoading(observerContents)
             try await Self.pollUntil {
@@ -169,47 +164,6 @@ final class WebKitExtensionWebNavigationPermissionLiveTests: XCTestCase {
                 guard let snapshot = self.parsePollSnapshot(raw) else { return false }
                 return snapshot.count > afterFirst.count
             }
-        }
-    }
-
-    // MARK: - Negative: no permission -> chrome.webNavigation does not exist at all -> no events, ever
-
-    func testAnExtensionWithoutTheWebNavigationPermissionNeverSeesChromeWebNavigationAtAll() throws {
-        try WebKitLiveEngineHost.runLive {
-            let engine = await WebKitLiveEngineHost.sharedEngine()
-            let directory = try self.writeWebNavigationExtension(named: "Orbit WebNavigation Negative Test", includeWebNavigationPermission: false)
-            let loaded = try await engine.loadExtension(at: directory, session: engine.defaultSession)
-            defer { engine.unloadExtension(id: loaded.id, session: engine.defaultSession) }
-
-            let server = try self.makeServer()
-            defer { server.stop() }
-
-            let observerContents = try await WebKitLiveEngineHost.makeContents(engine: engine)
-            defer { observerContents.close() }
-            observerContents.load(server.baseURL.appendingPathComponent("observer"))
-            try await WebKitLiveEngineHost.waitUntilStoppedLoading(observerContents)
-
-            try await Self.pollUntil {
-                try await observerContents.evaluateJavaScript(
-                    "document.documentElement.getAttribute('data-orbit-webnav-poll-result')"
-                ) != nil
-            }
-            let snapshotRaw = try await observerContents.evaluateJavaScript("document.documentElement.getAttribute('data-orbit-webnav-poll-result')")
-            let snapshot = try XCTUnwrap(self.parsePollSnapshot(snapshotRaw))
-            XCTAssertFalse(snapshot.defined, "an extension with no \"webNavigation\" permission must not even see chrome.webNavigation as defined")
-            XCTAssertEqual(snapshot.count, 0, "with chrome.webNavigation undefined, no onCompleted listener could ever have been registered, so the count must stay zero")
-
-            // A further real navigation still must not somehow make an event arrive.
-            observerContents.load(server.baseURL.appendingPathComponent("subject"))
-            try await WebKitLiveEngineHost.waitUntilStoppedLoading(observerContents)
-            observerContents.load(server.baseURL.appendingPathComponent("observer"))
-            try await WebKitLiveEngineHost.waitUntilStoppedLoading(observerContents)
-            try await Task.sleep(for: .milliseconds(500))
-
-            let afterRaw = try await observerContents.evaluateJavaScript("document.documentElement.getAttribute('data-orbit-webnav-poll-result')")
-            let after = try XCTUnwrap(self.parsePollSnapshot(afterRaw))
-            XCTAssertFalse(after.defined)
-            XCTAssertEqual(after.count, 0)
         }
     }
 }

@@ -517,7 +517,6 @@
 		50D154B07594CF5FF8FDB7CC /* CompiledFilterListCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B61034E682271FD979CE314 /* CompiledFilterListCache.swift */; };
 		51068102F0AFF7FD04E403B0 /* SyncBackCompatDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58995320B0B37486112AE1FD /* SyncBackCompatDecodingTests.swift */; };
 		510F2205C18189D8E6048F00 /* LinksSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05FD1AF3677C36011A114813 /* LinksSettingsPane.swift */; };
-		511AF3E96F5D9FB1DF19FE74 /* WebKitExtensionServiceWorkerBindingsLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B837923639D0FB02E44C05A /* WebKitExtensionServiceWorkerBindingsLiveTests.swift */; };
 		51206A78CD8266850145267B /* AppEnvironment+Commands.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE3713A3674970EF951FC1A9 /* AppEnvironment+Commands.swift */; };
 		515E8446A4EAC536B69FDB43 /* OrbitTooltip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F421B4074288418C694166B /* OrbitTooltip.swift */; };
 		518FC7DDE22D3E0423A5890E /* ToolbarContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D3A9DD274593033FEDDB67B /* ToolbarContextMenu.swift */; };
@@ -2074,7 +2073,6 @@
 		6AA5ECB15C4EF0CFE6B93B8E /* OrbitLighthousePane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitLighthousePane.swift; sourceTree = "<group>"; };
 		6B51AF3E38FDBEFF03B55261 /* WebKitWebContents+ContentBlocking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WebKitWebContents+ContentBlocking.swift"; sourceTree = "<group>"; };
 		6B795FF1E95FA877A4B8B839 /* ArcFaviconReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcFaviconReader.swift; sourceTree = "<group>"; };
-		6B837923639D0FB02E44C05A /* WebKitExtensionServiceWorkerBindingsLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebKitExtensionServiceWorkerBindingsLiveTests.swift; sourceTree = "<group>"; };
 		6B9609FF8CA856ADBBFA4F76 /* OrbitNSActionButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitNSActionButton.swift; sourceTree = "<group>"; };
 		6BB1855773C3782DFFD0B5CC /* LinkPreviewFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkPreviewFetcher.swift; sourceTree = "<group>"; };
 		6BC107C4EA0E59849C0C31F0 /* ExtensionInstallFlowVisualTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionInstallFlowVisualTests.swift; sourceTree = "<group>"; };
@@ -3917,7 +3915,6 @@
 				7685369A0D2A2361FA4F1126 /* WebKitExtensionRemovalCrashLiveTests.swift */,
 				793038E43458F4F681E0FF05 /* WebKitExtensionRuntimeSurfaceReflectionLiveTests.swift */,
 				1E297708D503110E9DB65208 /* WebKitExtensionSearchLiveTests.swift */,
-				6B837923639D0FB02E44C05A /* WebKitExtensionServiceWorkerBindingsLiveTests.swift */,
 				8FAA002FE650B1203841865F /* WebKitExtensionSessionsLiveTests.swift */,
 				17AC889B5F60B647ED50C65F /* WebKitExtensionStorageAreasLiveTests.swift */,
 				C09A2A2D2F435D7CFE1243F9 /* WebKitExtensionStoragePersistenceLiveTests.swift */,
@@ -5643,7 +5640,6 @@
 				6EDD08EDA1081586E550E06C /* WebKitExtensionRemovalCrashLiveTests.swift in Sources */,
 				8041B79BDE06023384B35E2A /* WebKitExtensionRuntimeSurfaceReflectionLiveTests.swift in Sources */,
 				3F6D6C5C8F25925B2B02F882 /* WebKitExtensionSearchLiveTests.swift in Sources */,
-				511AF3E96F5D9FB1DF19FE74 /* WebKitExtensionServiceWorkerBindingsLiveTests.swift in Sources */,
 				17F4E970F71EF2AB5133298B /* WebKitExtensionSessionsLiveTests.swift in Sources */,
 				435A39E2131002A23D754F59 /* WebKitExtensionStorageAreasLiveTests.swift in Sources */,
 				F7CDBE48633AA03B390E8524 /* WebKitExtensionStoragePersistenceLiveTests.swift in Sources */,

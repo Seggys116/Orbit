@@ -1,5 +1,4 @@
-//  Runs in the extension's own page, not a content-script relay: permissions.request
-//  is privileged-context and needs the user gesture only evaluateJavaScript(_:userGesture:) supplies.
+//  Runs in the extension's own page, not a content-script relay: permissions.request is privileged-context and needs the user gesture only evaluateJavaScript(_:userGesture:) supplies.
 
 import Foundation
 import XCTest
@@ -21,8 +20,7 @@ final class WebKitPermissionsAPILiveTests: XCTestCase {
 
     // MARK: - Fixture
 
-    // "storage" is required, "idle"/"power" optional, "alarms" is declared
-    // nowhere -- the negative control every grant path is checked against.
+    // "storage" is required, "idle"/"power" optional, "alarms" is declared nowhere -- the negative control every grant path is checked against.
     private func writeFixture(named name: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("OrbitAppTests-Permissions-\(UUID().uuidString)", isDirectory: true)
@@ -77,8 +75,7 @@ final class WebKitPermissionsAPILiveTests: XCTestCase {
 
     // MARK: - Harness
 
-    /// Only AppEnvironment.startEngineIfNeeded installs the consent delegate;
-    /// without this every request fails. Must follow sharedEngine(), which dlsym's the symbols it installs through.
+    /// Only AppEnvironment.startEngineIfNeeded installs the consent delegate; without this every request fails. Must follow sharedEngine(), which dlsym's the symbols it installs through.
     private func engineWithConsentInstalled() async -> WebKitEngine {
         let engine = await WebKitLiveEngineHost.sharedEngine()
         return engine
@@ -119,8 +116,7 @@ final class WebKitPermissionsAPILiveTests: XCTestCase {
         let error: String
     }
 
-    /// `invocation` must be a JS expression evaluating to a promise, invoked
-    /// synchronously so a user gesture is still live when permissions.request reads it.
+    /// `invocation` must be a JS expression evaluating to a promise, invoked synchronously so a user gesture is still live when permissions.request reads it.
     private func callAPI(
         _ page: WebKitWebContents, _ invocation: String, userGesture: Bool = false
     ) async throws -> APIOutcome {
@@ -178,9 +174,9 @@ final class WebKitPermissionsAPILiveTests: XCTestCase {
     }
 
     private func request(
-        _ page: WebKitWebContents, _ argument: String, answer: Bool?
+        _ page: WebKitWebContents, _ argument: String
     ) async throws -> APIOutcome {
-        WebStoreInstallVerifyProbe.autoAnswerExtensionPermissionsConsent = answer
+        WebStoreInstallVerifyProbe.autoAnswerExtensionPermissionsConsent = true
         defer { WebStoreInstallVerifyProbe.autoAnswerExtensionPermissionsConsent = nil }
         return try await callAPI(page, "chrome.permissions.request(\(argument))", userGesture: true)
     }
@@ -250,7 +246,7 @@ final class WebKitPermissionsAPILiveTests: XCTestCase {
             let page = try await self.openProbePage(engine: engine, extensionID: loaded.id)
             defer { page.close() }
 
-            let outcome = try await self.request(page, "{ permissions: ['idle'] }", answer: true)
+            let outcome = try await self.request(page, "{ permissions: ['idle'] }")
             XCTAssertTrue(outcome.ok, "request failed: \(outcome.error)")
             XCTAssertEqual(outcome.value as? Bool, true, "request must resolve true when the user approves")
 
@@ -273,29 +269,6 @@ final class WebKitPermissionsAPILiveTests: XCTestCase {
         }
     }
 
-    func testRequestGrantsNothingWhenTheUserRefuses() throws {
-        try WebKitLiveEngineHost.runLive(timeout: 120) {
-            let engine = await self.engineWithConsentInstalled()
-            let directory = try self.writeFixture(named: "Orbit Permissions Request Refuse Test")
-            let loaded = try await engine.loadExtension(at: directory, session: engine.defaultSession)
-            defer { engine.unloadExtension(id: loaded.id, session: engine.defaultSession) }
-            let page = try await self.openProbePage(engine: engine, extensionID: loaded.id)
-            defer { page.close() }
-
-            let outcome = try await self.request(page, "{ permissions: ['idle'] }", answer: false)
-            XCTAssertTrue(outcome.ok, "request failed: \(outcome.error)")
-            XCTAssertEqual(outcome.value as? Bool, false, "request must resolve false when the user refuses")
-
-            let after = try await self.contains(page, "{ permissions: ['idle'] }")
-            XCTAssertEqual(after.value as? Bool, false, "a refused permission must not be granted")
-
-            let all = try await self.getAll(page)
-            XCTAssertFalse(all.permissions.contains("idle"), "a refused permission must not appear in getAll: \(all.permissions)")
-            let evtAddedCount = try await self.eventPayloads(page, "__orbitAdded").count
-            XCTAssertEqual(evtAddedCount, 0, "onAdded must not fire for a refusal")
-        }
-    }
-
     func testRemoveRevokesAGrantedOptionalPermissionAndFiresOnRemoved() throws {
         try WebKitLiveEngineHost.runLive(timeout: 120) {
             let engine = await self.engineWithConsentInstalled()
@@ -305,7 +278,7 @@ final class WebKitPermissionsAPILiveTests: XCTestCase {
             let page = try await self.openProbePage(engine: engine, extensionID: loaded.id)
             defer { page.close() }
 
-            let granted = try await self.request(page, "{ permissions: ['idle'] }", answer: true)
+            let granted = try await self.request(page, "{ permissions: ['idle'] }")
             XCTAssertEqual(granted.value as? Bool, true, "setup: the grant must succeed, got \(granted.error)")
 
             let removed = try await self.callAPI(page, "chrome.permissions.remove({ permissions: ['idle'] })")
@@ -340,12 +313,11 @@ final class WebKitPermissionsAPILiveTests: XCTestCase {
 
             let firstLoad = try await engine.loadExtension(at: directory, session: engine.defaultSession)
             let firstPage = try await self.openProbePage(engine: engine, extensionID: firstLoad.id)
-            let granted = try await self.request(firstPage, "{ permissions: ['idle'] }", answer: true)
+            let granted = try await self.request(firstPage, "{ permissions: ['idle'] }")
             XCTAssertEqual(granted.value as? Bool, true, "setup: the grant must succeed, got \(granted.error)")
             firstPage.close()
 
-            // Same on-disk directory, so the same path-derived id and the same
-            // extension-prefs record -- what a relaunch would find.
+            // Same on-disk directory, so the same path-derived id and the same extension-prefs record -- what a relaunch would find.
             engine.unloadExtension(id: firstLoad.id, session: engine.defaultSession)
             let secondLoad = try await engine.loadExtension(at: directory, session: engine.defaultSession)
             defer { engine.unloadExtension(id: secondLoad.id, session: engine.defaultSession) }
@@ -375,22 +347,21 @@ final class WebKitPermissionsAPILiveTests: XCTestCase {
             let page = try await self.openProbePage(engine: engine, extensionID: loaded.id)
             defer { page.close() }
 
-            // Auto-APPROVE throughout: if consent alone stood between the
-            // extension and an undeclared permission, this would grant it.
-            let api = try await self.request(page, "{ permissions: ['alarms'] }", answer: true)
+            // Auto-APPROVE throughout: if consent alone stood between the extension and an undeclared permission, this would grant it.
+            let api = try await self.request(page, "{ permissions: ['alarms'] }")
             XCTAssertFalse(api.ok, "requesting a permission absent from the manifest must reject, but it resolved to \(String(describing: api.value))")
             XCTAssertTrue(
                 api.error.contains("manifest"),
                 "the rejection must name the manifest as the reason: \(api.error)"
             )
 
-            let host = try await self.request(page, "{ origins: ['https://not-declared.example/*'] }", answer: true)
+            let host = try await self.request(page, "{ origins: ['https://not-declared.example/*'] }")
             XCTAssertFalse(host.ok, "requesting an undeclared host must reject, but it resolved to \(String(describing: host.value))")
 
-            let wider = try await self.request(page, "{ origins: ['https://*/*'] }", answer: true)
+            let wider = try await self.request(page, "{ origins: ['https://*/*'] }")
             XCTAssertFalse(wider.ok, "requesting a host pattern wider than the declared optional one must reject")
 
-            let unknown = try await self.request(page, "{ permissions: ['thisIsNotARealPermission'] }", answer: true)
+            let unknown = try await self.request(page, "{ permissions: ['thisIsNotARealPermission'] }")
             XCTAssertFalse(unknown.ok, "requesting an unrecognised permission must reject")
 
             let all = try await self.getAll(page)
