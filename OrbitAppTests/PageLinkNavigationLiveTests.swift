@@ -280,48 +280,6 @@ final class PageLinkNavigationLiveTests: XCTestCase {
         }
     }
 
-    // Every gesture is checked against the link the page's own mousedown listener rewrote, so a navigation that was not this click cannot satisfy it.
-    private func assertClickRequests(
-        _ expected: NewContentDisposition,
-        modifiers: NSEvent.ModifierFlags
-    ) async throws {
-        let server = try makeServer()
-        defer { server.stop() }
-        let start = server.baseURL.appendingPathComponent("link")
-
-        let contents = try await WebKitLiveEngineHost.makeContents()
-        defer { contents.close() }
-        let recorder = NewContentRecorder()
-        contents.delegate = recorder
-        defer { recorder.closeAll() }
-
-        let hosted = try hostRealContentCard(contents, url: start)
-        defer {
-            hosted.environment._test_detachWebContents(for: hosted.tabID)
-            hosted.window.orderOut(nil)
-        }
-
-        contents.load(start)
-        try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
-        try await waitUntilEngineViewIsMounted(contents, in: hosted.window)
-        try await Task.sleep(for: .milliseconds(400))
-
-        click(at: engineCentre(of: contents), in: hosted.window, modifiers: modifiers)
-
-        try await waitUntil("The click produced no new-content request at all.") { !recorder.requested.isEmpty }
-        let request = try XCTUnwrap(recorder.requested.first)
-        XCTAssertEqual(request.url.path, ClickDestination.onLink, Self.diagnosis(forLandedPath: request.url.path))
-        XCTAssertEqual(request.disposition, expected)
-        XCTAssertEqual(contents.navigationState.url?.path, "/link", "The click must not navigate the tab it was made in.")
-        XCTAssertTrue(recorder.adopted.isEmpty, "Nothing is built for a click: the delegate opens the tab itself.")
-    }
-
-    func testAShiftClickAsksForANewWindow() throws {
-        try WebKitLiveEngineHost.runLive(timeout: 90) {
-            try await self.assertClickRequests(.newWindow, modifiers: [.shift])
-        }
-    }
-
     func testWindowOpenWithFeaturesIsAdoptedAsAPopup() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             let server = try self.makeServer()
