@@ -327,6 +327,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
 
     // MARK: - Focus reports
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testFocusingAFieldReportsItsKindFrameOriginAndScreenRectAtAnyZoom
+
     func testFocusingAFieldReportsItsKindFrameOriginAndScreenRectAtAnyZoom() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             let page = try await self.openPage(Self.loginForm)
@@ -409,6 +411,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
 
     // MARK: - Only a person raises the suggestion panel
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAFocusFromPageScriptIsNotReportedButARealClickIs
+
     func testAFocusFromPageScriptIsNotReportedButARealClickIs() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             let page = try await self.openPage(Self.loginForm)
@@ -436,6 +440,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testARealClickElsewhereDoesNotLetAScriptRaiseAField
+
     func testARealClickElsewhereDoesNotLetAScriptRaiseAField() throws {
         let html = Self.loginForm.replacingOccurrences(
             of: "</body>",
@@ -450,6 +456,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
             XCTAssertTrue(page.recorder.focuses.isEmpty, "a click on something else was taken as input on the field")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTabbingToTheNextFieldIsReported
 
     func testTabbingToTheNextFieldIsReported() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
@@ -480,6 +488,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
 
     /// A submit event alone only parks the sign-in; it is delivered once the page it led to loads without a sign-in form of its own, so these
     /// pages really navigate (a local server) and the test waits for that decision.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAScriptDrivenSubmitWithNoRealInputIsNotCapturedButOneAfterARealClickIs
+
     func testAScriptDrivenSubmitWithNoRealInputIsNotCapturedButOneAfterARealClickIs() throws {
         try WebKitLiveEngineHost.runLive(timeout: 120) {
             let server = try LiveHTTPTestServer(routes: [
@@ -537,6 +547,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
 
     // MARK: - Filling
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAFillReachesAControlledInputAndLeavesAHiddenFieldAlone
+
     func testAFillReachesAControlledInputAndLeavesAHiddenFieldAlone() throws {
         let state = try WebKitLiveEngineHost.runLive(timeout: 90) { () -> String in
             let page = try await self.openPage(Self.controlledForm)
@@ -571,6 +583,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
         XCTAssertTrue(events.contains("u:change") && events.contains("p:change"), "change events were not dispatched: \(events)")
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAFillIsRefusedForAFrameWhoseSiteIsNotTheLoginsSite
+
     func testAFillIsRefusedForAFrameWhoseSiteIsNotTheLoginsSite() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             let page = try await self.openPage(Self.controlledForm)
@@ -593,6 +607,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
             XCTAssertEqual(unknown, .fieldUnavailable, "a token the page never reported must not name a field")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAnHTTPSLoginIsNeverFilledIntoAnHTTPFrameButAnHTTPLoginMayBe
 
     func testAnHTTPSLoginIsNeverFilledIntoAnHTTPFrameButAnHTTPLoginMayBe() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
@@ -695,6 +711,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testMultiStepFillTakesTheUsernameFirstAndTheNextStepOffersTheSameLoginFirst
+
     func testMultiStepFillTakesTheUsernameFirstAndTheNextStepOffersTheSameLoginFirst() throws {
         let html = """
         <html><body style="margin:0;font:14px sans-serif">
@@ -725,6 +743,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testChoosingARowFillsTheFieldAndMarksTheLoginUsed
+
     func testChoosingARowFillsTheFieldAndMarksTheLoginUsed() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             let page = try await self.openPage(Self.controlledForm)
@@ -746,6 +766,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
     }
 
     // MARK: - Capturing a sign-in
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testASignInThatRemovesItsPasswordFieldIsCapturedOnce
 
     func testASignInThatRemovesItsPasswordFieldIsCapturedOnce() throws {
         let html = """
@@ -782,6 +804,8 @@ final class PasswordAutofillLiveTests: XCTestCase {
             XCTAssertEqual(submission.origin.absoluteString, "https://login.example.test")
         }
     }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAGeneratedPasswordFillsTheNewPasswordAndItsConfirmationAndIsCapturedAsNew
 
     func testAGeneratedPasswordFillsTheNewPasswordAndItsConfirmationAndIsCapturedAsNew() throws {
         let html = """

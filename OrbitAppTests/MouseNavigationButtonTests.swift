@@ -15,6 +15,8 @@ final class MouseNavigationButtonTests: XCTestCase {
     }
 
     @MainActor
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAClickInAWindowThatIsNotABrowserWindowPassesThrough
+
     func testAClickInAWindowThatIsNotABrowserWindowPassesThrough() throws {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

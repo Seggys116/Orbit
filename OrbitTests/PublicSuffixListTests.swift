@@ -1,5 +1,4 @@
 import XCTest
-@testable import Orbit
 
 final class PublicSuffixListTests: XCTestCase {
 
