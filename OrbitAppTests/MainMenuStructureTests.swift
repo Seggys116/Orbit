@@ -196,15 +196,71 @@ final class MainMenuStructureTests: XCTestCase {
         first.close()
     }
 
+    // MARK: Menu bar is kept
+
+    // The SwiftUI App scene installs its own View/Window/Help menu at times Orbit does not control.
+    func testMainMenuIsPutBackWhenSomethingReplacesIt() async throws {
+        let previous = NSApp.mainMenu
+        defer {
+            if let previous { MainMenuKeeper.shared.install(previous) }
+        }
+        let ours = NSMenu(title: "Ours")
+        let stock = NSMenu(title: "Stock")
+
+        MainMenuKeeper.shared.install(ours)
+        XCTAssertTrue(NSApp.mainMenu === ours)
+
+        NSApp.mainMenu = stock
+        MainMenuKeeper.shared.restoreIfReplaced()
+        XCTAssertTrue(NSApp.mainMenu === ours, "An explicit check must put Orbit's menu back.")
+
+        // With no check called: the observation alone has to repair it.
+        NSApp.mainMenu = stock
+        for _ in 0..<50 where NSApp.mainMenu !== ours {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(NSApp.mainMenu === ours, "A replacement that nobody checks for must still be undone.")
+    }
+
     // MARK: Dock menu
 
     func testDockMenuOffersNewWindowIncognitoAndNewTab() {
-        let items = OrbitAppDelegate.buildDockMenu().items
+        let items = OrbitAppDelegate.buildDockMenu(windows: []).items
         XCTAssertEqual(items.map(\.title), ["New Window", "New Incognito Window", "New Tab"])
     }
 
+    func testDockMenuListsEachOpenWindowBelowTheCommands() {
+        let first = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+        let second = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+        let menu = OrbitAppDelegate.buildDockMenu(windows: [
+            DockWindowEntry(window: first, title: "Apple"),
+            DockWindowEntry(window: second, title: "Incognito: Example"),
+        ])
+
+        XCTAssertEqual(
+            menu.items.map(\.title),
+            ["New Window", "New Incognito Window", "New Tab", "", "Apple", "Incognito: Example"]
+        )
+        XCTAssertTrue(menu.items[3].isSeparatorItem)
+        let rows = menu.items.compactMap { $0 as? DockWindowMenuItem }
+        XCTAssertEqual(rows.count, 2)
+        for row in rows {
+            XCTAssertNotNil(row.target, "A window row with no target would fall through the empty responder chain of a Dock menu click.")
+            XCTAssertNotNil(row.action)
+        }
+    }
+
+    func testDockWindowRowTitlesAreSingleLineAndBounded() {
+        XCTAssertEqual(DockWindowMenuItem.displayTitle("  Apple\nStore  "), "Apple Store")
+        XCTAssertEqual(DockWindowMenuItem.displayTitle(""), "Untitled")
+        let long = String(repeating: "a", count: 200)
+        let shown = DockWindowMenuItem.displayTitle(long)
+        XCTAssertEqual(shown.count, DockWindowMenuItem.maximumTitleLength)
+        XCTAssertTrue(shown.hasSuffix("\u{2026}"))
+    }
+
     func testDockMenuItemsAreAllTargetedAndActionable() {
-        for item in OrbitAppDelegate.buildDockMenu().items {
+        for item in OrbitAppDelegate.buildDockMenu(windows: []).items {
             XCTAssertNotNil(item.target, "Dock row \(item.title) has a nil target and would fall through the responder chain, which is empty for a Dock menu click.")
             XCTAssertNotNil(item.action, "Dock row \(item.title) must be wired to something")
         }
@@ -214,7 +270,7 @@ final class MainMenuStructureTests: XCTestCase {
     // ShortcutCommandID the File menu's own rows dispatch through, so the two
     // surfaces can never drift apart.
     func testDockMenuReusesTheSameCommandsAsTheFileMenu() throws {
-        let dockItems = OrbitAppDelegate.buildDockMenu().items.compactMap { $0 as? DockCommandMenuItem }
+        let dockItems = OrbitAppDelegate.buildDockMenu(windows: []).items.compactMap { $0 as? DockCommandMenuItem }
         XCTAssertEqual(dockItems.count, 3, "Every Dock row must be a DockCommandMenuItem")
 
         let newWindowRow = try row(["File", "New Window"]) as? CommandMenuItem

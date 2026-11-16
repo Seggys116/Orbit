@@ -433,6 +433,7 @@ private struct TabRowChrome: View, Equatable {
                 .focused($titleFieldFocused)
                 .onSubmit { rename.commit(tabID: tab.id, in: env) }
                 .onExitCommand { rename.cancel() }
+                .commitsOnOutsideClick(while: rename.isEditing) { rename.commit(tabID: tab.id, in: env) }
         } else if showsPinnedResetPreview {
             pinnedResetPreviewText.allowsHitTesting(false)
         } else if isRenameable {
@@ -683,6 +684,7 @@ struct PinnedFolderRowView: View {
                     .focused($focused)
                     .onSubmit(commitRename)
                     .onExitCommand { isRenaming = false }
+                    .commitsOnOutsideClick(while: isRenaming, perform: commitRename)
             } else {
                 OrbitNSActionButton(onClickCount: { handleNameLabelClick(clickCount: $0) }) {
                     Text(folder.name)

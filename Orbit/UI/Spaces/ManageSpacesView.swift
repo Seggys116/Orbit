@@ -289,6 +289,7 @@ private struct ManageSpacesColumnHeader: View {
                     .focused($fieldFocused)
                     .onSubmit(commitRename)
                     .onExitCommand { isRenaming = false }
+                    .commitsOnOutsideClick(while: isRenaming, perform: commitRename)
             } else {
                 Text(space.name)
                     .font(OrbitFont.spaceTitle)
@@ -388,6 +389,7 @@ private struct ManageSpacesColumnFooter: View {
                     .focused($fieldFocused)
                     .onSubmit(commitRename)
                     .onExitCommand { isRenaming = false }
+                    .commitsOnOutsideClick(while: isRenaming, perform: commitRename)
                     .padding(.horizontal, ManageSpacesMetrics.headerPadding)
             }
         }

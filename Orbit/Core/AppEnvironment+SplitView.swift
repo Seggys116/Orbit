@@ -148,9 +148,37 @@ extension AppEnvironment {
         return true
     }
 
+    /// Takes the pane out of its split and leaves its page open. The pane's close control is `closeSplitPaneTab`.
     func closeSplitPane(_ tabID: TabID) {
         store.removeFromSplit(tabID)
         focusedSplitPaneIndex = 0
+    }
+
+    /// What the close control on a pane does: closes that one page, by the same rule as Close Tab, and leaves
+    /// the other panes as they were. A split of three keeps its other two; a split of two leaves the survivor
+    /// full size. Focus lands on the pane beside the closed one, not on whichever tab the Space last used.
+    func closeSplitPaneTab(_ tabID: TabID) {
+        let survivor = splitGroup(for: tabID).flatMap { group -> TabID? in
+            guard let index = group.tabIDs.firstIndex(of: tabID) else { return nil }
+            let neighbours = [index + 1, index - 1].filter { group.tabIDs.indices.contains($0) }
+            return neighbours.first.map { group.tabIDs[$0] }
+        }
+        let wasActive = activeTabID == tabID
+
+        if let page = tab(tabID), NewTabPageModel.isUnlisted(page) {
+            discardNewTabPage(tabID)
+        } else {
+            closeTabPreservingBookmark(tabID)
+        }
+        focusedSplitPaneIndex = 0
+
+        guard wasActive, let survivor, tab(survivor) != nil else { return }
+        if let group = splitGroup(for: survivor), let index = group.tabIDs.firstIndex(of: survivor) {
+            activateTab(survivor)
+            focusedSplitPaneIndex = index
+        } else {
+            activateTab(survivor)
+        }
     }
 
     func separateAllTabs(_ groupID: UUID) {

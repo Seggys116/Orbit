@@ -34,6 +34,7 @@ struct SpaceEditPopover: View {
                 TextField("Space name", text: $draftName)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(commitRename)
+                    .commitsOnOutsideClick(while: true, perform: commitRename)
             }
 
             Button {

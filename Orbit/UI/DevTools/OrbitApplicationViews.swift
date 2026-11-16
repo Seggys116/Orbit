@@ -72,6 +72,55 @@ private struct AppSidebarRow: View {
     }
 }
 
+// MARK: - Optional detail split
+
+/// A table with a detail pane that only exists while `showsDetail` is true. Without a selection the table takes the
+/// whole area. The table is always the first child, so selecting a row keeps its scroll position instead of rebuilding it.
+/// Shares the saved width and the resize handle with `InspectSplit` (same `key`).
+private struct AppDetailSplit<First: View, Second: View>: View {
+    var key: String
+    var showsDetail: Bool
+    var defaultFraction: CGFloat
+    var minFirst: CGFloat
+    var minSecond: CGFloat
+    @ViewBuilder var first: () -> First
+    @ViewBuilder var second: () -> Second
+
+    @State private var fraction: CGFloat?
+
+    private var storageKey: String { "orbit.inspect.split.\(key)" }
+
+    var body: some View {
+        GeometryReader { geo in
+            let total = max(1, geo.size.width)
+            let stored = OrbitDefaults.standard.object(forKey: storageKey) as? Double
+            let value = fraction ?? stored.map { CGFloat($0) } ?? defaultFraction
+            let upper = max(minFirst, total - minSecond - 7)
+            let firstSize = showsDetail ? min(max(total * value, minFirst), upper) : total
+            HStack(alignment: .top, spacing: 0) {
+                first().frame(width: firstSize, height: geo.size.height, alignment: .top).clipped()
+                if showsDetail {
+                    InspectResizeHandle(
+                        vertical: false,
+                        sign: 1,
+                        minBreadth: minFirst,
+                        maxBreadth: upper,
+                        current: { firstSize },
+                        onChange: { fraction = $0 / total },
+                        onEnd: {
+                            if let fraction { OrbitDefaults.standard.set(Double(fraction), forKey: storageKey) }
+                        }
+                    )
+                    .frame(width: 7)
+                    .background(InspectChrome.hairline.frame(width: 1))
+                    .accessibilityLabel("Resize panes")
+                    second().frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Storage table (local + session)
 
 struct AppStorageTableView: View {
@@ -94,11 +143,25 @@ struct AppStorageTableView: View {
         enum EditField { case value }
     }
 
+    private var selectedEntry: OrbitApplicationLogic.StorageEntry? {
+        guard let key = selectedKey else { return nil }
+        return entries.first { $0.key == key }
+    }
+
     var body: some View {
-        InspectSplit(key: "app.storage.detail", defaultFraction: 0.6, minFirst: 150, minSecond: 100, stackBelow: 0) {
+        AppDetailSplit(key: "app.storage.detail", showsDetail: selectedEntry != nil,
+                       defaultFraction: 0.6, minFirst: 150, minSecond: 100) {
             tableContent
         } second: {
             detailPanel
+        }
+        // Deselect when the row is deleted, filtered out, or the origin changes, so no stale selection lingers.
+        .onChange(of: selectedKey != nil && selectedEntry == nil) { _, stale in
+            if stale { selectedKey = nil }
+        }
+        .onChange(of: origin) { _, _ in
+            selectedKey = nil
+            editingCell = nil
         }
     }
 
@@ -169,11 +232,12 @@ struct AppStorageTableView: View {
                     .textFieldStyle(.plain)
                     .font(InspectChrome.mono)
                     .focused($cellFocused)
-                    .onSubmit {
-                        onSet(entry.key, editText)
-                        editingCell = nil
-                    }
+                    .onSubmit { commitCellEdit() }
                     .onKeyPress(.escape) { editingCell = nil; return .handled }
+                    // Clicking elsewhere commits like Return. Return and Escape clear editingCell first, so the blur they cause is a no-op.
+                    .onChange(of: cellFocused) { wasFocused, isFocused in
+                        if wasFocused && !isFocused { commitCellEdit() }
+                    }
                 } else {
                     Text(entry.value)
                         .font(InspectChrome.mono)
@@ -213,13 +277,16 @@ struct AppStorageTableView: View {
         }
     }
 
+    private func commitCellEdit() {
+        guard let cell = editingCell else { return }
+        editingCell = nil
+        onSet(cell.key, editText)
+    }
+
+    @ViewBuilder
     private var detailPanel: some View {
-        Group {
-            if let key = selectedKey, let entry = entries.first(where: { $0.key == key }) {
-                AppValueDetailView(value: entry.value)
-            } else {
-                InspectEmptyState(symbol: "cursorarrow.click", title: "Select an entry", message: "Click a row to preview its value")
-            }
+        if let entry = selectedEntry {
+            AppValueDetailView(value: entry.value)
         }
     }
 }
@@ -233,11 +300,25 @@ struct AppCookieTableView: View {
     @State private var selectedID: String?
     @State private var editingCookie: OrbitApplicationLogic.CookieRecord?
 
+    private var selectedCookie: OrbitApplicationLogic.CookieRecord? {
+        guard let id = selectedID else { return nil }
+        return model.filteredCookies.first { $0.id == id }
+    }
+
     var body: some View {
-        InspectSplit(key: "app.cookies.detail", defaultFraction: 0.65, minFirst: 200, minSecond: 120, stackBelow: 0) {
+        AppDetailSplit(key: "app.cookies.detail", showsDetail: editingCookie != nil || selectedCookie != nil,
+                       defaultFraction: 0.65, minFirst: 200, minSecond: 120) {
             tableContent
         } second: {
             detailPanel
+        }
+        // Deselect when the cookie is deleted, filtered out, or the site changes, so no stale selection lingers.
+        .onChange(of: selectedID != nil && selectedCookie == nil) { _, stale in
+            if stale { selectedID = nil }
+        }
+        .onChange(of: URL(string: session.pageURL)?.host) { _, _ in
+            selectedID = nil
+            editingCookie = nil
         }
     }
 
@@ -249,15 +330,21 @@ struct AppCookieTableView: View {
                 InspectEmptyState(symbol: "exclamationmark.triangle", title: "Cookies unavailable", message: err)
             } else {
                 // The columns have fixed widths, so a narrow dock scrolls sideways instead of clipping them.
-                ScrollView([.horizontal, .vertical]) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        cookieHeader
-                        InspectDivider()
-                        ForEach(model.filteredCookies) { cookie in
-                            cookieRow(cookie)
+                // The content is sized to at least the viewport and pinned top-leading: a bare two-axis scroll view
+                // centres content that is smaller than the viewport.
+                GeometryReader { viewport in
+                    ScrollView([.horizontal, .vertical]) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            cookieHeader
+                            InspectDivider()
+                            ForEach(model.filteredCookies) { cookie in
+                                cookieRow(cookie)
+                            }
                         }
+                        .frame(width: max(560, viewport.size.width), alignment: .leading)
+                        .frame(minHeight: viewport.size.height, alignment: .topLeading)
                     }
-                    .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in max(width, 560) }
+                    .defaultScrollAnchor(.topLeading)
                 }
             }
         }
@@ -292,6 +379,7 @@ struct AppCookieTableView: View {
             cookieHeaderCell("Expires", width: 100)
             cookieHeaderCell("Size", width: 50)
             cookieHeaderCell("H", width: 22)
+                .help("HttpOnly cookies are listed here via the browser's native cookie store. They are never exposed to page JavaScript.")
             cookieHeaderCell("S", width: 22)
             cookieHeaderCell("SameSite", width: 60)
         }
@@ -347,28 +435,18 @@ struct AppCookieTableView: View {
         }
     }
 
+    @ViewBuilder
     private var detailPanel: some View {
-        Group {
-            if let sheet = editingCookie {
-                AppCookieEditorView(cookie: sheet,
-                    onSave: { updated in
-                        model.addOrUpdateCookie(updated)
-                        editingCookie = nil
-                    },
-                    onCancel: { editingCookie = nil }
-                )
-            } else if let id = selectedID, let cookie = model.filteredCookies.first(where: { $0.id == id }) {
-                AppCookieDetailView(cookie: cookie)
-            } else {
-                cookieNote
-            }
-        }
-    }
-
-    private var cookieNote: some View {
-        VStack(spacing: 8) {
-            InspectEmptyState(symbol: "globe", title: "Cookies",
-                message: "HttpOnly cookies are listed here via the browser's native cookie store — they are never exposed to page JavaScript.")
+        if let sheet = editingCookie {
+            AppCookieEditorView(cookie: sheet,
+                onSave: { updated in
+                    model.addOrUpdateCookie(updated)
+                    editingCookie = nil
+                },
+                onCancel: { editingCookie = nil }
+            )
+        } else if let cookie = selectedCookie {
+            AppCookieDetailView(cookie: cookie)
         }
     }
 }
@@ -584,11 +662,26 @@ struct AppIDBRecordView: View {
     @State private var editJSON: String = ""
     @State private var editError: String?
 
+    private var selectedRecord: AppIDBRecord? {
+        guard let id = selectedID else { return nil }
+        return model.idbCurrentRecords.first { $0.id == id }
+    }
+
     var body: some View {
-        InspectSplit(key: "app.idb.detail", defaultFraction: 0.6, minFirst: 180, minSecond: 120, stackBelow: 0) {
+        AppDetailSplit(key: "app.idb.detail", showsDetail: editingRecord != nil || selectedRecord != nil,
+                       defaultFraction: 0.6, minFirst: 180, minSecond: 120) {
             tableContent
         } second: {
             detailPanel
+        }
+        // Deselect when the record is deleted or paged away, and drop the selection and edit when another store opens.
+        .onChange(of: selectedID != nil && selectedRecord == nil) { _, stale in
+            if stale { selectedID = nil }
+        }
+        .onChange(of: "\(dbName)/\(storeName)") { _, _ in
+            selectedID = nil
+            editingRecord = nil
+            editError = nil
         }
     }
 
@@ -693,15 +786,12 @@ struct AppIDBRecordView: View {
         .background(InspectChrome.surface)
     }
 
+    @ViewBuilder
     private var detailPanel: some View {
-        Group {
-            if let record = editingRecord {
-                idbEditPanel(record)
-            } else if let id = selectedID, let record = model.idbCurrentRecords.first(where: { $0.id == id }) {
-                AppValueDetailView(value: record.value)
-            } else {
-                InspectEmptyState(symbol: "cursorarrow.click", title: "Select a record", message: "Click a row to preview its value. Double-click to edit.")
-            }
+        if let record = editingRecord {
+            idbEditPanel(record)
+        } else if let record = selectedRecord {
+            AppValueDetailView(value: record.value)
         }
     }
 
@@ -796,21 +886,31 @@ struct AppCacheEntriesView: View {
     var cacheName: String
     @State private var selectedURL: String?
 
+    private var entries: [AppCacheEntry] { model.cacheEntriesByName[cacheName] ?? [] }
+
+    private var selectedEntry: AppCacheEntry? {
+        guard let url = selectedURL else { return nil }
+        return entries.first { $0.url == url }
+    }
+
     var body: some View {
-        InspectSplit(key: "app.cache.detail", defaultFraction: 0.65, minFirst: 200, minSecond: 120, stackBelow: 0) {
+        AppDetailSplit(key: "app.cache.detail", showsDetail: selectedEntry != nil,
+                       defaultFraction: 0.65, minFirst: 200, minSecond: 120) {
             tableContent
         } second: {
-            if let url = selectedURL {
-                AppValueDetailView(value: url)
-            } else {
-                InspectEmptyState(symbol: "cursorarrow.click", title: "Select an entry", message: "Click a row to see the URL")
+            if let entry = selectedEntry {
+                AppValueDetailView(value: entry.url)
             }
         }
+        // Deselect when the entry is deleted or the cache changes, so no stale selection lingers.
+        .onChange(of: selectedURL != nil && selectedEntry == nil) { _, stale in
+            if stale { selectedURL = nil }
+        }
+        .onChange(of: cacheName) { _, _ in selectedURL = nil }
     }
 
     private var tableContent: some View {
-        let entries = model.cacheEntriesByName[cacheName] ?? []
-        return VStack(spacing: 0) {
+        VStack(spacing: 0) {
             HStack {
                 Text(cacheName).font(InspectChrome.label).foregroundStyle(InspectChrome.muted)
                 Spacer()

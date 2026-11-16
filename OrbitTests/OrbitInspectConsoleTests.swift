@@ -402,6 +402,67 @@ final class OrbitInspectConsoleTests: XCTestCase {
         XCTAssertEqual(ranked.count, 2)  // "Foo" and "FOO" match
     }
 
+    // MARK: - Copy all
+
+    private func logEntry(_ id: String, _ args: [ConSerializedValue]) -> ConEntry {
+        var entry = ConEntry.command(id: id, text: "", depth: 0)
+        entry.level = .log
+        entry.args = args
+        entry.plainText = args.map { $0.plainText }.joined(separator: " ")
+        return entry
+    }
+
+    func test_allMessagesText_oneLinePerEntryInOrder() {
+        let entries = [
+            logEntry("a", [.string_("first")]),
+            logEntry("b", [.string_("count"), .number(3), .boolean(true)]),
+            logEntry("c", [.null_]),
+        ]
+        XCTAssertEqual(OrbitConsoleLogic.allMessagesText(entries), "first\ncount 3 true\nnull")
+    }
+
+    func test_allMessagesText_matchesPerRowCopyFormat() {
+        let entry = logEntry("a", [.string_("x"), .undefined_])
+        XCTAssertEqual(OrbitConsoleLogic.allMessagesText([entry]),
+                       entry.args.map { $0.plainText }.joined(separator: " "))
+    }
+
+    func test_allMessagesText_empty() {
+        XCTAssertEqual(OrbitConsoleLogic.allMessagesText([]), "")
+    }
+
+    func test_jsonArrayText_empty() {
+        XCTAssertEqual(OrbitConsoleLogic.jsonArrayText([]), "[]")
+    }
+
+    func test_jsonArrayText_isValidJSONAndKeepsOrder() throws {
+        let text = OrbitConsoleLogic.jsonArrayText([
+            .json("{\n  \"a\": 1\n}"),
+            .text("plain \"quoted\" message"),
+            .json("[1, 2]"),
+        ])
+        let parsed = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(text.utf8)) as? [Any]
+        )
+        XCTAssertEqual(parsed.count, 3)
+        XCTAssertEqual((parsed[0] as? [String: Int]), ["a": 1])
+        XCTAssertEqual(parsed[1] as? String, "plain \"quoted\" message")
+        XCTAssertEqual((parsed[2] as? [Int]), [1, 2])
+    }
+
+    func test_jsonArrayText_unparseableJSONBecomesString() throws {
+        // The page falls back to String(o), e.g. "[object Object]", when JSON.stringify throws.
+        let text = OrbitConsoleLogic.jsonArrayText([.json("[object Object]")])
+        let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [Any])
+        XCTAssertEqual(parsed.first as? String, "[object Object]")
+    }
+
+    func test_jsonArrayText_multilineMessageStaysValid() throws {
+        let text = OrbitConsoleLogic.jsonArrayText([.text("line one\nline two")])
+        let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [Any])
+        XCTAssertEqual(parsed.first as? String, "line one\nline two")
+    }
+
     // MARK: - ConStackFrame helpers
 
     func test_stackFrame_shortURL_withLine() {

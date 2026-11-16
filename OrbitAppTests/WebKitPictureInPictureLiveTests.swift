@@ -105,58 +105,6 @@ final class WebKitPictureInPictureLiveTests: LiveEnvironmentTestCase {
         return try await body(contents, server)
     }
 
-    struct PanelFrame {
-        var saturatedFraction: Double
-        var nearBlackFraction: Double
-        var checksum: Int
-
-        // Thresholds measured against the fixture (0.17-0.26 saturated, 0.0
-        // near-black). Every layer behind the video surface paints black, so an empty panel is entirely near-black.
-        var isShowingVideo: Bool { nearBlackFraction < 0.1 && saturatedFraction > 0.1 }
-    }
-
-    /// dlsym'd because CGWindowListCreateImage is deprecated in the SDK;
-    /// asking only for a window this process owns needs no screen-recording grant.
-    private static func readPanelPixels(_ panel: NSPanel) -> PanelFrame? {
-        typealias WindowListCreateImage = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
-        guard
-            let handle = dlopen(nil, RTLD_NOW),
-            let symbol = dlsym(handle, "CGWindowListCreateImage"),
-            panel.windowNumber > 0
-        else { return nil }
-        let create = unsafeBitCast(symbol, to: WindowListCreateImage.self)
-        guard
-            let image = create(.null, 1 << 3, UInt32(panel.windowNumber), (1 << 0) | (1 << 3))?.takeRetainedValue()
-        else { return nil }
-        let bitmap = NSBitmapImageRep(cgImage: image)
-        guard bitmap.pixelsWide > 8, bitmap.pixelsHigh > 8 else { return nil }
-
-        // The middle half, away from the rounded corners and the title row.
-        let left = bitmap.pixelsWide / 4
-        let top = bitmap.pixelsHigh / 4
-        var saturated = 0
-        var nearBlack = 0
-        var sampled = 0
-        var checksum = 0
-        for y in stride(from: top, to: top + bitmap.pixelsHigh / 2, by: 3) {
-            for x in stride(from: left, to: left + bitmap.pixelsWide / 2, by: 3) {
-                guard let colour = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-                let channels = [colour.redComponent, colour.greenComponent, colour.blueComponent]
-                let brightest = channels.max() ?? 0
-                if brightest - (channels.min() ?? 0) > 0.3 { saturated += 1 }
-                if brightest < 0.08 { nearBlack += 1 }
-                sampled += 1
-                checksum = checksum &* 31 &+ Int((channels.reduce(0, +) / 3) * 255)
-            }
-        }
-        guard sampled > 0 else { return nil }
-        return PanelFrame(
-            saturatedFraction: Double(saturated) / Double(sampled),
-            nearBlackFraction: Double(nearBlack) / Double(sampled),
-            checksum: checksum
-        )
-    }
-
     private func enterPictureInPicture(_ contents: WebKitWebContents) async throws {
         contents.togglePictureInPicture()
         let started = true
@@ -330,6 +278,40 @@ final class WebKitPictureInPictureLiveTests: LiveEnvironmentTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testLeavingPictureInPictureKeepsThePlaybackPosition
+
+    /// Returning to a tab ends its floating window, and the video must carry on from where it was rather than from the start.
+    func testLeavingPictureInPictureKeepsThePlaybackPosition() throws {
+        let outcome = try WebKitLiveEngineHost.runLive(timeout: 90) { () -> (
+            duration: Double, before: Double, after: Double, stillPlaying: Bool
+        ) in
+            try await self.withPlayingVideoPage { contents, _ in
+                // Past the start by a margin the loop cannot explain, so a reset to zero is unmistakable.
+                let duration = (try await contents.evaluateJavaScript("document.getElementById('v').duration") as? NSNumber)?.doubleValue ?? 0
+                _ = try await contents.evaluateJavaScript("""
+                (function() { var v = document.getElementById('v'); v.loop = false; v.currentTime = v.duration * 0.6; return true; })()
+                """)
+                try await Task.sleep(for: .milliseconds(300))
+                let before = (try await contents.evaluateJavaScript("document.getElementById('v').currentTime") as? NSNumber)?.doubleValue ?? -1
+
+                try await self.enterPictureInPicture(contents)
+                contents.togglePictureInPicture()
+                try await self.waitUntilTrue(contents, "document.pictureInPictureElement === null")
+                try await Task.sleep(for: .milliseconds(500))
+
+                let after = (try await contents.evaluateJavaScript("document.getElementById('v').currentTime") as? NSNumber)?.doubleValue ?? -1
+                let playing = (try await contents.evaluateJavaScript("!document.getElementById('v').paused") as? Bool) ?? false
+                return (duration, before, after, playing)
+            }
+        }
+
+        XCTAssertGreaterThan(outcome.duration, 0.5, "the fixture's duration was never read, so this test proved nothing")
+        XCTAssertGreaterThanOrEqual(
+            outcome.after, outcome.before - 0.1,
+            "leaving Picture-in-Picture moved the video back from \(outcome.before)s to \(outcome.after)s"
+        )
+    }
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testPageInitiatedExitPictureInPictureIsReportedNatively
 
     func testPageInitiatedExitPictureInPictureIsReportedNatively() throws {
@@ -460,88 +442,30 @@ final class WebKitPictureInPictureLiveTests: LiveEnvironmentTestCase {
 
     // MARK: - The floating window itself
 
-    /// A real NSPanel this process owns, so it's in NSApp.windows.
-    /// contentAspectRatio only updates once the real decoded natural size is known, so 96:64 proves the real fixture.
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEnteringOpensARealFloatingPanelSizedToTheRealVideoAndClosesItOnExit
-    func testEnteringOpensARealFloatingPanelSizedToTheRealVideoAndClosesItOnExit() throws {
-        let outcome = try WebKitLiveEngineHost.runLive(timeout: 90) { () -> (
-            foundPanel: Bool, aspectRatio: Double, minWidth: Double, minHeight: Double, hiddenAfterExit: Bool,
-            frames: [PanelFrame]
-        ) in
+    /// WebKit's own window is the only picture-in-picture surface. Orbit once painted a second, closable-but-immortal
+    /// NSPanel mirror of the video beside it; nothing of ours may float over the desktop any more.
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testEnteringOpensNoFloatingPanelOfOurOwn
+    func testEnteringOpensNoFloatingPanelOfOurOwn() throws {
+        let outcome = try WebKitLiveEngineHost.runLive(timeout: 90) { () -> (entered: Bool, strayPanels: Int) in
             try await self.withPlayingVideoPage { contents, _ in
                 let before = Set(NSApp.windows.map(ObjectIdentifier.init))
                 try await self.enterPictureInPicture(contents)
-
-                var panel: NSPanel?
-                _ = try await self.waitUntil {
-                    panel = NSApp.windows.first { window in
-                        guard let candidate = window as? NSPanel else { return false }
-                        return !before.contains(ObjectIdentifier(candidate))
-                            && candidate.isVisible
-                            && candidate.level == .floating
-                    } as? NSPanel
-                    return panel != nil
+                // Long enough for the media watch to have probed several times; the old mirror opened on the first probe.
+                try await Task.sleep(for: .seconds(2))
+                let stray = NSApp.windows.filter { window in
+                    window is NSPanel
+                        && !before.contains(ObjectIdentifier(window))
+                        && window.isVisible
+                        && window.level == .floating
                 }
-                guard let panel else {
-                    return (false, 0, 0, 0, false, [])
-                }
-
-                var ratio = 0.0
-                _ = try await self.waitUntil(timeout: .seconds(10)) {
-                    let size = panel.contentAspectRatio
-                    guard size.height > 0 else { return false }
-                    ratio = Double(size.width / size.height)
-                    return true
-                }
-                let minSize = panel.contentMinSize
-
-                // Polled, not sampled once: the panel orders in before its
-                // first frame composites, so collection starts from the first frame showing video.
-                var frames: [PanelFrame] = []
-                let deadline = ContinuousClock.now + .seconds(10)
-                while ContinuousClock.now < deadline {
-                    if let frame = Self.readPanelPixels(panel) {
-                        if !frames.isEmpty || frame.isShowingVideo {
-                            frames.append(frame)
-                        }
-                        if frames.count >= 2, frames[0].checksum != frames[frames.count - 1].checksum {
-                            break
-                        }
-                    }
-                    try await Task.sleep(for: .milliseconds(200))
-                }
-
-                contents.togglePictureInPicture()
-                let hidden = try await self.waitUntil(timeout: .seconds(10)) { !panel.isVisible }
-
-                return (true, ratio, Double(minSize.width), Double(minSize.height), hidden, frames)
+                return (contents.mediaState.isPictureInPictureActive, stray.count)
             }
         }
 
-        XCTAssertTrue(
-            outcome.foundPanel,
-            "entering Picture-in-Picture never produced a visible floating NSPanel in this process"
-        )
+        XCTAssertTrue(outcome.entered, "the page never reported being in Picture-in-Picture, so this test proved nothing")
         XCTAssertEqual(
-            outcome.aspectRatio, 1.5, accuracy: 0.01,
-            "the floating panel's contentAspectRatio is not the real decoded 96x64 natural size of the video that entered"
-        )
-        XCTAssertEqual(outcome.minWidth, 284, accuracy: 0.5, "the floating panel's minimum content width is not the one it is built with")
-        XCTAssertEqual(outcome.minHeight, 160, accuracy: 0.5, "the floating panel's minimum content height is not the one it is built with")
-        XCTAssertFalse(
-            outcome.frames.isEmpty,
-            """
-            the floating panel never showed the video's own pixels: within 10s of opening, every capture of its \
-            real screen content was still the black it paints behind the video surface, so the viz surface never reached it
-            """
-        )
-        XCTAssertNotEqual(
-            outcome.frames.first?.checksum, outcome.frames.last?.checksum,
-            "the floating panel is showing one frozen frame: the surface arrived but is not being updated as the video plays"
-        )
-        XCTAssertTrue(
-            outcome.hiddenAfterExit,
-            "leaving Picture-in-Picture left the floating panel on screen"
+            outcome.strayPanels, 0,
+            "entering Picture-in-Picture opened a floating NSPanel owned by Orbit beside WebKit's own window"
         )
     }
 

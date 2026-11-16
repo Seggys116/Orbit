@@ -49,7 +49,8 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         UpdaterController.shared.start()
         #endif
 
-        NSApp.mainMenu = MainMenuBuilder.build()
+        // Kept, not just set: the SwiftUI App scene can replace it with its stock View/Window/Help menu after launch.
+        MainMenuKeeper.shared.install(MainMenuBuilder.build())
         GlobalKeyEventMonitor.shared.start()
 
         // origin, not openTornOffWindow's processRoot default: needed to find the tab's already-live WebContents.
@@ -120,7 +121,9 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         OrbitAppDelegate.buildDockMenu()
     }
 
-    static func buildDockMenu() -> NSMenu {
+    /// `windows` is injectable so the rows can be checked without opening real windows.
+    static func buildDockMenu(windows injected: [DockWindowEntry]? = nil) -> NSMenu {
+        let windows = injected ?? OrbitWindowController.dockWindowEntries + LittleOrbitWindowController.dockWindowEntries
         let menu = NSMenu(title: "Dock")
         menu.addItem(DockCommandMenuItem(title: "New Window", command: .newWindow))
         menu.addItem(DockCommandMenuItem(title: "New Incognito Window", command: .newIncognitoWindow))
@@ -129,6 +132,12 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(DockCommandMenuItem(title: "New Tab", command: .newTabCommandBar) {
             OrbitWindowController.activateBrowserWindow()
         })
+        if !windows.isEmpty {
+            menu.addItem(.separator())
+            for entry in windows {
+                menu.addItem(DockWindowMenuItem(entry: entry))
+            }
+        }
         return menu
     }
 
@@ -252,5 +261,49 @@ final class DockCommandMenuItem: NSMenuItem {
         NSApp.activate(ignoringOtherApps: true)
         precondition?()
         AppEnvironment.frontmost.perform(command)
+    }
+}
+
+/// A window shown in the Dock menu. `title` is already the text to display.
+struct DockWindowEntry {
+    var window: NSWindow
+    var title: String
+}
+
+// One row per open window. Orbit windows carry no title, so the system lists none of them under the Dock
+// icon; without these rows a window behind others, or minimized, could not be reached from there.
+@MainActor
+final class DockWindowMenuItem: NSMenuItem {
+
+    static let maximumTitleLength = 48
+
+    private weak var window: NSWindow?
+
+    init(entry: DockWindowEntry) {
+        self.window = entry.window
+        super.init(title: Self.displayTitle(entry.title), action: #selector(reveal), keyEquivalent: "")
+        self.target = self
+        // The checkmark marks the window in front; a diamond-style dash marks one that is minimized.
+        if entry.window.isMiniaturized {
+            state = .mixed
+        } else if entry.window.isKeyWindow {
+            state = .on
+        }
+    }
+
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    static func displayTitle(_ title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let single = trimmed.replacingOccurrences(of: "\n", with: " ")
+        guard single.count > maximumTitleLength else { return single.isEmpty ? "Untitled" : single }
+        return String(single.prefix(maximumTitleLength - 1)) + "\u{2026}"
+    }
+
+    @objc private func reveal() {
+        guard let window else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
     }
 }

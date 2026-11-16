@@ -131,6 +131,43 @@ final class SplitPaneCloseControlTests: XCTestCase {
         XCTAssertNotNil(env.tab(tabB.id), "Closing a pane separates it — it must not delete the tab outright.")
     }
 
+    // The close control on a pane closes that page. Separating it into its own tab is what "Separate Page from Split View" is for.
+    func test_closeSplitPaneTab_closesOnlyThatPageAndLeavesTheOtherOpen() {
+        guard let (tabA, tabB, groupID) = makeSplitPair() else { return }
+        defer {
+            env.store.dissolveSplit(groupID)
+            env.state.tabs.removeValue(forKey: tabA.id)
+            env.state.tabs.removeValue(forKey: tabB.id)
+        }
+        env.focusedSplitPaneIndex = 0
+
+        env.closeSplitPaneTab(tabB.id)
+
+        XCTAssertEqual(env.tab(tabB.id)?.section, .archived, "The pane that was closed must close, not be separated and kept open.")
+        XCTAssertNil(env.splitGroup(for: tabB.id))
+        XCTAssertNotEqual(env.tab(tabA.id)?.section, .archived, "The other pane's page must stay open.")
+        XCTAssertNil(env.splitGroup(for: tabA.id), "A split of two with one pane closed is a single page again.")
+    }
+
+    func test_closeSplitPaneTab_inASplitOfThreeKeepsTheOtherTwoSplit() {
+        let tabA = makeTab(url: "https://a.example.com")
+        let tabB = makeTab(url: "https://b.example.com")
+        let tabC = makeTab(url: "https://c.example.com")
+        guard let groupID = env.store.createSplit(with: [tabA.id, tabB.id, tabC.id], axis: .horizontal) else {
+            XCTFail("Failed to create a split group.")
+            return
+        }
+        defer {
+            if let remaining = env.splitGroup(for: tabA.id) { env.store.dissolveSplit(remaining.id) } else { env.store.dissolveSplit(groupID) }
+            for id in [tabA.id, tabB.id, tabC.id] { env.state.tabs.removeValue(forKey: id) }
+        }
+
+        env.closeSplitPaneTab(tabB.id)
+
+        XCTAssertEqual(env.tab(tabB.id)?.section, .archived)
+        XCTAssertEqual(env.splitGroup(for: tabA.id)?.tabIDs, [tabA.id, tabC.id], "The two panes that were not closed stay together in their order.")
+    }
+
     // MARK: - Helpers
 
     private func paintedAlpha(of view: some View, size: CGSize) -> Double {

@@ -369,6 +369,43 @@ final class OrbitConsoleModel: OrbitInspectModule {
         }
     }
 
+    /// Copies what the log currently shows, so the filter and group collapsing decide the content.
+    func copyAllEntries() {
+        guard !displayEntries.isEmpty else { return }
+        session?.copy(OrbitConsoleLogic.allMessagesText(displayEntries))
+    }
+
+    func copyAllEntriesAsJSON() {
+        let shown = displayEntries
+        guard !shown.isEmpty else { return }
+        let ids = Array(Set(shown.compactMap { $0.args.first?.registryId }))
+        Task {
+            // One page round trip for every object, with the same serialisation as the per-row "Copy as JSON".
+            var serialised: [String: String] = [:]
+            if !ids.isEmpty,
+               let webView = session?.contents?.webView,
+               let idsJSON = OrbitInspectDecode.jsonLiteral(ids) {
+                let body = """
+                var reg=window.__orbitInspect&&window.__orbitInspect._con_reg;
+                var out={};
+                \(idsJSON).forEach(function(id){
+                  var o=reg&&reg.get(id);
+                  try{var s=JSON.stringify(o,null,2);if(typeof s==='string')out[id]=s;}catch(e){out[id]=String(o);}
+                });
+                return out;
+                """
+                if let raw = try? await Self.callAsync(webView, body) as? [String: String] {
+                    serialised = raw
+                }
+            }
+            let items = shown.map { entry -> OrbitConsoleLogic.JSONCopyItem in
+                if let id = entry.args.first?.registryId, let text = serialised[String(id)] { return .json(text) }
+                return .text(entry.args.map { $0.plainText }.joined(separator: " "))
+            }
+            session?.copy(OrbitConsoleLogic.jsonArrayText(items))
+        }
+    }
+
     func storeAsGlobal(_ entry: ConEntry) {
         guard let id = entry.args.first?.registryId else { return }
         session?.command(["op": "con.storeGlobal", "id": id])

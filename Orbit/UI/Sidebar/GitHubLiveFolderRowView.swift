@@ -183,6 +183,7 @@ struct GitHubLiveFolderRowView: View {
                     .focused($focused)
                     .onSubmit(commitRename)
                     .onExitCommand { isRenaming = false }
+                    .commitsOnOutsideClick(while: isRenaming, perform: commitRename)
             } else {
                 OrbitNSActionButton(onClickCount: { handleNameClick(clickCount: $0) }) {
                     Text(config.displayName)

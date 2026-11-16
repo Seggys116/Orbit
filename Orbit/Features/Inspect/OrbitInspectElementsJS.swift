@@ -479,6 +479,13 @@ extension OrbitInspectAgent {
         post({ t: "el.text", id: msg.id, text: String(node.data || "") });
       };
 
+      // Attribute values reach the tree cut to 400 characters, so editing one asks for the whole value.
+      ops["el.getAttr"] = function(msg) {
+        var node = nodeById(msg.id);
+        if (!node || node.nodeType !== 1 || !node.hasAttribute(msg.name)) return;
+        post({ t: "el.attrValue", id: msg.id, name: String(msg.name), value: String(node.getAttribute(msg.name)) });
+      };
+
       ops["el.editText"] = function(msg) {
         var node = nodeById(msg.id);
         if (!node || (node.nodeType !== 3 && node.nodeType !== 8)) return;

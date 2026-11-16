@@ -695,4 +695,182 @@ final class OrbitInspectElementsTests: XCTestCase {
         XCTAssertEqual(OrbitElementsLogic.singleLine("a\r\nb"), "a b", "CRLF is one character")
         XCTAssertEqual(OrbitElementsLogic.singleLine("plain"), "plain")
     }
+
+    // MARK: Attribute hit testing
+
+    /// `<div class="a b" disabled id="x">`, whose attributes print sorted by name: class, disabled, id.
+    private var threeAttributeDiv: ElNodeInfo {
+        ElNodeInfo(id: 1, kind: "el", name: "div", attrs: ["id": "x", "class": "a b", "disabled": ""], childCount: 0, text: "")
+    }
+
+    private func column(of needle: String, in printed: String) -> Int {
+        let range = printed.range(of: needle)!
+        return printed.distance(from: printed.startIndex, to: range.lowerBound)
+    }
+
+    func testAnAttributeIsFoundAnywhereOnItsNameAndValueRun() {
+        let printed = "<div class=\"a b\" disabled id=\"x\">"
+        let node = threeAttributeDiv
+        let start = column(of: " class", in: printed)
+        let run = " class=\"a b\"".count
+        for offset in 0..<run {
+            XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: start + offset, of: node), "class", "column \(start + offset)")
+        }
+    }
+
+    func testTheMiddleAndLastAttributesAreFoundByTheirOwnRuns() {
+        let printed = "<div class=\"a b\" disabled id=\"x\">"
+        let node = threeAttributeDiv
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: column(of: "disabled", in: printed), of: node), "disabled")
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: column(of: "id=", in: printed), of: node), "id")
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: column(of: "x\"", in: printed), of: node), "id")
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: printed.count - 2, of: node), "id", "the closing quote belongs to the value")
+    }
+
+    func testABooleanAttributeRunIsItsNameAndNothingAfter() {
+        let printed = "<div class=\"a b\" disabled id=\"x\">"
+        let node = threeAttributeDiv
+        let start = column(of: " disabled", in: printed)
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: start, of: node), "disabled", "the leading space is part of the run")
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: start + " disabled".count - 1, of: node), "disabled")
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: start + " disabled".count, of: node), "id",
+                       "the next run starts straight after, with no empty value printed")
+    }
+
+    func testTheTagNameAndOpeningBracketAreNotAttributes() {
+        let node = threeAttributeDiv
+        XCTAssertNil(OrbitElementsLogic.attributeName(atColumn: 0, of: node), "the < is not an attribute")
+        for offset in 1...3 {
+            XCTAssertNil(OrbitElementsLogic.attributeName(atColumn: offset, of: node), "tag name column \(offset)")
+        }
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: 4, of: node), "class")
+    }
+
+    func testClicksBeforeAndPastTheEndOfTheTagFindNothing() {
+        let node = threeAttributeDiv
+        let printed = "<div class=\"a b\" disabled id=\"x\">"
+        XCTAssertNil(OrbitElementsLogic.attributeName(atColumn: -1, of: node))
+        XCTAssertNil(OrbitElementsLogic.attributeName(atColumn: printed.count - 1, of: node), "the closing bracket")
+        XCTAssertNil(OrbitElementsLogic.attributeName(atColumn: printed.count, of: node))
+        XCTAssertNil(OrbitElementsLogic.attributeName(atColumn: 10_000, of: node))
+    }
+
+    func testAnElementWithoutAttributesHasNoAttributeToFind() {
+        let node = ElNodeInfo(id: 1, kind: "el", name: "p", attrs: [:], childCount: 0, text: "")
+        for column in -1...6 { XCTAssertNil(OrbitElementsLogic.attributeName(atColumn: column, of: node)) }
+    }
+
+    func testALongValueIsHitOnItsShortenedRunNotItsFullLength() {
+        let long = String(repeating: "x", count: 300)
+        let node = ElNodeInfo(id: 1, kind: "el", name: "a", attrs: ["b": long, "c": "y"], childCount: 0, text: "")
+        let shown = OrbitElementsLogic.displayedAttributeValue(long)
+        XCTAssertTrue(shown.hasSuffix("…"))
+        let printed = "<a b=\"\(shown)\" c=\"y\">"
+        // The ellipsis is the last column of b's value; the closing quote follows it, and c starts right after.
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: column(of: "…", in: printed), of: node), "b")
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: column(of: "…", in: printed) + 1, of: node), "b")
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: column(of: "…", in: printed) + 2, of: node), "c")
+        XCTAssertEqual(OrbitElementsLogic.attributeName(atColumn: column(of: " c=", in: printed), of: node), "c")
+    }
+
+    func testAttributeSpansTileTheOpeningTagWithNoGaps() {
+        let spans = OrbitElementsLogic.attributeSpans(of: threeAttributeDiv)
+        XCTAssertEqual(spans.map(\.name), ["class", "disabled", "id"])
+        XCTAssertEqual(spans.first?.columns.lowerBound, "<div".count)
+        for (earlier, later) in zip(spans, spans.dropFirst()) {
+            XCTAssertEqual(earlier.columns.upperBound, later.columns.lowerBound)
+        }
+        XCTAssertEqual(spans.last.map { $0.columns.upperBound + 1 }, OrbitElementsLogic.displayColumns(of: row(threeAttributeDiv, expanded: true)),
+                       "the spans end one column before the closing bracket")
+    }
+
+    func testEditorColumnsBracketTheFieldWithTheTextPrintedAroundIt() {
+        let node = threeAttributeDiv
+        let r = row(node, expanded: true)
+        let columns = OrbitElementsLogic.attributeEditorColumns(of: r, editing: "class")
+        XCTAssertEqual(columns?.leading, "<div class=\"".count)
+        XCTAssertEqual(columns?.trailing, "\" disabled id=\"x\">".count)
+    }
+
+    func testEditorColumnsForABooleanAttributeAddTheQuotesTheEditorShows() {
+        let r = row(threeAttributeDiv, expanded: true)
+        let columns = OrbitElementsLogic.attributeEditorColumns(of: r, editing: "disabled")
+        XCTAssertEqual(columns?.leading, "<div class=\"a b\" disabled=\"".count)
+        XCTAssertEqual(columns?.trailing, "\" id=\"x\">".count)
+    }
+
+    func testEditorColumnsForACollapsedParentIncludeTheElidedClosingTag() {
+        let node = ElNodeInfo(id: 1, kind: "el", name: "ul", attrs: ["class": "nav"], childCount: 2, text: "")
+        let columns = OrbitElementsLogic.attributeEditorColumns(of: row(node), editing: "class")
+        XCTAssertEqual(columns?.trailing, "\">…</ul>".count)
+    }
+
+    func testEditorColumnsAreNilForAnAttributeTheNodeLacks() {
+        XCTAssertNil(OrbitElementsLogic.attributeEditorColumns(of: row(threeAttributeDiv), editing: "title"))
+    }
+
+    func testTheEditorGrowsWithItsTextThenStopsAtWhatIsVisible() {
+        let glyph: CGFloat = 7
+        XCTAssertEqual(OrbitElementsLogic.attributeEditorWidth(visible: 600, consumed: 100, textColumns: 20, glyph: glyph), 22 * glyph)
+        XCTAssertEqual(OrbitElementsLogic.attributeEditorWidth(visible: 600, consumed: 100, textColumns: 5_000, glyph: glyph), 500,
+                       "a long class list wraps instead of running past the visible width")
+    }
+
+    func testTheEditorNeverShrinksBelowItsMinimumWidth() {
+        XCTAssertEqual(OrbitElementsLogic.attributeEditorWidth(visible: 200, consumed: 400, textColumns: 5_000, glyph: 7),
+                       OrbitElementsLogic.minAttributeEditorWidth, "a deep node in a narrow dock scrolls instead")
+        XCTAssertEqual(OrbitElementsLogic.attributeEditorWidth(visible: 600, consumed: 100, textColumns: 0, glyph: 7),
+                       OrbitElementsLogic.minAttributeEditorWidth, "an empty value still leaves room to type")
+    }
+
+    // MARK: Attribute edit commands
+
+    func testEditingAnAttributeSetsItsWholeRawValue() {
+        let command = OrbitElementsLogic.editAttributeCommand(id: 7, name: "class", original: "foo bar baz", edited: "foo bar qux")
+        XCTAssertEqual(command?["op"] as? String, "el.attr")
+        XCTAssertEqual(command?["id"] as? Int, 7)
+        XCTAssertEqual(command?["name"] as? String, "class")
+        XCTAssertEqual(command?["value"] as? String, "foo bar qux")
+        XCTAssertNil(command?["remove"])
+    }
+
+    func testAnUnchangedAttributeSendsNothing() {
+        XCTAssertNil(OrbitElementsLogic.editAttributeCommand(id: 7, name: "class", original: "a b", edited: "a b"))
+        XCTAssertNil(OrbitElementsLogic.editAttributeCommand(id: 7, name: "disabled", original: "", edited: ""))
+    }
+
+    func testEmptyingAnAttributeKeepsItWithAnEmptyValue() {
+        let command = OrbitElementsLogic.editAttributeCommand(id: 7, name: "class", original: "a b", edited: "")
+        XCTAssertEqual(command?["value"] as? String, "")
+        XCTAssertNil(command?["remove"], "emptying class must not delete it")
+    }
+
+    func testGivingABooleanAttributeAValueSetsIt() {
+        let command = OrbitElementsLogic.editAttributeCommand(id: 7, name: "disabled", original: "", edited: "disabled")
+        XCTAssertEqual(command?["value"] as? String, "disabled")
+    }
+
+    func testALongValueIsEditedAsTheFullRawStringNotTheShortenedOne() {
+        let full = String(repeating: "x", count: 300)
+        let edited = full + " tail"
+        let command = OrbitElementsLogic.editAttributeCommand(id: 1, name: "data-x", original: full, edited: edited)
+        XCTAssertEqual(command?["value"] as? String, edited)
+        XCTAssertFalse((command?["value"] as? String ?? "").contains("…"))
+        XCTAssertNil(OrbitElementsLogic.editAttributeCommand(id: 1, name: "data-x", original: full, edited: full),
+                     "committing the fetched full value untouched changes nothing")
+    }
+
+    func testTheAttributeSetterAndRemoverBuildTheSameCommandsTheEditorUses() {
+        XCTAssertEqual(OrbitElementsLogic.setAttributeCommand(id: 3, name: "id", value: "a")["op"] as? String, "el.attr")
+        let remove = OrbitElementsLogic.removeAttributeCommand(id: 3, name: "id")
+        XCTAssertEqual(remove["remove"] as? Bool, true)
+        XCTAssertEqual(remove["name"] as? String, "id")
+    }
+
+    func testTheFullValueIsRequestedByNodeAndName() {
+        let request = OrbitElementsLogic.attributeValueRequest(id: 9, name: "class")
+        XCTAssertEqual(request["op"] as? String, "el.getAttr")
+        XCTAssertEqual(request["id"] as? Int, 9)
+        XCTAssertEqual(request["name"] as? String, "class")
+    }
 }

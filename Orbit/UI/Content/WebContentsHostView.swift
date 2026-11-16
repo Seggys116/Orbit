@@ -127,6 +127,7 @@ struct LiveWebContentsHostView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let container = WebContentsHostContainerView()
         container.wantsLayer = true
+        paintPlaceholderBackground(on: container)
         // Not embedded here: SwiftUI can discard a built NSView, and embedding from makeNSView could move the engine view into a container never installed.
         container.windowDidChange = { [weak container] in
             guard let container else { return }
@@ -140,7 +141,27 @@ struct LiveWebContentsHostView: NSViewRepresentable {
             guard let nsView else { return }
             onWindowChange(of: nsView)
         }
+        paintPlaceholderBackground(on: nsView)
         embedIfEntitled(in: nsView)
+    }
+
+    /// What shows for the frame or two between the engine view joining the window and its first paint. Without a
+    /// colour of its own that is the window's tinted backdrop, which reads as a grey flash on every tab swap.
+    /// The page's own background colour makes the swap read as the page arriving rather than a screen in between.
+    private func paintPlaceholderBackground(on container: NSView) {
+        let color = placeholderColor(in: container)
+        container.effectiveAppearance.performAsCurrentDrawingAppearance {
+            container.layer?.backgroundColor = color.cgColor
+        }
+    }
+
+    private func placeholderColor(in container: NSView) -> NSColor {
+        guard let environment, let tabID = environment.tabID(for: contents) else { return .textBackgroundColor }
+        let resolver = PaneHeaderColorResolver.shared
+        let known = environment.documentColors[tabID]
+            ?? resolver.documentColor(forTab: tabID)
+            ?? environment.themeColors[tabID]
+        return known?.nsColor ?? .textBackgroundColor
     }
 
     // A container that has lost its window must never re-adopt: the replacing pane may already hold the engine view.

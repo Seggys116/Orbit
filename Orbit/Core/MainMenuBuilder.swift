@@ -394,3 +394,49 @@ enum MainMenuBuilder {
         }
     }
 }
+
+/// Keeps Orbit's menu bar installed. The SwiftUI `App` that hosts the Settings scene builds its own
+/// stock menu (View, Window, Help) and installs it whenever its lifecycle decides to, which can land
+/// after `applicationDidFinishLaunching` or when another scene activates. A single assignment at
+/// launch therefore loses that race at random; this puts Orbit's menu back whenever it is replaced.
+@MainActor
+final class MainMenuKeeper {
+    static let shared = MainMenuKeeper()
+
+    private(set) var menu: NSMenu?
+    private var observation: NSKeyValueObservation?
+    private var notificationTokens: [NSObjectProtocol] = []
+
+    private init() {}
+
+    /// The same menu object is kept for the life of the process: its items (Import, Services, Window)
+    /// belong to one menu at a time, so rebuilding would trip over items still attached to the old one.
+    func install(_ menu: NSMenu) {
+        self.menu = menu
+        restoreIfReplaced()
+        guard observation == nil else { return }
+
+        observation = NSApp.observe(\.mainMenu, options: [.new]) { [weak self] _, _ in
+            // Deferred: SwiftUI assigns its menu from inside its own update pass, and setting the
+            // menu again from within that call can be overwritten by the rest of the pass.
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.restoreIfReplaced() } }
+        }
+
+        let center = NotificationCenter.default
+        let names: [Notification.Name] = [
+            NSApplication.didBecomeActiveNotification,
+            NSWindow.didBecomeMainNotification,
+            NSWindow.didBecomeKeyNotification,
+        ]
+        notificationTokens = names.map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.restoreIfReplaced() }
+            }
+        }
+    }
+
+    func restoreIfReplaced() {
+        guard let menu, NSApp.mainMenu !== menu else { return }
+        NSApp.mainMenu = menu
+    }
+}

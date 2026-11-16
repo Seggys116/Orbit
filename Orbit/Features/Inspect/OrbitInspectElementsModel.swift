@@ -126,7 +126,7 @@ final class OrbitElementsModel: OrbitInspectModule {
         ["el.dom", "el.children", "el.select", "el.style", "el.computed",
          "el.listeners", "el.a11y", "el.mutation", "el.attrDone", "el.outerHTML",
          "el.boxModel", "el.navigate", "el.snapshotDone",
-         "el.edited", "el.editFailed", "el.editDone", "el.text",
+         "el.edited", "el.editFailed", "el.editDone", "el.text", "el.attrValue",
          "el.layoutKinds", "el.layoutOverlays"]
     }
 
@@ -180,6 +180,7 @@ final class OrbitElementsModel: OrbitInspectModule {
     enum InlineEdit: Equatable {
         case tagName(Int)
         case text(Int)
+        case attribute(Int, String)
     }
 
     var inlineEdit: InlineEdit? = nil
@@ -246,6 +247,7 @@ final class OrbitElementsModel: OrbitInspectModule {
         case "el.editFailed":   receiveEditFailed(object)
         case "el.editDone":     receiveEditDone(object)
         case "el.text":         receiveText(object)
+        case "el.attrValue":    receiveAttributeValue(object)
         case "el.layoutKinds":  receiveLayoutKinds(object)
         case "el.layoutOverlays": receiveLayoutOverlays(object)
         default: break
@@ -323,6 +325,15 @@ final class OrbitElementsModel: OrbitInspectModule {
         session?.command(["op": "el.getText", "id": nodeID])
     }
 
+    /// The row only holds the first 400 characters of a value, so the page is asked for the whole one.
+    func beginAttributeEdit(nodeID: Int, name: String) {
+        guard let node = nodes[nodeID], node.kind == "el", let value = node.attrs[name] else { return }
+        inlineEditOriginal = value
+        inlineEditText = value
+        inlineEdit = .attribute(nodeID, name)
+        session?.command(OrbitElementsLogic.attributeValueRequest(id: nodeID, name: name))
+    }
+
     func commitInlineEdit() {
         guard let edit = inlineEdit else { return }
         inlineEdit = nil
@@ -335,6 +346,10 @@ final class OrbitElementsModel: OrbitInspectModule {
             if let command = OrbitElementsLogic.editTextCommand(id: id, original: inlineEditOriginal, edited: inlineEditText) {
                 session?.command(command)
             }
+        case .attribute(let id, let name):
+            if let command = OrbitElementsLogic.editAttributeCommand(id: id, name: name, original: inlineEditOriginal, edited: inlineEditText) {
+                session?.command(command)
+            }
         }
     }
 
@@ -345,6 +360,14 @@ final class OrbitElementsModel: OrbitInspectModule {
     private func receiveText(_ object: [String: Any]) {
         guard case .text(let id) = inlineEdit, id == OrbitInspectDecode.integer(object, "id") else { return }
         let full = OrbitInspectDecode.string(object, "text")
+        if inlineEditText == inlineEditOriginal { inlineEditText = full }
+        inlineEditOriginal = full
+    }
+
+    private func receiveAttributeValue(_ object: [String: Any]) {
+        guard case .attribute(let id, let name) = inlineEdit,
+              id == OrbitInspectDecode.integer(object, "id"), name == OrbitInspectDecode.string(object, "name") else { return }
+        let full = OrbitInspectDecode.string(object, "value")
         if inlineEditText == inlineEditOriginal { inlineEditText = full }
         inlineEditOriginal = full
     }
@@ -450,8 +473,12 @@ final class OrbitElementsModel: OrbitInspectModule {
     }
 
     func selectRow(nodeID: Int) {
+        let isSameNode = selectedID == nodeID
         selectedID = nodeID
         if let path = pathIDs(to: nodeID) { selectionPath = path }
+        // Clicking the selected row again (a double-click to edit it, say) changes nothing the detail pane shows, so it keeps its data.
+        // Changes to the selected node reach the pane through mutation and tab refreshes, not through selecting it.
+        guard !isSameNode else { return }
         styleRules = []
         computedProperties = []
         boxModel = nil
@@ -497,11 +524,11 @@ final class OrbitElementsModel: OrbitInspectModule {
 
 
     func setAttribute(nodeID: Int, name: String, value: String) {
-        session?.command(["op": "el.attr", "id": nodeID, "name": name, "value": value])
+        session?.command(OrbitElementsLogic.setAttributeCommand(id: nodeID, name: name, value: value))
     }
 
     func removeAttribute(nodeID: Int, name: String) {
-        session?.command(["op": "el.attr", "id": nodeID, "name": name, "remove": true])
+        session?.command(OrbitElementsLogic.removeAttributeCommand(id: nodeID, name: name))
     }
 
 

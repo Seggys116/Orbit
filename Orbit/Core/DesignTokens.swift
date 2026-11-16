@@ -19,7 +19,10 @@ enum OrbitMetrics {
     static let sidebarMaxWidth: CGFloat = 560
     // Hit column: anything wider is empty padding that steals clicks from the tab edge.
     static let sidebarResizeHandleWidth: CGFloat = 4
+    // The least the hidden sidebar's hover zone ever measures, used when there is no bezel (Borderless) to size it by.
     static let sidebarHoverEdgeWidth: CGFloat = 8
+    // How far the hover zone runs past the bezel into the page edge, so the pointer does not have to land inside the thin band.
+    static let sidebarHoverEdgeOvershoot: CGFloat = 6
     static let sidebarAutoHideDelay: Double = 0.45
 
     static let sidebarRowHeight: CGFloat = 36
@@ -133,6 +136,11 @@ enum OrbitMetrics {
     static let cardCornerRadius: CGFloat = 10
 
     static let cardInset: CGFloat = 9
+
+    /// The zone along the window's leading edge that opens a hidden sidebar: the whole bezel plus a little past it.
+    static func sidebarHoverZoneWidth(bezel: CGFloat) -> CGFloat {
+        max(sidebarHoverEdgeWidth, bezel) + sidebarHoverEdgeOvershoot
+    }
 
     // Docked leading padding: the resize handle occupies the rest of cardInset, so the page stays one inset from the sidebar.
     static let contentCardLeadingSeam: CGFloat = cardInset - sidebarResizeHandleWidth

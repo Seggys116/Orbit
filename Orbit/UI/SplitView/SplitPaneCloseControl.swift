@@ -12,7 +12,7 @@ struct SplitPaneCloseControl: View {
     var body: some View {
         if Self.isApplicable(to: tab, in: env) {
             // OrbitNSActionButton: only mechanism proven to receive clicks inside the window's titlebar band.
-            OrbitNSActionButton(action: { env.closeSplitPane(tab.id) }) {
+            OrbitNSActionButton(action: { env.closeSplitPaneTab(tab.id) }) {
                 ToolbarTrailingGlyph.splitClose
                     .foregroundStyle(foreground)
             }

@@ -643,16 +643,7 @@ struct AnimDetailsPane: View {
     }
 
     private func editField(_ label: String, text: Binding<String>, onCommit: @escaping () -> Void) -> some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(InspectChrome.caption)
-                .foregroundStyle(InspectChrome.muted)
-                .frame(width: 90, alignment: .trailing)
-            InspectTextField(label, text: text)
-                .onSubmit(onCommit)
-                .frame(width: 120)
-        }
-        .padding(.horizontal, 10)
+        AnimTimingEditField(label: label, text: text, onCommit: onCommit)
     }
 
     // MARK: Keyframes
@@ -739,6 +730,46 @@ struct AnimDetailsPane: View {
         editIterations = record.iterations.isInfinite ? "∞" : String(format: "%.2f", record.iterations)
         editEasing     = record.easing
         bezierEdit     = AnimBezierEdit(from: record.easing)
+    }
+}
+
+/// One timing field in the details pane. Applies on Return, and on focus loss when the text changed since it gained focus.
+private struct AnimTimingEditField: View {
+    var label: String
+    @Binding var text: String
+    var onCommit: () -> Void
+
+    @FocusState private var focused: Bool
+    @State private var baseline = ""
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(InspectChrome.caption)
+                .foregroundStyle(InspectChrome.muted)
+                .frame(width: 90, alignment: .trailing)
+            OrbitTextField(
+                placeholder: label, text: $text,
+                accentColor: OrbitNeutral.accent, accessibilityLabel: label,
+                externalFocus: $focused
+            )
+            .onSubmit { commit() }
+            .onChange(of: focused) { _, isFocused in
+                if isFocused {
+                    baseline = text
+                } else if text != baseline {
+                    commit()
+                }
+            }
+            .frame(width: 120)
+        }
+        .padding(.horizontal, 10)
+    }
+
+    // Resetting the baseline keeps the blur that follows a Return from applying the same text twice.
+    private func commit() {
+        baseline = text
+        onCommit()
     }
 }
 

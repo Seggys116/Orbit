@@ -719,6 +719,43 @@ public enum OrbitConsoleLogic {
         return true
     }
 
+    // MARK: Copy all
+
+    /// One line per entry in the same text the per-row "Copy message" produces.
+    public static func allMessagesText(_ entries: [ConEntry]) -> String {
+        entries.map { $0.args.map { $0.plainText }.joined(separator: " ") }.joined(separator: "\n")
+    }
+
+    /// One element of "Copy all as JSON": the page's `JSON.stringify` text for an object, or the message text when there is no object to serialise.
+    public enum JSONCopyItem: Equatable, Sendable {
+        case json(String)
+        case text(String)
+    }
+
+    /// Joins the items into one pretty-printed JSON array. A `.json` item that does not parse (the page falls back to `String(o)` for cyclic objects) is embedded as a string so the array stays valid.
+    public static func jsonArrayText(_ items: [JSONCopyItem]) -> String {
+        guard !items.isEmpty else { return "[]" }
+        let elements = items.map { item -> String in
+            switch item {
+            case .json(let raw):
+                let parses = (try? JSONSerialization.jsonObject(with: Data(raw.utf8), options: [.fragmentsAllowed])) != nil
+                return parses ? raw : stringLiteral(raw)
+            case .text(let text):
+                return stringLiteral(text)
+            }
+        }
+        let indented = elements.map { element in
+            element.split(separator: "\n", omittingEmptySubsequences: false)
+                .map { "  " + $0 }
+                .joined(separator: "\n")
+        }
+        return "[\n" + indented.joined(separator: ",\n") + "\n]"
+    }
+
+    private static func stringLiteral(_ text: String) -> String {
+        OrbitInspectDecode.jsonLiteral(text) ?? "\"\""
+    }
+
     // MARK: Autocomplete ranking
 
     public static func rankCompletions(_ completions: [String], prefix: String) -> [String] {

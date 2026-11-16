@@ -104,6 +104,7 @@ struct ProfilesSettingsPane: View {
                 )
                 .onSubmit { commitRename(profile.id) }
                 .onExitCommand { renamingProfileID = nil }
+                .commitsOnOutsideClick(while: renamingProfileID == profile.id) { commitRename(profile.id) }
             } else {
                 Text(profile.name)
                     .font(.system(size: 12.5, weight: .medium))
@@ -235,6 +236,7 @@ struct ProfilesSettingsPane: View {
                 .frame(width: 120)
                 .onSubmit { commitSpaceRename(space.id) }
                 .onExitCommand { renamingSpaceID = nil }
+                .commitsOnOutsideClick(while: renamingSpaceID == space.id) { commitSpaceRename(space.id) }
             } else {
                 Text(space.name)
                     .font(.system(size: 11, weight: .medium))

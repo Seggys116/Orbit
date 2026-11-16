@@ -21,46 +21,43 @@ struct OrbitConsolePane: View {
         .background(InspectChrome.panel)
     }
 
+    /// Wraps onto more lines on a narrow dock instead of scrolling, so the filter field is never pushed out of view.
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(ConFilterLevel.allCases, id: \.self) { level in
-                    let count = model.count(for: level)
-                    InspectChip(
-                        level.title,
-                        selected: model.filterLevel == level,
-                        count: level == .all ? nil : (count > 0 ? count : nil)
-                    ) {
-                        model.filterLevel = level
-                    }
-                }
-
-                Rectangle().fill(InspectChrome.hairline).frame(width: 1, height: 18)
-
-                InspectSearchField(placeholder: "Filter  (/regex/, -exclude, url:pattern)",
-                                   text: Binding(get: { model.filterText },
-                                                 set: { model.filterText = $0 }))
-                    .frame(minWidth: 180, maxWidth: 300)
-
-                Rectangle().fill(InspectChrome.hairline).frame(width: 1, height: 18)
-
-                InspectChip("Group similar", selected: model.groupSimilar) {
-                    model.groupSimilar.toggle()
-                }
-                InspectChip("Timestamps", selected: model.showTimestamps) {
-                    model.showTimestamps.toggle()
-                }
-
-                Spacer(minLength: 0)
-
-                InspectTextButton("Clear", systemImage: "trash") {
-                    model.clear()
+        ConFilterBarLayout(spacing: 4, lineSpacing: 4) {
+            ForEach(ConFilterLevel.allCases, id: \.self) { level in
+                let count = model.count(for: level)
+                InspectChip(
+                    level.title,
+                    selected: model.filterLevel == level,
+                    count: level == .all ? nil : (count > 0 ? count : nil)
+                ) {
+                    model.filterLevel = level
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+
+            Rectangle().fill(InspectChrome.hairline).frame(width: 1, height: 18)
+
+            InspectSearchField(placeholder: "Filter  (/regex/, -exclude, url:pattern)",
+                               text: Binding(get: { model.filterText },
+                                             set: { model.filterText = $0 }))
+                .layoutValue(key: ConFilterBarFlexibleMinWidth.self, value: 140)
+
+            Rectangle().fill(InspectChrome.hairline).frame(width: 1, height: 18)
+
+            InspectChip("Group similar", selected: model.groupSimilar) {
+                model.groupSimilar.toggle()
+            }
+            InspectChip("Timestamps", selected: model.showTimestamps) {
+                model.showTimestamps.toggle()
+            }
+
+            InspectTextButton("Clear", systemImage: "trash") {
+                model.clear()
+            }
         }
-        .frame(height: 36)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
     }
 
     private var logArea: some View {
@@ -118,6 +115,16 @@ struct OrbitConsolePane: View {
             }
             .onChange(of: model.inputFocusRequested) { _, requested in
                 if requested { model.inputFocusRequested = false }
+            }
+            // A row's own menu is the innermost, so it wins over this one when the click lands on a row.
+            .contextMenu {
+                let hasEntries = !model.displayEntries.isEmpty
+                Button("Copy all messages") { model.copyAllEntries() }
+                    .disabled(!hasEntries)
+                Button("Copy all as JSON") { model.copyAllEntriesAsJSON() }
+                    .disabled(!hasEntries)
+                Divider()
+                Button("Clear console") { model.clear() }
             }
             .overlay(alignment: .bottom) {
                 if showJumpPill {
@@ -286,5 +293,94 @@ struct OrbitConsolePane: View {
         guard ms > 0 else { return "" }
         let secs = ms / 1000
         return String(format: "%.3f s", secs)
+    }
+}
+
+// MARK: - Filter bar layout
+
+/// Marks a filter bar child as stretchable and gives the narrowest width it may be wrapped at.
+private struct ConFilterBarFlexibleMinWidth: LayoutValueKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+/// Flows children left to right and wraps to a new line when the next one does not fit. A child with a
+/// flexible minimum width takes whatever its line has left, so the filter field fills the bar.
+private struct ConFilterBarLayout: Layout {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat
+
+    private struct Placement {
+        var index: Int
+        var width: CGFloat
+        var height: CGFloat
+    }
+
+    private func arrange(maxWidth: CGFloat, subviews: Subviews) -> [[Placement]] {
+        var arranged: [[Placement]] = [[]]
+        var used: CGFloat = 0
+        for index in subviews.indices {
+            let sub = subviews[index]
+            var width = sub[ConFilterBarFlexibleMinWidth.self] ?? sub.sizeThatFits(.unspecified).width
+            if maxWidth.isFinite { width = min(width, maxWidth) }
+            if !arranged[arranged.count - 1].isEmpty {
+                if maxWidth.isFinite, used + spacing + width > maxWidth {
+                    arranged.append([])
+                    used = 0
+                } else {
+                    used += spacing
+                }
+            }
+            used += width
+            arranged[arranged.count - 1].append(Placement(index: index, width: width, height: 0))
+        }
+
+        for lineIndex in arranged.indices {
+            let flexible = arranged[lineIndex].indices.filter {
+                subviews[arranged[lineIndex][$0].index][ConFilterBarFlexibleMinWidth.self] != nil
+            }
+            if maxWidth.isFinite, !flexible.isEmpty {
+                let lineUsed = arranged[lineIndex].reduce(CGFloat(0)) { $0 + $1.width }
+                    + spacing * CGFloat(arranged[lineIndex].count - 1)
+                let extra = max(0, maxWidth - lineUsed) / CGFloat(flexible.count)
+                for slot in flexible { arranged[lineIndex][slot].width += extra }
+            }
+            for slot in arranged[lineIndex].indices {
+                let item = arranged[lineIndex][slot]
+                arranged[lineIndex][slot].height = subviews[item.index]
+                    .sizeThatFits(ProposedViewSize(width: item.width, height: nil)).height
+            }
+        }
+        return arranged.filter { !$0.isEmpty }
+    }
+
+    private func lineHeight(_ line: [Placement]) -> CGFloat {
+        line.map(\.height).max() ?? 0
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let arranged = arrange(maxWidth: maxWidth, subviews: subviews)
+        let height = arranged.map(lineHeight).reduce(0, +) + lineSpacing * CGFloat(max(0, arranged.count - 1))
+        let widest = arranged
+            .map { line in line.reduce(CGFloat(0)) { $0 + $1.width } + spacing * CGFloat(max(0, line.count - 1)) }
+            .max() ?? 0
+        return CGSize(width: maxWidth.isFinite ? maxWidth : widest, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for line in arrange(maxWidth: bounds.width, subviews: subviews) {
+            let height = lineHeight(line)
+            var x = bounds.minX
+            for item in line {
+                subviews[item.index].place(
+                    at: CGPoint(x: x, y: y + (height - item.height) / 2),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: item.width, height: item.height)
+                )
+                x += item.width + spacing
+            }
+            y += height + lineSpacing
+        }
     }
 }

@@ -52,6 +52,17 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
         openControllers.first { $0.session.environment === environment }
     }
 
+    /// The browser windows the Dock menu lists, in the order they were opened. Their titles are empty, so
+    /// the system's own list of a Dock icon's windows never includes them.
+    static var dockWindowEntries: [DockWindowEntry] {
+        openControllers.compactMap { controller in
+            guard let window = controller.window, window.isVisible || window.isMiniaturized else { return nil }
+            let session = controller.session
+            let page = session.environment.activeTab?.displayTitle ?? "New Window"
+            return DockWindowEntry(window: window, title: session.isIncognito ? "Incognito: \(page)" : page)
+        }
+    }
+
     // The key (else main, else first) window among those showing this environment, since standard windows share one.
     static func window(for environment: AppEnvironment) -> NSWindow? {
         let windows = openControllers.filter { $0.session.environment === environment }.compactMap(\.window)

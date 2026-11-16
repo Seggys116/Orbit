@@ -72,6 +72,15 @@ final class LittleOrbitWindowController: NSWindowController, NSWindowDelegate {
         return controller
     }
 
+    /// Little Orbit windows for the Dock menu's list, which the system's own window list omits because they have no title.
+    static var dockWindowEntries: [DockWindowEntry] {
+        openWindows.values.compactMap { controller in
+            guard let window = controller.window, window.isVisible || window.isMiniaturized else { return nil }
+            let page = AppEnvironment.processRoot.tab(controller.tabID)?.displayTitle ?? "New Tab"
+            return DockWindowEntry(window: window, title: "Little Orbit: \(page)")
+        }
+    }
+
     static func tabID(forWindow window: NSWindow) -> TabID? {
         openWindows.values.first { $0.window === window }?.tabID
     }

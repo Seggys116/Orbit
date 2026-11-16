@@ -46,7 +46,7 @@ struct HoverRevealSidebarLayer: View {
     private var hotZoneWidth: CGFloat {
         env.isSidebarHoverRevealed
             ? OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: env.effectiveSidebarWidth, availableWidth: layerWidth)
-            : OrbitMetrics.sidebarHoverEdgeWidth
+            : OrbitMetrics.sidebarHoverZoneWidth(bezel: BorderlessSettings.shared.cardInset)
     }
 
     var body: some View {

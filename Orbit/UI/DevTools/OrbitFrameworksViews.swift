@@ -539,6 +539,7 @@ struct FWKeyValueRow: View {
 
     @State private var editing = false
     @State private var draft = ""
+    @FocusState private var draftFocused: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -554,8 +555,13 @@ struct FWKeyValueRow: View {
                     .textFieldStyle(.plain)
                     .font(InspectChrome.mono)
                     .padding(.horizontal, 4)
+                    .focused($draftFocused)
                     .onSubmit { commitEdit() }
                     .onExitCommand { editing = false }
+                    // Clicking elsewhere applies like Return. Return, Escape and the buttons clear `editing` first, so the blur they cause does nothing.
+                    .onChange(of: draftFocused) { wasFocused, isFocused in
+                        if wasFocused && !isFocused && editing { commitEdit() }
+                    }
             } else {
                 Text(value)
                     .font(InspectChrome.mono)
@@ -570,6 +576,7 @@ struct FWKeyValueRow: View {
                 InspectIconButton(symbol: "pencil", help: "Edit value") {
                     draft = value
                     editing = true
+                    draftFocused = true
                 }
             } else if editing {
                 InspectIconButton(symbol: "checkmark", help: "Apply") { commitEdit() }

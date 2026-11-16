@@ -168,6 +168,94 @@ final class PiPControllerTests: XCTestCase {
         )
     }
 
+    // MARK: - The floating window's own controls
+
+    private func floatTheVideoTab(_ tabs: (video: TabID, other: TabID, contents: MockWebContents)) {
+        XCTAssertTrue(controller.requestPiP(for: tabs.video, env: env))
+        reportPictureInPicture(true, for: tabs.video, contents: tabs.contents)
+        controller.tick(env: env)
+        env.activateTab(tabs.other)
+        controller.tick(env: env)
+        XCTAssertEqual(controller.pipTabID, tabs.video, "Precondition: it is floating.")
+    }
+
+    private func setPlaying(_ playing: Bool, for tabID: TabID, contents: MockWebContents) {
+        contents.mediaState.isPlaying = playing
+        env.mediaStates[tabID]?.isPlaying = playing
+    }
+
+    func test_returnToTabFromTheFloatingWindow_bringsTheTabBack() throws {
+        let tabs = try videoTabAndAnother()
+        floatTheVideoTab(tabs)
+        var presented = 0
+        controller.presentApp = { _ in presented += 1 }
+
+        reportPictureInPicture(false, for: tabs.video, contents: tabs.contents)
+        controller.tick(env: env)
+        XCTAssertNotEqual(env.activeTabID, tabs.video, "One tick is not enough to tell a return from a close that has not paused yet.")
+        controller.tick(env: env)
+
+        XCTAssertEqual(env.activeTabID, tabs.video, "The window's return button must bring its tab to the front.")
+        XCTAssertNil(controller.pipTabID)
+        XCTAssertEqual(presented, 1, "Orbit must also come to the front.")
+    }
+
+    func test_closingTheFloatingWindowWithTheVideoPaused_doesNotChangeTheTab() throws {
+        let tabs = try videoTabAndAnother()
+        floatTheVideoTab(tabs)
+
+        setPlaying(false, for: tabs.video, contents: tabs.contents)
+        reportPictureInPicture(false, for: tabs.video, contents: tabs.contents)
+        controller.tick(env: env)
+        controller.tick(env: env)
+
+        XCTAssertEqual(env.activeTabID, tabs.other, "Closing the window must leave the user where they are.")
+        XCTAssertNil(controller.pipTabID)
+    }
+
+    func test_aCloseThatPausesTheVideoAMomentLater_isNotMistakenForAReturn() throws {
+        let tabs = try videoTabAndAnother()
+        floatTheVideoTab(tabs)
+
+        reportPictureInPicture(false, for: tabs.video, contents: tabs.contents)
+        controller.tick(env: env)
+        setPlaying(false, for: tabs.video, contents: tabs.contents)
+        controller.tick(env: env)
+
+        XCTAssertEqual(env.activeTabID, tabs.other)
+        XCTAssertNil(controller.pipTabID)
+    }
+
+    // MARK: - Split View
+
+    func test_movingFocusBetweenThePanesOfASplit_doesNotFloatEither() throws {
+        let tabs = try videoTabAndAnother()
+        let groupID = try XCTUnwrap(env.store.createSplit(with: [tabs.video, tabs.other], axis: .horizontal))
+        defer { env.store.dissolveSplit(groupID) }
+
+        env.activateTab(tabs.other)
+        controller.tick(env: env)
+
+        XCTAssertEqual(
+            tabs.contents.togglePictureInPictureCallCount, 0,
+            "A pane of the split the user is looking at is still on screen; it must not pop out into a floating window."
+        )
+    }
+
+    func test_showingASplitThatHoldsTheFloatingTab_dismissesItsWindow() throws {
+        let tabs = try videoTabAndAnother()
+        floatTheVideoTab(tabs)
+        let spaceID = try XCTUnwrap(env.spaces.first?.id)
+        let partner = env.openTab(url: URL(string: "https://partner.example.com/")!, in: spaceID, activate: false)
+        let groupID = try XCTUnwrap(env.store.createSplit(with: [tabs.video, partner], axis: .horizontal))
+        defer { env.store.dissolveSplit(groupID) }
+
+        env.activateTab(partner)
+        controller.tick(env: env)
+
+        XCTAssertNil(controller.pipTabID, "Its page is back on screen inside the split, so the floating copy must go.")
+    }
+
     func test_aPause_doesNotDismissPictureInPicture() throws {
         let tabs = try videoTabAndAnother()
         XCTAssertTrue(controller.requestPiP(for: tabs.video, env: env))

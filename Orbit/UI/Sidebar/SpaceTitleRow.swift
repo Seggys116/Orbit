@@ -27,6 +27,7 @@ struct SpaceTitleRow: View {
                     .focused($fieldFocused)
                     .onSubmit(commitRename)
                     .onExitCommand { isRenaming = false }
+                    .commitsOnOutsideClick(while: isRenaming, perform: commitRename)
             } else {
                 Text(space.name)
                     .font(OrbitFont.sidebarSpaceName)

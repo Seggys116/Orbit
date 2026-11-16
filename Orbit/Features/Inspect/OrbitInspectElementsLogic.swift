@@ -339,6 +339,53 @@ enum OrbitElementsLogic {
         }
     }
 
+    // MARK: Attribute hit testing
+
+    /// One attribute's ` name="value"` run on an opening tag, in glyph columns counted from the `<`.
+    struct ElAttributeSpan: Equatable {
+        var name: String
+        var columns: Range<Int>
+    }
+
+    /// The attributes in the order and widths the row prints them: sorted by name, values shortened by `displayedAttributeValue`,
+    /// and an empty value printing as the bare name. Keep in step with `ElTreeRowView.attributesText` and `displayColumns`.
+    static func attributeSpans(of node: ElNodeInfo) -> [ElAttributeSpan] {
+        var column = 1 + node.name.count
+        var spans: [ElAttributeSpan] = []
+        for key in node.attrs.keys.sorted() {
+            let value = node.attrs[key] ?? ""
+            let width = 1 + key.count + (value.isEmpty ? 0 : 3 + displayedAttributeValue(value).count)
+            spans.append(ElAttributeSpan(name: key, columns: column..<(column + width)))
+            column += width
+        }
+        return spans
+    }
+
+    /// The attribute whose run covers `column`, counted in glyph columns from the opening tag's `<`.
+    /// The `<`, the tag name, the closing bracket and anything past the end of the row's text belong to no attribute.
+    static func attributeName(atColumn column: Int, of node: ElNodeInfo) -> String? {
+        attributeSpans(of: node).first { $0.columns.contains(column) }?.name
+    }
+
+    /// While an attribute is edited its row prints `<tag ... name="` + field + `"` + the rest of the tag. These are the columns
+    /// of fixed text either side of the field, which the field's width is capped against.
+    static func attributeEditorColumns(of row: ElFlatRow, editing name: String) -> (leading: Int, trailing: Int)? {
+        guard let span = attributeSpans(of: row.node).first(where: { $0.name == name }) else { return nil }
+        let leading = span.columns.lowerBound + 1 + name.count + 2
+        let trailing = 1 + displayColumns(of: row) - span.columns.upperBound
+        return (leading, trailing)
+    }
+
+    static let minAttributeEditorWidth: CGFloat = 80
+
+    /// The editor grows with the text until it fills what is visible beside the fixed text, then wraps onto more lines,
+    /// so a long class list never runs off screen. `consumed` is the width already used by everything else in the row.
+    static func attributeEditorWidth(visible: CGFloat, consumed: CGFloat, textColumns: Int, glyph: CGFloat) -> CGFloat {
+        let wanted = max(minAttributeEditorWidth, CGFloat(textColumns + 2) * glyph)
+        let room = max(minAttributeEditorWidth, visible - consumed)
+        return min(wanted, room)
+    }
+
     static func flattenTree(
         rootIDs: [Int],
         nodes: [Int: ElNodeInfo],
@@ -689,6 +736,24 @@ extension OrbitElementsLogic {
     static func editTextCommand(id: Int, original: String, edited: String) -> [String: Any]? {
         guard edited != original else { return nil }
         return ["op": "el.editText", "id": id, "text": edited]
+    }
+
+    static func setAttributeCommand(id: Int, name: String, value: String) -> [String: Any] {
+        ["op": "el.attr", "id": id, "name": name, "value": value]
+    }
+
+    static func removeAttributeCommand(id: Int, name: String) -> [String: Any] {
+        ["op": "el.attr", "id": id, "name": name, "remove": true]
+    }
+
+    /// An emptied attribute is kept with an empty value, like `class=""`, rather than removed.
+    static func editAttributeCommand(id: Int, name: String, original: String, edited: String) -> [String: Any]? {
+        guard edited != original else { return nil }
+        return setAttributeCommand(id: id, name: name, value: edited)
+    }
+
+    static func attributeValueRequest(id: Int, name: String) -> [String: Any] {
+        ["op": "el.getAttr", "id": id, "name": name]
     }
 
     static func editHTMLCommand(id: Int, original: String, edited: String) -> [String: Any]? {

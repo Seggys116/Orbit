@@ -17,6 +17,15 @@ final class PiPController {
 
     private var pendingRequest: (tabID: TabID, ticksRemaining: Int)?
 
+    // A floating tab whose window closed while the video kept playing: possibly the window's "return to tab" button, possibly a close that has not paused the video yet.
+    private var returnCandidate: TabID?
+
+    /// Brings Orbit forward after the user returns to a tab from the floating window. Replaced in tests.
+    var presentApp: (AppEnvironment) -> Void = { env in
+        NSApp.activate(ignoringOtherApps: true)
+        OrbitWindowController.window(for: env)?.makeKeyAndOrderFront(nil)
+    }
+
     static let confirmationTicks = 6
 
     static let tickInterval: TimeInterval = 0.5
@@ -63,6 +72,7 @@ final class PiPController {
 
     func tick(env: AppEnvironment) {
         settlePendingRequest(env: env)
+        settleFloatingWindowClosed(env: env)
 
         let currentActive = env.activeTabID
         defer {
@@ -72,16 +82,58 @@ final class PiPController {
 
         guard currentActive != lastActiveTabID else { return }
 
+        // A tab that is still on screen has nothing to float away from: moving focus between the panes of a Split View hides neither.
         if let losingFocus = lastActiveTabID, losingFocus != pipTabID,
+           !Self.isOnScreen(losingFocus, env: env),
            pendingRequest?.tabID != losingFocus,
            let state = env.mediaStates[losingFocus], state.isPictureInPictureAvailable, state.isPlaying,
            env.webContents[losingFocus] != nil {
             requestPiP(for: losingFocus, env: env)
         }
 
-        if let newlyFocused = currentActive, newlyFocused == pipTabID {
-            dismissPiP(for: newlyFocused, env: env)
+        if let floating = pipTabID, Self.isOnScreen(floating, env: env) {
+            dismissPiP(for: floating, env: env)
         }
+    }
+
+    /// Whether the tab's page is showing in the window: it is the active tab or a pane of the active Split View.
+    static func isOnScreen(_ tabID: TabID, env: AppEnvironment) -> Bool {
+        guard let active = env.activeTabID else { return false }
+        if tabID == active { return true }
+        return env.splitGroup(for: active)?.tabIDs.contains(tabID) == true
+    }
+
+    /// The floating window can be closed from its own controls, which Orbit never asked for. Closing it with the
+    /// video paused is a dismissal. Closing it with the video still playing is the "return to tab" button, so
+    /// the tab comes back to the front. The playing state is read a second time one tick later because a close
+    /// pauses the video a moment after the window goes.
+    private func settleFloatingWindowClosed(env: AppEnvironment) {
+        guard let floating = pipTabID, pendingRequest?.tabID != floating else {
+            returnCandidate = nil
+            return
+        }
+        guard env.tab(floating) != nil, let state = env.mediaStates[floating] else {
+            pipTabID = nil
+            returnCandidate = nil
+            return
+        }
+        guard !state.isPictureInPictureActive else {
+            returnCandidate = nil
+            return
+        }
+        guard state.isPlaying else {
+            pipTabID = nil
+            returnCandidate = nil
+            return
+        }
+        guard returnCandidate == floating else {
+            returnCandidate = floating
+            return
+        }
+        returnCandidate = nil
+        pipTabID = nil
+        env.activateTab(floating)
+        presentApp(env)
     }
 
     private func settlePendingRequest(env: AppEnvironment) {
@@ -125,6 +177,7 @@ final class PiPController {
         if pendingRequest?.tabID == tabID {
             pendingRequest = nil
         }
+        if returnCandidate == tabID { returnCandidate = nil }
         guard pipTabID == tabID else { return }
         if let contents = env.webContents[tabID], contents.mediaState.isPictureInPictureActive {
             contents.togglePictureInPicture()
@@ -138,6 +191,8 @@ final class PiPController {
         lastActiveTabID = nil
         pipTabID = nil
         pendingRequest = nil
+        returnCandidate = nil
+        presentApp = { _ in }
     }
 
     func _test_hasPendingRequest(for tabID: TabID) -> Bool {

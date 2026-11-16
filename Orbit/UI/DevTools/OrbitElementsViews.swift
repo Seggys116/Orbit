@@ -44,6 +44,11 @@ struct ElTreeRowView: View {
     /// Room after the text for its trailing padding and the layout badge.
     static let trailingRoom: CGFloat = 96
 
+    /// Where a row's text starts along the row, after its indent guides and disclosure column.
+    static func textStart(depth: Int) -> CGFloat {
+        CGFloat(depth) * indentWidth + disclosureWidth
+    }
+
     /// The width the row needs to print in full, estimated from its text so rows that are not on screen need no layout.
     static func contentWidth(of row: ElFlatRow) -> CGFloat {
         CGFloat(row.depth) * indentWidth + disclosureWidth
@@ -57,6 +62,13 @@ struct ElTreeRowView: View {
 
     private var isEditingTagName: Bool { model.inlineEdit == .tagName(row.nodeID) && !row.isClosingTag }
     private var isEditingText: Bool { model.inlineEdit == .text(row.nodeID) && !row.isClosingTag }
+
+    /// The attribute being edited on this row, if the row still has it.
+    private var editingAttribute: String? {
+        guard case .attribute(let id, let name) = model.inlineEdit, id == row.nodeID, !row.isClosingTag,
+              row.node.attrs[name] != nil else { return nil }
+        return name
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -245,15 +257,20 @@ struct ElTreeRowView: View {
 
     /// Separate runs so the tag name can swap for a text field. The attribute run keeps its full width; the tree scrolls to it.
     private var openingTagContent: some View {
-        HStack(spacing: 0) {
+        // A wrapped attribute editor spans several lines, so the text around it lines up with its first line.
+        HStack(alignment: editingAttribute == nil ? .center : .firstTextBaseline, spacing: 0) {
             Text("<")
                 .font(InspectChrome.mono)
                 .foregroundStyle(InspectChrome.muted)
                 .fixedSize()
             tagNameView
-            attributesText
-                .font(InspectChrome.mono)
-                .fixedSize()
+            if let editingAttribute {
+                attributeEditorRuns(editing: editingAttribute)
+            } else {
+                attributesText
+                    .font(InspectChrome.mono)
+                    .fixedSize()
+            }
         }
         .padding(.trailing, 8)
     }
@@ -293,8 +310,13 @@ struct ElTreeRowView: View {
 
     /// The attribute list and the closing bracket, as concatenated `Text` so it renders as one run.
     private var attributesText: Text {
+        attributeRun(row.node.attrs.keys.sorted()) + tailText
+    }
+
+    /// The given attributes, which must be in `OrbitElementsLogic.attributeSpans` order.
+    private func attributeRun(_ keys: [String]) -> Text {
         var t = Text("")
-        for key in row.node.attrs.keys.sorted() {
+        for key in keys {
             t = t + Text(" \(key)").foregroundStyle(InspectChrome.attributeNameColor)
             if let val = row.node.attrs[key], !val.isEmpty {
                 t = t + Text("=\"").foregroundStyle(InspectChrome.muted)
@@ -302,14 +324,69 @@ struct ElTreeRowView: View {
                 t = t + Text("\"").foregroundStyle(InspectChrome.muted)
             }
         }
+        return t
+    }
+
+    private var tailText: Text {
         let tail: String
         if row.hasChildren && !row.isExpanded {
             tail = ">…</\(row.node.name)>"
         } else {
             tail = ">"
         }
-        t = t + Text(tail).foregroundStyle(InspectChrome.muted)
-        return t
+        return Text(tail).foregroundStyle(InspectChrome.muted)
+    }
+
+    /// The attributes before the edited one, its name and opening quote, the field, then the closing quote and the rest of the tag,
+    /// so the edit reads in place. Every fixed run is printed as the row prints it, which keeps the row's width estimate true.
+    @ViewBuilder
+    private func attributeEditorRuns(editing name: String) -> some View {
+        let keys = row.node.attrs.keys.sorted()
+        let index = keys.firstIndex(of: name) ?? keys.endIndex
+        let before = Array(keys[..<index])
+        let after = Array(keys.dropFirst(index + 1))
+        let opening = attributeRun(before)
+            + Text(" \(name)").foregroundStyle(InspectChrome.attributeNameColor)
+            + Text("=\"").foregroundStyle(InspectChrome.muted)
+        let closing = Text("\"").foregroundStyle(InspectChrome.muted) + attributeRun(after) + tailText
+        opening.font(InspectChrome.mono).fixedSize()
+        attributeField(name: name)
+        closing.font(InspectChrome.mono).fixedSize()
+    }
+
+    /// Edits the whole raw value, wrapping onto more lines rather than running past what the tree shows.
+    private func attributeField(name: String) -> some View {
+        let columns = OrbitElementsLogic.attributeEditorColumns(of: row, editing: name) ?? (leading: 0, trailing: 0)
+        // Everything in the row but the field: the indent, the text either side of it, and the field's own and the row's padding.
+        let consumed = CGFloat(row.depth) * Self.indentWidth + Self.disclosureWidth
+            + CGFloat(columns.leading + columns.trailing) * Self.glyphWidth + 4 + 8 + 16
+        let textColumns = model.inlineEditText.count
+        return TextField("value", text: Binding(get: { model.inlineEditText }, set: { model.inlineEditText = $0 }), axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(InspectChrome.mono)
+            .foregroundStyle(InspectChrome.attributeValueColor)
+            .lineLimit(1...12)
+            .autocorrectionDisabled()
+            .focused($editFocused)
+            // The scroll view's visible width, not the row's, since the row is as wide as the longest line in the tree.
+            .containerRelativeFrame(.horizontal, alignment: .leading) { visible, _ in
+                OrbitElementsLogic.attributeEditorWidth(visible: visible, consumed: consumed, textColumns: textColumns, glyph: Self.glyphWidth)
+            }
+            .padding(.horizontal, 2)
+            .background(
+                RoundedRectangle(cornerRadius: OrbitRadius.xs, style: .continuous).fill(InspectChrome.panel)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: OrbitRadius.xs, style: .continuous)
+                    .strokeBorder(InspectChrome.accent, lineWidth: 1)
+            )
+            .onAppear { editFocused = true }
+            .onSubmit { model.commitInlineEdit() }
+            .onKeyPress(.escape) { model.cancelInlineEdit(); return .handled }
+            .onChange(of: editFocused) { _, focused in
+                if !focused, editingAttribute == name { model.commitInlineEdit() }
+            }
+            .accessibilityLabel("Attribute \(name)")
     }
 
     private var closingTagContent: some View {
@@ -385,18 +462,24 @@ struct ElTreeRowView: View {
 
     /// The tag name's extent along the row, from the row's leading edge.
     private var tagNameRange: ClosedRange<CGFloat> {
-        let start = CGFloat(row.depth) * Self.indentWidth + Self.disclosureWidth + Self.glyphWidth
+        let start = Self.textStart(depth: row.depth) + Self.glyphWidth
         return start...(start + CGFloat(row.node.name.count) * Self.glyphWidth)
     }
 
     private var hitTarget: some View {
         InspectHitTarget(drag: dragSource, located: { point, clicks in
-            guard !row.isClosingTag, !isEditingTagName, !isEditingText else { return }
+            guard !row.isClosingTag, !isEditingTagName, !isEditingText, editingAttribute == nil else { return }
             model.selectRow(nodeID: row.nodeID)
             guard clicks >= 2 else { return }
             switch row.node.kind {
             case "el" where tagNameRange.contains(point.x):
                 model.beginTagRename(nodeID: row.nodeID)
+            case "el":
+                // Anywhere on an attribute's ` name="value"` run edits it; the rest of the opening tag does nothing.
+                let column = Int(((point.x - Self.textStart(depth: row.depth)) / Self.glyphWidth).rounded(.down))
+                if let name = OrbitElementsLogic.attributeName(atColumn: column, of: row.node) {
+                    model.beginAttributeEdit(nodeID: row.nodeID, name: name)
+                }
             case "text", "comment":
                 model.beginTextEdit(nodeID: row.nodeID)
             default:
