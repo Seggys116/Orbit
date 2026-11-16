@@ -155,10 +155,41 @@ public final class CloudSyncEngine {
         guard isEligibleToSync else { return }
         reconcile()
         do {
-            try await transport.fetchChanges()
-            try await transport.sendChanges()
+            try await fetchChangesOutsideDelegateCallback()
+            try await sendChangesOutsideDelegateCallback()
         } catch {
             handleTopLevelError(error)
+        }
+    }
+
+    // MARK: Calling into CKSyncEngine
+
+    // CKSyncEngine traps ("BUG IN CLIENT OF CLOUDKIT: Cannot await a call into CKSyncEngine from within a
+    // delegate callback") when fetchChanges or sendChanges is awaited by a task it has marked as running
+    // inside one of its callbacks. The mark is a task-local, and an unstructured Task copies its creator's
+    // task-locals. So a push started from handleEvent carried it: .accountChange (delivered at startup) ->
+    // refreshAccountStatus -> reconcileAndPush, a failed save -> scheduleRetry, or a store edit made while
+    // absorbing a fetch -> debounceReconcile. Every call into the engine goes through here, in a detached
+    // task that starts with no inherited task-locals.
+
+    private func fetchChangesOutsideDelegateCallback() async throws {
+        let transport = self.transport
+        try await Self.runOutsideDelegateCallback { try await transport.fetchChanges() }
+    }
+
+    private func sendChangesOutsideDelegateCallback() async throws {
+        let transport = self.transport
+        try await Self.runOutsideDelegateCallback { try await transport.sendChanges() }
+    }
+
+    private static func runOutsideDelegateCallback(
+        _ operation: @escaping @MainActor @Sendable () async throws -> Void
+    ) async throws {
+        let detached = Task.detached { @MainActor in try await operation() }
+        try await withTaskCancellationHandler {
+            try await detached.value
+        } onCancel: {
+            detached.cancel()
         }
     }
 
@@ -230,7 +261,7 @@ public final class CloudSyncEngine {
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.transport.sendChanges()
+                try await self.sendChangesOutsideDelegateCallback()
             } catch {
                 self.handleTopLevelError(error)
             }

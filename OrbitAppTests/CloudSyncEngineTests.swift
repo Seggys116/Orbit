@@ -778,6 +778,81 @@ final class CloudSyncEngineTests: XCTestCase {
         )
     }
 
+    // MARK: - CloudKit delegate-callback context
+
+    /// The crash this guards: CKSyncEngine delivers `.accountChange` at startup, `handleEvent` awaits
+    /// `refreshAccountStatus()`, that reaches `reconcileAndPush()`, and its unstructured Task awaited
+    /// `sendChanges()` while still marked as inside the callback. CloudKit trapped, about a second after launch.
+    func testAPushStartedFromInsideADelegateCallbackDoesNotCarryTheCallbackIntoCloudKit() async throws {
+        let store = StubSyncableStore(state: makeFixture(includeIncognito: false).state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(store: store, transport: transport)
+        engine.start()
+        await engine.refreshAccountStatus()
+        try await settle(milliseconds: 300)
+        transport.reset()
+
+        await SimulatedDelegateCallback.$isActive.withValue(true) {
+            await engine.refreshAccountStatus()
+        }
+        await waitUntil(timeout: 3, "the push started from the callback to reach the transport") {
+            transport.sendCount > 0
+        }
+
+        XCTAssertFalse(transport.sendCallsInsideDelegateCallback.isEmpty, "No push was sent, so nothing was observed.")
+        XCTAssertFalse(
+            transport.sendCallsInsideDelegateCallback.contains(true),
+            "sendChanges ran inside a task that still carried the delegate-callback context. Real CloudKit traps on that, which is a crash at launch."
+        )
+    }
+
+    func testARetryScheduledFromInsideADelegateCallbackDoesNotCarryTheCallbackIntoCloudKit() async throws {
+        let store = StubSyncableStore(state: makeFixture(includeIncognito: false).state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(store: store, transport: transport)
+        engine.start()
+        await engine.refreshAccountStatus()
+        try await settle(milliseconds: 300)
+        transport.reset()
+
+        let rateLimited = CKError(.requestRateLimited, userInfo: [CKErrorRetryAfterKey: 1.0])
+        SimulatedDelegateCallback.$isActive.withValue(true) {
+            engine.handleTopLevelError(rateLimited)
+        }
+        await waitUntil(timeout: 4, "the scheduled retry to reach the transport") {
+            transport.sendCount > 0
+        }
+
+        XCTAssertFalse(transport.sendCallsInsideDelegateCallback.isEmpty, "The retry never sent, so nothing was observed.")
+        XCTAssertFalse(
+            transport.sendCallsInsideDelegateCallback.contains(true),
+            "A retry scheduled from a delegate callback sent while still marked as inside it, which traps in real CloudKit."
+        )
+    }
+
+    func testAnEditMadeWhileAbsorbingAFetchDoesNotPushFromInsideTheDelegateCallback() async throws {
+        let fixture = makeFixture(includeIncognito: false)
+        let store = StubSyncableStore(state: fixture.state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(store: store, transport: transport)
+        engine.start()
+        await engine.refreshAccountStatus()
+        try await settle(milliseconds: 300)
+        transport.reset()
+
+        await SimulatedDelegateCallback.$isActive.withValue(true) {
+            store.applySyncEngineUpdate { $0.spaces[0].name = "Renamed Elsewhere" }
+            await engine.refreshNow()
+        }
+        await waitUntil(timeout: 3, "a push to reach the transport") { transport.sendCount > 0 }
+
+        XCTAssertFalse(transport.fetchCallsInsideDelegateCallback.isEmpty, "refreshNow never fetched.")
+        XCTAssertFalse(
+            transport.fetchCallsInsideDelegateCallback.contains(true) || transport.sendCallsInsideDelegateCallback.contains(true),
+            "refreshNow reached CloudKit from inside the delegate-callback context."
+        )
+    }
+
     // MARK: - Helpers
 
     @discardableResult
@@ -810,6 +885,14 @@ final class CloudSyncEngineTests: XCTestCase {
 }
 
 // MARK: - Test doubles
+
+/// Stands in for the task-local CloudKit sets while it runs a `CKSyncEngineDelegate` callback. CKSyncEngine
+/// checks it on every `fetchChanges` and `sendChanges` and, finding it set, traps with "BUG IN CLIENT OF
+/// CLOUDKIT: Cannot await a call into CKSyncEngine from within a delegate callback". An unstructured `Task`
+/// inherits its creator's task-locals, so any push started from inside a callback carries the marker with it.
+enum SimulatedDelegateCallback {
+    @TaskLocal static var isActive = false
+}
 
 @MainActor
 final class StubSyncableStore: SyncableStore {
@@ -873,8 +956,19 @@ final class RecordingSyncTransport: SyncTransport {
         addedDatabaseChanges.append(contentsOf: changes)
     }
 
-    func fetchChanges() async throws { fetchCount += 1 }
-    func sendChanges() async throws { sendCount += 1 }
+    /// Whether each call arrived with `SimulatedDelegateCallback` set, in call order.
+    private(set) var fetchCallsInsideDelegateCallback: [Bool] = []
+    private(set) var sendCallsInsideDelegateCallback: [Bool] = []
+
+    func fetchChanges() async throws {
+        fetchCount += 1
+        fetchCallsInsideDelegateCallback.append(SimulatedDelegateCallback.isActive)
+    }
+
+    func sendChanges() async throws {
+        sendCount += 1
+        sendCallsInsideDelegateCallback.append(SimulatedDelegateCallback.isActive)
+    }
 
     // MARK: Assertions
 
@@ -902,6 +996,8 @@ final class RecordingSyncTransport: SyncTransport {
         addedDatabaseChanges.removeAll()
         fetchCount = 0
         sendCount = 0
+        fetchCallsInsideDelegateCallback.removeAll()
+        sendCallsInsideDelegateCallback.removeAll()
     }
 
     private static func recordName(of change: CKSyncEngine.PendingRecordZoneChange) -> String {
