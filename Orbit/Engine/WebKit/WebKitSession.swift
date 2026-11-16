@@ -78,7 +78,7 @@ final class WebKitSession: EngineSession {
         store.getAllCookies { [weak self] cookies in
             Task { @MainActor in
                 guard let self else { return }
-                self.knownCookies = Dictionary(uniqueKeysWithValues: cookies.map { (Self.cookieKey($0), $0) })
+                self.knownCookies = Self.indexCookies(cookies)
                 let observer = CookieStoreObserver(session: self)
                 self.cookieObserver = observer
                 store.add(observer)
@@ -103,6 +103,14 @@ final class WebKitSession: EngineSession {
 
     private static func cookieKey(_ cookie: HTTPCookie) -> String {
         "\(cookie.name)|\(cookie.domain)|\(cookie.path)"
+    }
+
+    /// Cookies keyed for change detection. WebKit's store can hold several cookies that share a name,
+    /// domain and path and differ only in attributes such as SameSite or partition, so a repeated key is
+    /// ordinary data. This once used `Dictionary(uniqueKeysWithValues:)`, which traps on a repeated key and
+    /// crashed the app at launch for any profile whose store held such a pair.
+    static func indexCookies(_ cookies: [HTTPCookie]) -> [String: HTTPCookie] {
+        Dictionary(cookies.map { (cookieKey($0), $0) }, uniquingKeysWith: { _, latest in latest })
     }
 
     func cookies(for url: URL) async -> [HTTPCookie] {
