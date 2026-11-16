@@ -335,12 +335,13 @@ private struct ConFilterBarLayout: Layout {
         }
 
         for lineIndex in arranged.indices {
-            let flexible = arranged[lineIndex].indices.filter {
-                subviews[arranged[lineIndex][$0].index][ConFilterBarFlexibleMinWidth.self] != nil
+            var flexible: [Int] = []
+            for slot in arranged[lineIndex].indices {
+                let subview = subviews[arranged[lineIndex][slot].index]
+                if subview[ConFilterBarFlexibleMinWidth.self] != nil { flexible.append(slot) }
             }
             if maxWidth.isFinite, !flexible.isEmpty {
-                let lineUsed = arranged[lineIndex].reduce(CGFloat(0)) { $0 + $1.width }
-                    + spacing * CGFloat(arranged[lineIndex].count - 1)
+                let lineUsed: CGFloat = lineWidth(arranged[lineIndex])
                 let extra = max(0, maxWidth - lineUsed) / CGFloat(flexible.count)
                 for slot in flexible { arranged[lineIndex][slot].width += extra }
             }
@@ -357,13 +358,23 @@ private struct ConFilterBarLayout: Layout {
         line.map(\.height).max() ?? 0
     }
 
+    private func lineWidth(_ line: [Placement]) -> CGFloat {
+        var total: CGFloat = 0
+        for item in line { total += item.width }
+        let gaps = CGFloat(max(0, line.count - 1))
+        return total + spacing * gaps
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let maxWidth = proposal.width ?? .infinity
+        let maxWidth: CGFloat = proposal.width ?? .infinity
         let arranged = arrange(maxWidth: maxWidth, subviews: subviews)
-        let height = arranged.map(lineHeight).reduce(0, +) + lineSpacing * CGFloat(max(0, arranged.count - 1))
-        let widest = arranged
-            .map { line in line.reduce(CGFloat(0)) { $0 + $1.width } + spacing * CGFloat(max(0, line.count - 1)) }
-            .max() ?? 0
+        var height: CGFloat = 0
+        var widest: CGFloat = 0
+        for line in arranged {
+            height += lineHeight(line)
+            widest = max(widest, lineWidth(line))
+        }
+        height += lineSpacing * CGFloat(max(0, arranged.count - 1))
         return CGSize(width: maxWidth.isFinite ? maxWidth : widest, height: height)
     }
 
