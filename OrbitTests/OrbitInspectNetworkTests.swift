@@ -471,6 +471,262 @@ final class OrbitInspectNetworkTests: XCTestCase {
         XCTAssertNil(buffer[id: "alias10"])
     }
 
+    // MARK: - Set-Cookie and store cookies
+
+    func test_splitSetCookieHeader_keepsExpiresDateWhole() {
+        let combined = "a=1; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT; HttpOnly, b=2; Secure, c=3"
+        XCTAssertEqual(OrbitNetworkLogic.splitSetCookieHeader(combined), [
+            "a=1; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT; HttpOnly",
+            "b=2; Secure",
+            "c=3",
+        ])
+    }
+
+    func test_splitSetCookieHeader_singleCookieAndEmpty() {
+        XCTAssertEqual(OrbitNetworkLogic.splitSetCookieHeader("token=abc; Path=/"), ["token=abc; Path=/"])
+        XCTAssertEqual(OrbitNetworkLogic.splitSetCookieHeader(""), [])
+    }
+
+    func test_matchingCookies_filtersByDomainPathSecureAndExpiryAndOrdersLongestPathFirst() throws {
+        func cookie(_ name: String, domain: String, path: String = "/", secure: Bool = false, expires: Date? = nil) throws -> HTTPCookie {
+            var props: [HTTPCookiePropertyKey: Any] = [.name: name, .value: "v", .domain: domain, .path: path]
+            if secure { props[.secure] = "TRUE" }
+            if let expires { props[.expires] = expires }
+            return try XCTUnwrap(HTTPCookie(properties: props))
+        }
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let cookies = [
+            try cookie("root", domain: ".example.com"),
+            try cookie("deep", domain: "example.com", path: "/docs"),
+            try cookie("other_host", domain: "other.com"),
+            try cookie("other_path", domain: "example.com", path: "/admin"),
+            try cookie("secure_only", domain: "example.com", secure: true),
+            try cookie("expired", domain: "example.com", expires: Date(timeIntervalSince1970: 1_000)),
+        ]
+        let plain = OrbitNetworkLogic.matchingCookies(cookies, url: try XCTUnwrap(URL(string: "http://www.example.com/docs/a")), now: now)
+        XCTAssertEqual(plain.map(\.name), ["deep", "root"])
+        let secure = OrbitNetworkLogic.matchingCookies(cookies, url: try XCTUnwrap(URL(string: "https://example.com/docs/a")), now: now)
+        XCTAssertEqual(secure.map(\.name), ["deep", "root", "secure_only"])
+    }
+
+    // MARK: - Request payload
+
+    func test_decodeRequestBody_stringKeepsTextAndImpliedContentType() throws {
+        let body = try XCTUnwrap(OrbitNetworkLogic.decodeRequestBody(
+            ["type": "string", "size": 13, "text": "{\"a\":1}", "truncated": false, "ct": "text/plain;charset=UTF-8"]))
+        XCTAssertEqual(body.kind, "string")
+        XCTAssertEqual(body.text, "{\"a\":1}")
+        XCTAssertEqual(body.size, 13)
+        XCTAssertEqual(body.impliedContentType, "text/plain;charset=UTF-8")
+        XCTAssertFalse(body.truncated)
+        XCTAssertEqual(OrbitNetworkLogic.requestBodySummary(body), "Text, 13 B")
+    }
+
+    func test_decodeRequestBody_formDataKeepsFieldsAndFileMetadata() throws {
+        let entries: [[String: Any]] = [["n": "title", "v": "Hello"], ["n": "photo", "v": "", "f": "a.png", "s": 2048]]
+        let body = try XCTUnwrap(OrbitNetworkLogic.decodeRequestBody(["type": "FormData", "count": 3, "entries": entries]))
+        XCTAssertEqual(body.fieldCount, 3)
+        XCTAssertEqual(body.fields.count, 2)
+        XCTAssertEqual(body.fields[0], NetFormField(name: "title", value: "Hello"))
+        XCTAssertEqual(body.fields[1].fileName, "a.png")
+        XCTAssertEqual(body.fields[1].fileSize, 2048)
+        XCTAssertEqual(OrbitNetworkLogic.requestBodySummary(body), "FormData, 3 fields")
+        XCTAssertNil(body.size)
+    }
+
+    func test_decodeRequestBody_withoutATypeIsNil() {
+        XCTAssertNil(OrbitNetworkLogic.decodeRequestBody([:]))
+    }
+
+    func test_exportableBodyText_onlyForCompleteText() {
+        XCTAssertEqual(OrbitNetworkLogic.exportableBodyText(NetRequestBody(kind: "string", text: "x=1")), "x=1")
+        XCTAssertNil(OrbitNetworkLogic.exportableBodyText(NetRequestBody(kind: "string", text: "x=1", truncated: true)))
+        XCTAssertNil(OrbitNetworkLogic.exportableBodyText(NetRequestBody(kind: "FormData")))
+        XCTAssertNil(OrbitNetworkLogic.exportableBodyText(nil))
+    }
+
+    func test_decodeFormEncoded_decodesPlusAndPercent() {
+        let fields = OrbitNetworkLogic.decodeFormEncoded("q=hello+world&path=%2Fa%2Fb&flag&empty=")
+        XCTAssertEqual(fields, [
+            NetFormField(name: "q", value: "hello world"),
+            NetFormField(name: "path", value: "/a/b"),
+            NetFormField(name: "flag", value: ""),
+            NetFormField(name: "empty", value: ""),
+        ])
+    }
+
+    func test_queryParameters_ofURL() {
+        XCTAssertEqual(OrbitNetworkLogic.queryParameters(of: "https://x.test/p?a=1&b=two%20words#frag"), [
+            NetFormField(name: "a", value: "1"),
+            NetFormField(name: "b", value: "two words"),
+        ])
+        XCTAssertTrue(OrbitNetworkLogic.queryParameters(of: "https://x.test/p").isEmpty)
+    }
+
+    func test_prettyJSON_keepsKeyOrderAndCompactEmptyContainers() {
+        let pretty = OrbitNetworkLogic.prettyJSON("{\"b\":1,\"a\":[1,2],\"c\":{},\"s\":\"x,y:{z}\"}")
+        XCTAssertEqual(pretty, """
+        {
+          "b": 1,
+          "a": [
+            1,
+            2
+          ],
+          "c": {},
+          "s": "x,y:{z}"
+        }
+        """)
+    }
+
+    func test_prettyJSON_rejectsInvalidAndNonContainerText() {
+        XCTAssertNil(OrbitNetworkLogic.prettyJSON("{\"a\":"))
+        XCTAssertNil(OrbitNetworkLogic.prettyJSON("plain text"))
+        XCTAssertNil(OrbitNetworkLogic.prettyJSON("42"))
+    }
+
+    // MARK: - Initiator
+
+    func test_parseStackFrame_namedAnonymousAndPortUrls() throws {
+        let named = try XCTUnwrap(OrbitNetworkLogic.parseStackFrame("loadData@https://example.com/app.js:12:34"))
+        XCTAssertEqual(named, NetStackFrame(function: "loadData", url: "https://example.com/app.js", line: 12, column: 34))
+        XCTAssertTrue(named.isOpenable)
+
+        let anonymous = try XCTUnwrap(OrbitNetworkLogic.parseStackFrame("@http://localhost:3000/main.js:5:7"))
+        XCTAssertEqual(anonymous.function, "")
+        XCTAssertEqual(anonymous.url, "http://localhost:3000/main.js")
+        XCTAssertEqual(anonymous.line, 5)
+
+        let global = try XCTUnwrap(OrbitNetworkLogic.parseStackFrame("global code@https://x.test/a.js:1:1"))
+        XCTAssertEqual(global.function, "global code")
+    }
+
+    func test_parseStackFrame_nativeAndBlankLines() throws {
+        let native = try XCTUnwrap(OrbitNetworkLogic.parseStackFrame("[native code]"))
+        XCTAssertTrue(native.isNative)
+        XCTAssertFalse(native.isOpenable)
+        XCTAssertNil(native.line)
+        XCTAssertNil(OrbitNetworkLogic.parseStackFrame("   "))
+    }
+
+    func test_initiatorLocation_isTheFirstOpenableFrame() {
+        let frames = OrbitNetworkLogic.stackFrames(["[native code]", "run@https://x.test/a.js:3:4", "go@https://x.test/b.js:9:1"])
+        XCTAssertEqual(OrbitNetworkLogic.initiatorLocation(frames)?.url, "https://x.test/a.js")
+        XCTAssertNil(OrbitNetworkLogic.initiatorLocation([]))
+    }
+
+    func test_initiatorKind_prefersTheHookThenTheTimingType() {
+        XCTAssertEqual(OrbitNetworkLogic.initiatorKind(jsSource: "xhr", timingInitiatorType: "script", resourceType: "fetch")?.title, "XMLHttpRequest")
+        XCTAssertEqual(OrbitNetworkLogic.initiatorKind(jsSource: "", timingInitiatorType: "img", resourceType: "image")?.title, "Image element")
+        XCTAssertEqual(OrbitNetworkLogic.initiatorKind(jsSource: "", timingInitiatorType: "css", resourceType: "font")?.title, "CSS")
+        XCTAssertEqual(OrbitNetworkLogic.initiatorKind(jsSource: "", timingInitiatorType: "", resourceType: "websocket")?.title, "WebSocket")
+        XCTAssertEqual(OrbitNetworkLogic.initiatorKind(jsSource: "", timingInitiatorType: "", resourceType: "document")?.title, "Navigation")
+        XCTAssertEqual(OrbitNetworkLogic.initiatorKind(jsSource: "", timingInitiatorType: "newthing", resourceType: "other")?.title, "newthing")
+        XCTAssertNil(OrbitNetworkLogic.initiatorKind(jsSource: "", timingInitiatorType: "", resourceType: "other"))
+    }
+
+    func test_isCrossOrigin_comparesSchemeHostAndPort() {
+        XCTAssertEqual(OrbitNetworkLogic.isCrossOrigin("https://a.test/x.js", pageURL: "https://a.test/index"), false)
+        XCTAssertEqual(OrbitNetworkLogic.isCrossOrigin("https://a.test:443/x.js", pageURL: "https://a.test/index"), false)
+        XCTAssertEqual(OrbitNetworkLogic.isCrossOrigin("https://cdn.a.test/x.js", pageURL: "https://a.test/index"), true)
+        XCTAssertEqual(OrbitNetworkLogic.isCrossOrigin("http://a.test/x.js", pageURL: "https://a.test/index"), true)
+        XCTAssertEqual(OrbitNetworkLogic.isCrossOrigin("https://a.test:8443/x.js", pageURL: "https://a.test/index"), true)
+        XCTAssertNil(OrbitNetworkLogic.isCrossOrigin("not a url", pageURL: "https://a.test/"))
+    }
+
+    // MARK: - Response body
+
+    private func fetchability(
+        method: String = "GET", status: Int = 200, mime: String = "application/json", type: String = "fetch",
+        url: String = "https://a.test/x", pending: Bool = false, failed: Bool = false, cancelled: Bool = false
+    ) -> NetBodyFetchability {
+        OrbitNetworkLogic.bodyFetchability(
+            method: method, status: status, mimeType: mime, resourceType: type, url: url,
+            pending: pending, failed: failed, cancelled: cancelled)
+    }
+
+    func test_bodyFetchability_textImageAndUnknownTypesCanBeReread() {
+        XCTAssertEqual(fetchability(), .refetch)
+        XCTAssertEqual(fetchability(mime: "text/css", type: "stylesheet"), .refetch)
+        XCTAssertEqual(fetchability(mime: "image/png", type: "image"), .refetch)
+        XCTAssertEqual(fetchability(mime: "", type: "script"), .refetch)
+        XCTAssertEqual(fetchability(status: 304), .refetch)
+    }
+
+    func test_bodyFetchability_explainsEachRefusal() {
+        func reason(_ f: NetBodyFetchability) -> String {
+            if case .unavailable(let text) = f { return text }
+            return ""
+        }
+        XCTAssertTrue(reason(fetchability(pending: true)).contains("not finished"))
+        XCTAssertTrue(reason(fetchability(failed: true)).contains("failed"))
+        XCTAssertTrue(reason(fetchability(cancelled: true)).contains("cancelled"))
+        XCTAssertTrue(reason(fetchability(method: "POST")).contains("POST"))
+        XCTAssertTrue(reason(fetchability(status: 204)).contains("204"))
+        XCTAssertTrue(reason(fetchability(status: 302)).contains("redirect"))
+        XCTAssertTrue(reason(fetchability(mime: "font/woff2", type: "font")).contains("font/woff2"))
+        XCTAssertTrue(reason(fetchability(url: "data:text/plain,hi")).contains("http"))
+        XCTAssertTrue(reason(fetchability(type: "websocket")).contains("Streams"))
+    }
+
+    func test_decodeFetchedBody_textImageAndFailures() throws {
+        let text = try XCTUnwrap(OrbitNetworkLogic.decodeFetchedBody(["id": "7", "kind": "text", "text": "hi", "truncated": true]))
+        XCTAssertEqual(text.id, "7")
+        XCTAssertEqual(text.body, .text("hi", truncated: true))
+
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47])
+        let image = try XCTUnwrap(OrbitNetworkLogic.decodeFetchedBody(["id": "8", "kind": "image", "b64": bytes.base64EncodedString()]))
+        XCTAssertEqual(image.body, .image(bytes))
+
+        let broken = try XCTUnwrap(OrbitNetworkLogic.decodeFetchedBody(["id": "9", "kind": "image", "b64": ""]))
+        guard case .unavailable = broken.body else { return XCTFail("an empty image payload must not preview") }
+
+        let opaque = try XCTUnwrap(OrbitNetworkLogic.decodeFetchedBody(["id": "10", "kind": "unavailable", "reason": "opaque"]))
+        guard case .unavailable(let why) = opaque.body else { return XCTFail("expected unavailable") }
+        XCTAssertTrue(why.contains("opaque"))
+
+        XCTAssertNil(OrbitNetworkLogic.decodeFetchedBody(["kind": "text", "text": "no id"]))
+    }
+
+    func test_captureSkipReason_namesEveryCodeTheHookSends() {
+        for code in ["closed", "opaque", "stream", "type", "responseType", "empty", "unreadable"] {
+            XCTAssertNotNil(OrbitNetworkLogic.captureSkipReason(code: code, mime: "image/png"), code)
+        }
+        XCTAssertNil(OrbitNetworkLogic.captureSkipReason(code: "", mime: ""))
+        XCTAssertTrue(OrbitNetworkLogic.captureSkipReason(code: "type", mime: "image/png")?.contains("image/png") == true)
+    }
+
+    // MARK: - Timing decode
+
+    func test_decodeResourceTiming_readsEveryField() {
+        let serverTiming: [[String: Any]] = [["name": "db", "dur": 12.5, "desc": "query"]]
+        let raw = OrbitNetworkLogic.decodeResourceTiming([
+            "url": "https://a.test/x.js", "st": 10.5, "fetchStart": 11, "rdStart": 0, "rdEnd": 0,
+            "dnsStart": 12, "dnsEnd": 14, "connStart": 14, "connEnd": 30, "tlsStart": 20,
+            "reqStart": 30, "respStart": 60, "respEnd": 70,
+            "xfer": 1200, "encBody": 900, "decBody": 2400, "proto": "h2", "init": "script", "dur": 59.5,
+            "serverTiming": serverTiming,
+        ])
+        XCTAssertEqual(raw.name, "https://a.test/x.js")
+        XCTAssertEqual(raw.startTime, 10.5, accuracy: 0.001)
+        XCTAssertEqual(raw.secureConnectionStart, 20, accuracy: 0.001)
+        XCTAssertEqual(raw.transferSize, 1200)
+        XCTAssertEqual(raw.decodedBodySize, 2400)
+        XCTAssertEqual(raw.nextHopProtocol, "h2")
+        XCTAssertEqual(raw.initiatorType, "script")
+        XCTAssertEqual(raw.serverTiming, [NetServerTimingEntry(name: "db", duration: 12.5, description: "query")])
+
+        let phases = OrbitNetworkLogic.phases(from: raw)
+        XCTAssertEqual(phases.waitingMs ?? 0, 30, accuracy: 0.001)
+        XCTAssertEqual(phases.downloadMs ?? 0, 10, accuracy: 0.001)
+    }
+
+    func test_decodeResourceTiming_missingNumbersAreZero() {
+        let raw = OrbitNetworkLogic.decodeResourceTiming(["url": "https://a.test/", "st": NSNull(), "dur": NSNull()])
+        XCTAssertEqual(raw.startTime, 0)
+        XCTAssertEqual(raw.duration, 0)
+        XCTAssertTrue(raw.serverTiming.isEmpty)
+    }
+
     // MARK: - Helpers
 
     // OrbitNetworkRecord's optional properties have no `= nil` defaults, so the memberwise initializer needs them all.

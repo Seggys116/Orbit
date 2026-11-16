@@ -298,6 +298,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         view.navigationDelegate = self
         view.uiDelegate = self
         attachResourceLoadDelegate(view)
+        if session.isPersistent { WebKitPasswordAutofill.install(on: configuration.userContentController) }
         WebKitContextMenuProbe.install(on: configuration.userContentController)
         Self.installIsolatedWorld(on: configuration.userContentController)
         OrbitInspectAgent.install(on: configuration.userContentController)
@@ -315,6 +316,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         Self.installIsolatedWorld(on: controller)
         WebKitCosmeticScripts.reset(controller)
         contentSizing?.addScript(to: controller)
+        if !isExtensionPage, session.isPersistent { WebKitPasswordAutofill.install(on: controller) }
         if !isExtensionPage { WebKitContextMenuProbe.install(on: controller) }
         OrbitInspectAgent.install(on: controller)
         OrbitDevToolsStore.shared.session(for: self)?.device.reinstallUserScript()
@@ -413,6 +415,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         extras.hostContainer = nil
         observeWebView()
         contentSizing?.attach(to: replacement)
+        if extensionHost == nil, session.isPersistent { WebKitPasswordAutofill.install(on: configuration.userContentController) }
         if extensionHost == nil { WebKitContextMenuProbe.install(on: configuration.userContentController) }
         // didOpenTab ran before this view became an extension page, so WebKit still lists the popup as a tab.
         if extensionHost != nil {
@@ -955,6 +958,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        passwordNavigationStarted()
         navigationState.isLoading = true
         navigationState.progress = 0.1
         if let url = webView.url {
@@ -970,6 +974,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        passwordNavigationCommitted()
         navigationState.canGoBack = webView.canGoBack
         navigationState.canGoForward = webView.canGoForward
         // The inspector's new-page reset and page URL come from here, never from the page agent.
@@ -993,6 +998,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        passwordNavigationFinished()
         extras.requestedLoadURL = nil
         navigationState.isLoading = false
         navigationState.progress = 1
@@ -1027,6 +1033,28 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         guard navigationState.isLoading else { return }
         navigationState.isLoading = false
         navigationState.progress = 1
+        publishNavigation()
+    }
+
+    /// Follows the address of the document on screen when it changes without a new document, which no navigation delegate method reports.
+    func noteDocumentURL() {
+        guard !isClosed, let url = webView.url, url != navigationState.url else { return }
+        // A load Orbit started keeps its requested address until that document commits.
+        if navigationState.isLoading, extras.requestedLoadURL != nil { return }
+        navigationState.url = url
+        navigationState.security = Self.security(for: url, mixedContent: url.scheme?.caseInsensitiveCompare("https") == .orderedSame && !webView.hasOnlySecureContent)
+        navigationState.canGoBack = webView.canGoBack
+        navigationState.canGoForward = webView.canGoForward
+        publishNavigation()
+        engine.extensionController.didChangeTabProperties(.URL, for: self)
+    }
+
+    func noteHistoryAvailability() {
+        guard !isClosed,
+              navigationState.canGoBack != webView.canGoBack || navigationState.canGoForward != webView.canGoForward
+        else { return }
+        navigationState.canGoBack = webView.canGoBack
+        navigationState.canGoForward = webView.canGoForward
         publishNavigation()
     }
 
@@ -1110,6 +1138,29 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         decidePolicyFor navigationAction: WKNavigationAction,
         preferences: WKWebpagePreferences,
         decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+    ) {
+        if let hook = extras.mainFrameNavigationHook, navigationAction.targetFrame?.isMainFrame ?? true,
+           let url = navigationAction.request.url {
+            // The decision is held until the hook returns; the hook stays installed for later navigations.
+            Task { @MainActor in
+                await hook(url)
+                self.decideAfterHook(webView, navigationAction, preferences, decisionHandler)
+            }
+            return
+        }
+        decideAfterHook(webView, navigationAction, preferences, decisionHandler)
+    }
+
+    /// Runs before every main-frame navigation decision, which waits for it. A popup uses it to prepare the cookie store before its first request leaves.
+    func setMainFrameNavigationHook(_ hook: (@MainActor (URL) async -> Void)?) {
+        extras.mainFrameNavigationHook = hook
+    }
+
+    private func decideAfterHook(
+        _ webView: WKWebView,
+        _ navigationAction: WKNavigationAction,
+        _ preferences: WKWebpagePreferences,
+        _ decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
     ) {
         if navigationAction.targetFrame?.isMainFrame ?? true {
             WebKitNavigationUserAgent.set(

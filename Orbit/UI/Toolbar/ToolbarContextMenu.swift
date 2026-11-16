@@ -58,7 +58,7 @@ struct ToolbarContextMenu {
     static func siteProfileSwitchEntries(forTab tabID: TabID, siteKey: String, in env: AppEnvironment) -> [OrbitContextMenuEntry] {
         let boundID = env.store.boundSiteProfile(forTab: tabID)?.id
         var entries: [OrbitContextMenuEntry] = [
-            .item(OrbitContextMenuItem(title: SiteProfile.defaultName, isChecked: boundID == nil) {
+            .item(OrbitContextMenuItem(title: env.store.defaultSiteProfileName(forSiteKey: siteKey), isChecked: boundID == nil) {
                 env.switchSiteProfile(tabID: tabID, to: nil)
             })
         ]
@@ -83,6 +83,8 @@ struct ToolbarContextMenu {
             let boundID = bound.id
             entries.append(.item(OrbitContextMenuItem(title: "Rename Profile...") { env.promptToRenameSiteProfile(boundID) }))
             entries.append(.item(OrbitContextMenuItem(title: "Delete Profile", isDestructive: true) { env.confirmDeleteSiteProfile(boundID) }))
+        } else {
+            entries.append(.item(OrbitContextMenuItem(title: "Rename Profile...") { env.promptToRenameDefaultSiteProfile(siteKey: siteKey) }))
         }
         return entries
     }

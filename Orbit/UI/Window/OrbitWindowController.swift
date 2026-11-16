@@ -40,6 +40,10 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
         return nil
     }
 
+    static func environment(forWindow window: NSWindow) -> AppEnvironment? {
+        openControllers.first { $0.window === window }?.session.environment
+    }
+
     static var openEnvironments: [AppEnvironment] {
         openControllers.map { $0.session.environment }
     }

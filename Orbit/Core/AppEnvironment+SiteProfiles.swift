@@ -82,6 +82,23 @@ extension AppEnvironment {
         store.setSiteProfile(profile.id, forTab: tabID)
     }
 
+    // A popup shares its opener's cookie store, so a popup from a Site Profile tab to another site (a Google sign-in) would meet that site with no account in it. Before such a popup's navigation leaves, the destination site's cookies are copied in from the Space's own store, only when the profile's store holds none for it.
+    func seedCrossSitePopupCookies(for popup: any WebContents, openedBy opener: any WebContents, openerTabID: TabID) {
+        guard let popup = popup as? WebKitWebContents,
+              let openerSession = opener.session as? WebKitSession,
+              let siteProfile = store.siteProfiles.first(where: { $0.sessionIdentifier == openerSession.identifier }),
+              let spaceID = state.tabs[openerTabID]?.spaceID,
+              let spaceProfile = state.profiles.first(where: { $0.id == profileID(for: spaceID) }),
+              let source = try? engine?.session(identifier: spaceProfile.sessionIdentifier, persistent: spaceProfile.isPersistent) as? WebKitSession
+        else { return }
+        let ownSite = siteProfile.siteKey
+        var handled: Set<String> = []
+        popup.setMainFrameNavigationHook { url in
+            guard let site = SiteProfile.siteKey(for: url), site != ownSite, handled.insert(site).inserted else { return }
+            await openerSession.seedCookies(forSite: site, from: source)
+        }
+    }
+
     // MenuPrompt rather than a SwiftUI sheet: these run from a menu action, after the menu has torn down and left no view to attach a sheet to.
     func promptToCreateSiteProfile(forTab tabID: TabID) {
         guard store.canOfferSiteProfiles(forTab: tabID), let tab = store.tab(tabID),
@@ -96,7 +113,18 @@ extension AppEnvironment {
                 return
             }
             draft = typed
-            message = "Choose a name that is not empty, not \"\(SiteProfile.defaultName)\", and not already used for \(siteKey)."
+            message = "Choose a name that is not empty and not already used for \(siteKey)."
+        }
+    }
+
+    func promptToRenameDefaultSiteProfile(siteKey: String) {
+        let current = store.defaultSiteProfileName(forSiteKey: siteKey)
+        var message = "Profile names are only shown for \(siteKey). Pages without another profile selected use this one."
+        var draft = current
+        while let typed = MenuPrompt.text(title: "Rename Profile", message: message, defaultValue: draft, acceptTitle: "Rename") {
+            if store.renameDefaultSiteProfile(siteKey: siteKey, to: typed) { return }
+            draft = typed
+            message = "Choose a name that is not empty and not already used for \(siteKey)."
         }
     }
 
@@ -107,15 +135,16 @@ extension AppEnvironment {
         while let typed = MenuPrompt.text(title: "Rename Profile", message: message, defaultValue: draft, acceptTitle: "Rename") {
             if renameSiteProfile(id, to: typed) { return }
             draft = typed
-            message = "Choose a name that is not empty, not \"\(SiteProfile.defaultName)\", and not already used for \(profile.siteKey)."
+            message = "Choose a name that is not empty and not already used for \(profile.siteKey)."
         }
     }
 
     func confirmDeleteSiteProfile(_ id: SiteProfileID) {
         guard let profile = store.siteProfile(id) else { return }
+        let defaultName = store.defaultSiteProfileName(forSiteKey: profile.siteKey)
         let confirmed = MenuPrompt.confirmDestructive(
             title: "Delete the profile \"\(profile.name)\"?",
-            message: "Its cookies and site data for \(profile.siteKey) are erased, and tabs using it go back to Default.",
+            message: "Its cookies and site data for \(profile.siteKey) are erased, and tabs using it go back to \(defaultName).",
             acceptTitle: "Delete"
         )
         guard confirmed else { return }

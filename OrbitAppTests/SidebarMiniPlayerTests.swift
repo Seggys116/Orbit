@@ -150,6 +150,20 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_closingTheTabPlayingMedia_removesItsCardAndLeavesTheTabClosed
+
+    func test_closingTheTabPlayingMedia_removesItsCardAndLeavesTheTabClosed() throws {
+        let tabs = try twoTabs()
+        _ = makePlaying(tabs.playing)
+        XCTAssertEqual(env.nowPlayingTabs.map(\.id), [tabs.playing], "Precondition: the card is up.")
+
+        env.closeTab(tabs.playing)
+
+        XCTAssertTrue(env.nowPlayingTabs.isEmpty, "A closed page must not keep a card in the mini player.")
+        XCTAssertNil(env.mediaStates[tabs.playing], "The closed tab's media state must be dropped with its page.")
+        XCTAssertNil(env.webContents[tabs.playing], "Nothing about the closed tab may bring its page back.")
+    }
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_theTabYouAreLookingAt_isNotInTheTray
 
     func test_theTabYouAreLookingAt_isNotInTheTray() throws {

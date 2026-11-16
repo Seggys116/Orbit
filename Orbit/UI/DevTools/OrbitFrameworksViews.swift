@@ -49,6 +49,8 @@ struct FWTechRow: View {
 struct FWTechnologiesTab: View {
     var model: OrbitFrameworksModel
     var session: OrbitInspectSession
+    /// The side list that normally owns the filter is hidden in a narrow or docked pane, so the tab carries its own.
+    var showsFilter = false
 
     var body: some View {
         if model.detections.isEmpty {
@@ -58,7 +60,23 @@ struct FWTechnologiesTab: View {
                 message: "Press Refresh to scan the current page. Detection reads JavaScript globals, DOM attributes, script URLs, response headers, and meta tags."
             )
         } else {
-            ScrollView {
+            VStack(spacing: 0) {
+                if showsFilter {
+                    InspectSearchField(placeholder: "Filter", text: Binding(
+                        get: { model.techFilter },
+                        set: { model.techFilter = $0 }
+                    ))
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.vertical, 6)
+                    InspectDivider()
+                }
+                technologyList
+            }
+        }
+    }
+
+    private var technologyList: some View {
+        ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(FWCategory.allCases, id: \.self) { category in
                         let group = model.filteredDetections.filter { $0.category == category }
@@ -75,7 +93,6 @@ struct FWTechnologiesTab: View {
                 }
                 .padding(.bottom, 16)
             }
-        }
     }
 }
 
@@ -151,7 +168,7 @@ struct FWComponentsTab: View {
             } else if model.componentNodes.isEmpty {
                 emptyState
             } else {
-                InspectSplit(key: "fw.components", defaultFraction: 0.45, minFirst: 180, minSecond: 200, stackBelow: 0) {
+                FWAdaptiveSplit(session: session, key: "fw.components", sideFraction: 0.45, minFirst: 180, minSecond: 200) {
                     componentTree
                 } second: {
                     componentDetail
@@ -592,7 +609,7 @@ struct FWDataTab: View {
                 message: "Data is extracted from globals like __NEXT_DATA__, __NUXT__, __remixContext, Apollo cache, Redux state, JSON-LD scripts, and more. Navigate to a page that uses one of these."
             )
         } else {
-            InspectSplit(key: "fw.data", defaultFraction: 0.30, minFirst: 140, minSecond: 240) {
+            FWAdaptiveSplit(session: session, key: "fw.data", sideFraction: 0.30, minFirst: 140, minSecond: 240) {
                 dataList
             } second: {
                 dataDetail
@@ -845,6 +862,16 @@ struct FWRoutesTab: View {
                     .padding(.vertical, 4)
                 }
             }
+            if let message = model.routeNavigationMessage {
+                InspectDivider()
+                Text(message)
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(InspectChrome.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 }
@@ -866,6 +893,7 @@ struct FWRouteRow: View {
                 .font(InspectChrome.mono)
                 .foregroundStyle(route.isDynamic ? InspectChrome.attributeNameColor : InspectChrome.ink)
                 .lineLimit(1)
+                .truncationMode(.middle)
 
             if route.isCurrent {
                 Text("current").font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
@@ -873,8 +901,9 @@ struct FWRouteRow: View {
                     .background(Capsule().fill(InspectChrome.goodColor.opacity(0.15)))
             }
 
-            Text(route.source).font(InspectChrome.caption).foregroundStyle(InspectChrome.muted2)
             Spacer(minLength: 0)
+            Text(route.source).font(InspectChrome.caption).foregroundStyle(InspectChrome.muted2)
+                .lineLimit(1).layoutPriority(-1)
         }
         .frame(minHeight: InspectChrome.rowHeight)
         .padding(.horizontal, InspectChrome.panelPadding)
@@ -892,71 +921,460 @@ struct FWRouteRow: View {
     }
 }
 
+// MARK: - Adaptive split
+
+/// Two panes side by side, or stacked when the inspector is docked to a side or narrow (the technique the Elements pane uses).
+struct FWAdaptiveSplit<First: View, Second: View>: View {
+    var session: OrbitInspectSession
+    var key: String
+    var sideFraction: CGFloat
+    var stackedFraction: CGFloat = 0.5
+    var minFirst: CGFloat
+    var minSecond: CGFloat
+    var stackBelowWidth: CGFloat = 560
+    @ViewBuilder var first: () -> First
+    @ViewBuilder var second: () -> Second
+
+    var body: some View {
+        GeometryReader { geo in
+            let docked = session.dock == .left || session.dock == .right
+            let stacked = docked || geo.size.width < stackBelowWidth
+            InspectSplit(
+                key: stacked ? key + ".stacked" : key,
+                defaultFraction: stacked ? stackedFraction : sideFraction,
+                minFirst: stacked ? 110 : minFirst, minSecond: stacked ? 130 : minSecond,
+                stackBelow: stacked ? .infinity : 0
+            ) {
+                first()
+            } second: {
+                second()
+            }
+            // The split keeps its dragged fraction in state, which must not carry over to the other orientation.
+            .id(stacked)
+        }
+    }
+}
+
 // MARK: - Dev server tab
 
 struct FWDevServerTab: View {
     var model: OrbitFrameworksModel
     var session: OrbitInspectSession
 
+    @State private var showAllEvents = false
+    @State private var showDetails = false
+
     var body: some View {
+        let resolution = model.devResolution
+        let probe = model.effectiveProbe
+        let header = FWDevLogic.header(resolution: resolution, state: model.devState, probe: probe)
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                hmrSection
-                if let overlay = model.overlayInfo {
-                    InspectDivider().padding(.vertical, 8)
-                    overlaySection(overlay: overlay)
+            VStack(alignment: .leading, spacing: 16) {
+                FWDevHeaderCard(header: header, resolution: resolution, state: model.devState)
+                if let text = FWDevLogic.modeExplanation(resolution) {
+                    FWDevNote(text: text)
                 }
-                Spacer(minLength: 20)
+                ForEach(resolution.conflicts, id: \.self) { conflict in
+                    FWDevNote(text: conflict, tone: 2)
+                }
+                issuesSection(resolution: resolution)
+                controlsSection(probe: probe)
+                infoSection
+                timelineSection
+                environmentSection
+                detailsSection(resolution: resolution)
             }
             .padding(InspectChrome.panelPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private var hmrSection: some View {
+    // MARK: Errors
+
+    /// The overlay the framework drew is the fallback for servers whose wire messages were never observed.
+    private var displayedIssues: [FWDevIssue] {
+        var issues = model.devState.allIssues
+        if issues.isEmpty, let overlay = model.overlayInfo {
+            issues = [FWDevIssue(severity: .error, origin: .build, message: overlay.message, file: overlay.file,
+                                 line: overlay.line, column: overlay.col, frame: overlay.stackText, source: overlay.source)]
+        }
+        return issues
+    }
+
+    @ViewBuilder
+    private func issuesSection(resolution: FWDevResolution) -> some View {
+        let issues = displayedIssues
         VStack(alignment: .leading, spacing: 8) {
-            InspectSectionHeader("Hot Module Replacement")
-            if let kind = model.hmrStatus.kind {
-                FWKeyValueRow(name: "dev server", value: kind, editable: false, onEdit: { _ in })
-                if let url = model.hmrStatus.wsURL {
-                    FWKeyValueRow(name: "WebSocket", value: url, editable: false, onEdit: { _ in })
+            HStack(spacing: 6) {
+                InspectSectionHeader(issues.isEmpty ? "Errors" : "Errors and warnings",
+                                     detail: issues.isEmpty ? nil : "\(issues.count)")
+                if !model.devState.runtimeIssues.isEmpty {
+                    InspectTextButton("Clear runtime") { model.clearRuntimeIssues() }
                 }
-                FWKeyValueRow(name: "connected", value: model.hmrStatus.connected ? "yes" : "unknown",
-                              editable: false, onEdit: { _ in })
-            } else {
-                Text("No HMR connection detected. Dev servers are identified from WebSocket URLs in the network log (/_next/webpack-hmr, /_next/turbopack-hmr, vite-hmr, /__webpack_hmr, /hmr).")
+            }
+            if issues.isEmpty {
+                Text(resolution.mode == .development
+                     ? "No build or runtime errors reported by the dev server or the page."
+                     : "Build errors appear here while a dev server is connected. Runtime errors are collected from the page.")
                     .font(InspectChrome.caption)
                     .foregroundStyle(InspectChrome.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(issues) { issue in
+                    FWDevIssueRow(issue: issue, model: model)
+                }
+            }
+            if model.launchAttemptActive {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Asking the dev server to open the file").font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
+                }
+            } else if let error = model.launchError {
+                Text(error).font(InspectChrome.caption).foregroundStyle(InspectChrome.badColor)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    private func overlaySection(overlay: FWOverlayInfo) -> some View {
+    // MARK: Controls
+
+    private func controlsSection(probe: FWDevProbe) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                InspectSectionHeader("Error Overlay")
-                Circle().fill(InspectChrome.badColor).frame(width: 8, height: 8)
+            InspectSectionHeader("Controls")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
+                ForEach(model.devControls) { state in
+                    FWDevControlCell(state: state, overlayHidden: probe.overlayHidden,
+                                     busy: model.devBusyAction != nil) { model.runControl(state.control) }
+                }
             }
-            Text(overlay.message)
-                .font(InspectChrome.mono)
-                .foregroundStyle(InspectChrome.badColor)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-            if let file = overlay.file {
+            if model.devBusyAction != nil {
                 HStack(spacing: 6) {
-                    Text(file + (overlay.line.map { ":\($0)" } ?? ""))
-                        .font(InspectChrome.mono)
-                        .foregroundStyle(InspectChrome.muted)
-                        .textSelection(.enabled)
-                    InspectTextButton("Sources") {
-                        session.reveal(sourceURL: file, line: overlay.line, column: overlay.col)
+                    ProgressView().controlSize(.small)
+                    Text("Working").font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
+                }
+            }
+            if let message = model.devActionMessage {
+                Text(message)
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(model.devActionSucceeded ? InspectChrome.muted : InspectChrome.badColor)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    // MARK: Render and route information
+
+    @ViewBuilder
+    private var infoSection: some View {
+        let rows = model.devRenderInfo
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                InspectSectionHeader("This page")
+                ForEach(rows) { row in FWDevKV(name: row.label, value: row.value) }
+            }
+        }
+    }
+
+    // MARK: Timeline
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
+    @ViewBuilder
+    private var timelineSection: some View {
+        let events = Array(model.devState.events.reversed())
+        let shown = showAllEvents ? events : Array(events.prefix(20))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                InspectSectionHeader("Timeline", detail: events.isEmpty ? nil : "\(events.count)")
+                if !events.isEmpty {
+                    InspectTextButton("Clear") { model.clearDevTimeline() }
+                }
+            }
+            if events.isEmpty {
+                Text("HMR messages, route changes and page errors appear here as they happen.")
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(InspectChrome.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(shown) { event in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(Self.timeFormatter.string(from: Date(timeIntervalSince1970: event.at / 1000)))
+                            .font(InspectChrome.monoSmall)
+                            .foregroundStyle(InspectChrome.muted2)
+                        Circle().fill(Self.color(forTone: event.kind.tone)).frame(width: 6, height: 6)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(event.title).font(InspectChrome.caption).foregroundStyle(InspectChrome.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let detail = event.detail, !detail.isEmpty {
+                                Text(detail).font(InspectChrome.monoSmall).foregroundStyle(InspectChrome.muted)
+                                    .lineLimit(2).truncationMode(.middle)
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
-                    InspectTextButton("Editor") {
-                        OrbitInspectEditorLauncher.open(sourceURL: file, line: overlay.line, column: overlay.col, session: session)
+                }
+                if events.count > 20 {
+                    InspectTextButton(showAllEvents ? "Show fewer" : "Show all \(events.count)") { showAllEvents.toggle() }
+                }
+            }
+        }
+    }
+
+    static func color(forTone tone: Int) -> Color {
+        switch tone {
+        case 1: return InspectChrome.goodColor
+        case 2: return InspectChrome.warnColor
+        case 3: return InspectChrome.badColor
+        default: return InspectChrome.muted2
+        }
+    }
+
+    // MARK: Environment
+
+    @ViewBuilder
+    private var environmentSection: some View {
+        let entries = model.devEnvironment
+        if !entries.isEmpty || model.canLoadViteEnv {
+            VStack(alignment: .leading, spacing: 4) {
+                InspectSectionHeader("Public environment", detail: entries.isEmpty ? nil : "\(entries.count)")
+                ForEach(entries) { entry in
+                    FWDevKV(name: entry.key, value: entry.value, mono: true)
+                }
+                if model.canLoadViteEnv && !model.devEnvironment.contains(where: { $0.source == "import.meta.env" }) {
+                    HStack(spacing: 6) {
+                        InspectTextButton(model.devEnvLoading ? "Reading" : "Read import.meta.env", enabled: !model.devEnvLoading) {
+                            model.loadViteEnv()
+                        }
+                    }
+                }
+                if let message = model.devEnvMessage {
+                    Text(message).font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if model.devResolution.adapter?.id == "next" {
+                    Text("Next.js inlines NEXT_PUBLIC_* values into the bundle at build time, so they cannot be listed from the page.")
+                        .font(InspectChrome.caption).foregroundStyle(InspectChrome.muted2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    // MARK: Details
+
+    private func detailsSection(resolution: FWDevResolution) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            InspectTextButton(showDetails ? "Hide connection details" : "Connection details") { showDetails.toggle() }
+            if showDetails {
+                let sockets = model.devState.sockets.filter { $0.protocolID != nil }
+                if sockets.isEmpty {
+                    Text("No HMR socket was opened by this page. Sockets opened before Orbit attached are not seen; reload the page to capture them.")
+                        .font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(sockets) { socket in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(socket.url).font(InspectChrome.monoSmall).foregroundStyle(InspectChrome.ink)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        Text("\(socket.protocolID?.title ?? "") · \(socket.transport) · \(Self.stateName(socket.state)) · \(socket.frames) messages")
+                            .font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
+                    }
+                }
+                if !resolution.reasons.isEmpty {
+                    InspectSectionHeader("Why")
+                    ForEach(resolution.reasons, id: \.self) { reason in
+                        Text(reason).font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
         }
     }
+
+    private static func stateName(_ state: FWDevSocketInfo.State) -> String {
+        switch state {
+        case .connecting: return "connecting"
+        case .open: return "open"
+        case .closed: return "closed"
+        case .failed: return "error"
+        }
+    }
 }
 
+// MARK: - Dev server pieces
+
+struct FWDevPill: View {
+    var text: String
+    var tone: Int
+    var dot = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if dot { Circle().fill(FWDevServerTab.color(forTone: tone)).frame(width: 7, height: 7) }
+            Text(text).font(InspectChrome.caption).foregroundStyle(InspectChrome.ink).lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(InspectChrome.hover))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct FWDevNote: View {
+    var text: String
+    var tone = 0
+
+    var body: some View {
+        Text(text)
+            .font(InspectChrome.caption)
+            .foregroundStyle(tone == 2 ? InspectChrome.warnColor : InspectChrome.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A label over or beside its value, wrapping instead of truncating so a narrow dock stays readable.
+struct FWDevKV: View {
+    var name: String
+    var value: String
+    var mono = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(name)
+                .font(InspectChrome.caption)
+                .foregroundStyle(InspectChrome.muted)
+                .frame(width: 88, alignment: .leading)
+            Text(value)
+                .font(mono ? InspectChrome.monoSmall : InspectChrome.caption)
+                .foregroundStyle(InspectChrome.ink)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+struct FWDevHeaderCard: View {
+    var header: FWDevLogic.Header
+    var resolution: FWDevResolution
+    var state: FWDevState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(header.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(InspectChrome.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let subtitle = header.subtitle {
+                    Text(subtitle).font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            FlowLayout(spacing: 6) {
+                FWDevPill(text: header.modeLabel, tone: resolution.mode == .development ? 1 : 0)
+                if let bundler = header.bundlerLabel { FWDevPill(text: bundler, tone: 0) }
+                FWDevPill(text: "HMR: " + header.connectionLabel, tone: header.connectionTone, dot: true)
+                if resolution.mode == .development { FWDevPill(text: "Build: " + header.buildLabel, tone: header.buildTone, dot: true) }
+            }
+            if resolution.mode == .development {
+                // The age text changes with time, not with state, so it refreshes on its own clock.
+                TimelineView(.periodic(from: .now, by: 5)) { context in
+                    Text(lastUpdateText(now: context.date.timeIntervalSince1970 * 1000))
+                        .font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: InspectChrome.rowRadius, style: .continuous).fill(InspectChrome.surface))
+        .overlay(RoundedRectangle(cornerRadius: InspectChrome.rowRadius, style: .continuous).strokeBorder(InspectChrome.hairline, lineWidth: 0.5))
+    }
+
+    private func lastUpdateText(now: Double) -> String {
+        guard let last = state.lastUpdateAt else { return "No update since this page loaded" }
+        let count = state.updateCount
+        return "Last update \(FWDevLogic.relativeAge(from: last, to: now)) · \(count) \(count == 1 ? "update" : "updates")"
+    }
+}
+
+struct FWDevControlCell: View {
+    var state: FWDevLogic.ControlState
+    var overlayHidden: Bool
+    var busy: Bool
+    var action: () -> Void
+
+    private var title: String {
+        state.control == .toggleOverlay ? (overlayHidden ? "Show overlay" : "Hide overlay") : state.control.title
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            InspectTextButton(title, systemImage: state.control.symbol, enabled: state.enabled && !busy, action: action)
+            Text(state.note)
+                .font(InspectChrome.caption)
+                .foregroundStyle(state.enabled ? InspectChrome.muted2 : InspectChrome.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct FWDevIssueRow: View {
+    var issue: FWDevIssue
+    var model: OrbitFrameworksModel
+
+    @State private var expanded = false
+
+    private var color: Color { issue.severity == .error ? InspectChrome.badColor : InspectChrome.warnColor }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Circle().fill(color).frame(width: 7, height: 7)
+                Text(issue.source + (issue.origin == .runtime ? " · runtime" : ""))
+                    .font(InspectChrome.caption).foregroundStyle(InspectChrome.muted)
+                Spacer(minLength: 0)
+            }
+            Text(issue.message)
+                .font(InspectChrome.mono)
+                .foregroundStyle(color)
+                .lineLimit(expanded ? nil : 4)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if let location = issue.locationText {
+                Text(location)
+                    .font(InspectChrome.monoSmall)
+                    .foregroundStyle(InspectChrome.muted)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+            if expanded, let frame = issue.frame, !frame.isEmpty {
+                Text(frame)
+                    .font(InspectChrome.monoSmall)
+                    .foregroundStyle(InspectChrome.muted)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            FlowLayout(spacing: 6) {
+                if issue.file != nil {
+                    InspectTextButton("Editor") { model.openIssueInEditor(issue) }
+                    InspectTextButton("Sources") { model.revealIssueInSources(issue) }
+                }
+                if issue.frame != nil || issue.message.count > 240 {
+                    InspectTextButton(expanded ? "Less" : "More") { expanded.toggle() }
+                }
+                InspectTextButton("Copy") {
+                    model.session?.copy([issue.message, issue.locationText, issue.frame].compactMap { $0 }.joined(separator: "\n"))
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: InspectChrome.rowRadius, style: .continuous).fill(InspectChrome.surface))
+    }
+}

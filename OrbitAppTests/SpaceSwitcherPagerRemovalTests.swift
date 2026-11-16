@@ -230,6 +230,23 @@ final class SpaceSwitcherPagerRemovalTests: XCTestCase {
         XCTAssertEqual(SpaceSwitcherPagerView.idealWidth(forSpaceCount: 0, scale: 1), 0)
     }
 
+    // MARK: - The icon a Space shows in the switcher
+
+    func testSpaceWithNoChosenIconShowsADotNotThePlaceholderSymbol() {
+        let space = Space(name: "Plain", profileID: ProfileID())
+        XCTAssertEqual(SpaceSwitcherPagerView.pagerIcon(for: space), SpaceIcon.none)
+    }
+
+    func testExplicitlyChosenSymbolAndEmojiAreKept() {
+        var symbolSpace = Space(name: "Symbol", profileID: ProfileID())
+        symbolSpace.setIcon(symbol: SpaceSwitcherPagerView.placeholderSymbol)
+        XCTAssertEqual(SpaceSwitcherPagerView.pagerIcon(for: symbolSpace), SpaceIcon.symbol(SpaceSwitcherPagerView.placeholderSymbol))
+
+        var emojiSpace = Space(name: "Emoji", profileID: ProfileID())
+        emojiSpace.setIcon(emoji: "\u{1F4DA}")
+        XCTAssertEqual(SpaceSwitcherPagerView.pagerIcon(for: emojiSpace), SpaceIcon.emoji("\u{1F4DA}"))
+    }
+
     // MARK: - State
 
     @discardableResult

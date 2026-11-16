@@ -816,6 +816,512 @@ final class OrbitInspectLighthouseTests: XCTestCase {
         XCTAssertTrue(line?.hasSuffix("77/100") == true)
     }
 
+    // MARK: - Layout shifts
+
+    func testCLSSessionWindow_groupsShiftsByGapAndTakesTheLargest() {
+        let shifts: [(startMs: Double, value: Double)] = [(0, 0.1), (500, 0.05), (3_000, 0.2)]
+        XCTAssertEqual(OrbitLighthouseLogic.clsSessionWindowMax(shifts), 0.2, accuracy: 1e-9)
+        let burst: [(startMs: Double, value: Double)] = [(0, 0.1), (500, 0.1), (900, 0.1), (5_000, 0.05)]
+        XCTAssertEqual(OrbitLighthouseLogic.clsSessionWindowMax(burst), 0.3, accuracy: 1e-9)
+        XCTAssertEqual(OrbitLighthouseLogic.clsSessionWindowMax([]), 0)
+    }
+
+    func testCLSSessionWindow_endsAfterFiveSecondsEvenWithoutAGap() {
+        let shifts: [(startMs: Double, value: Double)] = stride(from: 0.0, through: 5_400, by: 900).map { ($0, 0.1) }
+        // Shifts at 0 to 4500 ms fill one window; 5400 ms starts the next.
+        XCTAssertEqual(OrbitLighthouseLogic.clsSessionWindowMax(shifts), 0.6, accuracy: 1e-9)
+    }
+
+    func testCLSSessionWindow_sortsUnorderedShifts() {
+        let shifts: [(startMs: Double, value: Double)] = [(3_000, 0.2), (0, 0.1), (500, 0.05)]
+        XCTAssertEqual(OrbitLighthouseLogic.clsSessionWindowMax(shifts), 0.2, accuracy: 1e-9)
+    }
+
+    func testEffectiveCLS_usesTheWorstBurstOnlyWhenEveryShiftIsTimedAndNoneWasDropped() {
+        var bundle = LHBundle()
+        bundle.clsScore = 0.9
+        XCTAssertEqual(OrbitLighthouseLogic.effectiveCLS(bundle), 0.9, "no shifts reported, so the running total stands")
+        bundle.clsShifts = [LHClsShift(value: 0.1, sources: [], startMs: 0), LHClsShift(value: 0.2, sources: [], startMs: 9_000)]
+        XCTAssertEqual(OrbitLighthouseLogic.effectiveCLS(bundle), 0.2, accuracy: 1e-9)
+        bundle.clsShiftsTruncated = true
+        XCTAssertEqual(OrbitLighthouseLogic.effectiveCLS(bundle), 0.9, "a truncated list cannot be windowed")
+        bundle.clsShiftsTruncated = false
+        bundle.clsShifts[1].startMs = nil
+        XCTAssertEqual(OrbitLighthouseLogic.effectiveCLS(bundle), 0.9, "an untimed shift cannot be windowed")
+    }
+
+    func testCLSCulprits_splitEachShiftByMovedAreaAndMergeAcrossShifts() {
+        let big = LHRect(x: 0, y: 0, width: 100, height: 100)
+        let small = LHRect(x: 0, y: 0, width: 50, height: 50)
+        let shifts = [
+            LHLayoutShift(value: 0.3, sources: ["div.ad", "p.text"], startMs: 100, details: [
+                LHShiftSource(selector: "div.ad", nodeID: 4, previous: big, current: big, live: big),
+                LHShiftSource(selector: "p.text", previous: small, current: small),
+            ]),
+            LHLayoutShift(value: 0.1, sources: ["p.text"], startMs: 900, details: [LHShiftSource(selector: "p.text", nodeID: 5)]),
+        ]
+        let culprits = OrbitLighthouseLogic.clsCulprits(shifts)
+        XCTAssertEqual(culprits.map(\.selector), ["div.ad", "p.text"])
+        XCTAssertEqual(culprits[0].value, 0.24, accuracy: 1e-9)
+        XCTAssertEqual(culprits[1].value, 0.06 + 0.1, accuracy: 1e-9)
+        XCTAssertEqual(culprits[0].nodeID, 4)
+        XCTAssertEqual(culprits[1].nodeID, 5)
+        XCTAssertEqual(culprits[1].shiftCount, 2)
+        XCTAssertEqual(culprits[0].live, big)
+        XCTAssertEqual(culprits.reduce(0) { $0 + $1.value }, 0.4, accuracy: 1e-9, "the attributed values add back to the shift totals")
+    }
+
+    func testCLSCulprits_fallBackToNamesWhenThereAreNoRectangles() {
+        let culprits = OrbitLighthouseLogic.clsCulprits([LHLayoutShift(value: 0.2, sources: ["a", "b"])])
+        XCTAssertEqual(culprits.map(\.value), [0.1, 0.1])
+        XCTAssertTrue(OrbitLighthouseLogic.clsCulprits([LHLayoutShift(value: 0.2, sources: [])]).isEmpty)
+    }
+
+    func testCLSAudit_listsTheElementsThatMovedWithTheirNodes() {
+        var bundle = LHBundle()
+        bundle.mode = .navigation
+        bundle.clsScore = 0.2
+        bundle.clsShifts = [LHClsShift(value: 0.2, sources: ["div.ad"], startMs: 500, details: [
+            LHShiftSource(selector: "div.ad", nodeID: 9, previous: LHRect(x: 0, y: 0, width: 100, height: 100),
+                          current: LHRect(x: 0, y: 50, width: 100, height: 100))
+        ])]
+        let report = OrbitLighthouseLogic.score(bundle: bundle)
+        let audit = report.audits.first { $0.id == "cumulative-layout-shift" }
+        XCTAssertEqual(audit?.items.first?.nodeID, 9)
+        XCTAssertEqual(audit?.items.first?.selector, "div.ad")
+        XCTAssertEqual(report.metrics.cls ?? -1, 0.2, accuracy: 1e-9)
+        XCTAssertEqual(report.metrics.clsShifts.first?.details?.first?.nodeID, 9)
+        XCTAssertNotNil(audit?.howToFix, "a failing metric explains how to fix it")
+    }
+
+    // MARK: - LCP and TTFB breakdown
+
+    func testLCPPhases_addUpToTheLCPTime() {
+        let phases = OrbitLighthouseLogic.lcpPhases(lcpMs: 3_000, ttfbMs: 400, resourceStartMs: 900, resourceEndMs: 2_200)
+        XCTAssertEqual(phases.map(\.name), ["Time to first byte", "Resource load delay", "Resource load time", "Element render delay"])
+        XCTAssertEqual(phases.map(\.ms), [400, 500, 1_300, 800])
+        XCTAssertEqual(phases.reduce(0) { $0 + $1.ms }, 3_000, accuracy: 1e-9)
+    }
+
+    func testLCPPhases_withoutAResourceTheRestIsRenderDelay() {
+        let phases = OrbitLighthouseLogic.lcpPhases(lcpMs: 3_000, ttfbMs: 400, resourceStartMs: nil, resourceEndMs: nil)
+        XCTAssertEqual(phases, [LHTimingPart(name: "Time to first byte", ms: 400), LHTimingPart(name: "Element render delay", ms: 2_600)])
+    }
+
+    func testLCPPhases_clampAwkwardTimingsSoTheyStillAddUp() {
+        let early = OrbitLighthouseLogic.lcpPhases(lcpMs: 1_000, ttfbMs: 5_000, resourceStartMs: 200, resourceEndMs: 100)
+        XCTAssertEqual(early.reduce(0) { $0 + $1.ms }, 1_000, accuracy: 1e-9)
+        XCTAssertTrue(early.allSatisfy { $0.ms >= 0 })
+        let late = OrbitLighthouseLogic.lcpPhases(lcpMs: 1_000, ttfbMs: nil, resourceStartMs: 50, resourceEndMs: 4_000)
+        XCTAssertEqual(late.reduce(0) { $0 + $1.ms }, 1_000, accuracy: 1e-9)
+        XCTAssertTrue(OrbitLighthouseLogic.lcpPhases(lcpMs: 0, ttfbMs: 10, resourceStartMs: nil, resourceEndMs: nil).isEmpty)
+    }
+
+    func testTTFBBreakdown_addsWhatTheNamedPartsDoNotExplain() {
+        let parts = [LHTimingPart(name: "DNS lookup", ms: 30), LHTimingPart(name: "Waiting for the server", ms: 300), LHTimingPart(name: "Tiny", ms: 0.1)]
+        let result = OrbitLighthouseLogic.ttfbBreakdown(parts: parts, ttfbMs: 400)
+        XCTAssertEqual(result.map(\.name), ["DNS lookup", "Waiting for the server", "Queueing and other"])
+        XCTAssertEqual(result.last?.ms ?? 0, 70, accuracy: 1e-9)
+        XCTAssertEqual(OrbitLighthouseLogic.ttfbBreakdown(parts: parts, ttfbMs: 330).map(\.name), ["DNS lookup", "Waiting for the server"])
+        XCTAssertEqual(OrbitLighthouseLogic.ttfbBreakdown(parts: parts, ttfbMs: nil).count, 2)
+    }
+
+    func testLCPAudit_carriesTheElementItsPhasesAndAFix() {
+        var bundle = LHBundle()
+        bundle.mode = .navigation
+        bundle.fcpMs = 1_000
+        bundle.lcpMs = 3_000
+        bundle.ttfbMs = 400
+        bundle.lcpSelector = "img.hero"
+        bundle.lcpDetail = LHLCPDetail(
+            selector: "img.hero", tag: "img", nodeID: 7, snippet: "<img class=\"hero\">", url: "https://example.com/hero.jpg",
+            rect: LHRect(x: 10, y: 20, width: 300, height: 200),
+            phases: OrbitLighthouseLogic.lcpPhases(lcpMs: 3_000, ttfbMs: 400, resourceStartMs: 900, resourceEndMs: 2_200)
+        )
+        let report = OrbitLighthouseLogic.score(bundle: bundle)
+        let audit = report.audits.first { $0.id == "largest-contentful-paint" }
+        XCTAssertEqual(audit?.items.first?.nodeID, 7)
+        XCTAssertEqual(audit?.items.first?.selector, "img.hero")
+        XCTAssertEqual(audit?.items.first?.url, "https://example.com/hero.jpg")
+        XCTAssertEqual(audit?.items.dropFirst().compactMap(\.label).count, 4)
+        XCTAssertEqual(report.metrics.lcpDetail?.nodeID, 7)
+        XCTAssertEqual(report.metrics.lcpElement, "img.hero")
+        XCTAssertNotNil(audit?.howToFix)
+    }
+
+    func testLCPLazyLoaded_isFlaggedAsAnAudit() {
+        var bundle = LHBundle()
+        bundle.mode = .navigation
+        bundle.lcpDetail = LHLCPDetail(selector: "img.hero", tag: "img", nodeID: 3, isLazyLoaded: true)
+        let audit = OrbitLighthouseLogic.score(bundle: bundle).audits.first { $0.id == "lcp-lazy-loaded" }
+        XCTAssertEqual(audit?.status, .fail)
+        XCTAssertEqual(audit?.items.first?.nodeID, 3)
+        XCTAssertNotNil(audit?.howToFix)
+    }
+
+    func testTBTAudit_listsTheBlockingTasksLongestFirst() {
+        var bundle = LHBundle()
+        bundle.mode = .navigation
+        bundle.fcpMs = 1_000
+        bundle.longTasksAPIAvailable = true
+        bundle.longTasks = [
+            LHLongTask(startMs: 500, durationMs: 900),     // before FCP, not counted
+            LHLongTask(startMs: 1_500, durationMs: 120),
+            LHLongTask(startMs: 2_000, durationMs: 400),
+            LHLongTask(startMs: 3_000, durationMs: 40),    // under 50 ms, not a task that blocks
+        ]
+        let audit = OrbitLighthouseLogic.score(bundle: bundle).audits.first { $0.id == "total-blocking-time" }
+        XCTAssertEqual(audit?.items.map(\.wastedMs) ?? [], [350, 70])
+        XCTAssertEqual(audit?.numericValue ?? 0, 420, accuracy: 1e-9, "the evidence adds up to the metric")
+    }
+
+    func testTTFBAudit_showsWhereTheTimeWent() {
+        var bundle = LHBundle()
+        bundle.mode = .navigation
+        bundle.ttfbMs = 1_200
+        bundle.ttfbParts = [LHTimingPart(name: "Waiting for the server", ms: 1_000)]
+        let audit = OrbitLighthouseLogic.score(bundle: bundle).audits.first { $0.id == "server-response-time" }
+        XCTAssertEqual(audit?.items.map(\.label) ?? [], ["Waiting for the server", "Queueing and other"])
+        XCTAssertEqual(audit?.status, .fail)
+        XCTAssertNotNil(audit?.howToFix)
+    }
+
+    // MARK: - Filmstrip and screenshot
+
+    func testFilmstripSelection_dropsNearDuplicatesAndKeepsTheEnds() {
+        XCTAssertEqual(OrbitLighthouseLogic.filmstripSelection(completeness: [0, 0.01, 0.5, 0.505, 0.9, 1.0], maxFrames: 8), [0, 2, 4, 5])
+        XCTAssertEqual(OrbitLighthouseLogic.filmstripSelection(completeness: [1, 1, 1, 1], maxFrames: 8), [0, 3])
+        XCTAssertEqual(OrbitLighthouseLogic.filmstripSelection(completeness: [nil, nil, nil], maxFrames: 8), [0, 1, 2], "frames of unknown completeness are all kept")
+    }
+
+    func testFilmstripSelection_thinsEvenlyToTheLimit() {
+        let picks = OrbitLighthouseLogic.filmstripSelection(completeness: [0, 0.2, 0.4, 0.6, 0.8, 1.0], maxFrames: 3)
+        XCTAssertEqual(picks, [0, 3, 5])
+        XCTAssertEqual(OrbitLighthouseLogic.filmstripSelection(completeness: [0, 0.5, 1.0], maxFrames: 1), [2])
+        XCTAssertEqual(OrbitLighthouseLogic.filmstripSelection(completeness: [], maxFrames: 4), [])
+        XCTAssertEqual(OrbitLighthouseLogic.filmstripSelection(completeness: [0.5], maxFrames: 4), [0])
+    }
+
+    func testFilmstripMilestones_tagTheFirstFrameAtOrAfterEachPaint() {
+        let tags = OrbitLighthouseLogic.filmstripMilestones(frameMs: [100, 600, 1_100, 1_600], fcpMs: 500, lcpMs: 1_100)
+        XCTAssertEqual(tags, [[], ["FCP"], ["LCP"], []])
+        let same = OrbitLighthouseLogic.filmstripMilestones(frameMs: [100, 600], fcpMs: 550, lcpMs: 560)
+        XCTAssertEqual(same, [[], ["FCP", "LCP"]])
+        let missing = OrbitLighthouseLogic.filmstripMilestones(frameMs: [100, 600], fcpMs: nil, lcpMs: 9_000)
+        XCTAssertEqual(missing, [[], []])
+    }
+
+    func testFractionalRect_clipsToTheViewportAndRejectsWhatIsOutside() {
+        let viewport = LHRect(x: 0, y: 0, width: 1_000, height: 500)
+        let inside = OrbitLighthouseLogic.fractionalRect(LHRect(x: 100, y: 50, width: 200, height: 100), in: viewport)
+        XCTAssertEqual(inside, LHRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2))
+        let partial = OrbitLighthouseLogic.fractionalRect(LHRect(x: 900, y: 400, width: 400, height: 400), in: viewport)
+        XCTAssertEqual(partial, LHRect(x: 0.9, y: 0.8, width: 0.1, height: 0.2))
+        XCTAssertNil(OrbitLighthouseLogic.fractionalRect(LHRect(x: 0, y: 900, width: 50, height: 50), in: viewport))
+        XCTAssertNil(OrbitLighthouseLogic.fractionalRect(LHRect(x: 0, y: 0, width: 5, height: 5), in: LHRect(x: 0, y: 0, width: 0, height: 0)))
+    }
+
+    private func shot(pixels: (Int, Int) = (720, 450), viewport: (Double, Double) = (1_440, 900), scrollY: Double = 0) -> LHScreenshot {
+        LHScreenshot(jpeg: Data([1, 2, 3]), pixelWidth: pixels.0, pixelHeight: pixels.1,
+                     viewportWidth: viewport.0, viewportHeight: viewport.1, scrollY: scrollY)
+    }
+
+    func testScreenshot_onlyAlignsWhenThePictureHasThePageShape() {
+        XCTAssertTrue(shot().alignsWithViewport)
+        XCTAssertTrue(shot(pixels: (1_440, 910)).alignsWithViewport, "a small difference in shape is tolerated")
+        XCTAssertFalse(shot(pixels: (720, 600)).alignsWithViewport)
+        XCTAssertFalse(shot(viewport: (0, 0)).alignsWithViewport)
+    }
+
+    func testVisuals_splitMarksIntoDrawnAndListedOnly() {
+        let inside = LHShotMark(kind: .lcp, label: "LCP element", selector: "img", rect: LHRect(x: 10, y: 10, width: 100, height: 100))
+        let below = LHShotMark(kind: .layoutShift, label: "Shifted", selector: "div", rect: LHRect(x: 10, y: 2_000, width: 100, height: 100))
+        var visuals = LHVisuals(screenshot: shot(), marks: [inside, below])
+        XCTAssertEqual(visuals.drawnMarks.map(\.selector), ["img"])
+        XCTAssertEqual(visuals.undrawnMarks.map(\.selector), ["div"])
+        visuals.screenshot = shot(pixels: (720, 600))
+        XCTAssertTrue(visuals.drawnMarks.isEmpty, "misaligned pictures draw nothing rather than draw in the wrong place")
+        XCTAssertEqual(visuals.undrawnMarks.count, 2)
+    }
+
+    func testScore_buildsVisualsWithMarksFromTheLCPElementAndTheShifters() {
+        var bundle = LHBundle()
+        bundle.mode = .navigation
+        bundle.screenshot = shot()
+        bundle.filmstrip = [LHFilmstripFrame(ms: 100, completeness: 0.4, jpeg: Data([9]))]
+        bundle.lcpDetail = LHLCPDetail(selector: "img.hero", tag: "img", nodeID: 7, rect: LHRect(x: 0, y: 0, width: 400, height: 300))
+        bundle.clsScore = 0.2
+        bundle.clsShifts = [LHClsShift(value: 0.2, sources: ["div.ad"], startMs: 100, details: [
+            LHShiftSource(selector: "div.ad", nodeID: 9, current: LHRect(x: 0, y: 300, width: 400, height: 100),
+                          live: LHRect(x: 0, y: 320, width: 400, height: 100)),
+            LHShiftSource(selector: "p.gone", current: LHRect(x: 0, y: 0, width: 10, height: 10)),
+        ])]
+        let visuals = OrbitLighthouseLogic.score(bundle: bundle).visuals
+        XCTAssertEqual(visuals?.filmstrip.count, 1)
+        let marks = visuals?.marks ?? []
+        XCTAssertEqual(marks.map(\.kind), [.lcp, .layoutShift, .layoutShift])
+        XCTAssertEqual(marks[1].rect, LHRect(x: 0, y: 320, width: 400, height: 100), "a live position wins over the one at the shift")
+        XCTAssertNotNil(marks[2].detail, "a removed element is shown at where it shifted and says so")
+    }
+
+    func testScore_doesNotOfferWherePositionsAfterThePageScrolled() {
+        var bundle = LHBundle()
+        bundle.mode = .navigation
+        bundle.screenshot = shot(scrollY: 800)
+        bundle.clsScore = 0.2
+        bundle.clsShifts = [LHClsShift(value: 0.2, sources: ["p.gone"], startMs: 100, details: [
+            LHShiftSource(selector: "p.gone", current: LHRect(x: 0, y: 0, width: 10, height: 10)),
+        ])]
+        XCTAssertEqual(OrbitLighthouseLogic.score(bundle: bundle).visuals?.marks.count, 0)
+    }
+
+    func testScore_hasNoVisualsWhenNothingWasCaptured() {
+        var bundle = LHBundle()
+        bundle.mode = .snapshot
+        XCTAssertNil(OrbitLighthouseLogic.score(bundle: bundle).visuals)
+        bundle.screenshotNote = "The tab was hidden."
+        XCTAssertEqual(OrbitLighthouseLogic.score(bundle: bundle).visuals?.note, "The tab was hidden.")
+    }
+
+    func testVisuals_roundTripAndAreStrippedForSavedHistory() throws {
+        var report = makeReport(perfScore: 80)
+        report.visuals = LHVisuals(screenshot: shot(), filmstrip: [LHFilmstripFrame(ms: 5, jpeg: Data([7, 8]))],
+                                   marks: [LHShotMark(kind: .lcp, label: "LCP element", selector: "img", rect: LHRect(x: 1, y: 2, width: 3, height: 4))])
+        let data = try JSONEncoder().encode(report)
+        let decoded = try JSONDecoder().decode(LHReport.self, from: data)
+        XCTAssertEqual(decoded.visuals?.screenshot?.jpeg, Data([1, 2, 3]))
+        XCTAssertEqual(decoded.visuals?.marks.first?.rect, LHRect(x: 1, y: 2, width: 3, height: 4))
+        XCTAssertNil(report.strippingVisuals().visuals)
+        XCTAssertEqual(report.strippingVisuals().scores.performance, 80)
+    }
+
+    func testOldSavedReports_stillDecodeWithoutTheNewFields() throws {
+        let metrics = try JSONDecoder().decode(LHMetrics.self, from: Data(#"{"fcp":1000,"clsShifts":[{"value":0.1,"sources":["a"]}]}"#.utf8))
+        XCTAssertEqual(metrics.fcp, 1_000)
+        XCTAssertNil(metrics.lcpDetail)
+        XCTAssertNil(metrics.clsShifts.first?.details)
+        let audit = try JSONDecoder().decode(
+            LHAuditResult.self,
+            from: Data(#"{"id":"a","category":"seo","title":"t","description":"d","status":"fail","weight":1,"displayValue":"v","items":[]}"#.utf8)
+        )
+        XCTAssertNil(audit.howToFix)
+    }
+
+    // MARK: - Decoding the page's wire format
+
+    func testDecodeRect_acceptsFourNumbersOnly() {
+        XCTAssertEqual(OrbitLighthouseLogic.decodeRect([1.5, 2, 3, 4] as [Any]), LHRect(x: 1.5, y: 2, width: 3, height: 4))
+        XCTAssertNil(OrbitLighthouseLogic.decodeRect([1, 2, 3] as [Any]))
+        XCTAssertNil(OrbitLighthouseLogic.decodeRect(["a", 2, 3, 4] as [Any]))
+        XCTAssertNil(OrbitLighthouseLogic.decodeRect(NSNull()))
+        XCTAssertNil(OrbitLighthouseLogic.decodeRect(nil))
+    }
+
+    func testDecodeShifts_readsTimesSourcesAndPositions() {
+        let wire: [[String: Any]] = [[
+            "v": 0.12, "t": 840.5, "srcs": ["div.ad"],
+            "det": [["sel": "div.ad", "id": 14, "prev": [0, 0, 10, 10], "cur": [0, 5, 10, 10], "live": NSNull()] as [String: Any]],
+        ]]
+        let shifts = OrbitLighthouseLogic.decodeShifts(wire)
+        XCTAssertEqual(shifts.count, 1)
+        XCTAssertEqual(shifts[0].value, 0.12, accuracy: 1e-9)
+        XCTAssertEqual(shifts[0].startMs, 840.5)
+        XCTAssertEqual(shifts[0].details.first?.nodeID, 14)
+        XCTAssertEqual(shifts[0].details.first?.current, LHRect(x: 0, y: 5, width: 10, height: 10))
+        XCTAssertNil(shifts[0].details.first?.live)
+    }
+
+    func testDecodeLCPDetail_buildsPhasesFromTheResourceTiming() {
+        let wire: [String: Any] = [
+            "sel": "img.hero", "tag": "img", "id": 5, "snip": "<img>", "url": "https://e.com/a.jpg",
+            "rect": [1, 2, 3, 4], "load": 2_200.0, "render": 2_900.0, "lazy": true, "resStart": 900.0, "resEnd": 2_200.0,
+        ]
+        let detail = OrbitLighthouseLogic.decodeLCPDetail(wire, lcpMs: 3_000, ttfbMs: 400)
+        XCTAssertEqual(detail?.nodeID, 5)
+        XCTAssertEqual(detail?.isLazyLoaded, true)
+        XCTAssertEqual(detail?.phases.map(\.ms) ?? [], [400, 500, 1_300, 800])
+        XCTAssertNil(OrbitLighthouseLogic.decodeLCPDetail(wire, lcpMs: nil, ttfbMs: 400))
+        XCTAssertNil(OrbitLighthouseLogic.decodeLCPDetail(nil, lcpMs: 3_000, ttfbMs: 400))
+    }
+
+    func testDecodeLCPDetail_textElementsHaveNoResourcePhases() {
+        let wire: [String: Any] = ["sel": "h1", "tag": "h1", "id": 0, "url": "", "resStart": 10.0, "resEnd": 20.0]
+        let detail = OrbitLighthouseLogic.decodeLCPDetail(wire, lcpMs: 1_000, ttfbMs: 100)
+        XCTAssertNil(detail?.nodeID)
+        XCTAssertNil(detail?.url)
+        XCTAssertEqual(detail?.phases.map(\.name) ?? [], ["Time to first byte", "Element render delay"])
+    }
+
+    func testDecodeEvidenceAndTimingParts() {
+        let nodes = OrbitLighthouseLogic.decodeEvidence([["sel": "a > b", "id": 3, "snip": "<b>"]])
+        XCTAssertEqual(nodes.first?.selector, "a > b")
+        XCTAssertEqual(nodes.first?.nodeID, 3)
+        let parts = OrbitLighthouseLogic.decodeTimingParts([["n": "DNS lookup", "ms": 12.5], ["n": "bad"]])
+        XCTAssertEqual(parts, [LHTimingPart(name: "DNS lookup", ms: 12.5)])
+    }
+
+    func testAccessibilityAudits_showWhichElementsFailed() {
+        var bundle = LHBundle()
+        bundle.mode = .snapshot
+        bundle.nestedInteractiveCount = 1
+        bundle.nestedInteractiveNodes = [LHEvidenceNode(selector: "a.card", nodeID: 21, snippet: "<a class=\"card\">")]
+        bundle.positiveTabindexCount = 1
+        bundle.positiveTabindexNodes = [LHEvidenceNode(selector: "#go", nodeID: 22, snippet: "<a id=\"go\" tabindex=\"3\">")]
+        let report = OrbitLighthouseLogic.score(bundle: bundle)
+        XCTAssertEqual(report.audits.first { $0.id == "nested-interactive" }?.items.first?.nodeID, 21)
+        XCTAssertEqual(report.audits.first { $0.id == "tabindex" }?.items.first?.selector, "#go")
+        XCTAssertNotNil(report.audits.first { $0.id == "tabindex" }?.howToFix)
+    }
+
+    // MARK: - Score breakdown
+
+    private func weighted(_ id: String, score: Double?, weight: Double) -> LHAuditResult {
+        LHAuditResult(id: id, category: .performance, title: id, description: "",
+                      status: score == nil ? .notApplicable : (score! >= 0.9 ? .pass : .fail),
+                      score: score, weight: weight, displayValue: "v", items: [])
+    }
+
+    func testScoreBreakdown_pointsAddUpToTheCategoryScore() {
+        let audits = [weighted("fcp", score: 1, weight: 10), weighted("lcp", score: 0.6, weight: 25),
+                      weighted("tbt", score: nil, weight: 30), weighted("cls", score: 0, weight: 25)]
+        let rows = OrbitLighthouseLogic.scoreBreakdown(audits, category: .performance)
+        XCTAssertEqual(rows.map(\.id), ["cls", "lcp", "fcp", "tbt"], "largest loss first, unmeasured last")
+        let measured = rows.filter(\.measured)
+        XCTAssertEqual(measured.reduce(0) { $0 + $1.maxPoints }, 100, accuracy: 1e-9)
+        // (10 * 1 + 25 * 0.6 + 25 * 0) / 60 of 100 points.
+        XCTAssertEqual(measured.reduce(0) { $0 + $1.points }, 25 / 60.0 * 100, accuracy: 1e-9)
+        XCTAssertEqual(Int(measured.reduce(0) { $0 + $1.points }.rounded()), OrbitLighthouseLogic.categoryScore(audits, category: .performance))
+        XCTAssertEqual(rows[1].maxPoints, 25 / 60.0 * 100, accuracy: 1e-9, "an unmeasured weight is shared among the rest")
+        XCTAssertEqual(rows[1].points, rows[1].maxPoints * 0.6, accuracy: 1e-9)
+        XCTAssertFalse(rows[3].measured)
+        XCTAssertEqual(rows[3].maxPoints, 0)
+    }
+
+    func testScoreBreakdown_ignoresUnweightedAndOtherCategories() {
+        var other = weighted("seo-thing", score: 0, weight: 5)
+        other.category = .seo
+        let audits = [weighted("diag", score: 0, weight: 0), other, weighted("fcp", score: 1, weight: 10)]
+        XCTAssertEqual(OrbitLighthouseLogic.scoreBreakdown(audits, category: .performance).map(\.id), ["fcp"])
+        XCTAssertTrue(OrbitLighthouseLogic.scoreBreakdown([], category: .performance).isEmpty)
+    }
+
+    func testScoreBreakdown_matchesAFullReport() {
+        var bundle = LHBundle()
+        bundle.mode = .navigation
+        bundle.fcpMs = 2_000
+        bundle.lcpMs = 3_500
+        bundle.clsScore = 0.2
+        bundle.longTasksAPIAvailable = true
+        bundle.longTasks = [LHLongTask(startMs: 2_500, durationMs: 350)]
+        let report = OrbitLighthouseLogic.score(bundle: bundle)
+        let rows = OrbitLighthouseLogic.scoreBreakdown(report.audits, category: .performance)
+        let total = rows.reduce(0) { $0 + $1.points }
+        XCTAssertEqual(Int(total.rounded()), report.scores.performance)
+        XCTAssertTrue(rows.contains { !$0.measured && $0.id == "speed-index" })
+    }
+
+    // MARK: - Metric explanations
+
+    func testMetricAssessment_statesTheReasonForEachBand() {
+        XCTAssertTrue(LHMetricKind.lcp.assessment(for: 2_000).contains("within the good limit"))
+        XCTAssertTrue(LHMetricKind.lcp.assessment(for: 2_000).contains("500 ms to spare"))
+        XCTAssertTrue(LHMetricKind.lcp.assessment(for: 3_000).contains("over the good limit"))
+        XCTAssertTrue(LHMetricKind.lcp.assessment(for: 3_000).contains("under the poor limit"))
+        XCTAssertTrue(LHMetricKind.lcp.assessment(for: 5_000).contains("past the poor limit"))
+        XCTAssertTrue(LHMetricKind.cls.assessment(for: 0.15).contains("0.050 over the good limit of 0.100"))
+    }
+
+    func testMetricKinds_haveGuidanceAndTheScoredOnesWeighToOneHundred() {
+        for kind in LHMetricKind.allCases {
+            XCTAssertFalse(kind.explanation.isEmpty, kind.rawValue)
+            XCTAssertFalse(kind.improvement.isEmpty, kind.rawValue)
+            XCTAssertFalse(kind.auditID.isEmpty, kind.rawValue)
+        }
+        XCTAssertEqual(Set(LHMetricKind.allCases.map(\.auditID)).count, LHMetricKind.allCases.count)
+        XCTAssertEqual(LHMetricKind.allCases.reduce(0) { $0 + $1.scoreWeight }, 100)
+        XCTAssertEqual(LHMetricKind.inp.scoreWeight, 0)
+        XCTAssertEqual(LHMetricKind.ttfb.scoreWeight, 0)
+    }
+
+    func testMetricAuditWeights_matchTheKindWeights() {
+        var bundle = LHBundle()
+        bundle.mode = .navigation
+        bundle.fcpMs = 1_000
+        bundle.lcpMs = 1_000
+        bundle.longTasksAPIAvailable = true
+        bundle.siFrames = [(ms: 0, completeness: 0.5), (ms: 100, completeness: 1)]
+        let report = OrbitLighthouseLogic.score(bundle: bundle)
+        for kind in LHMetricKind.allCases where kind.scoreWeight > 0 {
+            XCTAssertEqual(report.audits.first { $0.id == kind.auditID }?.weight, kind.scoreWeight, kind.rawValue)
+        }
+    }
+
+    // MARK: - How to fix
+
+    func testGuidance_isAddedOnlyToFailedAndWarningAudits() {
+        var failed = audit(.fail, score: 0, id: "image-alt")
+        failed.category = .accessibility
+        XCTAssertNotNil(OrbitLighthouseLogic.withGuidance(failed).howToFix)
+        var warning = failed
+        warning.status = .warning
+        XCTAssertNotNil(OrbitLighthouseLogic.withGuidance(warning).howToFix)
+        var passed = failed
+        passed.status = .pass
+        XCTAssertNil(OrbitLighthouseLogic.withGuidance(passed).howToFix)
+        XCTAssertNil(OrbitLighthouseLogic.withGuidance(audit(.fail, score: 0, id: "no-such-audit")).howToFix)
+        var already = failed
+        already.howToFix = "Keep this."
+        XCTAssertEqual(OrbitLighthouseLogic.withGuidance(already).howToFix, "Keep this.")
+    }
+
+    func testGuidance_isSetOnFailingAuditsInAFullReport() {
+        var bundle = LHBundle()
+        bundle.mode = .snapshot
+        bundle.images = [image(natural: (2000, 1000), shown: (500, 250), size: 160_000)]
+        bundle.renderBlockers = [LHRenderBlocker(url: "https://example.com/a.css", type: "stylesheet", wastedMs: 80, transferSize: 100)]
+        let report = OrbitLighthouseLogic.score(bundle: bundle)
+        for id in ["uses-responsive-images", "render-blocking-resources", "html-has-lang", "document-title", "meta-description"] {
+            guard let audit = report.audits.first(where: { $0.id == id }), audit.status == .fail else { continue }
+            XCTAssertNotNil(audit.howToFix, id)
+        }
+        XCTAssertNotNil(report.audits.first { $0.id == "uses-responsive-images" }?.howToFix)
+    }
+
+    // MARK: - Reports
+
+    func testSummaryText_listsMetricsAndTheLCPElement() {
+        var report = makeReport(perfScore: 90)
+        report.metrics.lcpDetail = LHLCPDetail(selector: "img.hero", tag: "img")
+        let lines = OrbitLighthouseLogic.summaryText(report).split(separator: "\n").map(String.init)
+        XCTAssertTrue(lines.contains { $0.hasPrefix("LCP 2.50 s (good)") })
+        XCTAssertTrue(lines.contains("LCP element: img.hero"))
+        var snapshot = report
+        snapshot.mode = .snapshot
+        XCTAssertFalse(OrbitLighthouseLogic.summaryText(snapshot).contains("LCP 2.50 s"), "a snapshot measured no load metrics")
+    }
+
+    func testHTMLReport_embedsThePicturesOnceAndExplainsFailures() {
+        var report = makeReport(perfScore: 70)
+        report.visuals = LHVisuals(
+            screenshot: LHScreenshot(jpeg: Data([0xFF, 0xD8, 0xFF, 0xE0, 0x01]), pixelWidth: 720, pixelHeight: 450, viewportWidth: 1_440, viewportHeight: 900),
+            filmstrip: [LHFilmstripFrame(ms: 200, completeness: 0.5, jpeg: Data([0xFF, 0xD8, 0xFF, 0xE1, 0x02]))],
+            marks: [LHShotMark(kind: .lcp, label: "LCP element", selector: "img.hero", rect: LHRect(x: 0, y: 0, width: 100, height: 100))]
+        )
+        var failing = audit(.fail, score: 0, id: "image-alt")
+        failing.title = "Image elements have [alt] text"
+        failing.howToFix = "Add alt text."
+        failing.items = [LHAuditItem(selector: "img.hero", url: "https://example.com/hero.jpg")]
+        report.audits = [failing]
+        let html = OrbitLighthouseLogic.generateHTMLReport(report)
+        let shotBase64 = Data([0xFF, 0xD8, 0xFF, 0xE0, 0x01]).base64EncodedString()
+        XCTAssertEqual(html.components(separatedBy: shotBase64).count - 1, 1, "the picture is in the page once, not again in the raw JSON")
+        XCTAssertTrue(html.contains("Visual evidence"))
+        XCTAssertTrue(html.contains("Filmstrip"))
+        XCTAssertTrue(html.contains("LCP element"))
+        XCTAssertTrue(html.contains("How to fix:</b> Add alt text."))
+        XCTAssertTrue(html.contains("img.hero | https://example.com/hero.jpg") || html.contains("https://example.com/hero.jpg | img.hero"))
+    }
+
     // MARK: - Helpers
 
     private func makeReport(perfScore: Int) -> LHReport {

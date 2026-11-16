@@ -118,6 +118,25 @@ final class WebKitSession: EngineSession {
         return all.filter { Self.cookie($0, matches: url) }
     }
 
+    /// Every cookie whose domain belongs to the registrable domain `site`, subdomains included.
+    func cookies(forSite site: String) async -> [HTTPCookie] {
+        await dataStore.httpCookieStore.allCookies().filter {
+            let domain = $0.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return SiteIdentity.registrableDomain(ofHost: domain) == site
+        }
+    }
+
+    /// Copies `site`'s cookies from `source` into this store, only when this store holds none for the site, so an account already signed in here is never replaced. Returns how many were copied.
+    @discardableResult
+    func seedCookies(forSite site: String, from source: WebKitSession) async -> Int {
+        guard source !== self, await cookies(forSite: site).isEmpty else { return 0 }
+        let copied = await source.cookies(forSite: site)
+        for cookie in copied {
+            await dataStore.httpCookieStore.setCookie(cookie)
+        }
+        return copied.count
+    }
+
     func deleteCookies(for url: URL) async {
         let matching = await cookies(for: url)
         for cookie in matching {
@@ -187,6 +206,27 @@ final class WebKitSession: EngineSession {
 
     func clear(_ scope: BrowsingDataScope, since: Date?) async {
         await removeData(ofTypes: Self.dataTypes(for: scope), since: since)
+    }
+
+    /// Drops the HTTP, memory and fetch caches for the site of `url` only, matched by registrable domain so subdomains go with it. Cookies, storage and other sites' caches are untouched.
+    func clearCache(forSiteOf url: URL) async {
+        guard let host = url.host()?.lowercased(), !host.isEmpty else { return }
+        let site = SiteIdentity.registrableDomain(ofHost: host)
+        let types = Self.dataTypes(for: .cache)
+        let records: [WKWebsiteDataRecord] = await withCheckedContinuation { continuation in
+            dataStore.fetchDataRecords(ofTypes: types) { continuation.resume(returning: $0) }
+        }
+        let matching = records.filter { Self.record($0, belongsToSite: site, host: host) }
+        guard !matching.isEmpty else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            dataStore.removeData(ofTypes: types, for: matching) { continuation.resume() }
+        }
+    }
+
+    // WebKit names a record by the registrable domain for most types and by the full host for some, so both forms are accepted.
+    private static func record(_ record: WKWebsiteDataRecord, belongsToSite site: String, host: String) -> Bool {
+        let name = record.displayName.lowercased()
+        return name == site || name == host || name.hasSuffix("." + site) || host.hasSuffix("." + name)
     }
 
     // Every type this OS knows, including ones no scope names.

@@ -167,6 +167,10 @@ struct OrbitLighthousePane: View {
                 if report.enabledCategories.contains(.performance) {
                     metricsSection(report)
                 }
+                visualEvidenceSection(report)
+                if report.enabledCategories.contains(.performance) {
+                    scoreBreakdownSection(report)
+                }
                 filterBar(report)
                 opportunitiesSection(report)
                 diagnosticsSection(report)
@@ -260,9 +264,47 @@ struct OrbitLighthousePane: View {
             InspectSectionHeader("Performance metrics")
                 .padding(.horizontal, InspectChrome.panelPadding)
                 .padding(.vertical, 6)
-            LHMetricTilesView(metrics: report.metrics, device: report.device)
+            LHMetricTilesView(metrics: report.metrics, device: report.device, audits: report.audits, session: session,
+                              expandedIDs: model.expandedAuditIDs) { model.toggleExpanded(auditID: $0) }
+                .padding(.horizontal, InspectChrome.panelPadding)
+                .padding(.bottom, 4)
+            Text(report.runCount > 1
+                 ? "Select a metric for what it means and the evidence behind it. The LCP element, layout shifts and filmstrip come from the run closest to the median."
+                 : "Select a metric for what it means and the evidence behind it.")
+                .font(InspectChrome.caption)
+                .foregroundStyle(OrbitNeutral.muted)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, InspectChrome.panelPadding)
                 .padding(.bottom, 8)
+        }
+    }
+
+    private func visualEvidenceSection(_ report: LHReport) -> some View {
+        Group {
+            if let visuals = report.visuals {
+                Divider()
+                InspectSectionHeader("Visual evidence")
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.vertical, 6)
+                LHVisualEvidenceView(visuals: visuals, metrics: report.metrics, session: session)
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.bottom, 10)
+            }
+        }
+    }
+
+    private func scoreBreakdownSection(_ report: LHReport) -> some View {
+        let rows = OrbitLighthouseLogic.scoreBreakdown(report.audits, category: .performance)
+        return Group {
+            if let score = report.scores.performance, !rows.isEmpty {
+                Divider()
+                InspectSectionHeader("Performance score breakdown", detail: "\(score)/100")
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.vertical, 6)
+                LHScoreBreakdownView(rows: rows, score: score)
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.bottom, 10)
+            }
         }
     }
 

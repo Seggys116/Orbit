@@ -119,6 +119,8 @@ struct LHAuditResult: Codable, Identifiable {
     var savingsBytes: Int? = nil
     /// How the estimate was made, shown with the audit so an estimate is never mistaken for a measurement.
     var savingsNote: String? = nil
+    /// Plain-language remedy, set for failed and warning audits that have guidance.
+    var howToFix: String? = nil
 
     var totalWastedMs: Double {
         items.compactMap(\.wastedMs).reduce(0, +)
@@ -141,9 +143,58 @@ struct LHAuditResult: Codable, Identifiable {
     }
 }
 
+/// A rectangle in CSS pixels.
+struct LHRect: Codable, Equatable {
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+
+    var area: Double { max(width, 0) * max(height, 0) }
+
+    func intersection(_ other: LHRect) -> LHRect? {
+        let left = max(x, other.x), top = max(y, other.y)
+        let right = min(x + width, other.x + other.width), bottom = min(y + height, other.y + other.height)
+        guard right > left, bottom > top else { return nil }
+        return LHRect(x: left, y: top, width: right - left, height: bottom - top)
+    }
+}
+
+/// One element that moved in a layout shift. `previous` and `current` are viewport rectangles when it shifted;
+/// `live` is where the element sits when the audit ran, and is nil if it has since left the page.
+struct LHShiftSource: Codable {
+    var selector: String
+    var nodeID: Int? = nil
+    var previous: LHRect? = nil
+    var current: LHRect? = nil
+    var live: LHRect? = nil
+}
+
 struct LHLayoutShift: Codable {
     var value: Double
     var sources: [String]
+    var startMs: Double? = nil
+    var details: [LHShiftSource]? = nil
+}
+
+/// A named slice of a duration, for the phases of LCP and the parts of TTFB.
+struct LHTimingPart: Codable, Equatable {
+    var name: String
+    var ms: Double
+}
+
+struct LHLCPDetail: Codable {
+    var selector: String
+    var tag: String
+    var nodeID: Int? = nil
+    var snippet: String? = nil
+    var url: String? = nil
+    /// Where the element sits in the viewport when the audit ran; nil once it has left the page.
+    var rect: LHRect? = nil
+    var loadMs: Double? = nil
+    var renderMs: Double? = nil
+    var isLazyLoaded: Bool = false
+    var phases: [LHTimingPart] = []
 }
 
 struct LHMetrics: Codable {
@@ -157,10 +208,81 @@ struct LHMetrics: Codable {
     var ttfb:         Double? = nil
     var speedIndex:   Double? = nil
     var longTaskCount: Int?  = nil
+    var lcpDetail:    LHLCPDetail? = nil
+    var ttfbParts:    [LHTimingPart]? = nil
+}
+
+struct LHFilmstripFrame: Codable {
+    var ms: Double
+    /// Pixel similarity to the final frame, 0 to 1, from the same snapshots that feed Speed Index.
+    var completeness: Double? = nil
+    var jpeg: Data
+}
+
+struct LHScreenshot: Codable {
+    var jpeg: Data
+    var pixelWidth: Int
+    var pixelHeight: Int
+    var viewportWidth: Double
+    var viewportHeight: Double
+    var scrollX: Double = 0
+    var scrollY: Double = 0
+
+    var viewport: LHRect { LHRect(x: 0, y: 0, width: viewportWidth, height: viewportHeight) }
+
+    /// Overlays are only drawn when the picture and the page's viewport have the same shape, otherwise they would land in the wrong place.
+    var alignsWithViewport: Bool {
+        guard pixelWidth > 0, pixelHeight > 0, viewportWidth > 0, viewportHeight > 0 else { return false }
+        let picture = Double(pixelWidth) / Double(pixelHeight)
+        let page = viewportWidth / viewportHeight
+        return abs(picture - page) / page <= 0.03
+    }
+}
+
+/// An element to outline on the screenshot. `rect` is in viewport CSS pixels.
+struct LHShotMark: Codable, Identifiable {
+    enum Kind: String, Codable { case lcp, layoutShift }
+
+    var kind: Kind
+    var label: String
+    var selector: String
+    var nodeID: Int? = nil
+    var rect: LHRect
+    var detail: String? = nil
+
+    var id: String { "\(kind.rawValue):\(selector):\(Int(clamping: rect.x)):\(Int(clamping: rect.y))" }
+}
+
+struct LHVisuals: Codable {
+    var screenshot: LHScreenshot? = nil
+    var filmstrip: [LHFilmstripFrame] = []
+    var marks: [LHShotMark] = []
+    /// Why there is no screenshot, when there is none.
+    var note: String? = nil
+
+    /// Marks that fall inside the captured viewport and can be drawn on it.
+    var drawnMarks: [LHShotMark] {
+        guard let shot = screenshot, shot.alignsWithViewport else { return [] }
+        return marks.filter { $0.rect.intersection(shot.viewport) != nil }
+    }
+
+    /// Marks that exist but cannot be drawn, listed instead so none is silently dropped.
+    var undrawnMarks: [LHShotMark] {
+        let drawn = Set(drawnMarks.map(\.id))
+        return marks.filter { !drawn.contains($0.id) }
+    }
 }
 
 enum LHRating: String, Hashable {
     case good, needsImprovement, poor
+
+    var plainWord: String {
+        switch self {
+        case .good: return "good"
+        case .needsImprovement: return "needs improvement"
+        case .poor: return "poor"
+        }
+    }
 }
 
 enum LHMetricKind: String, CaseIterable, Identifiable {
@@ -244,6 +366,96 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
         case .ttfb: return metrics.ttfb
         }
     }
+
+    /// The audit that carries this metric's evidence in a report.
+    var auditID: String {
+        switch self {
+        case .lcp: return "largest-contentful-paint"
+        case .cls: return "cumulative-layout-shift"
+        case .inp: return "interaction-to-next-paint"
+        case .fcp: return "first-contentful-paint"
+        case .tbt: return "total-blocking-time"
+        case .speedIndex: return "speed-index"
+        case .ttfb: return "server-response-time"
+        }
+    }
+
+    /// Weight in the Performance score; INP and TTFB are shown but do not count towards it.
+    var scoreWeight: Double {
+        switch self {
+        case .lcp: return 25
+        case .cls: return 25
+        case .tbt: return 30
+        case .fcp: return 10
+        case .speedIndex: return 10
+        case .inp, .ttfb: return 0
+        }
+    }
+
+    /// What the metric is and why a visitor would care.
+    var explanation: String {
+        switch self {
+        case .lcp:
+            return "How long the largest image or block of text in the first screen takes to appear. It is the moment a visitor feels the main content has loaded."
+        case .cls:
+            return "How much visible content jumps around while the page loads. Each shift is scored by how much of the screen moved and how far, and the page's figure is its worst burst of shifts."
+        case .inp:
+            return "How long the page takes to respond to a click, tap or key press. Orbit's figure is a proxy: the longest input delay plus handler time seen by the Event Timing API, without the time to paint the next frame."
+        case .fcp:
+            return "When the first text or image appears. Until then the visitor sees a blank page."
+        case .tbt:
+            return "The total time the main thread was blocked for longer than 50 ms after First Contentful Paint. While it is blocked, taps and typing feel stuck."
+        case .speedIndex:
+            return "How quickly the visible part of the page fills in. Orbit estimates it from small snapshots of the page taken every 100 ms, compared with the final frame."
+        case .ttfb:
+            return "How long the server takes to start answering, including redirects, DNS, connection set-up and waiting for the first byte."
+        }
+    }
+
+    var improvement: String {
+        switch self {
+        case .lcp:
+            return "Make the LCP element load sooner: serve a smaller or modern-format image, preload it with fetchpriority=\"high\", never lazy-load it, remove render-blocking CSS and scripts, and speed up the server response."
+        case .cls:
+            return "Give images, videos, embeds and ads an explicit width and height or an aspect-ratio, reserve space for content that arrives late, and avoid inserting content above what the visitor is already reading."
+        case .inp:
+            return "Break up long tasks, do less work in event handlers, and move non-urgent work out of the way with requestIdleCallback or setTimeout."
+        case .fcp:
+            return "Cut the server response time, remove render-blocking CSS and scripts, and inline the CSS needed for the first screen."
+        case .tbt:
+            return "Split long JavaScript tasks, remove unused code, and defer third-party scripts until after the page is usable."
+        case .speedIndex:
+            return "Show first-screen content early: inline critical CSS, preload hero images and fonts, and avoid content that only appears after JavaScript has run."
+        case .ttfb:
+            return "Use a CDN or caching, remove redirect chains, reuse connections, and reduce the server's own work before it responds."
+        }
+    }
+
+    /// How Orbit measures it, where that differs from a lab run in Chrome. Nil when there is nothing to caveat.
+    var measurementNote: String? {
+        switch self {
+        case .lcp: return "From the Largest Contentful Paint API. Nothing is throttled, so this Mac is faster than a typical phone."
+        case .cls: return "From the Layout Instability API. Shifts right after a tap or key press are ignored, as they are expected."
+        case .inp: return "Measured in Timespan mode, from the interactions you make while recording."
+        case .fcp: return "From the Paint Timing API. Nothing is throttled."
+        case .tbt: return "From the Long Tasks API, counting tasks that start after First Contentful Paint. Nothing is throttled."
+        case .speedIndex: return "An estimate from 20 by 20 pixel snapshots, not a video of the load."
+        case .ttfb: return "From the Navigation Timing API for this page load."
+        }
+    }
+
+    /// A plain-language reason for the rating, stated from the value and the thresholds.
+    func assessment(for value: Double) -> String {
+        let shown = format(value)
+        switch rating(for: value) {
+        case .good:
+            return "\(shown) is within the good limit of \(format(goodLimit)), with \(format(goodLimit - value)) to spare."
+        case .needsImprovement:
+            return "\(shown) is \(format(value - goodLimit)) over the good limit of \(format(goodLimit)) and \(format(poorLimit - value)) under the poor limit of \(format(poorLimit))."
+        case .poor:
+            return "\(shown) is \(format(value - poorLimit)) past the poor limit of \(format(poorLimit)); a visitor would notice this."
+        }
+    }
 }
 
 struct LHScores: Codable {
@@ -286,9 +498,22 @@ struct LHReport: Codable, Identifiable {
     var audits: [LHAuditResult]
     var throttlingNote: String
     var redistributionNote: String? = nil
+    var visuals: LHVisuals? = nil
+
+    /// The screenshots are large, so saved history keeps the numbers and evidence but not the pictures.
+    func strippingVisuals() -> LHReport {
+        var copy = self
+        copy.visuals = nil
+        return copy
+    }
 }
 
-struct LHClsShift    { var value: Double; var sources: [String] }
+struct LHClsShift {
+    var value: Double
+    var sources: [String]
+    var startMs: Double? = nil
+    var details: [LHShiftSource] = []
+}
 struct LHLongTask    { var startMs: Double; var durationMs: Double }
 struct LHHreflangEntry { var lang: String; var href: String }
 
@@ -352,6 +577,11 @@ struct LHUnusedCSS {
     var nodeID: Int; var selector: String
 }
 
+/// An element that failed a check that has no richer record of its own.
+struct LHEvidenceNode {
+    var selector: String; var nodeID: Int; var snippet: String
+}
+
 struct LHDeprecatedElement {
     var tag: String; var selector: String; var nodeID: Int
 }
@@ -389,6 +619,10 @@ struct LHBundle {
     var lcpURL:             String            = ""
     var clsScore:           Double            = 0
     var clsShifts:          [LHClsShift]      = []
+    /// True when the page reported more shifts than were kept, so the shift list cannot be summed into a worst burst.
+    var clsShiftsTruncated: Bool              = false
+    var lcpDetail:          LHLCPDetail?      = nil
+    var ttfbParts:          [LHTimingPart]    = []
     var inpMs:              Double?           = nil
     var ttfbMs:             Double?           = nil
     var longTasks:          [LHLongTask]      = []
@@ -454,6 +688,14 @@ struct LHBundle {
     var duplicateActiveIDs: [String]          = []
     var positiveTabindexCount: Int           = 0
     var blankTargetNoopenerIssues: [LHLink]  = []
+    var nestedInteractiveNodes: [LHEvidenceNode] = []
+    var unfocusableScrollRegions: [LHEvidenceNode] = []
+    var videosWithoutCaptionNodes: [LHEvidenceNode] = []
+    var positiveTabindexNodes: [LHEvidenceNode] = []
+
+    var screenshot:         LHScreenshot?     = nil
+    var screenshotNote:     String?           = nil
+    var filmstrip:          [LHFilmstripFrame] = []
 
     var networkRecords:     [LHNetRecord]     = []
 
@@ -645,7 +887,7 @@ enum OrbitLighthouseLogic {
         if cats.contains(.seo)           { audits += seoAudits(bundle: bundle) }
         if cats.contains(.security)      { audits += securityAudits(bundle: bundle) }
         audits += networkAudits(bundle: bundle)
-        audits = audits.map { withEstimatedSavings($0, device: bundle.device) }
+        audits = audits.map { withEstimatedSavings($0, device: bundle.device) }.map(withGuidance)
 
         let tbt = computeTBT(longTasks: bundle.longTasks, fcpMs: bundle.fcpMs, apiAvailable: bundle.longTasksAPIAvailable)
         let si  = computeSpeedIndex(frames: bundle.siFrames)
@@ -666,13 +908,17 @@ enum OrbitLighthouseLogic {
             security:       cats.contains(.security) ? categoryScore(audits, category: .security) : nil
         )
 
+        let shifts = layoutShifts(bundle)
+        let parts = ttfbBreakdown(parts: bundle.ttfbParts, ttfbMs: bundle.ttfbMs)
         let metrics = LHMetrics(
             fcp: bundle.fcpMs, lcp: bundle.lcpMs,
             lcpElement: bundle.lcpSelector.isEmpty ? nil : bundle.lcpSelector,
-            tbt: tbt, cls: bundle.clsScore,
-            clsShifts: bundle.clsShifts.map { LHLayoutShift(value: $0.value, sources: $0.sources) },
+            tbt: tbt, cls: effectiveCLS(bundle),
+            clsShifts: shifts,
             inp: bundle.inpMs, ttfb: bundle.ttfbMs, speedIndex: si,
-            longTaskCount: bundle.longTasksAPIAvailable ? bundle.longTasks.count : nil
+            longTaskCount: bundle.longTasksAPIAvailable ? bundle.longTasks.count : nil,
+            lcpDetail: bundle.lcpDetail,
+            ttfbParts: parts.isEmpty ? nil : parts
         )
 
         return LHReport(
@@ -681,8 +927,268 @@ enum OrbitLighthouseLogic {
             runCount: 1, enabledCategories: Array(bundle.enabledCategories),
             scores: scores, metrics: metrics, audits: audits,
             throttlingNote: "No CPU or network throttling applied; metrics measured on this Mac.",
-            redistributionNote: redist
+            redistributionNote: redist,
+            visuals: visuals(bundle: bundle, shifts: shifts)
         )
+    }
+
+    // MARK: Decoding what the page agent sends
+
+    /// A rectangle sent as [left, top, width, height]; nil for anything else.
+    static func decodeRect(_ value: Any?) -> LHRect? {
+        guard let parts = value as? [Any], parts.count == 4 else { return nil }
+        let numbers = parts.compactMap { OrbitInspectDecode.number(["v": $0], "v") }
+        guard numbers.count == 4 else { return nil }
+        return LHRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
+    }
+
+    static func decodeShifts(_ objects: [[String: Any]]) -> [LHClsShift] {
+        objects.map { shift in
+            let details = OrbitInspectDecode.objects(shift, "det").map { detail -> LHShiftSource in
+                let id = OrbitInspectDecode.integer(detail, "id")
+                return LHShiftSource(selector: OrbitInspectDecode.string(detail, "sel"), nodeID: id > 0 ? id : nil,
+                                     previous: decodeRect(detail["prev"]), current: decodeRect(detail["cur"]),
+                                     live: decodeRect(detail["live"]))
+            }
+            return LHClsShift(value: OrbitInspectDecode.number(shift, "v") ?? 0, sources: OrbitInspectDecode.strings(shift, "srcs"),
+                              startMs: OrbitInspectDecode.number(shift, "t"), details: details)
+        }
+    }
+
+    /// Nil when the page reported no LCP. The phases come from the page's own resource timing for the LCP image, if it has one.
+    static func decodeLCPDetail(_ object: [String: Any]?, lcpMs: Double?, ttfbMs: Double?) -> LHLCPDetail? {
+        guard let object, let lcpMs else { return nil }
+        let id = OrbitInspectDecode.integer(object, "id")
+        let url = OrbitInspectDecode.optionalString(object, "url")
+        let timed = url != nil
+        return LHLCPDetail(
+            selector: OrbitInspectDecode.string(object, "sel"),
+            tag: OrbitInspectDecode.string(object, "tag"),
+            nodeID: id > 0 ? id : nil,
+            snippet: OrbitInspectDecode.optionalString(object, "snip"),
+            url: url,
+            rect: decodeRect(object["rect"]),
+            loadMs: OrbitInspectDecode.number(object, "load"),
+            renderMs: OrbitInspectDecode.number(object, "render"),
+            isLazyLoaded: OrbitInspectDecode.bool(object, "lazy"),
+            phases: lcpPhases(lcpMs: lcpMs, ttfbMs: ttfbMs,
+                              resourceStartMs: timed ? OrbitInspectDecode.number(object, "resStart") : nil,
+                              resourceEndMs: timed ? OrbitInspectDecode.number(object, "resEnd") : nil)
+        )
+    }
+
+    static func decodeEvidence(_ objects: [[String: Any]]) -> [LHEvidenceNode] {
+        objects.map {
+            LHEvidenceNode(selector: OrbitInspectDecode.string($0, "sel"), nodeID: OrbitInspectDecode.integer($0, "id"),
+                           snippet: OrbitInspectDecode.string($0, "snip"))
+        }
+    }
+
+    static func decodeTimingParts(_ objects: [[String: Any]]) -> [LHTimingPart] {
+        objects.compactMap { part in
+            guard let ms = OrbitInspectDecode.number(part, "ms") else { return nil }
+            return LHTimingPart(name: OrbitInspectDecode.string(part, "n"), ms: ms)
+        }
+    }
+
+    static func layoutShifts(_ bundle: LHBundle) -> [LHLayoutShift] {
+        bundle.clsShifts.map {
+            LHLayoutShift(value: $0.value, sources: $0.sources, startMs: $0.startMs,
+                          details: $0.details.isEmpty ? nil : $0.details)
+        }
+    }
+
+    /// The worst burst of shifts when every shift's time is known and none was dropped, otherwise the page's running total.
+    static func effectiveCLS(_ bundle: LHBundle) -> Double {
+        let timed = bundle.clsShifts.compactMap { shift in shift.startMs.map { (startMs: $0, value: shift.value) } }
+        guard !bundle.clsShifts.isEmpty, !bundle.clsShiftsTruncated, timed.count == bundle.clsShifts.count else {
+            return bundle.clsScore
+        }
+        return clsSessionWindowMax(timed)
+    }
+
+    /// CLS as the Core Web Vitals define it: shifts group into windows that end after a 1 s gap or 5 s in total, and the largest window counts.
+    static func clsSessionWindowMax(_ shifts: [(startMs: Double, value: Double)]) -> Double {
+        var best = 0.0, current = 0.0
+        var windowStart = 0.0, previous = 0.0
+        var open = false
+        for shift in shifts.sorted(by: { $0.startMs < $1.startMs }) {
+            if open, shift.startMs - previous < 1_000, shift.startMs - windowStart < 5_000 {
+                current += shift.value
+            } else {
+                current = shift.value
+                windowStart = shift.startMs
+                open = true
+            }
+            previous = shift.startMs
+            best = max(best, current)
+        }
+        return best
+    }
+
+    /// A layout-shift culprit: an element and the part of the total shift attributed to it.
+    struct ShiftCulprit {
+        var selector: String
+        var nodeID: Int?
+        var value: Double
+        var shiftCount: Int
+        var live: LHRect?
+        var lastKnown: LHRect?
+    }
+
+    /// A shift's score belongs to the whole shift, so it is split between the elements that moved in proportion to the area each covers.
+    static func clsCulprits(_ shifts: [LHLayoutShift]) -> [ShiftCulprit] {
+        var order: [String] = []
+        var byName: [String: ShiftCulprit] = [:]
+        for shift in shifts {
+            let sources = shift.details ?? shift.sources.map { LHShiftSource(selector: $0) }
+            guard !sources.isEmpty else { continue }
+            let areas = sources.map { max($0.previous?.area ?? 0, $0.current?.area ?? 0) }
+            let total = areas.reduce(0, +)
+            for (index, source) in sources.enumerated() {
+                let name = source.selector.isEmpty ? "(unnamed element)" : source.selector
+                let share = total > 0 ? areas[index] / total : 1 / Double(sources.count)
+                if byName[name] == nil {
+                    order.append(name)
+                    byName[name] = ShiftCulprit(selector: name, nodeID: nil, value: 0, shiftCount: 0, live: nil, lastKnown: nil)
+                }
+                var entry = byName[name]!
+                entry.value += shift.value * share
+                entry.shiftCount += 1
+                if let id = source.nodeID, id > 0 { entry.nodeID = id }
+                if let live = source.live { entry.live = live }
+                if let current = source.current { entry.lastKnown = current }
+                byName[name] = entry
+            }
+        }
+        return order.compactMap { byName[$0] }.sorted { $0.value > $1.value }
+    }
+
+    /// Phases that add up to the LCP time: server, then the wait to start the image, the image download, and the paint.
+    /// Without a resource (text, or an image the page cannot time) the time after the first byte is all render delay.
+    static func lcpPhases(lcpMs: Double, ttfbMs: Double?, resourceStartMs: Double?, resourceEndMs: Double?) -> [LHTimingPart] {
+        guard lcpMs > 0 else { return [] }
+        let first = min(max(ttfbMs ?? 0, 0), lcpMs)
+        guard let start = resourceStartMs, let end = resourceEndMs else {
+            return [LHTimingPart(name: "Time to first byte", ms: first),
+                    LHTimingPart(name: "Element render delay", ms: lcpMs - first)]
+        }
+        let requested = min(max(start, first), lcpMs)
+        let loaded = min(max(end, requested), lcpMs)
+        return [LHTimingPart(name: "Time to first byte", ms: first),
+                LHTimingPart(name: "Resource load delay", ms: requested - first),
+                LHTimingPart(name: "Resource load time", ms: loaded - requested),
+                LHTimingPart(name: "Element render delay", ms: lcpMs - loaded)]
+    }
+
+    /// The parts the page reported, plus whatever of the TTFB they do not explain (queueing, cache lookups, service workers).
+    static func ttfbBreakdown(parts: [LHTimingPart], ttfbMs: Double?) -> [LHTimingPart] {
+        let known = parts.filter { $0.ms >= 0.5 }
+        guard let ttfbMs, ttfbMs > 0 else { return known }
+        let rest = ttfbMs - known.reduce(0) { $0 + $1.ms }
+        return rest >= 1 ? known + [LHTimingPart(name: "Queueing and other", ms: rest)] : known
+    }
+
+    /// Which frames to keep for the filmstrip: drop frames that look like the one before, then thin the rest evenly.
+    /// The first and last frames are always kept.
+    static func filmstripSelection(completeness: [Double?], maxFrames: Int) -> [Int] {
+        guard maxFrames > 0, !completeness.isEmpty else { return [] }
+        let last = completeness.count - 1
+        if maxFrames == 1 { return [last] }
+        var kept: [Int] = []
+        for index in completeness.indices {
+            if index == 0 || index == last { kept.append(index); continue }
+            if let value = completeness[index], let before = completeness[kept[kept.count - 1]], abs(value - before) < 0.02 {
+                continue
+            }
+            kept.append(index)
+        }
+        guard kept.count > maxFrames else { return kept }
+        var picked: [Int] = []
+        for slot in 0 ..< maxFrames {
+            let position = Int((Double(slot) * Double(kept.count - 1) / Double(maxFrames - 1)).rounded())
+            if picked.last != kept[position] { picked.append(kept[position]) }
+        }
+        return picked
+    }
+
+    /// Tags the first frame at or after each paint time, so the strip shows where FCP and LCP fell.
+    static func filmstripMilestones(frameMs: [Double], fcpMs: Double?, lcpMs: Double?) -> [[String]] {
+        var tags = [[String]](repeating: [], count: frameMs.count)
+        for (name, time) in [("FCP", fcpMs), ("LCP", lcpMs)] {
+            guard let time, let index = frameMs.firstIndex(where: { $0 >= time }) else { continue }
+            tags[index].append(name)
+        }
+        return tags
+    }
+
+    /// A rectangle as fractions (0 to 1) of the viewport, clipped to it. Nil when it lies entirely outside.
+    static func fractionalRect(_ rect: LHRect, in viewport: LHRect) -> LHRect? {
+        guard viewport.width > 0, viewport.height > 0, let clipped = rect.intersection(viewport) else { return nil }
+        return LHRect(x: (clipped.x - viewport.x) / viewport.width, y: (clipped.y - viewport.y) / viewport.height,
+                      width: clipped.width / viewport.width, height: clipped.height / viewport.height)
+    }
+
+    static func visuals(bundle: LHBundle, shifts: [LHLayoutShift]) -> LHVisuals? {
+        var marks: [LHShotMark] = []
+        if let lcp = bundle.lcpDetail, let rect = lcp.rect {
+            marks.append(LHShotMark(
+                kind: .lcp, label: "LCP element", selector: lcp.selector, nodeID: lcp.nodeID, rect: rect,
+                detail: "<\(lcp.tag)> \(Int(clamping: rect.width.rounded())) by \(Int(clamping: rect.height.rounded())) px"
+            ))
+        }
+        // Shifts happen during load at the top of the page, so where an element has since left the page its position
+        // at the shift is only offered while the page is still scrolled to the top.
+        let atTop = (bundle.screenshot?.scrollX ?? 0) == 0 && (bundle.screenshot?.scrollY ?? 0) == 0
+        for culprit in clsCulprits(shifts).prefix(5) {
+            if let live = culprit.live {
+                marks.append(LHShotMark(kind: .layoutShift, label: "Shifted: " + String(format: "%.3f", culprit.value),
+                                        selector: culprit.selector, nodeID: culprit.nodeID, rect: live))
+            } else if atTop, let known = culprit.lastKnown {
+                marks.append(LHShotMark(kind: .layoutShift, label: "Shifted: " + String(format: "%.3f", culprit.value),
+                                        selector: culprit.selector, nodeID: culprit.nodeID, rect: known,
+                                        detail: "Position when it shifted; the element is no longer on the page."))
+            }
+        }
+        let visuals = LHVisuals(screenshot: bundle.screenshot, filmstrip: bundle.filmstrip, marks: marks,
+                                note: bundle.screenshot == nil ? bundle.screenshotNote : nil)
+        if visuals.screenshot == nil && visuals.filmstrip.isEmpty && visuals.note == nil { return nil }
+        return visuals
+    }
+
+    /// One row of the score breakdown. `points` out of `maxPoints` is what the audit adds to the category score.
+    struct ScoreContribution: Identifiable {
+        var id: String
+        var title: String
+        var displayValue: String
+        var score: Double?
+        var weight: Double
+        var maxPoints: Double
+        var points: Double
+        /// False when the audit could not be measured; its weight is then shared among the audits that were.
+        var measured: Bool
+
+        var pointsLost: Double { maxPoints - points }
+    }
+
+    /// How each weighted audit contributes to a category score, largest loss first. Measured points add up to the unrounded category score.
+    static func scoreBreakdown(_ audits: [LHAuditResult], category: LHCategory) -> [ScoreContribution] {
+        let weighted = audits.filter { $0.category == category && $0.weight > 0 }
+        let totalWeight = weighted.filter { $0.score != nil }.reduce(0.0) { $0 + $1.weight }
+        let rows = weighted.map { audit -> ScoreContribution in
+            guard let score = audit.score, totalWeight > 0 else {
+                return ScoreContribution(id: audit.id, title: audit.title, displayValue: audit.displayValue, score: nil,
+                                         weight: audit.weight, maxPoints: 0, points: 0, measured: false)
+            }
+            let ceiling = audit.weight / totalWeight * 100
+            return ScoreContribution(id: audit.id, title: audit.title, displayValue: audit.displayValue, score: score,
+                                     weight: audit.weight, maxPoints: ceiling, points: ceiling * score, measured: true)
+        }
+        return rows.enumerated().sorted { lhs, rhs in
+            if lhs.element.measured != rhs.element.measured { return lhs.element.measured }
+            if lhs.element.pointsLost != rhs.element.pointsLost { return lhs.element.pointsLost > rhs.element.pointsLost }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
 
@@ -700,9 +1206,7 @@ enum OrbitLighthouseLogic {
             value: nav ? bundle.fcpMs : nil, curve: dev.fcpCurve, weight: 10, unit: .timeMs
         ))
 
-        let lcpItems: [LHAuditItem] = bundle.lcpSelector.isEmpty ? [] : [
-            LHAuditItem(selector: bundle.lcpSelector, url: bundle.lcpURL.isEmpty ? nil : bundle.lcpURL, label: "LCP element")
-        ]
+        let lcpItems = lcpAuditItems(bundle)
         out.append(metricAudit(
             id: "largest-contentful-paint",
             title: "Largest Contentful Paint",
@@ -723,21 +1227,20 @@ enum OrbitLighthouseLogic {
                 title: "Total Blocking Time",
                 desc: "Sum of (duration − 50 ms) for long tasks after FCP.",
                 docs: "https://developer.chrome.com/docs/lighthouse/performance/lighthouse-total-blocking-time/",
-                value: nav ? tbt : nil, curve: dev.tbtCurve, weight: 30, unit: .timeMs
+                value: nav ? tbt : nil, curve: dev.tbtCurve, weight: 30, unit: .timeMs,
+                items: blockingTaskItems(bundle)
             ))
         }
 
-        let clsItems = bundle.clsShifts.prefix(10).map { s in
-            LHAuditItem(label: String(format: "%.4f", s.value), subLabel: s.sources.prefix(3).joined(separator: ", "))
-        }
+        let cls = effectiveCLS(bundle)
         out.append(metricAudit(
             id: "cumulative-layout-shift",
             title: "Cumulative Layout Shift",
             desc: "Unexpected layout shifts during page load.",
             docs: "https://developer.chrome.com/docs/lighthouse/performance/cls/",
-            value: nav ? bundle.clsScore : nil,
-            rawOverride: nav ? bundle.clsScore : nil,
-            curve: dev.clsCurve, weight: 25, unit: .cls, items: Array(clsItems)
+            value: nav ? cls : nil,
+            rawOverride: nav ? cls : nil,
+            curve: dev.clsCurve, weight: 25, unit: .cls, items: clsAuditItems(bundle)
         ))
 
         if let si = computeSpeedIndex(frames: bundle.siFrames), nav {
@@ -762,7 +1265,10 @@ enum OrbitLighthouseLogic {
                 description: "Time to First Byte (TTFB). Target: ≤ 800 ms.",
                 docsURL: "https://developer.chrome.com/docs/lighthouse/performance/time-to-first-byte/",
                 status: ttfb <= 800 ? .pass : .fail, score: score, weight: 0,
-                numericValue: ttfb, displayValue: formatMs(ttfb), items: []
+                numericValue: ttfb, displayValue: formatMs(ttfb),
+                items: ttfbBreakdown(parts: bundle.ttfbParts, ttfbMs: ttfb).map {
+                    LHAuditItem(label: $0.name, subLabel: formatMs($0.ms) + " (\(percentOf($0.ms, of: ttfb)))")
+                }
             ))
         }
 
@@ -865,7 +1371,20 @@ enum OrbitLighthouseLogic {
                 docsURL: "https://developer.chrome.com/docs/lighthouse/performance/lcp-lazy-loading/",
                 status: .fail, score: 0, weight: 0,
                 numericValue: nil, displayValue: "LCP image not preloaded",
-                items: [LHAuditItem(selector: bundle.lcpSelector.isEmpty ? nil : bundle.lcpSelector, url: bundle.lcpURL)]
+                items: [LHAuditItem(nodeID: bundle.lcpDetail?.nodeID, selector: bundle.lcpSelector.isEmpty ? nil : bundle.lcpSelector,
+                                    url: bundle.lcpURL, snippet: bundle.lcpDetail?.snippet)]
+            ))
+        }
+
+        if let lcp = bundle.lcpDetail, lcp.isLazyLoaded {
+            out.append(LHAuditResult(
+                id: "lcp-lazy-loaded", category: .performance,
+                title: "Largest Contentful Paint image was not lazily loaded",
+                description: "The LCP image has loading=\"lazy\", so the browser waits until layout before it starts the download.",
+                docsURL: "https://developer.chrome.com/docs/lighthouse/performance/lcp-lazy-loading/",
+                status: .fail, score: 0, weight: 0,
+                numericValue: nil, displayValue: "LCP image is lazy-loaded",
+                items: [LHAuditItem(nodeID: lcp.nodeID, selector: lcp.selector.isEmpty ? nil : lcp.selector, url: lcp.url, snippet: lcp.snippet)]
             ))
         }
 
@@ -979,6 +1498,143 @@ enum OrbitLighthouseLogic {
 
         return out
     }
+
+    private static func evidenceItems(_ nodes: [LHEvidenceNode]) -> [LHAuditItem] {
+        nodes.prefix(20).map {
+            LHAuditItem(nodeID: $0.nodeID > 0 ? $0.nodeID : nil, selector: $0.selector.isEmpty ? nil : $0.selector,
+                        snippet: $0.snippet.isEmpty ? nil : $0.snippet)
+        }
+    }
+
+    private static func percentOf(_ part: Double, of whole: Double) -> String {
+        guard whole > 0 else { return "0%" }
+        return "\(Int((part / whole * 100).rounded()))%"
+    }
+
+    private static func lcpAuditItems(_ bundle: LHBundle) -> [LHAuditItem] {
+        guard let lcp = bundle.lcpDetail else {
+            guard !bundle.lcpSelector.isEmpty else { return [] }
+            return [LHAuditItem(selector: bundle.lcpSelector, url: bundle.lcpURL.isEmpty ? nil : bundle.lcpURL, label: "LCP element")]
+        }
+        var label = "LCP element: <\(lcp.tag)>"
+        if let rect = lcp.rect { label += " \(Int(clamping: rect.width.rounded())) by \(Int(clamping: rect.height.rounded())) px" }
+        var items = [LHAuditItem(nodeID: lcp.nodeID, selector: lcp.selector.isEmpty ? nil : lcp.selector,
+                                 url: lcp.url, label: label, snippet: lcp.snippet)]
+        let total = lcp.phases.reduce(0) { $0 + $1.ms }
+        for phase in lcp.phases {
+            items.append(LHAuditItem(label: phase.name, subLabel: formatMs(phase.ms) + " (\(percentOf(phase.ms, of: total)) of LCP)"))
+        }
+        return items
+    }
+
+    /// The tasks that make up Total Blocking Time, longest first.
+    private static func blockingTaskItems(_ bundle: LHBundle) -> [LHAuditItem] {
+        guard bundle.longTasksAPIAvailable, let fcp = bundle.fcpMs else { return [] }
+        return bundle.longTasks
+            .filter { $0.startMs >= fcp && $0.durationMs > 50 }
+            .sorted { $0.durationMs > $1.durationMs }
+            .prefix(10)
+            .map {
+                LHAuditItem(wastedMs: $0.durationMs - 50, label: "Task of \(formatMs($0.durationMs))",
+                            subLabel: "started at \(formatMs($0.startMs)); only the time over 50 ms counts")
+            }
+    }
+
+    private static func clsAuditItems(_ bundle: LHBundle) -> [LHAuditItem] {
+        let shifts = layoutShifts(bundle)
+        let culprits = clsCulprits(shifts).prefix(5).map { culprit in
+            LHAuditItem(nodeID: culprit.nodeID, selector: culprit.selector,
+                        label: String(format: "%.4f", culprit.value) + " from this element",
+                        subLabel: "\(culprit.shiftCount) shift(s); each shift's score is split by the area that moved")
+        }
+        let worst = shifts.sorted { $0.value > $1.value }.prefix(5).map { shift in
+            LHAuditItem(label: String(format: "%.4f", shift.value),
+                        subLabel: (shift.startMs.map { "at \(formatMs($0)): " } ?? "") + shift.sources.prefix(3).joined(separator: ", "))
+        }
+        return culprits + worst
+    }
+
+    /// Fills `howToFix` for a failed or warning audit that has guidance.
+    static func withGuidance(_ audit: LHAuditResult) -> LHAuditResult {
+        guard audit.howToFix == nil, audit.status == .fail || audit.status == .warning,
+              let fix = fixGuidance[audit.id] else { return audit }
+        var audit = audit
+        audit.howToFix = fix
+        return audit
+    }
+
+    private static let fixGuidance: [String: String] = [
+        "first-contentful-paint": LHMetricKind.fcp.improvement,
+        "largest-contentful-paint": LHMetricKind.lcp.improvement,
+        "total-blocking-time": LHMetricKind.tbt.improvement,
+        "cumulative-layout-shift": LHMetricKind.cls.improvement,
+        "speed-index": LHMetricKind.speedIndex.improvement,
+        "server-response-time": LHMetricKind.ttfb.improvement,
+        "interaction-to-next-paint": LHMetricKind.inp.improvement,
+        "dom-size": "Render only what is visible: paginate or virtualize long lists, remove wrapper elements, and build large sections on demand.",
+        "long-tasks": "Split the work into smaller chunks that yield to the browser, move heavy computation to a Web Worker, and defer scripts that are not needed for the first screen.",
+        "render-blocking-resources": "Add defer or async to scripts in the head, inline the CSS needed for the first screen, and load the rest of the CSS with media attributes or after first paint.",
+        "non-composited-animations": "Animate transform and opacity instead of layout or paint properties such as width, top, margin or box-shadow.",
+        "prefers-reduced-motion": "Wrap decorative animation in @media (prefers-reduced-motion: no-preference) or switch it off inside @media (prefers-reduced-motion: reduce).",
+        "preload-lcp-image": "Add fetchpriority=\"high\" to the LCP image, or add <link rel=\"preload\" as=\"image\"> for it in the head so the download starts early.",
+        "lcp-lazy-loaded": "Remove loading=\"lazy\" from the LCP image. Lazy loading is for images below the first screen.",
+        "image-explicit-dimensions": "Set width and height attributes (or a CSS aspect-ratio) on every image so the browser reserves its space before it loads.",
+        "offscreen-images": "Add loading=\"lazy\" to images below the first screen so they download only when the visitor scrolls near them.",
+        "uses-responsive-images": "Resize images to the size they are shown at, and use srcset and sizes so smaller screens get smaller files.",
+        "unused-css-rules": "Remove rules no page uses, split CSS per page or route, and inline only what the first screen needs.",
+        "uses-text-compression": "Turn on gzip or Brotli for HTML, CSS, JavaScript, JSON and SVG responses on the server or CDN.",
+        "uses-long-cache-ttl": "Send Cache-Control: max-age=31536000, immutable for fingerprinted static files, and a short max-age or revalidation for the rest.",
+        "uses-webp-images": "Convert JPEG, PNG and GIF images to WebP or AVIF, which are usually 30 to 50 percent smaller at the same quality.",
+        "total-byte-weight": "Compress and resize images, drop unused libraries, and lazy-load what is not needed at the start.",
+        "uses-http2": "Serve the site over HTTP/2 or HTTP/3 so many resources can share one connection.",
+        "no-mixed-content": "Load every resource over https:// and change any http:// URLs in the page, its CSS and its scripts.",
+        "redirects": "Link straight to the final URL and avoid chains of redirects, each of which adds a round trip before the page can start.",
+        "html-has-lang": "Add a lang attribute to the <html> element, for example <html lang=\"en\">.",
+        "html-lang-valid": "Use a valid BCP 47 language tag such as en, en-GB or zh-Hant.",
+        "document-title": "Add a short, descriptive <title> inside <head>.",
+        "image-alt": "Add alt text that says what the image shows, or alt=\"\" when it is purely decorative.",
+        "button-name": "Give each button visible text, an aria-label, or an aria-labelledby that points at a label.",
+        "link-name": "Give each link text that says where it goes, or an aria-label when it only holds an icon or image.",
+        "label": "Connect each form control to a <label for=...>, wrap it in a <label>, or add an aria-label.",
+        "frame-title": "Add a title attribute to each <iframe> that says what it contains.",
+        "heading-order": "Use heading levels in order (h1, then h2, then h3) without skipping, and style headings with CSS rather than by changing the level.",
+        "color-contrast": "Darken the text or lighten the background until the ratio is at least 4.5:1 (3:1 for large text).",
+        "duplicate-id-active": "Make every id unique on the page; rename or remove the duplicates.",
+        "tabindex": "Remove positive tabindex values and let the DOM order set the tab order; use tabindex=\"0\" or \"-1\" only.",
+        "meta-viewport": "Remove user-scalable=no and maximum-scale from the viewport meta tag so people can zoom.",
+        "bypass": "Add a skip link to the main content, a <main> landmark, or headings so keyboard users can jump past repeated navigation.",
+        "landmark-one-main": "Wrap the page's primary content in a single <main> element.",
+        "target-size": "Make tap targets at least 24 by 24 CSS pixels, or add spacing around smaller ones.",
+        "nested-interactive": "Do not put links, buttons or inputs inside other interactive elements; restructure so each control stands alone.",
+        "scrollable-region-focusable": "Add tabindex=\"0\" to scrollable containers, or make sure they hold something focusable, so keyboard users can scroll them.",
+        "video-caption": "Add a <track kind=\"captions\"> to each video.",
+        "aria-roles": "Use a role value defined by ARIA, or remove the role attribute.",
+        "aria-hidden-body": "Remove aria-hidden from <body>; hide individual regions instead.",
+        "aria-hidden-focus": "Remove focusable elements from inside aria-hidden regions, or take aria-hidden off the container.",
+        "aria-required-attr": "Add the attributes the role requires, for example aria-checked on role=\"checkbox\".",
+        "is-on-https": "Serve the page and all of its resources over HTTPS.",
+        "doctype": "Start the document with <!DOCTYPE html> so the browser does not use quirks mode.",
+        "charset": "Declare the encoding with <meta charset=\"utf-8\"> in the first 1024 bytes of the head.",
+        "no-console-errors": "Open the Console panel, fix the errors listed, and reload until it is clean.",
+        "geolocation-on-start": "Ask for location only after the visitor does something that needs it, such as pressing a button.",
+        "notification-on-start": "Ask for notification permission only after the visitor does something that shows why you need it.",
+        "no-sync-xhr": "Make XMLHttpRequest asynchronous or switch to fetch(); synchronous requests freeze the page.",
+        "no-unload-listeners": "Replace unload and beforeunload handlers with pagehide or visibilitychange, which keep the page eligible for the back-forward cache.",
+        "document-domain": "Stop setting document.domain; use postMessage or a CORS-enabled request for cross-origin communication.",
+        "deprecations": "Replace deprecated elements and APIs with their modern equivalents, using CSS for presentation.",
+        "rel-noopener": "Add rel=\"noopener\" to links that use target=\"_blank\" so the new page cannot reach window.opener.",
+        "document-title-seo": "Add a unique <title> that describes the page; search results show it as the headline.",
+        "meta-description": "Add <meta name=\"description\" content=\"...\"> with a one or two sentence summary of the page.",
+        "http-status-code": "Make the page respond with a 2xx status; search engines drop pages that return an error.",
+        "link-text": "Replace links such as \"click here\" with text that describes the destination.",
+        "crawlable-anchors": "Give links a real href (not # or javascript:) so crawlers and assistive technology can follow them.",
+        "is-crawlable": "Remove noindex from the robots meta tag or robots.txt if the page should appear in search.",
+        "viewport-seo": "Add <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">.",
+        "font-size": "Use at least 12px text so it is legible on phones without zooming.",
+        "canonical": "Point rel=\"canonical\" at one valid absolute URL for this content.",
+        "hreflang": "Use valid language codes and absolute URLs in hreflang links, and include a self-reference.",
+        "structured-data": "Fix the JSON-LD so it parses as valid JSON and follows the schema.org type it declares.",
+    ]
 
     static func renderBlockingSavingsMs(_ blockers: [LHRenderBlocker], fcpMs: Double?) -> Double {
         let slowest = blockers.map(\.wastedMs).max() ?? 0
@@ -1274,7 +1930,7 @@ enum OrbitLighthouseLogic {
             score: bundle.positiveTabindexCount == 0 ? 1 : 0, weight: 3,
             numericValue: Double(bundle.positiveTabindexCount),
             displayValue: bundle.positiveTabindexCount == 0 ? "None" : "\(bundle.positiveTabindexCount) element(s)",
-            items: []
+            items: evidenceItems(bundle.positiveTabindexNodes)
         ))
 
         let scalable = !bundle.viewportContent.lowercased().contains("user-scalable=no")
@@ -1331,7 +1987,7 @@ enum OrbitLighthouseLogic {
             score: bundle.nestedInteractiveCount == 0 ? 1 : 0, weight: 3,
             numericValue: Double(bundle.nestedInteractiveCount),
             displayValue: bundle.nestedInteractiveCount == 0 ? "None" : "\(bundle.nestedInteractiveCount)",
-            items: []
+            items: evidenceItems(bundle.nestedInteractiveNodes)
         ))
 
         out.append(LHAuditResult(
@@ -1343,7 +1999,7 @@ enum OrbitLighthouseLogic {
             score: bundle.scrollableNotFocusable == 0 ? 1 : 0, weight: 3,
             numericValue: Double(bundle.scrollableNotFocusable),
             displayValue: bundle.scrollableNotFocusable == 0 ? "None" : "\(bundle.scrollableNotFocusable)",
-            items: []
+            items: evidenceItems(bundle.unfocusableScrollRegions)
         ))
 
         out.append(LHAuditResult(
@@ -1355,7 +2011,7 @@ enum OrbitLighthouseLogic {
             score: bundle.videosWithoutCaptions == 0 ? 1 : 0, weight: 10,
             numericValue: Double(bundle.videosWithoutCaptions),
             displayValue: bundle.videosWithoutCaptions == 0 ? "All captioned" : "\(bundle.videosWithoutCaptions) missing",
-            items: []
+            items: evidenceItems(bundle.videosWithoutCaptionNodes)
         ))
 
         let byRule = Dictionary(grouping: bundle.ariaIssues, by: \.ruleID)
@@ -1944,6 +2600,15 @@ enum OrbitLighthouseLogic {
         if let b = report.scores.bestPractices  { lines.append("Best practices: \(b)/100") }
         if let s = report.scores.seo            { lines.append("SEO:            \(s)/100") }
         if let s = report.scores.security       { lines.append("Security:       \(s)/100") }
+        if report.mode != .snapshot {
+            for kind in LHMetricKind.allCases {
+                guard let value = kind.value(in: report.metrics) else { continue }
+                lines.append("\(kind.title) \(kind.format(value)) (\(kind.rating(for: value).plainWord))")
+            }
+            if let lcp = report.metrics.lcpDetail, !lcp.selector.isEmpty {
+                lines.append("LCP element: \(lcp.selector)")
+            }
+        }
         return lines.joined(separator: "\n")
     }
 
@@ -1951,7 +2616,8 @@ enum OrbitLighthouseLogic {
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let json = (try? enc.encode(report)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        // The pictures appear as images below, so the raw JSON leaves out their base64.
+        let json = (try? enc.encode(report.strippingVisuals())).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         func esc(_ s: String) -> String {
             s.replacingOccurrences(of: "&", with: "&amp;")
              .replacingOccurrences(of: "<", with: "&lt;")
@@ -1965,6 +2631,117 @@ enum OrbitLighthouseLogic {
                 + "<div style=\"font-size:36px;font-weight:700;color:\(cls)\">\(s)</div>"
                 + "<div style=\"font-size:12px;color:#666\">\(label)</div></div>"
         }
+        func ratingColor(_ rating: LHRating) -> String {
+            switch rating {
+            case .good: return "#1a9e3f"
+            case .needsImprovement: return "#e67e00"
+            case .poor: return "#d93025"
+            }
+        }
+
+        var sections = ""
+
+        if report.mode != .snapshot {
+            var rows = ""
+            for kind in LHMetricKind.allCases {
+                guard let value = kind.value(in: report.metrics) else { continue }
+                let rating = kind.rating(for: value)
+                rows += "<tr><td><b>\(kind.title)</b><br><span class=\"dim\">\(esc(kind.fullName))</span></td>"
+                rows += "<td style=\"color:\(ratingColor(rating))\"><b>\(esc(kind.format(value)))</b><br>\(rating.plainWord)</td>"
+                rows += "<td>\(esc(kind.assessment(for: value)))<br><span class=\"dim\">\(esc(kind.explanation))</span></td></tr>"
+            }
+            if !rows.isEmpty {
+                sections += "<h2>Metrics</h2><table>\(rows)</table>"
+            }
+            if let lcp = report.metrics.lcpDetail, !lcp.phases.isEmpty {
+                let total = lcp.phases.reduce(0) { $0 + $1.ms }
+                var phaseRows = ""
+                for phase in lcp.phases {
+                    phaseRows += "<tr><td>\(esc(phase.name))</td><td>\(esc(formatMs(phase.ms)))</td><td>\(percentOf(phase.ms, of: total))</td></tr>"
+                }
+                sections += "<h2>Largest Contentful Paint</h2><p>Element: <code>\(esc(lcp.selector))</code>"
+                if let url = lcp.url { sections += " loaded from <code>\(esc(url))</code>" }
+                sections += "</p><table>\(phaseRows)</table>"
+            }
+        }
+
+        if let visuals = report.visuals {
+            sections += "<h2>Visual evidence</h2>"
+            if let shot = visuals.screenshot {
+                var boxes = ""
+                if shot.alignsWithViewport {
+                    for mark in visuals.drawnMarks {
+                        guard let f = fractionalRect(mark.rect, in: shot.viewport) else { continue }
+                        let color = mark.kind == .lcp ? "#6d3fe0" : "#d93025"
+                        let box = String(format: "left:%.2f%%;top:%.2f%%;width:%.2f%%;height:%.2f%%", f.x * 100, f.y * 100, f.width * 100, f.height * 100)
+                        boxes += "<div style=\"position:absolute;\(box);border:2px solid \(color);box-sizing:border-box\">"
+                        boxes += "<span style=\"background:\(color);color:#fff;font-size:10px;padding:0 3px\">\(esc(mark.label))</span></div>"
+                    }
+                }
+                let encoded = shot.jpeg.base64EncodedString()
+                sections += "<div style=\"position:relative;max-width:720px\">"
+                sections += "<img style=\"width:100%;display:block;border:1px solid #ccc\" alt=\"Screenshot of the page when the audit ran\" src=\"data:image/jpeg;base64,\(encoded)\">"
+                sections += boxes + "</div>"
+                var list = ""
+                for mark in visuals.marks {
+                    list += "<li><b>\(esc(mark.label))</b> <code>\(esc(mark.selector))</code>"
+                    if let detail = mark.detail { list += " <span class=\"dim\">\(esc(detail))</span>" }
+                    list += "</li>"
+                }
+                if !list.isEmpty { sections += "<ul>\(list)</ul>" }
+            } else if let note = visuals.note {
+                sections += "<p class=\"dim\">\(esc(note))</p>"
+            }
+            if !visuals.filmstrip.isEmpty {
+                let tags = filmstripMilestones(frameMs: visuals.filmstrip.map(\.ms), fcpMs: report.metrics.fcp, lcpMs: report.metrics.lcp)
+                var frames = ""
+                for (index, frame) in visuals.filmstrip.enumerated() {
+                    var caption = formatMs(frame.ms)
+                    if let completeness = frame.completeness { caption += ", \(Int((completeness * 100).rounded()))% complete" }
+                    if !tags[index].isEmpty { caption += " (" + tags[index].joined(separator: ", ") + ")" }
+                    let encoded = frame.jpeg.base64EncodedString()
+                    frames += "<figure style=\"display:inline-block;margin:6px;text-align:center\">"
+                    frames += "<img style=\"width:140px;border:1px solid #ccc\" alt=\"Page at \(esc(formatMs(frame.ms)))\" src=\"data:image/jpeg;base64,\(encoded)\">"
+                    frames += "<figcaption class=\"dim\">\(esc(caption))</figcaption></figure>"
+                }
+                sections += "<h3>Filmstrip</h3><div>\(frames)</div>"
+            }
+        }
+
+        if report.scores.performance != nil {
+            let rows = scoreBreakdown(report.audits, category: .performance)
+            if !rows.isEmpty {
+                var body = ""
+                for row in rows {
+                    if row.measured {
+                        let points = String(format: "%.1f of %.1f", row.points, row.maxPoints)
+                        body += "<tr><td>\(esc(row.title))</td><td>\(esc(row.displayValue))</td><td>\(Int(row.weight))</td><td>\(points)</td></tr>"
+                    } else {
+                        body += "<tr><td>\(esc(row.title))</td><td colspan=\"3\" class=\"dim\">Not measured; its weight went to the other metrics.</td></tr>"
+                    }
+                }
+                sections += "<h2>Performance score breakdown</h2><table><tr><th>Metric</th><th>Value</th><th>Weight</th><th>Points</th></tr>\(body)</table>"
+            }
+        }
+
+        let problems = report.audits.filter { $0.band == .failed || $0.band == .warning }
+        if !problems.isEmpty {
+            var body = ""
+            for audit in problems {
+                body += "<h3>\(esc(audit.title)) <span class=\"dim\">\(esc(audit.displayValue))</span></h3><p>\(esc(audit.description))</p>"
+                if let fix = audit.howToFix { body += "<p><b>How to fix:</b> \(esc(fix))</p>" }
+                if !audit.items.isEmpty {
+                    body += "<ul>"
+                    for item in audit.items {
+                        let parts = [item.label, item.url, item.selector, item.snippet, item.subLabel].compactMap { $0 }.filter { !$0.isEmpty }
+                        body += "<li><code>\(esc(parts.joined(separator: " | ")))</code></li>"
+                    }
+                    body += "</ul>"
+                }
+            }
+            sections += "<h2>Audits to look at</h2>\(body)"
+        }
+
         return """
         <!DOCTYPE html><html lang="en">
         <head><meta charset="UTF-8"><title>Lighthouse — \(esc(report.url))</title>
@@ -1972,12 +2749,14 @@ enum OrbitLighthouseLogic {
         h1{font-size:18px}table{border-collapse:collapse;width:100%;margin:12px 0}
         td,th{padding:4px 8px;border-bottom:1px solid #ddd;font-size:13px;text-align:left}
         pre{background:#eee;padding:12px;border-radius:6px;overflow-x:auto;font-size:11px}
-        details summary{cursor:pointer;font-weight:600;margin:12px 0}</style></head>
+        details summary{cursor:pointer;font-weight:600;margin:12px 0}
+        h2{font-size:16px;margin-top:28px}h3{font-size:14px}.dim{color:#888;font-size:12px}code{font-size:12px;word-break:break-all}</style></head>
         <body>
         <h1>Lighthouse — \(esc(report.pageTitle.isEmpty ? report.url : report.pageTitle))</h1>
         <p style="color:#666;font-size:13px">\(esc(DateFormatter.localizedString(from: report.timestamp, dateStyle: .long, timeStyle: .medium))) · \(report.mode.title) · \(report.device.title) curves</p>
         <p style="color:#888;font-size:12px">\(esc(report.throttlingNote))</p>
         <div>\(badge("Performance", report.scores.performance))\(badge("Accessibility", report.scores.accessibility))\(badge("Best practices", report.scores.bestPractices))\(badge("SEO", report.scores.seo))\(badge("Security", report.scores.security))</div>
+        \(sections)
         <details><summary>Raw JSON</summary><pre>\(esc(json))</pre></details>
         </body></html>
         """

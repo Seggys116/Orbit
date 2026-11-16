@@ -214,10 +214,20 @@ public protocol WebContents: AnyObject {
 
     func focus()
 
+    /// Puts a saved login into the page field `token` named in a `PasswordFieldFocus`. The engine checks the field's own frame against `credentials.origin`
+    /// (same site; an https login never goes into an http frame) and against the frame's live origin, and refuses a mismatch.
+    func fillPassword(into token: String, credentials: PasswordFillCredentials) async -> PasswordFillOutcome
+
+    /// Fills a generated password into the new-password field `token` and the confirmation field beside it.
+    func fillGeneratedPassword(_ password: String, into token: String) async -> PasswordFillOutcome
+
     func close()
 }
 
 public extension WebContents {
+    func fillPassword(into token: String, credentials: PasswordFillCredentials) async -> PasswordFillOutcome { .unsupported }
+    func fillGeneratedPassword(_ password: String, into token: String) async -> PasswordFillOutcome { .unsupported }
+
     func enableContentSizing(minimum: CGSize, maximum: CGSize) {}
 
     func extensionContextMenuGroups() -> [ExtensionContextMenuGroup] { [] }
@@ -352,9 +362,30 @@ public protocol WebContentsDelegate: AnyObject {
     func webContentsDidCrash(_ contents: WebContents)
 
     func webContents(_ contents: WebContents, didChangeResponsiveness isResponsive: Bool)
+
+    /// Asked before any password message from the page is acted on. Answer false for a page that must never be offered or saved logins, such as an Incognito one; the default is false.
+    func webContentsAllowsPasswordAutofill(_ contents: WebContents) -> Bool
+
+    /// The user focused or clicked a sign-in field in a frame of the page.
+    func webContents(_ contents: WebContents, didFocusPasswordField field: PasswordFieldFocus)
+
+    /// The focused field moved (scroll, resize, layout); `rect` is in screen coordinates.
+    func webContents(_ contents: WebContents, didMovePasswordField token: String, toScreenRect rect: CGRect)
+
+    /// The field lost focus, scrolled out of view, or the page navigated.
+    func webContentsDidDismissPasswordField(_ contents: WebContents)
+
+    /// A sign-in the user made has completed: the next document committed, or the page removed its password field.
+    func webContents(_ contents: WebContents, didCapturePasswordSubmission submission: PasswordSubmission)
 }
 
 public extension WebContentsDelegate {
+    func webContentsAllowsPasswordAutofill(_ contents: WebContents) -> Bool { false }
+    func webContents(_ contents: WebContents, didFocusPasswordField field: PasswordFieldFocus) {}
+    func webContents(_ contents: WebContents, didMovePasswordField token: String, toScreenRect rect: CGRect) {}
+    func webContentsDidDismissPasswordField(_ contents: WebContents) {}
+    func webContents(_ contents: WebContents, didCapturePasswordSubmission submission: PasswordSubmission) {}
+
     func webContentsDidChangeNavigationState(_ contents: WebContents) {}
 
     func webContents(

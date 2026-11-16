@@ -9,6 +9,8 @@ extension AppEnvironment {
             .compactMap { tabID, mediaState -> Tab? in
                 guard mediaState.isMediaActive else { return nil }
                 guard tabID != activeTabID else { return nil }
+                // Media state belongs to a live page; an archived or closed tab has none to show.
+                guard webContents[tabID] != nil else { return nil }
                 guard !dismissedMiniPlayerTabIDs.contains(tabID) else { return nil }
                 return tab(tabID)
             }

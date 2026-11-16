@@ -136,7 +136,9 @@ final class OrbitElementsModel: OrbitInspectModule {
     var expanded: Set<Int>            = []
     var selectedID: Int?              = nil
     var selectionPath: [Int]          = []
-    var visibleRows: [ElFlatRow]      = []
+    var visibleRows: [ElFlatRow]      = [] { didSet { rowsRevision &+= 1 } }
+    /// Changes whenever `visibleRows` is replaced, so the tree can cache what it measures from the rows.
+    private(set) var rowsRevision      = 0
     var rootIDs: [Int]                = []
     var flashedNodes: Set<Int>        = []
     var isLoading: Bool               = false

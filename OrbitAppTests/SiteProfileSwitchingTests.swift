@@ -311,7 +311,7 @@ final class SiteProfileSwitchingTests: XCTestCase {
         XCTAssertTrue(ToolbarContextMenu.siteProfileDropdownEntries(forTab: tabID, in: env).isEmpty)
     }
 
-    func testDropdownOnDefaultListsProfilesWithoutRenameOrDelete() throws {
+    func testDropdownOnDefaultListsProfilesAndOffersRenameButNotDelete() throws {
         let tabID = env.openTab(url: githubURL, in: spaceID)
         _ = try makeProfile("Work")
         _ = try makeProfile("Personal")
@@ -319,12 +319,24 @@ final class SiteProfileSwitchingTests: XCTestCase {
         let entries = ToolbarContextMenu.siteProfileDropdownEntries(forTab: tabID, in: env)
         let titles = entries.flattenedItems.map(\.title)
 
-        XCTAssertEqual(titles, ["Default", "Work", "Personal", "New Profile..."])
+        XCTAssertEqual(titles, ["Default", "Work", "Personal", "New Profile...", "Rename Profile..."])
         XCTAssertEqual(entries.first(titled: "Default")?.isChecked, true)
         XCTAssertEqual(entries.first(titled: "Work")?.isChecked, false)
-        XCTAssertNil(entries.first(titled: "Rename Profile..."))
-        XCTAssertNil(entries.first(titled: "Delete Profile"))
+        XCTAssertNotNil(entries.first(titled: "Rename Profile..."), "The built-in profile can be renamed like any other.")
+        XCTAssertNil(entries.first(titled: "Delete Profile"), "The built-in profile cannot be deleted.")
         XCTAssertTrue(entries.flattenedItems.allSatisfy { $0.systemImage == nil }, "Names only, no icons.")
+    }
+
+    func testRenamedBuiltInProfileShowsItsNewNameInTheDropdown() throws {
+        let tabID = env.openTab(url: githubURL, in: spaceID)
+        _ = try makeProfile("Work")
+        XCTAssertTrue(env.store.renameDefaultSiteProfile(siteKey: "github.com", to: "Personal"))
+
+        let entries = ToolbarContextMenu.siteProfileDropdownEntries(forTab: tabID, in: env)
+
+        XCTAssertEqual(entries.flattenedItems.map(\.title).prefix(2), ["Personal", "Work"])
+        XCTAssertEqual(entries.first(titled: "Personal")?.isChecked, true)
+        XCTAssertNil(entries.first(titled: "Default"))
     }
 
     func testDropdownOnAProfileChecksItAndOffersRenameAndDelete() throws {

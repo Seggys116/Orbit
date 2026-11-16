@@ -32,11 +32,12 @@ enum CacheReloadPlan {
 
 extension BrowserEngine {
 
-    /// WebKit reloads from origin. Any other engine keeps the previous clear-then-reload.
+    /// Clears the cache of each page's own site, then reloads those pages from origin. Other sites' caches are kept.
+    /// Only WebKit can scope the clear to a site; any other engine clears the whole session cache before reloading.
     @MainActor
     func clearCacheAndReloadVisiblePages(_ pages: [any WebContents]) async {
         if let webKit = self as? WebKitEngine {
-            await webKit.wipeHTTPCacheAndReloadFromOrigin(pages)
+            await webKit.wipeSiteCacheAndReloadFromOrigin(pages)
             return
         }
         var cleared: Set<ObjectIdentifier> = []
@@ -52,13 +53,18 @@ extension BrowserEngine {
 
 extension WebKitEngine {
 
-    /// Wipes the HTTP cache for each page's session, then reloads those pages from origin.
-    /// Sessions shared by a split are cleared once. Background tabs are not in `pages`.
-    func wipeHTTPCacheAndReloadFromOrigin(_ pages: [any WebContents]) async {
-        var cleared: Set<ObjectIdentifier> = []
+    /// Wipes the HTTP cache of each page's site in its session, then reloads those pages from origin.
+    /// A session and site shared by several panes of a split are cleared once. Background tabs are not in `pages`.
+    func wipeSiteCacheAndReloadFromOrigin(_ pages: [any WebContents]) async {
+        var cleared: Set<String> = []
         for page in pages where !page.isClosed {
-            guard cleared.insert(ObjectIdentifier(page.session)).inserted else { continue }
-            await clearBrowsingData(.cache, session: page.session, since: nil)
+            guard let webKitSession = page.session as? WebKitSession,
+                  let url = page.navigationState.url,
+                  let host = url.host()?.lowercased(), !host.isEmpty
+            else { continue }
+            let key = "\(ObjectIdentifier(webKitSession).hashValue)|\(SiteIdentity.registrableDomain(ofHost: host))"
+            guard cleared.insert(key).inserted else { continue }
+            await webKitSession.clearCache(forSiteOf: url)
         }
         for page in pages where !page.isClosed {
             if let webKitPage = page as? WebKitWebContents {

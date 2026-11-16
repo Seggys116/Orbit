@@ -7,8 +7,13 @@ extension OrbitInspectAgent {
       var lh_lcpElement = null;      // node id via refOf
       var lh_lcpSelector = "";
       var lh_lcpURL = "";
+      var lh_lcpTag = "";
+      var lh_lcpSnippet = "";
+      var lh_lcpLoadMs = null;
+      var lh_lcpRenderMs = null;
       var lh_clsScore = 0;
       var lh_clsShifts = [];
+      var lh_clsShiftsTruncated = false;
       var lh_inpMax = null;
       var lh_longTasks = [];
       var lh_longTasksOk = false;
@@ -134,6 +139,18 @@ extension OrbitInspectAgent {
         return { color: base, needsReview: needsReview };
       }
 
+      // A DOMRect as [left, top, width, height] in CSS pixels, rounded to a tenth.
+      function lh_rect(r) {
+        if (!r) { return null; }
+        function t(n) { return Math.round(n * 10) / 10; }
+        return [t(r.left !== undefined ? r.left : r.x), t(r.top !== undefined ? r.top : r.y), t(r.width), t(r.height)];
+      }
+
+      // Elements that failed a check and have no richer record: selector, node id and the opening tag.
+      function lh_evidence(el) {
+        return { sel: lh_cssSelector(el), id: idOf(el), snip: lh_snippet(el) };
+      }
+
       function lh_domDepth(node) {
         var depth = 0;
         var cur = node;
@@ -172,9 +189,13 @@ extension OrbitInspectAgent {
             var entries = list.getEntries();
             var last = entries[entries.length - 1];
             lh_lcpMs = last.startTime;
+            lh_lcpLoadMs = last.loadTime || null;
+            lh_lcpRenderMs = last.renderTime || null;
             if (last.element) {
               lh_lcpElement = refOf(last.element);
               lh_lcpSelector = lh_cssSelector(last.element);
+              lh_lcpTag = (last.element.tagName || "").toLowerCase();
+              lh_lcpSnippet = lh_snippet(last.element);
             }
             lh_lcpURL = last.url || "";
           }).observe({ type: "largest-contentful-paint", buffered: true });
@@ -186,12 +207,22 @@ extension OrbitInspectAgent {
               if (!e.hadRecentInput) {
                 lh_clsScore += e.value;
                 var sources = [];
+                var details = [];
                 if (e.sources) {
                   e.sources.forEach(function (s) {
-                    if (s.node) { sources.push(lh_cssSelector(s.node)); }
+                    if (s.node) {
+                      var name = lh_cssSelector(s.node);
+                      sources.push(name);
+                      details.push({ sel: name, ref: refOf(s.node), prev: lh_rect(s.previousRect), cur: lh_rect(s.currentRect) });
+                    }
                   });
                 }
-                lh_clsShifts.push({ v: e.value, srcs: sources.slice(0, 5) });
+                // The shift list is kept short; the running total above still counts every shift.
+                if (lh_clsShifts.length < 150) {
+                  lh_clsShifts.push({ v: e.value, t: e.startTime, srcs: sources.slice(0, 5), det: details.slice(0, 5) });
+                } else {
+                  lh_clsShiftsTruncated = true;
+                }
               }
             });
           }).observe({ type: "layout-shift", buffered: true });
@@ -309,7 +340,8 @@ extension OrbitInspectAgent {
 
       ops["lh.reset"] = function () {
         lh_fcpMs = null; lh_lcpMs = null; lh_lcpElement = null; lh_lcpSelector = "";
-        lh_lcpURL = ""; lh_clsScore = 0; lh_clsShifts = []; lh_inpMax = null;
+        lh_lcpURL = ""; lh_lcpTag = ""; lh_lcpSnippet = ""; lh_lcpLoadMs = null; lh_lcpRenderMs = null;
+        lh_clsScore = 0; lh_clsShifts = []; lh_clsShiftsTruncated = false; lh_inpMax = null;
         lh_longTasks = []; lh_longTasksOk = false; lh_loadedPosted = false;
         lh_docWriteDetected = false; lh_syncXHRDetected = false;
         lh_geoDetected = false; lh_notifDetected = false; lh_unloadDetected = false;
@@ -335,7 +367,9 @@ extension OrbitInspectAgent {
           var httpStatus = navEntry && navEntry.responseStatus ? navEntry.responseStatus : 200;
 
           var clsVal = isTimespan ? Math.max(0, lh_clsScore - lh_clsAtTimespanStart) : lh_clsScore;
-          var shifts = isTimespan ? lh_clsShifts.slice(0) : lh_clsShifts;
+          var shifts = isTimespan
+            ? lh_clsShifts.filter(function (s) { return lh_timespanStartMs === null || s.t >= lh_timespanStartMs; })
+            : lh_clsShifts;
           var tasks  = isTimespan ? lh_longTasks.slice(lh_longTasksAtTimespanStart) : lh_longTasks;
           var timespanDur = (isTimespan && lh_timespanStartMs !== null)
             ? finite(performance.now() - lh_timespanStartMs) : null;
@@ -743,11 +777,15 @@ extension OrbitInspectAgent {
           } catch (e) {}
 
           var posTabindex = 0;
+          var posTabNodes = [];
           try {
             posTabindex = document.querySelectorAll("[tabindex]").length;
             var realPos = 0;
             Array.prototype.forEach.call(document.querySelectorAll("[tabindex]"), function (el) {
-              if (parseInt(el.getAttribute("tabindex"), 10) > 0) { realPos++; }
+              if (parseInt(el.getAttribute("tabindex"), 10) > 0) {
+                realPos++;
+                if (posTabNodes.length < 20 && !isOurs(el)) { posTabNodes.push(lh_evidence(el)); }
+              }
             });
             posTabindex = realPos;
           } catch (e) { posTabindex = 0; }
@@ -755,14 +793,19 @@ extension OrbitInspectAgent {
           var hasMain = !!(document.querySelector("main,[role='main']"));
           var hasSkip = !!(document.querySelector("a[href^='#']"));
           var videosNoCaptions = 0;
+          var videoNodes = [];
           try {
             Array.prototype.forEach.call(document.querySelectorAll("video"), function (v) {
               var hasCaps = !!v.querySelector("track[kind='captions'],track[kind='subtitles']");
-              if (!hasCaps) { videosNoCaptions++; }
+              if (!hasCaps) {
+                videosNoCaptions++;
+                if (videoNodes.length < 20 && !isOurs(v)) { videoNodes.push(lh_evidence(v)); }
+              }
             });
           } catch (e) {}
 
           var scrollNotFocus = 0;
+          var scrollNodes = [];
           try {
             Array.prototype.forEach.call(document.querySelectorAll("*"), function (el) {
               if (isOurs(el) || scrollNotFocus >= 20) { return; }
@@ -772,20 +815,24 @@ extension OrbitInspectAgent {
                   st.overflowY === "scroll" || st.overflowY === "auto");
                 if (scrollable && el.scrollHeight > el.clientHeight) {
                   var ti = el.getAttribute("tabindex");
-                  if (ti === null || parseInt(ti, 10) < 0) { scrollNotFocus++; }
+                  if (ti === null || parseInt(ti, 10) < 0) { scrollNotFocus++; scrollNodes.push(lh_evidence(el)); }
                 }
               } catch (e2) {}
             });
           } catch (e) {}
 
           var nestedInter = 0;
+          var nestedNodes = [];
           try {
             Array.prototype.forEach.call(
               document.querySelectorAll("button,a,input,select,textarea"),
               function (el) {
                 if (isOurs(el)) { return; }
                 var inner = el.querySelector("button,a,input,select,textarea");
-                if (inner) { nestedInter++; }
+                if (inner) {
+                  nestedInter++;
+                  if (nestedNodes.length < 20) { nestedNodes.push(lh_evidence(el)); }
+                }
               }
             );
           } catch (e) {}
@@ -849,13 +896,75 @@ extension OrbitInspectAgent {
             );
           } catch (e) {}
 
+          // The LCP element's position is read now, so it matches the screenshot Orbit takes straight after this.
+          var lcpInfo = null;
+          try {
+            if (lh_lcpMs !== null) {
+              var lcpNode = lh_lcpElement ? nodeById(lh_lcpElement) : null;
+              var lcpLive = !!(lcpNode && lcpNode.isConnected && !isOurs(lcpNode));
+              var resEntry = null;
+              if (lh_lcpURL && performance.getEntriesByName) {
+                var named = performance.getEntriesByName(lh_lcpURL, "resource");
+                if (named.length) { resEntry = named[0]; }
+              }
+              lcpInfo = {
+                sel: lh_lcpSelector.slice(0, 200), tag: lh_lcpTag,
+                id: lcpLive ? idOf(lcpNode) : 0,
+                snip: lcpLive ? lh_snippet(lcpNode) : lh_lcpSnippet,
+                url: lh_lcpURL.slice(0, 300),
+                rect: lcpLive ? lh_rect(lcpNode.getBoundingClientRect()) : null,
+                load: finite(lh_lcpLoadMs), render: finite(lh_lcpRenderMs),
+                lazy: !!(lcpLive && lcpNode.tagName === "IMG" && lcpNode.getAttribute("loading") === "lazy"),
+                resStart: resEntry ? finite(resEntry.startTime) : null,
+                resEnd: resEntry ? finite(resEntry.responseEnd) : null
+              };
+            }
+          } catch (e) {}
+
+          var shiftsOut = [];
+          try {
+            shifts.slice(0, 150).forEach(function (s) {
+              var det = [];
+              (s.det || []).forEach(function (d) {
+                var node = d.ref ? nodeById(d.ref) : null;
+                var live = null, nid = 0;
+                if (node && node.isConnected && !isOurs(node)) { live = lh_rect(node.getBoundingClientRect()); nid = idOf(node); }
+                det.push({ sel: d.sel, id: nid, prev: d.prev, cur: d.cur, live: live });
+              });
+              shiftsOut.push({ v: s.v, t: s.t, srcs: s.srcs, det: det });
+            });
+          } catch (e) {}
+
+          var ttfbParts = [];
+          try {
+            if (navEntry) {
+              [["Redirects", navEntry.redirectEnd - navEntry.redirectStart],
+               ["DNS lookup", navEntry.domainLookupEnd - navEntry.domainLookupStart],
+               ["Connection and TLS", navEntry.connectEnd - navEntry.connectStart],
+               ["Waiting for the server", navEntry.responseStart - navEntry.requestStart]
+              ].forEach(function (p) {
+                var ms = finite(p[1]);
+                if (ms !== null && ms > 0) { ttfbParts.push({ n: p[0], ms: ms }); }
+              });
+            }
+          } catch (e) {}
+
           var bundle = {
+            lcpInfo: lcpInfo,
+            ttfbParts: ttfbParts,
+            vp: { w: finite(window.innerWidth) || 0, h: finite(window.innerHeight) || 0,
+                  sx: finite(window.scrollX) || 0, sy: finite(window.scrollY) || 0 },
+            nestedNodes: nestedNodes,
+            scrollNodes: scrollNodes,
+            videoNodes: videoNodes,
+            posTabNodes: posTabNodes,
+            clsTruncated: lh_clsShiftsTruncated,
             fcp: finite(lh_fcpMs),
             lcp: finite(lh_lcpMs),
             lcpSel: lh_lcpSelector.slice(0, 200),
             lcpURL: lh_lcpURL.slice(0, 300),
             cls: finite(clsVal) || 0,
-            clsShifts: shifts.slice(0, 20),
+            clsShifts: shiftsOut,
             inp: finite(lh_inpMax),
             ttfb: ttfb,
             tasks: tasks.slice(0, 200),

@@ -162,6 +162,7 @@ extension WebKitWebContents {
         extras.contextMenuGeneration += 1
         extras.extensionMenu = nil
         extras.proposedContextMenu = nil
+        extras.passwords.contextToken = nil
         let generation = extras.contextMenuGeneration
         extras.pendingContextMenu = WebKitContentsExtras.PendingContextMenu(
             location: viewPoint(forWindowPoint: event.locationInWindow), generation: generation
@@ -262,11 +263,12 @@ extension WebKitWebContents {
     private func presentPendingContextMenu() {
         guard let pending = extras.pendingContextMenu else { return }
         extras.pendingContextMenu = nil
-        let context = Self.contextMenuContext(
+        var context = Self.contextMenuContext(
             from: pending.info ?? [:],
             pageURL: navigationState.url ?? webView.url,
             location: pending.location
         )
+        if context.isEditable { context.passwordField = passwordFieldForContextMenu() }
         _ = delegate?.webContents(self, showContextMenu: context)
         extras.proposedContextMenu = nil
     }

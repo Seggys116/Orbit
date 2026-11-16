@@ -626,4 +626,73 @@ final class OrbitInspectElementsTests: XCTestCase {
         XCTAssertEqual(tokenList.first?.range, 2..<3)
         XCTAssertEqual(tokenList.dropFirst().first?.range, 3..<4)
     }
+
+    // MARK: Detail pane orientation
+
+    func testStylesStackUnderTheTreeWhenDockedToASideAtAnyWidth() {
+        XCTAssertTrue(OrbitElementsLogic.detailStacks(dockedToSide: true, width: 320))
+        XCTAssertTrue(OrbitElementsLogic.detailStacks(dockedToSide: true, width: 900), "a wide side dock is still tall and narrow")
+    }
+
+    func testStylesSitBesideTheTreeWhenWideAndNotDockedToASide() {
+        XCTAssertFalse(OrbitElementsLogic.detailStacks(dockedToSide: false, width: 1000))
+        XCTAssertFalse(OrbitElementsLogic.detailStacks(dockedToSide: false, width: OrbitElementsLogic.detailStacksBelowWidth))
+    }
+
+    func testStylesStackWhenTheBottomDockOrWindowIsNarrow() {
+        XCTAssertTrue(OrbitElementsLogic.detailStacks(dockedToSide: false, width: OrbitElementsLogic.detailStacksBelowWidth - 1))
+    }
+
+    // MARK: Tree row text
+
+    private func row(_ node: ElNodeInfo, depth: Int = 0, expanded: Bool = false, closing: Bool = false) -> ElFlatRow {
+        ElFlatRow(id: .init(nodeID: node.id, isClosingTag: closing), nodeID: node.id, depth: depth, isExpanded: expanded,
+                  hasChildren: node.childCount > 0, isClosingTag: closing, node: node)
+    }
+
+    func testDisplayColumnsMatchTheTagAsPrinted() {
+        let div = ElNodeInfo(id: 1, kind: "el", name: "div", attrs: ["class": "a"], childCount: 0, text: "")
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(div)), "<div class=\"a\">".count)
+    }
+
+    func testDisplayColumnsForACollapsedParentIncludeTheElidedClosingTag() {
+        let div = ElNodeInfo(id: 1, kind: "el", name: "div", attrs: [:], childCount: 3, text: "")
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(div)), "<div>…</div>".count)
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(div, expanded: true)), "<div>".count)
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(div, expanded: true, closing: true)), "</div>".count)
+    }
+
+    func testDisplayColumnsCountEveryAttributeNotOnlyTheFirstFew() {
+        var attrs: [String: String] = [:]
+        for index in 1...8 { attrs["a\(index)"] = "x" }
+        let p = ElNodeInfo(id: 1, kind: "el", name: "p", attrs: attrs, childCount: 0, text: "")
+        let printed = "<p" + (1...8).map { " a\($0)=\"x\"" }.joined() + ">"
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(p)), printed.count)
+    }
+
+    func testALongAttributeValueEndsWithAnEllipsisAtTheCap() {
+        let long = String(repeating: "x", count: 300)
+        let shown = OrbitElementsLogic.displayedAttributeValue(long)
+        XCTAssertEqual(shown.count, OrbitElementsLogic.maxDisplayedAttributeValue + 1)
+        XCTAssertTrue(shown.hasSuffix("…"))
+        let a = ElNodeInfo(id: 1, kind: "el", name: "a", attrs: ["b": long], childCount: 0, text: "")
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(a)), "<a b=\"\(shown)\">".count)
+    }
+
+    func testDisplayColumnsForNonElementNodes() {
+        let text = ElNodeInfo(id: 1, kind: "text", name: "#text", attrs: [:], childCount: 0, text: "hi")
+        let empty = ElNodeInfo(id: 2, kind: "text", name: "#text", attrs: [:], childCount: 0, text: "")
+        let comment = ElNodeInfo(id: 3, kind: "comment", name: "#comment", attrs: [:], childCount: 0, text: "x")
+        let doctype = ElNodeInfo(id: 4, kind: "doctype", name: "html", attrs: [:], childCount: 0, text: "html")
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(text)), "\"hi\"".count)
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(empty)), "#text".count)
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(comment)), "<!-- x -->".count)
+        XCTAssertEqual(OrbitElementsLogic.displayColumns(of: row(doctype)), "<!DOCTYPE html>".count)
+    }
+
+    func testSingleLineTurnsEachLineBreakIntoOneSpace() {
+        XCTAssertEqual(OrbitElementsLogic.singleLine("a\nb"), "a b")
+        XCTAssertEqual(OrbitElementsLogic.singleLine("a\r\nb"), "a b", "CRLF is one character")
+        XCTAssertEqual(OrbitElementsLogic.singleLine("plain"), "plain")
+    }
 }

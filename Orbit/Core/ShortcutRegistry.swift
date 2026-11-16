@@ -533,7 +533,7 @@ final class ShortcutRegistry {
             .init(id: .openDeveloperTools, title: "Open Developer Tools", category: .findAndTools, defaultBinding: KeyBinding(key: "f12", modifiers: [])),
             .init(id: .captureFullPage, title: "Capture Full Page", category: .findAndTools, defaultBinding: nil),
             .init(id: .clearCookiesAndRefresh, title: "Clear Cookies and Refresh", category: .findAndTools, defaultBinding: nil),
-            .init(id: .clearCacheAndRefresh, title: "Clear Cache (Entire Session) and Refresh", category: .findAndTools, defaultBinding: nil),
+            .init(id: .clearCacheAndRefresh, title: "Clear Cache for This Site and Refresh", category: .findAndTools, defaultBinding: nil),
             .init(id: .shareCurrentPage, title: "Share Page", category: .findAndTools, defaultBinding: nil),
             .init(id: .newBoost, title: "New Boost", category: .findAndTools, defaultBinding: nil),
             .init(id: .editBoost, title: "Edit Boost", category: .findAndTools, defaultBinding: nil),

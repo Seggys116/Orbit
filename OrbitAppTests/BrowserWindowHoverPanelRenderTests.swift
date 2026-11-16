@@ -106,16 +106,38 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
             XCTFail("Expected the hover panel to draw something.")
             return
         }
-        let expectedTrailingEdge = OrbitHoverPanelMetrics.edgeInset + env.sidebarWidth
+        let expectedTrailingEdge = OrbitHoverPanelMetrics.edgeInset
+            + OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: env.sidebarWidth)
         let maxShadowReach = OrbitHoverPanelMetrics.shadowRadius + OrbitHoverPanelMetrics.shadowXOffset + 2
         XCTAssertGreaterThanOrEqual(
             box.maxX, expectedTrailingEdge - 2,
-            "The panel is narrower than it should be: its drawn content ends at \(box.maxX)pt, short of edgeInset + sidebarWidth (\(expectedTrailingEdge)pt)."
+            "The panel is narrower than it should be: its drawn content ends at \(box.maxX)pt, short of edgeInset + the overlay width (\(expectedTrailingEdge)pt)."
         )
         XCTAssertLessThanOrEqual(
             box.maxX, expectedTrailingEdge + maxShadowReach,
-            "The panel's drawn content reaches \(box.maxX)pt, past edgeInset + sidebarWidth (\(expectedTrailingEdge)pt) by more than its drop shadow's own reach (\(maxShadowReach)pt) — so something wider than the panel is being drawn, not just its shadow."
+            "The panel's drawn content reaches \(box.maxX)pt, past edgeInset + the overlay width (\(expectedTrailingEdge)pt) by more than its drop shadow's own reach (\(maxShadowReach)pt) — so something wider than the panel is being drawn, not just its shadow."
         )
+    }
+
+    // MARK: - The overlay is a little wider than the docked sidebar
+
+    func test_overlayWidth_isAboutADozenPointsWiderThanTheDockedWidth() {
+        let docked = OrbitMetrics.sidebarDefaultWidth
+        let overlay = OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: docked)
+        XCTAssertGreaterThanOrEqual(overlay - docked, 8)
+        XCTAssertLessThanOrEqual(overlay - docked, 16)
+    }
+
+    func test_overlayWidth_neverExceedsTheWindowLessItsInsets() {
+        let docked = OrbitMetrics.sidebarDefaultWidth
+        let window = docked + OrbitHoverPanelMetrics.edgeInset * 2 + 4
+        let overlay = OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: docked, availableWidth: window)
+        XCTAssertEqual(overlay, window - OrbitHoverPanelMetrics.edgeInset * 2, accuracy: 0.001)
+    }
+
+    func test_overlayWidth_neverShrinksBelowTheDockedWidthInATinyWindow() {
+        let docked = OrbitMetrics.sidebarDefaultWidth
+        XCTAssertEqual(OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: docked, availableWidth: 100), docked)
     }
 
     // MARK: - The panel's background is the window's gradient, sliced to position
@@ -219,7 +241,8 @@ final class BrowserWindowHoverPanelRenderTests: XCTestCase {
             size: windowSize
         )
 
-        let panelTrailingEdge = OrbitHoverPanelMetrics.edgeInset + env.sidebarWidth
+        let panelTrailingEdge = OrbitHoverPanelMetrics.edgeInset
+            + OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: env.sidebarWidth, availableWidth: windowSize.width)
         let column = CGRect(
             x: panelTrailingEdge - 24, y: 120,
             width: 16, height: windowSize.height - 240

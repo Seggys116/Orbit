@@ -1,11 +1,12 @@
 import Foundation
+import WebKit
 
 
 enum FWTab: String, CaseIterable, Identifiable {
+    case devServer = "Dev Server"
     case components = "Components"
     case data = "Data"
     case routes = "Routes"
-    case devServer = "Dev Server"
     case technologies = "Technologies"
 
     var id: String { rawValue }
@@ -30,7 +31,8 @@ final class OrbitFrameworksModel: OrbitInspectModule {
 
     var messageTypes: Set<String> {
         ["fw.evidence", "fw.tree", "fw.data", "fw.routes", "fw.hmr",
-         "fw.overlay", "fw.editResult", "fw.globalStored", "fw.launchResult"]
+         "fw.overlay", "fw.editResult", "fw.globalStored", "fw.launchResult",
+         "fw.devSocket", "fw.devFrame", "fw.devEvent", "fw.devProbe", "fw.devActionResult", "fw.devEnv"]
     }
 
 
@@ -105,7 +107,47 @@ final class OrbitFrameworksModel: OrbitInspectModule {
     var launchError: String?
 
 
-    var tab: FWTab = .technologies
+    /// Dev server surface: sockets, decoded events and issues come from the page's HMR traffic, signals from its globals.
+    var devState = FWDevState()
+    var devProbe = FWDevProbe()
+    var devActionMessage: String?
+    var devActionSucceeded = true
+    var devBusyAction: String?
+    var devEnvEntries: [FWDevEnvEntry] = []
+    var devEnvMessage: String?
+    var devEnvLoading = false
+    var routeNavigationMessage: String?
+    var draftCookiePresent = false
+    @ObservationIgnored private var devOrigin: String?
+    @ObservationIgnored private var pendingLaunch: (file: String, line: Int?, column: Int?)?
+
+    /// The probe plus what only the browser's cookie store can say.
+    var effectiveProbe: FWDevProbe {
+        var probe = devProbe
+        if draftCookiePresent { probe.signals.insert(FWSignal.draftModeCookie.rawValue) }
+        return probe
+    }
+
+    var devResolution: FWDevResolution {
+        FWDevLogic.resolve(detections: detections, probe: effectiveProbe, state: devState)
+    }
+
+    var devControls: [FWDevLogic.ControlState] {
+        FWDevLogic.controls(resolution: devResolution, probe: effectiveProbe)
+    }
+
+    var devRenderInfo: [FWDevLogic.InfoRow] {
+        FWDevLogic.renderInfo(resolution: devResolution, probe: effectiveProbe, state: devState,
+                              headers: OrbitFrameworksLogic.responseHeaders(from: session?.network.records ?? []))
+    }
+
+    var devEnvironment: [FWDevEnvEntry] { devProbe.env + devEnvEntries }
+
+    /// Vite is the only server that injects import.meta.env where a page can read it back.
+    var canLoadViteEnv: Bool { devProbe.has(.viteClient) }
+
+
+    var tab: FWTab = .devServer
 
 
     @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -134,13 +176,19 @@ final class OrbitFrameworksModel: OrbitInspectModule {
             let name = OrbitInspectDecode.string(object, "name")
             editResultMessage = "Stored component as \(name) in the console."
         case "fw.launchResult":
-            launchAttemptActive = false
-            if OrbitInspectDecode.bool(object, "ok") {
-                launchError = nil
-            } else {
-                let status = OrbitInspectDecode.integer(object, "status")
-                launchError = status == 0 ? "Dev server didn't respond." : "Dev server returned HTTP \(status)."
-            }
+            handleLaunchResult(object)
+        case "fw.devSocket":
+            handleDevSocket(object)
+        case "fw.devFrame":
+            handleDevFrame(object)
+        case "fw.devEvent":
+            handleDevEvent(object)
+        case "fw.devProbe":
+            handleDevProbe(object)
+        case "fw.devActionResult":
+            handleDevActionResult(object)
+        case "fw.devEnv":
+            handleDevEnv(object)
         default:
             break
         }
@@ -167,6 +215,7 @@ final class OrbitFrameworksModel: OrbitInspectModule {
         editResultMessage = nil
         launchError = nil
         isScanning = false
+        resetDevSurface()
         stopPoll()
     }
 
@@ -185,6 +234,8 @@ final class OrbitFrameworksModel: OrbitInspectModule {
         session.command(["op": "fw.tree"])
         session.command(["op": "fw.data"])
         session.command(["op": "fw.routes"])
+        session.command(["op": "fw.devProbe"])
+        refreshDraftMode()
         startPoll()
     }
 
@@ -220,27 +271,52 @@ final class OrbitFrameworksModel: OrbitInspectModule {
     func openSourceForComponent(id: Int) {
         guard let node = componentNodes.first(where: { $0.id == id }),
               let file = node.sourceFile, !file.isEmpty else { return }
-        // Try dev server launch endpoint first, then fall back to editor launcher
-        let isNext = detections.contains(where: { $0.name == "Next.js" })
-        let isVite = detections.contains(where: { $0.name == "Vite" })
-        let isDevServer = !hmrStatus.kind.isNilOrEmpty
-        if isDevServer {
-            let devserver = isNext ? "next" : (isVite ? "vite" : "")
-            if !devserver.isEmpty {
-                launchAttemptActive = true
-                launchError = nil
-                session?.command([
-                    "op": "fw.launch",
-                    "file": file,
-                    "line": node.sourceLine ?? 1,
-                    "col": node.sourceCol ?? 1,
-                    "devserver": devserver
-                ] as [String: Any])
-                return
-            }
+        // The dev server's own launch endpoint first, then the editor Orbit is configured with.
+        if launchThroughDevServer(file: file, line: node.sourceLine, column: node.sourceCol) { return }
+        session?.reveal(sourceURL: file, line: node.sourceLine, column: node.sourceCol)
+    }
+
+    /// Asks the detected dev server to open a file. False when no endpoint is known, so the caller falls back.
+    @discardableResult
+    func launchThroughDevServer(file: String, line: Int?, column: Int?) -> Bool {
+        let resolution = devResolution
+        guard resolution.mode == .development,
+              file.hasPrefix("/") || file.hasPrefix("./") || file.hasPrefix("../") || file.contains(":\\") else { return false }
+        let requests = FWDevLogic.editorRequests(adapter: resolution.adapter, file: file, line: line, column: column)
+        guard !requests.isEmpty, let session else { return false }
+        launchAttemptActive = true
+        launchError = nil
+        pendingLaunch = (file, line, column)
+        session.command(["op": "fw.launch", "requests": requests] as [String: Any])
+        return true
+    }
+
+    private func handleLaunchResult(_ object: [String: Any]) {
+        launchAttemptActive = false
+        let pending = pendingLaunch
+        pendingLaunch = nil
+        if OrbitInspectDecode.bool(object, "ok") {
+            launchError = nil
+            return
         }
-        guard let session else { return }
-        session.reveal(sourceURL: file, line: node.sourceLine, column: node.sourceCol)
+        let status = OrbitInspectDecode.integer(object, "status")
+        let reason = status == 0 ? "The dev server didn't respond." : "The dev server returned HTTP \(status)."
+        guard let pending, let session else { launchError = reason; return }
+        // Falling back keeps "open in editor" working for servers without a launch route.
+        let opened = OrbitInspectEditorLauncher.open(sourceURL: pending.file, line: pending.line, column: pending.column, session: session)
+        launchError = opened ? nil : reason + " No local editor could open it either."
+    }
+
+    /// Build errors carry file paths, runtime errors usually carry script URLs; the former go to the editor, the latter to Sources.
+    func openIssueInEditor(_ issue: FWDevIssue) {
+        guard let file = issue.file, let session else { return }
+        if launchThroughDevServer(file: file, line: issue.line, column: issue.column) { return }
+        _ = OrbitInspectEditorLauncher.open(sourceURL: file, line: issue.line, column: issue.column, session: session)
+    }
+
+    func revealIssueInSources(_ issue: FWDevIssue) {
+        guard let file = issue.file else { return }
+        session?.reveal(sourceURL: file, line: issue.line, column: issue.column)
     }
 
     func openInEditorForComponent(id: Int) {
@@ -275,11 +351,12 @@ final class OrbitFrameworksModel: OrbitInspectModule {
     }
 
 
+    /// Goes through the framework's own router when the page exposes one, so the route changes without a page load.
     func openRoute(path: String) {
         guard let session else { return }
-        Task {
-            _ = try? await session.evaluate("location.href = \(JSON.quote(path));")
-        }
+        routeNavigationMessage = nil
+        let strategy = FWDevLogic.navigationStrategy(adapterID: devResolution.adapter?.id, probe: effectiveProbe)
+        session.command(["op": "fw.devAction", "action": "navigate", "path": path, "strategy": strategy.rawValue] as [String: Any])
     }
 
 
@@ -315,7 +392,8 @@ final class OrbitFrameworksModel: OrbitInspectModule {
         detections = OrbitFrameworksLogic.detect(evidence: e)
 
         let newHMR = OrbitFrameworksLogic.hmrStatus(from: session?.network.records ?? [])
-        if newHMR.kind != nil || newHMR.wsURL != nil {
+        // The page's own socket observations are exact; the Network log is only a fallback for sockets opened before Orbit attached.
+        if devState.primarySocket == nil, newHMR.kind != nil || newHMR.wsURL != nil {
             hmrStatus = newHMR
         }
     }
@@ -445,6 +523,213 @@ final class OrbitFrameworksModel: OrbitInspectModule {
     }
 
 
+    // MARK: Dev server
+
+    private static func now() -> Double { Date().timeIntervalSince1970 * 1000 }
+
+    /// Epoch milliseconds from the page; anything outside a plausible range is the page's mistake, so the receive time stands in.
+    private func timestamp(_ object: [String: Any]) -> Double {
+        guard let at = OrbitInspectDecode.number(object, "at"), at > 0, at < 4_102_444_800_000 else { return Self.now() }
+        return at
+    }
+
+    private static func origin(of urlString: String?) -> String? {
+        guard let urlString, let url = URL(string: urlString), let host = url.host else { return nil }
+        return "\(url.scheme ?? "")://\(host):\(url.port ?? 0)"
+    }
+
+    /// A new document drops sockets and issues; the timeline survives a reload of the same origin so the reload itself shows up.
+    private func resetDevSurface() {
+        let origin = Self.origin(of: session?.pageURL)
+        let keep = origin != nil && origin == devOrigin
+        devOrigin = origin
+        devState.resetForNewDocument(keepHistory: keep)
+        if keep { devState.addEvent(kind: .navigation, title: "Page loaded", at: Self.now()) }
+        devProbe = FWDevProbe()
+        devActionMessage = nil
+        devBusyAction = nil
+        devEnvEntries = []
+        devEnvMessage = nil
+        devEnvLoading = false
+        routeNavigationMessage = nil
+        draftCookiePresent = false
+        pendingLaunch = nil
+        launchAttemptActive = false
+    }
+
+    private func handleDevSocket(_ object: [String: Any]) {
+        let id = OrbitInspectDecode.integer(object, "id")
+        guard id > 0 else { return }
+        let at = timestamp(object)
+        let host = URL(string: session?.pageURL ?? "")?.host ?? ""
+        let hints: Set<FWWireProtocol> = OrbitInspectDecode.string(object, "hint") == "parcel" ? [.parcel] : []
+        devState.socketOpened(id: id, url: OrbitInspectDecode.string(object, "url"),
+                              subprotocols: OrbitInspectDecode.strings(object, "protocols"),
+                              transport: OrbitInspectDecode.string(object, "transport"),
+                              pageHost: host, hints: hints, at: at)
+        let code = object["code"].flatMap { OrbitInspectDecode.integer($0) }
+        switch OrbitInspectDecode.string(object, "state") {
+        case "open": devState.socketState(id: id, state: .open, code: nil, at: at)
+        case "closed": devState.socketState(id: id, state: .closed, code: code, at: at)
+        case "error": devState.socketState(id: id, state: .failed, code: nil, at: at)
+        default: break
+        }
+        syncHMRStatus()
+    }
+
+    private func handleDevFrame(_ object: [String: Any]) {
+        let id = OrbitInspectDecode.integer(object, "id")
+        let binary = OrbitInspectDecode.bool(object, "binary")
+        devState.receiveFrame(socketID: id, text: OrbitInspectDecode.string(object, "data"),
+                              binaryLength: binary ? OrbitInspectDecode.integer(object, "len") : nil,
+                              at: timestamp(object))
+        syncHMRStatus()
+    }
+
+    private func handleDevEvent(_ object: [String: Any]) {
+        let line = object["line"].flatMap { OrbitInspectDecode.integer($0) }
+        let column = object["col"].flatMap { OrbitInspectDecode.integer($0) }
+        guard let event = FWDevWire.decodePageEvent(
+            name: OrbitInspectDecode.string(object, "name"),
+            detail: OrbitInspectDecode.optionalString(object, "detail"),
+            message: OrbitInspectDecode.optionalString(object, "message"),
+            file: OrbitInspectDecode.optionalString(object, "file"),
+            line: line, column: column,
+            stack: OrbitInspectDecode.optionalString(object, "stack")) else { return }
+        devState.apply(event, at: timestamp(object))
+    }
+
+    private func handleDevProbe(_ object: [String: Any]) {
+        var probe = FWDevProbe()
+        probe.signals = Set(OrbitInspectDecode.strings(object, "signals"))
+        probe.facts = OrbitInspectDecode.stringMap(object, "facts")
+        probe.overlayHosts = OrbitInspectDecode.strings(object, "overlays")
+        probe.overlayHidden = OrbitInspectDecode.bool(object, "overlayHidden")
+        probe.serviceWorkers = OrbitInspectDecode.integer(object, "serviceWorkers")
+        probe.cacheEntries = OrbitInspectDecode.integer(object, "cacheEntries")
+        probe.pathname = OrbitInspectDecode.string(object, "pathname")
+        probe.env = OrbitInspectDecode.objects(object, "env").compactMap { entry in
+            guard let key = entry["key"] as? String, !key.isEmpty else { return nil }
+            return FWDevEnvEntry(key: key, value: entry["value"] as? String ?? "", source: entry["source"] as? String ?? "")
+        }
+        devProbe = probe
+    }
+
+    private func handleDevActionResult(_ object: [String: Any]) {
+        let action = OrbitInspectDecode.string(object, "action")
+        let message = OrbitInspectDecode.string(object, "message")
+        let ok = OrbitInspectDecode.bool(object, "ok")
+        if action == "navigate" {
+            routeNavigationMessage = message
+            return
+        }
+        devActionMessage = message.isEmpty ? nil : message
+        devActionSucceeded = ok
+        if OrbitInspectDecode.bool(object, "pending") { return }
+        devBusyAction = nil
+        if action == "toggleOverlay" || action == "clearCaches" { session?.command(["op": "fw.devProbe"]) }
+    }
+
+    private func handleDevEnv(_ object: [String: Any]) {
+        devEnvLoading = false
+        devEnvEntries = OrbitInspectDecode.objects(object, "entries").compactMap { entry in
+            guard let key = entry["key"] as? String, !key.isEmpty else { return nil }
+            return FWDevEnvEntry(key: key, value: entry["value"] as? String ?? "", source: entry["source"] as? String ?? "")
+        }
+        devEnvMessage = OrbitInspectDecode.optionalString(object, "message")
+    }
+
+    /// The legacy HMR status mirrors the newest observed socket.
+    private func syncHMRStatus() {
+        guard let socket = devState.primarySocket, let protocolID = socket.protocolID else { return }
+        hmrStatus = FWHMRStatus(kind: protocolID.title, wsURL: socket.url, connected: socket.state == .open)
+    }
+
+    func loadViteEnv() {
+        guard let session, !devEnvLoading else { return }
+        devEnvLoading = true
+        devEnvMessage = nil
+        session.command(["op": "fw.devEnv"])
+    }
+
+    func clearDevTimeline() { devState.clearTimeline() }
+    func clearRuntimeIssues() { devState.clearRuntimeIssues() }
+
+    /// Runs one control from the Dev Server tab. Controls the logic reports as unavailable never reach the page.
+    func runControl(_ control: FWDevControl) {
+        guard let session, devBusyAction == nil,
+              devControls.first(where: { $0.control == control })?.enabled == true else { return }
+        let resolution = devResolution
+        let probe = effectiveProbe
+        devActionMessage = nil
+        func send(_ object: [String: Any]) {
+            devBusyAction = control.rawValue
+            session.command(object)
+        }
+        switch control {
+        case .reload:
+            session.reloadPage()
+        case .hardReload:
+            send(["op": "fw.devAction", "action": control.rawValue])
+        case .clearCaches, .toggleOverlay, .hmrRefresh:
+            send(["op": "fw.devAction", "action": control.rawValue])
+        case .softRefresh:
+            guard let strategy = FWDevLogic.refreshStrategy(adapterID: resolution.adapter?.id, probe: probe) else { return }
+            send(["op": "fw.devAction", "action": control.rawValue, "strategy": strategy.rawValue])
+        case .restartServer, .restartClearCache:
+            guard case .endpoint(let endpoint)? = resolution.adapter?.restart else { return }
+            send(["op": "fw.devRestart", "action": control.rawValue,
+                  "requestPath": FWDevLogic.restartRequest(endpoint, clearCache: control == .restartClearCache),
+                  "statusPath": endpoint.statusPath])
+        case .rebuild:
+            send(["op": "fw.devAction", "action": control.rawValue, "path": FWDevLogic.webpackInvalidatePath])
+        case .refreshSourceData:
+            send(["op": "fw.devAction", "action": control.rawValue, "path": FWDevLogic.gatsbyRefreshPath])
+        case .exitDraftMode:
+            exitDraftMode()
+        }
+    }
+
+    // MARK: Draft mode
+
+    /// The draft-mode cookies are httpOnly, so page scripts cannot see them; the browser's cookie store can.
+    func refreshDraftMode() {
+        guard let store = session?.contents?.webView.configuration.websiteDataStore.httpCookieStore,
+              let host = URL(string: session?.pageURL ?? "")?.host else { return }
+        store.getAllCookies { [weak self] cookies in
+            let present = cookies.contains { Self.isDraftCookie($0, host: host) }
+            Task { @MainActor [weak self] in self?.draftCookiePresent = present }
+        }
+    }
+
+    nonisolated private static func isDraftCookie(_ cookie: HTTPCookie, host: String) -> Bool {
+        guard FWDevLogic.draftModeCookieNames.contains(cookie.name) else { return false }
+        let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
+        return host == domain || host.hasSuffix("." + domain)
+    }
+
+    private func exitDraftMode() {
+        guard let session,
+              let store = session.contents?.webView.configuration.websiteDataStore.httpCookieStore,
+              let host = URL(string: session.pageURL)?.host else { return }
+        devBusyAction = FWDevControl.exitDraftMode.rawValue
+        Task { @MainActor [weak self] in
+            let cookies = await store.allCookies()
+            var removed = 0
+            for cookie in cookies where Self.isDraftCookie(cookie, host: host) {
+                await store.deleteCookie(cookie)
+                removed += 1
+            }
+            guard let self else { return }
+            self.draftCookiePresent = false
+            self.devBusyAction = nil
+            self.devActionSucceeded = removed > 0
+            self.devActionMessage = removed > 0 ? "Draft mode cookies removed. Reloading." : "No draft mode cookies were found."
+            if removed > 0 { self.session?.reloadPage() }
+        }
+    }
+
+
     private func startPoll() {
         guard pollTask == nil else { return }
         session?.command(["op": "fw.start", "interval": 3000] as [String: Any])
@@ -455,11 +740,14 @@ final class OrbitFrameworksModel: OrbitInspectModule {
                 guard !Task.isCancelled else { break }
                 await MainActor.run {
                     guard let self, self.session != nil else { return }
-                    // Only refresh tree while panel is the frameworks panel
+                    // The component tree is the costly walk, so it only refreshes while its tab is showing.
                     if self.session?.panel == .frameworks {
-                        self.session?.command(["op": "fw.tree"])
+                        if self.tab == .components { self.session?.command(["op": "fw.tree"]) }
                         count += 1
-                        if count % 5 == 0 { self.session?.command(["op": "fw.scan"]) }
+                        if count % 5 == 0 {
+                            self.session?.command(["op": "fw.scan"])
+                            self.refreshDraftMode()
+                        }
                     }
                 }
             }
@@ -470,21 +758,5 @@ final class OrbitFrameworksModel: OrbitInspectModule {
         session?.command(["op": "fw.stop"])
         pollTask?.cancel()
         pollTask = nil
-    }
-}
-
-
-private extension Optional where Wrapped == String {
-    var isNilOrEmpty: Bool { self == nil || self!.isEmpty }
-}
-
-private enum JSON {
-    static func quote(_ s: String) -> String {
-        let escaped = s
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-        return "\"\(escaped)\""
     }
 }

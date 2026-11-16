@@ -287,6 +287,57 @@ enum OrbitElementsLogic {
         return result
     }
 
+    // MARK: Layout
+
+    /// Below this width the Styles pane stacks under the tree even when the inspector is not docked to a side.
+    static let detailStacksBelowWidth: CGFloat = 560
+
+    /// The Styles pane goes under the DOM tree in a narrow, tall pane, which is what docking to the left or right makes,
+    /// and beside it in a wide, short one (docked to the bottom, or in the detached window).
+    static func detailStacks(dockedToSide: Bool, width: CGFloat) -> Bool {
+        dockedToSide || width < detailStacksBelowWidth
+    }
+
+    // MARK: Tree row text
+
+    /// Longest attribute value a tree row prints before ending it with an ellipsis.
+    static let maxDisplayedAttributeValue = 200
+
+    /// A tree row is one line tall, so line breaks print as spaces. One character maps to one, which keeps `displayColumns` exact.
+    static func singleLine(_ text: String) -> String {
+        text.contains(where: \.isNewline) ? String(text.map { $0.isNewline ? " " : $0 }) : text
+    }
+
+    static func displayedAttributeValue(_ value: String) -> String {
+        singleLine(value.count > maxDisplayedAttributeValue ? String(value.prefix(maxDisplayedAttributeValue)) + "…" : value)
+    }
+
+    /// How many monospaced characters a row prints after its disclosure column, so the tree can size its
+    /// scrollable width without laying out rows that are not on screen. Keep in step with `ElTreeRowView`.
+    static func displayColumns(of row: ElFlatRow) -> Int {
+        let node = row.node
+        switch node.kind {
+        case "el":
+            let name = node.name.count
+            if row.isClosingTag { return name + 3 }
+            var columns = 1 + name
+            for (key, value) in node.attrs {
+                columns += 1 + key.count
+                if !value.isEmpty { columns += 3 + min(value.count, maxDisplayedAttributeValue) + (value.count > maxDisplayedAttributeValue ? 1 : 0) }
+            }
+            return columns + (row.hasChildren && !row.isExpanded ? name + 5 : 1)
+        case "text":
+            return node.text.isEmpty ? 5 : node.text.count + 2
+        case "comment":
+            return node.text.count + 9
+        case "doctype":
+            return node.text.count + 11
+        case "shadow":
+            return 12
+        default:
+            return node.name.count
+        }
+    }
 
     static func flattenTree(
         rootIDs: [Int],

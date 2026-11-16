@@ -63,9 +63,17 @@ struct NetRecord: Identifiable, Sendable {
     var remoteAddress: String? = nil
     var timingRaw: NetResourceTimingRaw? = nil
     var timingBreakdown: NetTimingBreakdown? = nil
-    var requestBodySummary: String? = nil
+    var requestBody: NetRequestBody? = nil
     var responseBody: String? = nil
     var responseBodyTruncated: Bool = false
+    /// The page hook's code for why it did not capture the response body: "closed", "opaque", "stream", "type", "responseType", "empty" or "unreadable".
+    var responseBodySkip: String = ""
+    /// "fetch", "xhr" or "beacon" when the page's own hook reported the request.
+    var jsSource: String = ""
+    /// fetch Response.type: "basic", "cors", "opaque" and so on.
+    var responseType: String = ""
+    /// True once WebKit's own response headers were stored, which is the only source of Set-Cookie.
+    var nativeResponseSeen: Bool = false
     var wsFrames: [NetWSFrame] = []
     var wsState: String = ""
     var sseMessages: [NetSSEMessage] = []
@@ -108,7 +116,17 @@ struct NetRecord: Identifiable, Sendable {
     var responseCookies: [NetSetCookieParsed] {
         responseHeaders
             .filter { $0.name.caseInsensitiveCompare("set-cookie") == .orderedSame }
-            .map { OrbitNetworkLogic.parseSetCookieHeader($0.value) }
+            .flatMap { OrbitNetworkLogic.splitSetCookieHeader($0.value) }
+            .map { OrbitNetworkLogic.parseSetCookieHeader($0) }
+    }
+
+    var initiatorFrames: [NetStackFrame] {
+        OrbitNetworkLogic.stackFrames(initiatorStack)
+    }
+
+    /// The timing API's initiator type when it reported one, which is the only initiator WebKit gives for loads that did not start from fetch or XHR.
+    var timingInitiatorType: String {
+        timingRaw?.initiatorType ?? ""
     }
 }
 
@@ -143,6 +161,7 @@ enum OrbitInspectNativeNetwork {
         record.isMainFrame = isMain
         record.nativeEventTimestamp = timestamp
         record.requestHeaders = headers
+        record.requestBody = nativeBody(request)
         record.pending = true
 
         net.nativeRequestSent(record)
@@ -156,7 +175,22 @@ enum OrbitInspectNativeNetwork {
         let headers = (request.allHTTPHeaderFields ?? [:])
             .map { OrbitHeader(name: $0.key, value: $0.value) }
             .sorted { $0.name.lowercased() < $1.name.lowercased() }
-        session.network.noteMainFrameRequest(url: url, method: request.httpMethod ?? "GET", headers: headers)
+        session.network.noteMainFrameRequest(
+            url: url, method: request.httpMethod ?? "GET", headers: headers, body: nativeBody(request))
+    }
+
+    /// WebKit usually strips the body from the requests it reports, so this is nil more often than not; the page hooks fill the gap.
+    private static func nativeBody(_ request: URLRequest) -> NetRequestBody? {
+        guard let data = request.httpBody, !data.isEmpty else { return nil }
+        var body = NetRequestBody(kind: "native", size: data.count)
+        if data.count > 65536 {
+            body.note = "Large payload; its content is not captured."
+        } else if let text = String(data: data, encoding: .utf8) {
+            body.text = text
+        } else {
+            body.note = "Binary payload; its content cannot be shown as text."
+        }
+        return body
     }
 
     @MainActor
@@ -174,23 +208,23 @@ enum OrbitInspectNativeNetwork {
         guard session.isPresented else { return }
         let hasCookieHeader = headers.contains { $0.name.caseInsensitiveCompare("cookie") == .orderedSame }
         guard !hasCookieHeader else { return }
-        let cookieStore = contents.webView.configuration.websiteDataStore.httpCookieStore
-        Task { @MainActor [weak session] in
-            let all: [HTTPCookie] = await withCheckedContinuation { cont in
-                cookieStore.getAllCookies { cont.resume(returning: $0) }
-            }
-            let host = url.host?.lowercased() ?? ""
-            let urlPath = url.path.isEmpty ? "/" : url.path
-            let isSecure = url.scheme?.lowercased() == "https"
-            let matching = all.filter { c in
-                OrbitNetworkLogic.cookieDomainMatches(host: host, cookieDomain: c.domain)
-                    && OrbitNetworkLogic.cookiePathMatches(requestPath: urlPath, cookiePath: c.path)
-                    && (!c.isSecure || isSecure)
-            }
+        Task { @MainActor [weak session, weak contents] in
+            guard let contents else { return }
+            let matching = await storeCookies(contents: contents, url: url)
             guard !matching.isEmpty else { return }
             let cookieVal = matching.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
             session?.network.addCookieFromStore(id: loadID, value: cookieVal)
         }
+    }
+
+    /// Cookies in the page's cookie store that match `url`, HttpOnly ones included; this is the only place a script-invisible Cookie header can be derived from.
+    @MainActor
+    static func storeCookies(contents: WebKitWebContents, url: URL) async -> [NetStoreCookie] {
+        let cookieStore = contents.webView.configuration.websiteDataStore.httpCookieStore
+        let all: [HTTPCookie] = await withCheckedContinuation { cont in
+            cookieStore.getAllCookies { cont.resume(returning: $0) }
+        }
+        return OrbitNetworkLogic.matchingCookies(all, url: url)
     }
 
     @MainActor

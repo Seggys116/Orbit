@@ -197,6 +197,16 @@ extension WebKitWebContents {
             view.observe(\.title) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.noteDocumentTitle() }
             },
+            // Same-document navigations (pushState, replaceState, hash changes, a single-page app's router) fire no navigation delegate callback, so these are the only signal that the address moved.
+            view.observe(\.url) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.noteDocumentURL() }
+            },
+            view.observe(\.canGoBack) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.noteHistoryAvailability() }
+            },
+            view.observe(\.canGoForward) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.noteHistoryAvailability() }
+            },
             view.observe(\.estimatedProgress) { [weak self] view, _ in
                 MainActor.assumeIsolated { self?.noteEngineLoading(isLoading: view.isLoading, progress: view.estimatedProgress) }
             },

@@ -7,6 +7,10 @@ struct SpaceIconView: View {
     var dim: Double = 0
     var emojiScale: CGFloat = OrbitMetrics.spaceIconEmojiScaleFraction
     var symbolScale: CGFloat = OrbitMetrics.spaceIconSymbolScaleFraction
+    var dotScale: CGFloat = SpaceIconView.dotDiameterFraction
+    /// Opacity and saturation at `dim == 1`; `dim == 0` is always full strength.
+    var dimmedOpacity: Double = OrbitMetrics.spacePagerInactiveOpacity
+    var dimmedSaturation: Double = 1
 
     // Optional: this view also renders in hosting contexts with no injected
     // environment (menus, drag previews), where the process root owns the
@@ -18,7 +22,10 @@ struct SpaceIconView: View {
     }
 
     var body: some View {
-        content.opacity(1 - (1 - OrbitMetrics.spacePagerInactiveOpacity) * dim)
+        content
+            // Color emoji ignore foregroundStyle, so a dimmed icon is greyed with saturation rather than tinted.
+            .saturation(1 - (1 - dimmedSaturation) * dim)
+            .opacity(1 - (1 - dimmedOpacity) * dim)
     }
 
     private var glyphColor: Color { foregroundColor }
@@ -71,7 +78,7 @@ struct SpaceIconView: View {
     private var dot: some View {
         Circle()
             .fill(glyphColor)
-            .frame(width: size * SpaceIconView.dotDiameterFraction, height: size * SpaceIconView.dotDiameterFraction)
+            .frame(width: size * dotScale, height: size * dotScale)
     }
 
     static let dotDiameterFraction: CGFloat = 0.45

@@ -21,6 +21,9 @@ final class WebKitContentsExtras {
 
     var isElementFullscreen = false
 
+    /// Awaited before each main-frame navigation decision; see `WebKitWebContents.setMainFrameNavigationHook`.
+    var mainFrameNavigationHook: (@MainActor (URL) async -> Void)?
+
     var mainFrameNavigationType: WKNavigationType = .other
     var browserInitiatedLoad = false
     /// A windowless reload goes via about:blank first. `load` of the committed URL is not a reload.
@@ -43,9 +46,12 @@ final class WebKitContentsExtras {
     /// One webNavigation.onErrorOccurred per navigation. The resource load and the navigation delegate both see the failure.
     var navigationFailureReported = false
 
+    let passwords = WebKitPasswordsState()
+
     func tearDown() {
         observations.removeAll()
         pendingContextMenu = nil
+        passwords.reset()
         httpWebRequests.removeAll()
         if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
         frameObserver = nil

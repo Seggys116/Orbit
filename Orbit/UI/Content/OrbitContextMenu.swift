@@ -91,6 +91,8 @@ extension AppEnvironment {
             entries.append(.divider())
         }
 
+        entries.append(contentsOf: passwordContextMenuEntries(for: contents, context: context))
+
         if context.isEditable {
             let hasSelection = !(context.selectionText ?? "").isEmpty
             let canPaste = NSPasteboard.general.string(forType: .string) != nil

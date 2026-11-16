@@ -73,6 +73,31 @@ final class SiteProfileStoreTests: XCTestCase {
         XCTAssertTrue(store.siteProfiles.isEmpty)
     }
 
+    func testTheBuiltInProfileCanBeRenamedAndItsNewNameIsTaken() throws {
+        XCTAssertEqual(store.defaultSiteProfileName(forSiteKey: githubKey), "Default")
+        let work = try XCTUnwrap(store.createSiteProfile(name: "Work", siteKey: githubKey))
+
+        XCTAssertFalse(store.renameDefaultSiteProfile(siteKey: githubKey, to: "work"), "Another profile of the site already has it.")
+        XCTAssertFalse(store.renameDefaultSiteProfile(siteKey: githubKey, to: "  "))
+        XCTAssertTrue(store.renameDefaultSiteProfile(siteKey: githubKey, to: " Personal "))
+        XCTAssertEqual(store.defaultSiteProfileName(forSiteKey: githubKey), "Personal")
+        XCTAssertEqual(store.defaultSiteProfileName(forSiteKey: "gitlab.com"), "Default", "Only that site's built-in profile is renamed.")
+
+        XCTAssertNil(store.createSiteProfile(name: "personal", siteKey: githubKey), "The renamed built-in profile owns the name now.")
+        XCTAssertFalse(store.renameSiteProfile(work.id, to: "Personal"))
+        XCTAssertNotNil(store.createSiteProfile(name: "Default", siteKey: githubKey), "The old name is free once the built-in profile has another.")
+
+        XCTAssertTrue(store.renameDefaultSiteProfile(siteKey: githubKey, to: "personal"), "Case-only change of its own name.")
+        XCTAssertEqual(store.defaultSiteProfileName(forSiteKey: githubKey), "personal")
+    }
+
+    func testRenamingTheBuiltInProfileBackToDefaultClearsTheOverride() {
+        XCTAssertTrue(store.renameDefaultSiteProfile(siteKey: githubKey, to: "Home"))
+        XCTAssertFalse(store.state.siteDefaultProfileNames.isEmpty)
+        XCTAssertTrue(store.renameDefaultSiteProfile(siteKey: githubKey, to: "Default"))
+        XCTAssertTrue(store.state.siteDefaultProfileNames.isEmpty)
+    }
+
     func testNamesAreUniquePerSiteIgnoringCase() throws {
         XCTAssertNotNil(store.createSiteProfile(name: "Work", siteKey: githubKey))
 

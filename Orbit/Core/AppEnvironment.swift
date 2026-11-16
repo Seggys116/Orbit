@@ -1005,7 +1005,7 @@ final class AppEnvironment {
         store.runArchiveSweep(now: now)
     }
 
-    private func profileID(for spaceID: SpaceID) -> ProfileID {
+    func profileID(for spaceID: SpaceID) -> ProfileID {
         space(spaceID)?.profileID ?? state.profiles.first?.id ?? UUID()
     }
 
@@ -1403,6 +1403,9 @@ final class AppEnvironment {
         // An exemption that outlived its WebContents would keep a tab out of
         // the auto-archive sweep forever, so it's cleared at this single funnel.
         store.clearMediaState(forTab: tabID)
+        // Closing archives the tab rather than deleting it, so a stale "playing" state here would keep a card for it in the mini player, and clicking that card would reopen the closed page.
+        mediaStates.removeValue(forKey: tabID)
+        dismissedMiniPlayerTabIDs.remove(tabID)
     }
 
     // The one caller that must not close what it removes: tearing a tab off

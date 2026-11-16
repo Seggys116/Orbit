@@ -66,6 +66,11 @@ final class SidebarHoverHighlightAndLinkStatusTests: XCTestCase {
     // MARK: - The Space icons
 
     func test_bothSpacePagersApplyTheHoverHighlightToTheirDots() throws {
+        // The switcher draws its icons in a larger tile than the sidebar's own pager, so it has its own radius token.
+        let radiusToken = [
+            "Orbit/UI/Spaces/SpaceSwitcherPagerView.swift": "OrbitMetrics.spacePagerTileCornerRadius",
+            "Orbit/UI/Sidebar/SpacePagerView.swift": "OrbitMetrics.sidebarFaviconCornerRadius",
+        ]
         for file in ["Orbit/UI/Spaces/SpaceSwitcherPagerView.swift", "Orbit/UI/Sidebar/SpacePagerView.swift"] {
             let source = try Self.source(file)
             XCTAssertTrue(
@@ -77,8 +82,8 @@ final class SidebarHoverHighlightAndLinkStatusTests: XCTestCase {
                 "\(file) must use the sidebar's own hover pill opacity so all three sidebar icon buttons agree"
             )
             XCTAssertTrue(
-                source.contains("OrbitMetrics.sidebarFaviconCornerRadius"),
-                "\(file) must use the sidebar's own hover pill radius"
+                source.contains(radiusToken[file] ?? "OrbitMetrics.sidebarFaviconCornerRadius"),
+                "\(file) must use the hover pill radius of its own tile"
             )
         }
     }

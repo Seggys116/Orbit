@@ -21,6 +21,8 @@ private struct ElRowControlBoundsKey: PreferenceKey {
 struct ElTreeRowView: View {
     var row: ElFlatRow
     var session: OrbitInspectSession
+    /// The row never prints narrower than this, so its hover and selection fill spans the tree's scrollable width.
+    var minWidth: CGFloat = 0
 
     @State private var isHovering = false
     @FocusState private var editFocused: Bool
@@ -29,15 +31,29 @@ struct ElTreeRowView: View {
     private var isSelected: Bool { model.selectedID == row.nodeID && !row.isClosingTag }
     private var isFlashing: Bool { model.flashedNodes.contains(row.nodeID) }
 
-    /// Width of one monospaced glyph at the code size, for locating clicks inside the tag text.
-    private static let glyphWidth: CGFloat = {
+    /// Width of one monospaced glyph at the code size, for locating clicks inside the tag text and sizing the tree.
+    static let glyphWidth: CGFloat = {
         let font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
         return ("0" as NSString).size(withAttributes: [.font: font]).width
     }()
 
     /// Each indent level is a 1pt guide with 7.5pt either side; the disclosure column is 16pt.
-    private static let indentWidth: CGFloat = 16
-    private static let disclosureWidth: CGFloat = 16
+    static let indentWidth: CGFloat = 16
+    static let disclosureWidth: CGFloat = 16
+
+    /// Room after the text for its trailing padding and the layout badge.
+    static let trailingRoom: CGFloat = 96
+
+    /// The width the row needs to print in full, estimated from its text so rows that are not on screen need no layout.
+    static func contentWidth(of row: ElFlatRow) -> CGFloat {
+        CGFloat(row.depth) * indentWidth + disclosureWidth
+            + CGFloat(OrbitElementsLogic.displayColumns(of: row)) * glyphWidth + trailingRoom
+    }
+
+    /// The widest row's width, which the tree scrolls horizontally to reach.
+    static func contentWidth(of rows: [ElFlatRow]) -> CGFloat {
+        rows.reduce(0) { max($0, contentWidth(of: $1)) }
+    }
 
     private var isEditingTagName: Bool { model.inlineEdit == .tagName(row.nodeID) && !row.isClosingTag }
     private var isEditingText: Bool { model.inlineEdit == .text(row.nodeID) && !row.isClosingTag }
@@ -47,9 +63,10 @@ struct ElTreeRowView: View {
             indentGuides
             disclosureTriangle
             rowContent
-            Spacer(minLength: 0)
             layoutBadge
+            Spacer(minLength: 0)
         }
+        .frame(minWidth: minWidth, alignment: .leading)
         .frame(minHeight: InspectChrome.rowHeight)
         .background(rowBackground)
         .contentShape(Rectangle())
@@ -206,11 +223,13 @@ struct ElTreeRowView: View {
             Text("#shadow-root")
                 .font(InspectChrome.mono)
                 .foregroundStyle(InspectChrome.muted)
+                .fixedSize()
                 .padding(.trailing, 8)
         default:
             Text(row.node.name)
                 .font(InspectChrome.mono)
                 .foregroundStyle(InspectChrome.muted)
+                .fixedSize()
                 .padding(.trailing, 8)
         }
     }
@@ -224,7 +243,7 @@ struct ElTreeRowView: View {
         }
     }
 
-    /// Separate runs so the tag name can swap for a text field; the attribute run is the one that truncates.
+    /// Separate runs so the tag name can swap for a text field. The attribute run keeps its full width; the tree scrolls to it.
     private var openingTagContent: some View {
         HStack(spacing: 0) {
             Text("<")
@@ -234,8 +253,7 @@ struct ElTreeRowView: View {
             tagNameView
             attributesText
                 .font(InspectChrome.mono)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .fixedSize()
         }
         .padding(.trailing, 8)
     }
@@ -276,18 +294,13 @@ struct ElTreeRowView: View {
     /// The attribute list and the closing bracket, as concatenated `Text` so it renders as one run.
     private var attributesText: Text {
         var t = Text("")
-        let sorted = row.node.attrs.keys.sorted()
-        for key in sorted.prefix(6) {
+        for key in row.node.attrs.keys.sorted() {
             t = t + Text(" \(key)").foregroundStyle(InspectChrome.attributeNameColor)
             if let val = row.node.attrs[key], !val.isEmpty {
-                let displayVal = val.count > 60 ? String(val.prefix(60)) + "…" : val
                 t = t + Text("=\"").foregroundStyle(InspectChrome.muted)
-                t = t + Text(displayVal).foregroundStyle(InspectChrome.attributeValueColor)
+                t = t + Text(OrbitElementsLogic.displayedAttributeValue(val)).foregroundStyle(InspectChrome.attributeValueColor)
                 t = t + Text("\"").foregroundStyle(InspectChrome.muted)
             }
-        }
-        if sorted.count > 6 {
-            t = t + Text(" …").foregroundStyle(InspectChrome.muted)
         }
         let tail: String
         if row.hasChildren && !row.isExpanded {
@@ -303,6 +316,7 @@ struct ElTreeRowView: View {
         Text("</\(row.node.name)>")
             .font(InspectChrome.mono)
             .foregroundStyle(InspectChrome.muted)
+            .fixedSize()
             .padding(.trailing, 8)
     }
 
@@ -315,6 +329,8 @@ struct ElTreeRowView: View {
                 .foregroundStyle(InspectChrome.stringColor)
                 .lineLimit(1...6)
                 .focused($editFocused)
+                // Sized to the text so a long node is reached by scrolling the tree; only text past the cap wraps.
+                .frame(width: min(max(160, CGFloat(model.inlineEditText.count + 2) * Self.glyphWidth), 900), alignment: .leading)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
                 .background(
@@ -333,29 +349,28 @@ struct ElTreeRowView: View {
                 }
                 .accessibilityLabel("Text content")
         } else {
-            Text(row.node.text.isEmpty ? "#text" : "\"\(row.node.text)\"")
+            Text(row.node.text.isEmpty ? "#text" : "\"\(OrbitElementsLogic.singleLine(row.node.text))\"")
                 .font(InspectChrome.mono)
                 .foregroundStyle(InspectChrome.stringColor)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .fixedSize()
                 .padding(.trailing, 8)
         }
     }
 
     private var commentContent: some View {
-        Text("<!-- \(row.node.text) -->")
+        Text("<!-- \(OrbitElementsLogic.singleLine(row.node.text)) -->")
             .font(InspectChrome.mono)
             .foregroundStyle(InspectChrome.muted)
             .italic()
-            .lineLimit(1)
-            .truncationMode(.tail)
+            .fixedSize()
             .padding(.trailing, 8)
     }
 
     private var doctypeContent: some View {
-        Text("<!DOCTYPE \(row.node.text)>")
+        Text("<!DOCTYPE \(OrbitElementsLogic.singleLine(row.node.text))>")
             .font(InspectChrome.mono)
             .foregroundStyle(InspectChrome.muted)
+            .fixedSize()
             .padding(.trailing, 8)
     }
 

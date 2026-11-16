@@ -725,7 +725,7 @@ struct SiteControlPopoverView: View {
     }
 
 
-    // Kept as two rows: cache clearing is session-wide while cookie clearing is per-origin; `.done` means the call returned, not that removal was verified.
+    // Both rows act on this site only; `.done` means the call returned, not that removal was verified.
     private var siteDataRows: some View {
         Group {
             Button {
@@ -738,13 +738,13 @@ struct SiteControlPopoverView: View {
             .accessibilityLabel("Clear Cookies for This Site, scoped to \(host) only")
 
             Button {
-                clearCacheForEntireSession()
+                clearCacheForThisSite()
             } label: {
-                settingsRowContent(symbol: "internaldrive", title: "Clear Cache (Entire Session)", value: cacheClearState.label)
+                settingsRowContent(symbol: "internaldrive", title: "Clear Cache for This Site", value: cacheClearState.label)
             }
             .buttonStyle(pressStyle)
             .disabled(env.engine == nil || env.webContents[tab.id]?.session == nil || cacheClearState == .clearing)
-            .accessibilityLabel("Clear Cache for the entire browsing session, not only this site")
+            .accessibilityLabel("Clear Cache for This Site, scoped to \(host) only")
         }
     }
 
@@ -777,7 +777,7 @@ struct SiteControlPopoverView: View {
         }
     }
 
-    private func clearCacheForEntireSession() {
+    private func clearCacheForThisSite() {
         guard let engine = env.engine else { return }
         let pages = env.visiblePagesForCacheReload(around: tab.id)
         guard !pages.isEmpty else { return }

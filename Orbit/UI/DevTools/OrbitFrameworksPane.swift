@@ -6,11 +6,21 @@ struct OrbitFrameworksPane: View {
 
     private var model: OrbitFrameworksModel { session.frameworks }
 
+    /// Docked to a side or narrow, the technologies list gives way to the tabs (the Technologies tab carries the same list),
+    /// so the tall narrow pane is spent on the content instead of a short strip.
     var body: some View {
-        InspectSplit(key: "fw.main", defaultFraction: 0.26, minFirst: 160, minSecond: 320, stackBelow: 600) {
-            sidebarList
-        } second: {
-            mainArea
+        GeometryReader { geo in
+            let docked = session.dock == .left || session.dock == .right
+            let compact = docked || geo.size.width < 600
+            if compact {
+                mainArea(compact: true)
+            } else {
+                InspectSplit(key: "fw.main", defaultFraction: 0.26, minFirst: 160, minSecond: 320, stackBelow: 0) {
+                    sidebarList
+                } second: {
+                    mainArea(compact: false)
+                }
+            }
         }
     }
 
@@ -72,30 +82,37 @@ struct OrbitFrameworksPane: View {
 
     // MARK: - Main area
 
-    private var mainArea: some View {
+    private func mainArea(compact: Bool) -> some View {
         VStack(spacing: 0) {
-            tabBar
+            tabBar(compact: compact)
             InspectDivider()
-            tabContent
+            tabContent(compact: compact)
         }
     }
 
-    private var tabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(FWTab.allCases) { tab in
-                    InspectChip(tab.rawValue, selected: model.tab == tab) {
-                        model.selectTab(tab)
+    private func tabBar(compact: Bool) -> some View {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(FWTab.allCases) { tab in
+                        InspectChip(tab.rawValue, selected: model.tab == tab) {
+                            model.selectTab(tab)
+                        }
                     }
                 }
+                .padding(.horizontal, InspectChrome.panelPadding)
+                .padding(.vertical, 5)
             }
-            .padding(.horizontal, InspectChrome.panelPadding)
-            .padding(.vertical, 5)
+            // The side list, which owns Refresh in the wide layout, is hidden when compact.
+            if compact {
+                InspectIconButton(symbol: "arrow.clockwise", help: "Refresh") { model.refresh() }
+                    .padding(.trailing, 4)
+            }
         }
     }
 
     @ViewBuilder
-    private var tabContent: some View {
+    private func tabContent(compact: Bool) -> some View {
         switch model.tab {
         case .components:
             FWComponentsTab(model: model, session: session)
@@ -106,7 +123,7 @@ struct OrbitFrameworksPane: View {
         case .devServer:
             FWDevServerTab(model: model, session: session)
         case .technologies:
-            FWTechnologiesTab(model: model, session: session)
+            FWTechnologiesTab(model: model, session: session, showsFilter: compact)
         }
     }
 }

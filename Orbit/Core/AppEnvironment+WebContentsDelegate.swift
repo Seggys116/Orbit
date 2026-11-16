@@ -215,14 +215,17 @@ extension AppEnvironment: WebContentsDelegate {
                 return false
             }
             guard let adopted = pending.adopt() else { return false }
+            seedCrossSitePopupCookies(for: adopted, openedBy: contents, openerTabID: tabID)
             LittleOrbitWindowController.open(adopting: adopted, url: request.url)
             return true
         case .popup:
             guard let adopted = pending.adopt() else { return false }
+            seedCrossSitePopupCookies(for: adopted, openedBy: contents, openerTabID: tabID)
             LittleOrbitWindowController.open(adopting: adopted, url: request.url)
             return true
         case .currentTab, .newForegroundTab, .newBackgroundTab:
             guard let adopted = pending.adopt() else { return false }
+            seedCrossSitePopupCookies(for: adopted, openedBy: contents, openerTabID: tabID)
             adoptPageCreatedTab(
                 adopted,
                 url: request.url,
@@ -235,6 +238,7 @@ extension AppEnvironment: WebContentsDelegate {
 
     func webContentsDidRequestClose(_ contents: WebContents) {
         guard let tabID = tabID(for: contents) else { return }
+        if LittleOrbitWindowController.closeWindow(forTab: tabID) { return }
         closeTab(tabID)
     }
 
@@ -595,11 +599,24 @@ extension AppEnvironment: WebContentsDelegate {
     // honoured — applyRoutingRule returns false for a destination it can't reach.
     func handleExternalOpen(url: URL) {
         if let rule = matchingRoutingRule(for: url), applyRoutingRule(rule, url: url, sourceTabID: UUID()) {
-            return
+            return revealBrowserWindow(unlessOpenedIn: rule.destination)
         }
         let fallback = RoutingRule(pattern: "", destination: RoutingDefaults.destination)
-        if applyRoutingRule(fallback, url: url, sourceTabID: UUID()) { return }
+        if applyRoutingRule(fallback, url: url, sourceTabID: UUID()) {
+            return revealBrowserWindow(unlessOpenedIn: fallback.destination)
+        }
         LittleOrbitWindowController.open(url: url)
+    }
+
+    // A link from another app lands as a tab in a normal browser window, which has to be on screen for the tab to be seen. Little Orbit and other applications show their own window.
+    private func revealBrowserWindow(unlessOpenedIn destination: RoutingRule.Destination) {
+        switch destination {
+        case .littleOrbit, .application: return
+        case .space, .profile, .mostRecentSpace: break
+        }
+        guard !DebugFlags.isRunningUnderTests else { return }
+        OrbitWindowController.activateBrowserWindow()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Air Traffic Control

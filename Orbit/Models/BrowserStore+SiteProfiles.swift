@@ -17,6 +17,27 @@ public extension BrowserStore {
             }
     }
 
+    /// What the site's built-in profile is called: "Default" until the user renames it.
+    func defaultSiteProfileName(forSiteKey siteKey: String) -> String {
+        state.siteDefaultProfileNames[siteKey] ?? SiteProfile.defaultName
+    }
+
+    /// False when the name is empty or already taken by one of the site's other profiles.
+    @discardableResult
+    func renameDefaultSiteProfile(siteKey: String, to name: String) -> Bool {
+        guard !siteKey.isEmpty, let normalized = SiteProfile.normalizedName(name) else { return false }
+        if normalized == defaultSiteProfileName(forSiteKey: siteKey) { return true }
+        guard isSiteProfileNameAvailable(normalized, siteKey: siteKey, ignoringDefault: true) else { return false }
+        var newState = state
+        if normalized == SiteProfile.defaultName {
+            newState.siteDefaultProfileNames.removeValue(forKey: siteKey)
+        } else {
+            newState.siteDefaultProfileNames[siteKey] = normalized
+        }
+        state = newState
+        return true
+    }
+
     func boundSiteProfile(forTab tabID: TabID) -> SiteProfile? {
         guard let id = state.tabs[tabID]?.siteProfileID else { return nil }
         return siteProfile(id)
@@ -48,8 +69,10 @@ public extension BrowserStore {
         return pageSiteKey
     }
 
-    func isSiteProfileNameAvailable(_ name: String, siteKey: String, excluding id: SiteProfileID? = nil) -> Bool {
+    /// A name must differ from every other profile of the site, the built-in one included unless `ignoringDefault` is set (when the built-in profile is the one being renamed).
+    func isSiteProfileNameAvailable(_ name: String, siteKey: String, excluding id: SiteProfileID? = nil, ignoringDefault: Bool = false) -> Bool {
         guard let normalized = SiteProfile.normalizedName(name) else { return false }
+        if !ignoringDefault, defaultSiteProfileName(forSiteKey: siteKey).caseInsensitiveCompare(normalized) == .orderedSame { return false }
         return !state.siteProfiles.contains {
             $0.siteKey == siteKey && $0.id != id && $0.name.caseInsensitiveCompare(normalized) == .orderedSame
         }

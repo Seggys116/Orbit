@@ -1165,6 +1165,7 @@ private struct ScreenshotSettingsComposition: View {
         case .general: GeneralSettingsPane()
         case .data: DataSettingsPane()
         case .profiles: ProfilesSettingsPane()
+        case .passwords: PasswordsSettingsPane()
         case .assist: AssistSettingsPane()
         case .links: LinksSettingsPane()
         case .shortcuts: ShortcutsSettingsPane()

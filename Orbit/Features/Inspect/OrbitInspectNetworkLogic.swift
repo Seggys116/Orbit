@@ -157,6 +157,80 @@ struct NetSetCookieParsed: Equatable, Sendable {
 }
 
 
+struct NetFormField: Equatable, Sendable {
+    var name: String = ""
+    var value: String = ""
+    /// Set for a file input of a FormData body: the page can see the name and size but the content is never read.
+    var fileName: String? = nil
+    var fileSize: Int? = nil
+}
+
+/// What the page could see of a request body; WebKit exposes no request bodies natively, so this comes from the fetch/XHR/beacon/form hooks.
+struct NetRequestBody: Equatable, Sendable {
+    /// "string", "FormData", "URLSearchParams", "Blob", "ArrayBuffer", "Request", "ReadableStream" or "other".
+    var kind: String = ""
+    var text: String? = nil
+    var truncated = false
+    var size: Int? = nil
+    var mime: String = ""
+    var fields: [NetFormField] = []
+    /// Total fields in a FormData, which can exceed the `fields` that were kept.
+    var fieldCount: Int? = nil
+    /// The Content-Type the browser adds for this body type when the page sets none.
+    var impliedContentType: String? = nil
+    /// Why the content is missing when `text` and `fields` are empty.
+    var note: String? = nil
+}
+
+struct NetStackFrame: Equatable, Sendable {
+    var function: String = ""
+    var url: String = ""
+    var line: Int? = nil
+    var column: Int? = nil
+
+    var isNative: Bool { url == "[native code]" }
+    /// Only http(s) and file scripts can be opened in the Sources panel.
+    var isOpenable: Bool {
+        let lower = url.lowercased()
+        return lower.hasPrefix("http://") || lower.hasPrefix("https://") || lower.hasPrefix("file://")
+    }
+}
+
+struct NetStoreCookie: Equatable, Sendable {
+    var name: String = ""
+    var value: String = ""
+    var domain: String = ""
+    var path: String = "/"
+    var expires: Date? = nil
+    var secure = false
+    var httpOnly = false
+    var sameSite: String? = nil
+
+    init(_ cookie: HTTPCookie) {
+        name = cookie.name
+        value = cookie.value
+        domain = cookie.domain
+        path = cookie.path
+        expires = cookie.expiresDate
+        secure = cookie.isSecure
+        httpOnly = cookie.isHTTPOnly
+        sameSite = cookie.sameSitePolicy?.rawValue
+    }
+}
+
+/// The result of re-reading a response body from inside the page, on demand.
+enum NetFetchedBody: Equatable, Sendable {
+    case loading
+    case text(String, truncated: Bool)
+    case image(Data)
+    case unavailable(String)
+}
+
+enum NetBodyFetchability: Equatable, Sendable {
+    case refetch
+    case unavailable(String)
+}
+
 struct NetFilterToken: Equatable, Sendable {
     indirect enum Kind: Equatable, Sendable {
         case domain(String)
@@ -610,6 +684,354 @@ enum OrbitNetworkLogic {
         return NetSetCookieParsed(name: name, value: cookieVal, domain: domain, path: path,
                                   expiresRaw: expiresRaw, maxAge: maxAge,
                                   secure: secure, httpOnly: httpOnly, sameSite: sameSite, issues: issues)
+    }
+
+
+    /// A Set-Cookie header read through NSHTTPURLResponse arrives with every cookie joined by ", "; a comma only starts a new cookie when a `name=` follows, which keeps an Expires date whole.
+    static func splitSetCookieHeader(_ value: String) -> [String] {
+        func startsCookiePair(_ chars: [Character], from index: Int) -> Bool {
+            var j = index
+            while j < chars.count, chars[j] == " " { j += 1 }
+            let nameStart = j
+            while j < chars.count, !"=;, \t".contains(chars[j]) { j += 1 }
+            return j > nameStart && j < chars.count && chars[j] == "="
+        }
+        let chars = Array(value)
+        var result: [String] = []
+        var current = ""
+        for (index, c) in chars.enumerated() {
+            if c == ",", startsCookiePair(chars, from: index + 1) {
+                result.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
+            } else {
+                current.append(c)
+            }
+        }
+        let last = current.trimmingCharacters(in: .whitespaces)
+        if !last.isEmpty { result.append(last) }
+        return result
+    }
+
+    /// The cookies WebKit would attach to a request for `url`, in the order RFC 6265 sends them. SameSite and third-party blocking are not applied.
+    static func matchingCookies(_ cookies: [HTTPCookie], url: URL, now: Date = Date()) -> [NetStoreCookie] {
+        let host = url.host?.lowercased() ?? ""
+        let path = url.path.isEmpty ? "/" : url.path
+        let isSecure = url.scheme?.lowercased() == "https"
+        return cookies
+            .filter { cookie in
+                if let expires = cookie.expiresDate, expires <= now { return false }
+                return cookieDomainMatches(host: host, cookieDomain: cookie.domain)
+                    && cookiePathMatches(requestPath: path, cookiePath: cookie.path)
+                    && (!cookie.isSecure || isSecure)
+            }
+            .sorted { $0.path.count != $1.path.count ? $0.path.count > $1.path.count : $0.name < $1.name }
+            .map(NetStoreCookie.init)
+    }
+
+
+    // MARK: - Request payload
+
+    static func decodeRequestBody(_ object: [String: Any]) -> NetRequestBody? {
+        let kind = OrbitInspectDecode.string(object, "type")
+        guard !kind.isEmpty else { return nil }
+        var body = NetRequestBody(kind: kind)
+        body.text = object["text"] as? String
+        body.truncated = OrbitInspectDecode.bool(object, "truncated")
+        body.size = OrbitInspectDecode.integer(object["size"])
+        body.mime = OrbitInspectDecode.string(object, "mime")
+        body.fieldCount = OrbitInspectDecode.integer(object["count"])
+        body.impliedContentType = OrbitInspectDecode.optionalString(object, "ct")
+        body.note = OrbitInspectDecode.optionalString(object, "note")
+        body.fields = OrbitInspectDecode.objects(object, "entries").map { entry in
+            NetFormField(
+                name: OrbitInspectDecode.string(entry, "n"),
+                value: OrbitInspectDecode.string(entry, "v"),
+                fileName: OrbitInspectDecode.optionalString(entry, "f"),
+                fileSize: OrbitInspectDecode.integer(entry["s"]))
+        }
+        return body
+    }
+
+    static func requestBodySummary(_ body: NetRequestBody) -> String {
+        let size = body.size.map { OrbitDevToolsFormat.bytes($0) }
+        switch body.kind {
+        case "FormData":
+            let n = body.fieldCount ?? body.fields.count
+            return "FormData, \(n) field\(n == 1 ? "" : "s")"
+        case "string": return "Text" + (size.map { ", \($0)" } ?? "")
+        default: return body.kind + (size.map { ", \($0)" } ?? "")
+        }
+    }
+
+    /// Only text that was really sent is exported; a FormData or binary body has no honest single-string form.
+    static func exportableBodyText(_ body: NetRequestBody?) -> String? {
+        guard let body, !body.truncated, let text = body.text, !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// Decodes application/x-www-form-urlencoded text, where "+" means a space.
+    static func decodeFormEncoded(_ text: String) -> [NetFormField] {
+        func decode(_ part: Substring) -> String {
+            let spaced = part.replacingOccurrences(of: "+", with: " ")
+            return spaced.removingPercentEncoding ?? spaced
+        }
+        return text.split(separator: "&", omittingEmptySubsequences: true).map { pair in
+            if let eq = pair.firstIndex(of: "=") {
+                return NetFormField(name: decode(pair[..<eq]), value: decode(pair[pair.index(after: eq)...]))
+            }
+            return NetFormField(name: decode(pair), value: "")
+        }
+    }
+
+    static func queryParameters(of url: String) -> [NetFormField] {
+        guard let query = URL(string: url)?.query, !query.isEmpty else { return [] }
+        return decodeFormEncoded(query)
+    }
+
+    /// Re-indents valid JSON without parsing it into a dictionary, so key order and number formatting stay as the server sent them.
+    static func prettyJSON(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first, first == "{" || first == "[",
+              let data = trimmed.data(using: .utf8),
+              (try? JSONSerialization.jsonObject(with: data)) != nil else { return nil }
+        let chars = Array(trimmed)
+        var out = ""
+        var depth = 0
+        var inString = false
+        var escaped = false
+        func lineBreak() { out += "\n" + String(repeating: "  ", count: depth) }
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+            if inString {
+                out.append(c)
+                if escaped { escaped = false }
+                else if c == "\\" { escaped = true }
+                else if c == "\"" { inString = false }
+            } else {
+                switch c {
+                case "\"":
+                    inString = true
+                    out.append(c)
+                case "{", "[":
+                    var j = i + 1
+                    while j < chars.count, chars[j].isWhitespace { j += 1 }
+                    let closer: Character = c == "{" ? "}" : "]"
+                    out.append(c)
+                    if j < chars.count, chars[j] == closer {
+                        out.append(closer)
+                        i = j
+                    } else {
+                        depth += 1
+                        lineBreak()
+                    }
+                case "}", "]":
+                    depth -= 1
+                    lineBreak()
+                    out.append(c)
+                case ",":
+                    out.append(c)
+                    lineBreak()
+                case ":":
+                    out += ": "
+                default:
+                    if !c.isWhitespace { out.append(c) }
+                }
+            }
+            i += 1
+        }
+        return out
+    }
+
+
+    static func decodeResourceTiming(_ e: [String: Any]) -> NetResourceTimingRaw {
+        func d(_ key: String) -> Double { OrbitInspectDecode.number(e, key) ?? 0 }
+        func i(_ key: String) -> Int { OrbitInspectDecode.integer(e, key) }
+        let serverTiming = OrbitInspectDecode.objects(e, "serverTiming").map { st in
+            NetServerTimingEntry(
+                name: OrbitInspectDecode.string(st, "name"),
+                duration: OrbitInspectDecode.number(st, "dur"),
+                description: OrbitInspectDecode.string(st, "desc"))
+        }
+        return NetResourceTimingRaw(
+            name: OrbitInspectDecode.string(e, "url"),
+            startTime: d("st"), fetchStart: d("fetchStart"),
+            redirectStart: d("rdStart"), redirectEnd: d("rdEnd"),
+            domainLookupStart: d("dnsStart"), domainLookupEnd: d("dnsEnd"),
+            connectStart: d("connStart"), connectEnd: d("connEnd"),
+            secureConnectionStart: d("tlsStart"),
+            requestStart: d("reqStart"), responseStart: d("respStart"),
+            responseEnd: d("respEnd"),
+            transferSize: i("xfer"), encodedBodySize: i("encBody"), decodedBodySize: i("decBody"),
+            nextHopProtocol: OrbitInspectDecode.string(e, "proto"),
+            initiatorType: OrbitInspectDecode.string(e, "init"),
+            duration: d("dur"), serverTiming: serverTiming)
+    }
+
+
+    // MARK: - Initiator
+
+    /// Parses a WebKit stack line, "name@https://host/app.js:12:34"; a line without a location is not a frame.
+    static func parseStackFrame(_ raw: String) -> NetStackFrame? {
+        let line = raw.trimmingCharacters(in: .whitespaces)
+        guard !line.isEmpty else { return nil }
+        var function = ""
+        var location = line
+        if let at = line.firstIndex(of: "@") {
+            function = String(line[..<at])
+            location = String(line[line.index(after: at)...])
+        }
+        var frame = NetStackFrame(function: function)
+        let parts = location.split(separator: ":", omittingEmptySubsequences: false)
+        if parts.count >= 3, let column = Int(parts[parts.count - 1]), let lineNumber = Int(parts[parts.count - 2]) {
+            frame.line = lineNumber
+            frame.column = column
+            frame.url = parts.dropLast(2).joined(separator: ":")
+        } else {
+            frame.url = location
+        }
+        return frame.url.isEmpty ? nil : frame
+    }
+
+    static func stackFrames(_ lines: [String]) -> [NetStackFrame] {
+        lines.compactMap(parseStackFrame)
+    }
+
+    /// The first frame a developer can open: the script that called fetch or XHR.
+    static func initiatorLocation(_ frames: [NetStackFrame]) -> NetStackFrame? {
+        frames.first { $0.isOpenable }
+    }
+
+    /// Names what started a load from the hook that saw it or the resource-timing `initiatorType`; nil when neither says.
+    static func initiatorKind(jsSource: String, timingInitiatorType: String, resourceType: String) -> (title: String, detail: String)? {
+        switch jsSource {
+        case "fetch": return ("fetch()", "Started by a call to window.fetch from page script.")
+        case "xhr": return ("XMLHttpRequest", "Started by an XMLHttpRequest send() from page script.")
+        case "beacon": return ("navigator.sendBeacon()", "Started by a call to navigator.sendBeacon from page script.")
+        default: break
+        }
+        switch resourceType.lowercased() {
+        case "websocket": return ("WebSocket", "Opened by new WebSocket() in page script.")
+        case "eventsource": return ("EventSource", "Opened by new EventSource() in page script.")
+        default: break
+        }
+        switch timingInitiatorType.lowercased() {
+        case "": break
+        case "script": return ("Script element", "Loaded by a <script> element, either parsed from the HTML or created by script.")
+        case "link": return ("Link element", "Loaded by a <link> element: a stylesheet, preload, prefetch, modulepreload or icon.")
+        case "css": return ("CSS", "Loaded from inside a stylesheet by url(), @import or @font-face.")
+        case "img", "image": return ("Image element", "Loaded by an <img>, <picture> or SVG <image> element.")
+        case "iframe", "frame": return ("Frame", "Loaded as the document of an <iframe> or <frame>.")
+        case "video", "audio", "track": return ("Media element", "Loaded by a <video>, <audio> or <track> element.")
+        case "object", "embed": return ("Embedded object", "Loaded by an <object> or <embed> element.")
+        case "navigation": return ("Navigation", "The page itself: typed in the address bar, a link click, a form submission or a redirect.")
+        case "fetch": return ("fetch()", "Started by fetch() (possibly before DevTools was attached, or from a worker).")
+        case "xmlhttprequest": return ("XMLHttpRequest", "Started by an XMLHttpRequest (possibly before DevTools was attached, or from a worker).")
+        case "beacon": return ("navigator.sendBeacon()", "Started by navigator.sendBeacon.")
+        case "other": return ("Other", "The browser reports no specific initiator type for this load.")
+        case let other: return (other, "Initiator type reported by PerformanceResourceTiming.")
+        }
+        switch resourceType.lowercased() {
+        case "document", "main_frame": return ("Navigation", "The page itself: typed in the address bar, a link click, a form submission or a redirect.")
+        default: return nil
+        }
+    }
+
+    /// Nil when either URL cannot be parsed. Origin means scheme, host and port.
+    static func isCrossOrigin(_ url: String, pageURL: String) -> Bool? {
+        guard let a = URL(string: url), let b = URL(string: pageURL),
+              let hostA = a.host?.lowercased(), let hostB = b.host?.lowercased() else { return nil }
+        func port(_ u: URL) -> Int {
+            u.port ?? (u.scheme?.lowercased() == "https" ? 443 : (u.scheme?.lowercased() == "http" ? 80 : 0))
+        }
+        return a.scheme?.lowercased() != b.scheme?.lowercased() || hostA != hostB || port(a) != port(b)
+    }
+
+
+    // MARK: - Response body
+
+    static func isTextualMime(_ mime: String) -> Bool {
+        let m = mime.lowercased()
+        return m.hasPrefix("text/") || m.contains("json") || m.contains("javascript") || m.contains("ecmascript")
+            || m.contains("xml") || m.contains("x-www-form-urlencoded") || m.contains("graphql")
+    }
+
+    /// Whether a response body can be re-read from the page when the hooks did not capture it, or why not.
+    static func bodyFetchability(
+        method: String, status: Int, mimeType: String, resourceType: String, url: String,
+        pending: Bool, failed: Bool, cancelled: Bool
+    ) -> NetBodyFetchability {
+        if pending { return .unavailable("The request has not finished yet.") }
+        if failed { return .unavailable("The request failed, so there is no response body.") }
+        if cancelled { return .unavailable("The request was cancelled before a response body arrived.") }
+        let scheme = URL(string: url)?.scheme?.lowercased()
+        guard scheme == "http" || scheme == "https" else {
+            return .unavailable("Only http and https responses can be re-read.")
+        }
+        switch resourceType.lowercased() {
+        case "websocket", "eventsource":
+            return .unavailable("Streams are shown as messages, not as a single body.")
+        default: break
+        }
+        if method.uppercased() != "GET" {
+            return .unavailable("Re-reading a \(method.uppercased()) response would send the request again, so it is not done. Only bodies captured by the page hooks while DevTools was open are shown.")
+        }
+        if status == 0 { return .unavailable("No response status was recorded for this request.") }
+        if status == 204 || status == 205 { return .unavailable("Status \(status) has no response body.") }
+        if status >= 300 && status < 400 && status != 304 {
+            return .unavailable("A redirect response; the content comes from the request it redirects to.")
+        }
+        let mime = mimeType.lowercased()
+        if mime.isEmpty || isTextualMime(mime) || mime.hasPrefix("image/") { return .refetch }
+        return .unavailable("Binary content (\(mimeType)) cannot be shown as text or an image.")
+    }
+
+    static func decodeFetchedBody(_ object: [String: Any]) -> (id: String, body: NetFetchedBody)? {
+        let id = OrbitInspectDecode.string(object, "id")
+        guard !id.isEmpty else { return nil }
+        switch OrbitInspectDecode.string(object, "kind") {
+        case "text":
+            return (id, .text(OrbitInspectDecode.string(object, "text"), truncated: OrbitInspectDecode.bool(object, "truncated")))
+        case "image":
+            guard let data = Data(base64Encoded: OrbitInspectDecode.string(object, "b64")), !data.isEmpty else {
+                return (id, .unavailable("The image data could not be decoded."))
+            }
+            return (id, .image(data))
+        default:
+            return (id, .unavailable(fetchFailureReason(
+                code: OrbitInspectDecode.string(object, "reason"), detail: OrbitInspectDecode.string(object, "detail"))))
+        }
+    }
+
+    static func fetchFailureReason(code: String, detail: String) -> String {
+        switch code {
+        case "opaque":
+            return "This is an opaque response: the browser hides its status, headers and body from page script."
+        case "binary":
+            return "Binary content (\(detail.isEmpty ? "unknown type" : detail)) cannot be shown as text or an image."
+        case "too_large":
+            let size = Int(detail).map { OrbitDevToolsFormat.bytes($0) } ?? detail
+            return "The image (\(size)) is too large to preview."
+        case "error":
+            return "The page could not re-read this response (\(detail.isEmpty ? "request failed" : detail)). A cross-origin response is readable only when the server allows it with CORS."
+        default:
+            return "The response body is not available."
+        }
+    }
+
+    /// Reasons the page hooks gave for not capturing a body; they are shown instead of an empty pane.
+    static func captureSkipReason(code: String, mime: String) -> String? {
+        switch code {
+        case "": return nil
+        case "closed": return "DevTools was closed when this response arrived, so its body was not read."
+        case "opaque": return "This is an opaque (no-cors) response: the browser hides its body from page script."
+        case "stream": return "A streaming response (text/event-stream) is never buffered."
+        case "type": return "Binary or unsupported content type\(mime.isEmpty ? "" : " (\(mime))"): only text responses are captured."
+        case "responseType": return "This XMLHttpRequest asked for a non-text response type, which is not captured."
+        case "empty": return "The response had no body."
+        case "unreadable": return "The response body could not be read by the page hook."
+        default: return nil
+        }
     }
 
 

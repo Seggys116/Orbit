@@ -45,6 +45,14 @@ enum OrbitLighthouseSupport {
         return maxDiff > 0 ? max(0, min(1, 1.0 - totalDiff / maxDiff)) : 1.0
     }
 
+    /// A JPEG of the image and its size in pixels. The pixel size is read from the bitmap, because a snapshot's point size is not its pixel size on a Retina display.
+    static func jpegData(from image: NSImage, quality: Double) -> (data: Data, width: Int, height: Int)? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let bitmap = NSBitmapImageRep(cgImage: cgImage)
+        guard let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]) else { return nil }
+        return (data, cgImage.width, cgImage.height)
+    }
+
     @MainActor
     static func saveFile(data: Data, suggestedName: String, ext: String) {
         let panel = NSSavePanel()

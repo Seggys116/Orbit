@@ -109,10 +109,17 @@ enum OrbitMetrics {
 
     static let miniPlayerSurfaceOpacity: Double = 0.16
 
-    static let spacePagerDotSize: CGFloat = sidebarBottomBarIconSize
+    // The tile each Space icon sits in; measured against Arc, whose tile is ~33pt with the glyph at ~45% of it.
+    static let spacePagerDotSize: CGFloat = 28
     static let spacePagerDotSpacing: CGFloat = 2
     static let spacePagerContainerPadding: CGFloat = 2
     static let spacePagerInactiveOpacity: Double = 0.72
+    static let spacePagerIconInactiveOpacity: Double = 0.5
+    static let spacePagerIconInactiveSaturation: Double = 0.1
+    static let spacePagerTileCornerRadius: CGFloat = 8
+    static let spacePagerEmojiScaleFraction: CGFloat = 0.52
+    static let spacePagerSymbolScaleFraction: CGFloat = 0.5
+    static let spacePagerDotScaleFraction: CGFloat = 0.3
 
     static let spacePagerMinimumSizeScale: CGFloat = 0.6
 

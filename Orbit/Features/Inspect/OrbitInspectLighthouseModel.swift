@@ -166,9 +166,9 @@ final class OrbitLighthouseModel: OrbitInspectModule {
         awaitingOwnReload = true
         session?.reloadPage(ignoringCache: true)
 
-        let siTask = Task { @MainActor [weak self] () -> [(ms: Double, completeness: Double)] in
-            guard let self else { return [] }
-            return await self.collectSIFrames()
+        let siTask = Task { @MainActor [weak self] () -> VisualCapture in
+            guard let self else { return VisualCapture() }
+            return await self.collectVisualProgress()
         }
 
         setStep(prefix + "Waiting for network idle", progress: 0.2)
@@ -179,18 +179,18 @@ final class OrbitLighthouseModel: OrbitInspectModule {
         try? await Task.sleep(for: .milliseconds(400))
 
         siTask.cancel()
-        let siFrames = await siTask.value
+        let capture = await siTask.value
 
         if Task.isCancelled { return nil }
-        return await collectAndScore(prefix: prefix, mode: .navigation, siFrames: siFrames)
+        return await collectAndScore(prefix: prefix, mode: .navigation, siFrames: capture.frames, filmstrip: capture.filmstrip)
     }
 
     private func runSnapshot(prefix: String) async -> LHReport? {
-        return await collectAndScore(prefix: prefix, mode: .snapshot, siFrames: [])
+        return await collectAndScore(prefix: prefix, mode: .snapshot, siFrames: [], filmstrip: [])
     }
 
     private func performTimespanCollect() async {
-        if let report = await collectAndScore(prefix: "", mode: .timespan, siFrames: []) {
+        if let report = await collectAndScore(prefix: "", mode: .timespan, siFrames: [], filmstrip: []) {
             currentReport = report
             selectedHistoryID = nil
             saveToHistory(report)
@@ -202,7 +202,7 @@ final class OrbitLighthouseModel: OrbitInspectModule {
     }
 
     private func collectAndScore(
-        prefix: String, mode: LHRunMode, siFrames: [(ms: Double, completeness: Double)]
+        prefix: String, mode: LHRunMode, siFrames: [(ms: Double, completeness: Double)], filmstrip: [LHFilmstripFrame]
     ) async -> LHReport? {
         setStep(prefix + "Collecting DOM evidence", progress: 0.5)
         // Security evidence: cookies and the page's forms and frames are read fresh so the Security category is current.
@@ -217,11 +217,20 @@ final class OrbitLighthouseModel: OrbitInspectModule {
             return nil
         }
 
+        // Taken straight after the page measured its elements, so the outlines drawn on it match what was on screen.
+        setStep(prefix + "Capturing screenshot", progress: 0.62)
+        let inner = OrbitInspectDecode.object(bundleObj, "bundle") ?? bundleObj
+        let shot = await captureScreenshot(viewport: OrbitInspectDecode.object(inner, "vp"))
+        guard !Task.isCancelled else { return nil }
+
         setStep(prefix + "Fetching robots.txt", progress: 0.7)
         let robotsTxt = await fetchRobotsTxt()
 
         setStep(prefix + "Scoring", progress: 0.85)
-        let bundle = buildBundle(from: bundleObj, robotsTxt: robotsTxt, mode: mode, siFrames: siFrames)
+        var bundle = buildBundle(from: bundleObj, robotsTxt: robotsTxt, mode: mode, siFrames: siFrames)
+        bundle.filmstrip = filmstrip
+        bundle.screenshot = shot.screenshot
+        bundle.screenshotNote = shot.note
 
         setStep(prefix + "Generating report", progress: 0.95)
         var report = OrbitLighthouseLogic.score(bundle: bundle)
@@ -230,10 +239,20 @@ final class OrbitLighthouseModel: OrbitInspectModule {
     }
 
 
-    private func collectSIFrames() async -> [(ms: Double, completeness: Double)] {
+    /// What the load looked like: the pixel-similarity series behind Speed Index, and a few readable frames for the filmstrip.
+    private struct VisualCapture {
+        var frames: [(ms: Double, completeness: Double)] = []
+        var filmstrip: [LHFilmstripFrame] = []
+    }
+
+    private static let filmstripFrameLimit = 8
+    private static let filmstripFrameWidth: CGFloat = 240
+
+    private func collectVisualProgress() async -> VisualCapture {
         var raw: [(ms: Double, CGImage)] = []
+        var thumbs: [(ms: Double, jpeg: Data)] = []
         let start = Date()
-        for _ in 0 ..< 60 {                        // up to 60 × 100 ms = 6 s
+        for tick in 0 ..< 60 {                     // up to 60 × 100 ms = 6 s
             if Task.isCancelled { break }
             try? await Task.sleep(for: .milliseconds(100))
             let ms = Date().timeIntervalSince(start) * 1000
@@ -241,8 +260,44 @@ final class OrbitLighthouseModel: OrbitInspectModule {
                let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) {
                 raw.append((ms: ms, cgImage: cg))
             }
+            // A readable frame every half second is enough for a filmstrip and keeps the snapshot cost low.
+            if tick % 5 == 0, let thumb = await captureThumbnail() { thumbs.append((ms: ms, jpeg: thumb)) }
         }
-        return OrbitLighthouseSupport.computeCompleteness(rawFrames: raw)
+        let end = Date().timeIntervalSince(start) * 1000
+        if let thumb = await captureThumbnail() { thumbs.append((ms: end, jpeg: thumb)) }
+
+        let frames = OrbitLighthouseSupport.computeCompleteness(rawFrames: raw)
+        let completeness: [Double?] = thumbs.map { thumb in
+            frames.min(by: { abs($0.ms - thumb.ms) < abs($1.ms - thumb.ms) })?.completeness
+        }
+        let picks = OrbitLighthouseLogic.filmstripSelection(completeness: completeness, maxFrames: Self.filmstripFrameLimit)
+        let filmstrip = picks.map { LHFilmstripFrame(ms: thumbs[$0].ms, completeness: completeness[$0], jpeg: thumbs[$0].jpeg) }
+        return VisualCapture(frames: frames, filmstrip: filmstrip)
+    }
+
+    private func captureThumbnail() async -> Data? {
+        guard let image = await session?.contents?.capturePreview(rect: nil, size: CGSize(width: Self.filmstripFrameWidth, height: 0)) else {
+            return nil
+        }
+        return OrbitLighthouseSupport.jpegData(from: image, quality: 0.6)?.data
+    }
+
+    private func captureScreenshot(viewport: [String: Any]?) async -> (screenshot: LHScreenshot?, note: String?) {
+        session?.clearHighlight()
+        guard let image = await session?.contents?.capturePreview(rect: nil, size: CGSize(width: 720, height: 0)) else {
+            return (nil, "Orbit could not capture the page. A screenshot needs the tab to be visible while the audit runs.")
+        }
+        guard let encoded = OrbitLighthouseSupport.jpegData(from: image, quality: 0.6) else {
+            return (nil, "The screenshot could not be encoded.")
+        }
+        let viewport = viewport ?? [:]
+        return (LHScreenshot(
+            jpeg: encoded.data, pixelWidth: encoded.width, pixelHeight: encoded.height,
+            viewportWidth: OrbitInspectDecode.number(viewport, "w") ?? 0,
+            viewportHeight: OrbitInspectDecode.number(viewport, "h") ?? 0,
+            scrollX: OrbitInspectDecode.number(viewport, "sx") ?? 0,
+            scrollY: OrbitInspectDecode.number(viewport, "sy") ?? 0
+        ), nil)
     }
 
 
@@ -273,12 +328,14 @@ final class OrbitLighthouseModel: OrbitInspectModule {
         b.longTasksAPIAvailable = OrbitInspectDecode.bool(inner, "tasksOk")
         b.timespanDurationMs    = OrbitInspectDecode.number(inner, "timespanDur")
 
-        b.clsShifts = (inner["clsShifts"] as? [[String: Any]] ?? []).map { s in
-            LHClsShift(
-                value:   OrbitInspectDecode.number(s, "v") ?? 0,
-                sources: OrbitInspectDecode.strings(s, "srcs")
-            )
-        }
+        b.clsShifts = OrbitLighthouseLogic.decodeShifts(OrbitInspectDecode.objects(inner, "clsShifts"))
+        b.clsShiftsTruncated = OrbitInspectDecode.bool(inner, "clsTruncated")
+        b.lcpDetail = OrbitLighthouseLogic.decodeLCPDetail(OrbitInspectDecode.object(inner, "lcpInfo"), lcpMs: b.lcpMs, ttfbMs: b.ttfbMs)
+        b.ttfbParts = OrbitLighthouseLogic.decodeTimingParts(OrbitInspectDecode.objects(inner, "ttfbParts"))
+        b.nestedInteractiveNodes = OrbitLighthouseLogic.decodeEvidence(OrbitInspectDecode.objects(inner, "nestedNodes"))
+        b.unfocusableScrollRegions = OrbitLighthouseLogic.decodeEvidence(OrbitInspectDecode.objects(inner, "scrollNodes"))
+        b.videosWithoutCaptionNodes = OrbitLighthouseLogic.decodeEvidence(OrbitInspectDecode.objects(inner, "videoNodes"))
+        b.positiveTabindexNodes = OrbitLighthouseLogic.decodeEvidence(OrbitInspectDecode.objects(inner, "posTabNodes"))
         b.longTasks = (inner["tasks"] as? [[String: Any]] ?? []).compactMap { t in
             guard let s = OrbitInspectDecode.number(t, "s"), let d = OrbitInspectDecode.number(t, "d") else { return nil }
             return LHLongTask(startMs: s, durationMs: d)
@@ -569,7 +626,14 @@ final class OrbitLighthouseModel: OrbitInspectModule {
     func loadHistory() {
         guard let data = OrbitDefaults.standard.data(forKey: historyKey),
               let reports = try? JSONDecoder().decode([LHReport].self, from: data) else { return }
-        history = reports
+        // Saved history has no pictures, so reports still in memory from this session keep theirs.
+        let pictures = Dictionary(history.compactMap { report in report.visuals.map { (report.id, $0) } },
+                                  uniquingKeysWith: { first, _ in first })
+        history = reports.map { report in
+            var copy = report
+            copy.visuals = pictures[report.id]
+            return copy
+        }
     }
 
     func saveToHistory(_ report: LHReport) {
@@ -578,15 +642,18 @@ final class OrbitLighthouseModel: OrbitInspectModule {
         list.insert(report, at: 0)
         list = Array(list.prefix(10))
         history = list
-        if let data = try? JSONEncoder().encode(list) {
-            OrbitDefaults.standard.set(data, forKey: historyKey)
-        }
+        persistHistory()
     }
 
     func deleteHistoryItem(id: UUID) {
         history.removeAll { $0.id == id }
         if selectedHistoryID == id { selectedHistoryID = nil }
-        if let data = try? JSONEncoder().encode(history) {
+        persistHistory()
+    }
+
+    /// Screenshots are large and defaults hold small values, so the saved copy keeps the numbers and evidence but not the pictures.
+    private func persistHistory() {
+        if let data = try? JSONEncoder().encode(history.map { $0.strippingVisuals() }) {
             OrbitDefaults.standard.set(data, forKey: historyKey)
         }
     }

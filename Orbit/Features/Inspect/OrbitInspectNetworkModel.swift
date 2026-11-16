@@ -45,6 +45,26 @@ final class OrbitNetworkModel: OrbitInspectModule {
         }
     }
 
+    /// Response bodies re-read from the page on demand, keyed by record id and bounded so images cannot pile up.
+    private(set) var fetchedBodies: [String: NetFetchedBody] = [:]
+    /// Cookies in the cookie store that match a record's URL, looked up when the Cookies tab is shown.
+    private(set) var storeCookies: [String: [NetStoreCookie]] = [:]
+
+    @ObservationIgnored private var fetchedOrder: [String] = []
+    @ObservationIgnored private var storeCookieOrder: [String] = []
+    private static let maxCachedLookups = 24
+
+    /// The page's body re-read is a real request that WebKit reports too; its URL is remembered briefly so it is not listed as a page load.
+    @ObservationIgnored private var suppressedRefetches: [String: Date] = [:]
+    private static let refetchSuppressionWindow: TimeInterval = 5
+
+    /// A form post is a navigation, so its body arrives from the page's submit event, possibly before or after the navigation is recorded.
+    @ObservationIgnored private var pendingForms: [(url: String, body: NetRequestBody)] = []
+    private static let maxPendingForms = 8
+
+    /// Resource-timing entries already attached to a record, so a re-delivery (panel refresh, re-attach) cannot land on another request for the same URL.
+    @ObservationIgnored private var consumedTimings: Set<String> = []
+
     @ObservationIgnored private var _all = OrbitRingBuffer<Entry>(capacity: 5000)
 
     /// A page load is hundreds of messages, so derived state is rebuilt once per frame, not once per message.
@@ -52,7 +72,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
     @ObservationIgnored private var flushScheduled = false
     private static let flushDelay: Duration = .milliseconds(16)
 
-    var messageTypes: Set<String> { ["net.batch", "net.nav"] }
+    var messageTypes: Set<String> { ["net.batch", "net.nav", "net.form", "net.body"] }
 
     func receive(type: String, object: [String: Any], frame: OrbitInspectFrame) {
         switch type {
@@ -62,12 +82,21 @@ final class OrbitNetworkModel: OrbitInspectModule {
             }
         case "net.nav":
             handleNavTiming(object)
+        case "net.form":
+            handleFormSubmission(object)
+        case "net.body":
+            if let (id, body) = OrbitNetworkLogic.decodeFetchedBody(object) { setFetchedBody(body, for: id) }
         default: break
         }
     }
 
     func pageDidReset(preservingLog: Bool) {
         if !preservingLog {
+            fetchedBodies.removeAll()
+            fetchedOrder.removeAll()
+            storeCookies.removeAll()
+            storeCookieOrder.removeAll()
+            consumedTimings.removeAll()
             // The main document is recorded before the agent's hello, which clears the log, so it must survive or the first request disappears.
             let page = session?.pageURL ?? ""
             let kept = _all.filter { entry in
@@ -100,20 +129,25 @@ final class OrbitNetworkModel: OrbitInspectModule {
 
     func nativeRequestSent(_ record: NetRecord) {
         guard isRecording else { return }
+        if consumeRefetchSuppression(url: record.url) { return }
         // The page's fetch/XHR hook can report a request before WebKit does; fold that record into this one, in the page record's row.
         if getRecord(record.id) == nil, let jsIdx = findUnmergedPageRecord(url: record.url, method: record.method) {
             let page = _all[jsIdx].rich
             var merged = record
             merged.startTime = page.startTime ?? merged.startTime
             merged.initiatorStack = page.initiatorStack
+            merged.initiatorURL = page.initiatorURL
+            merged.jsSource = page.jsSource
             if merged.requestHeaders.isEmpty { merged.requestHeaders = page.requestHeaders }
-            merged.requestBodySummary = page.requestBodySummary
+            merged.requestBody = page.requestBody ?? merged.requestBody
             if merged.status == 0 { merged.status = page.status }
             if merged.responseHeaders.isEmpty { merged.responseHeaders = page.responseHeaders }
             if merged.mimeType.isEmpty { merged.mimeType = page.mimeType }
             if merged.duration == nil { merged.duration = page.duration }
             merged.responseBody = page.responseBody
             merged.responseBodyTruncated = page.responseBodyTruncated
+            merged.responseBodySkip = page.responseBodySkip
+            merged.responseType = page.responseType
             if !page.pending {
                 merged.pending = false
                 merged.failed = page.failed
@@ -125,11 +159,15 @@ final class OrbitNetworkModel: OrbitInspectModule {
             _all.alias(page.id, toPosition: jsIdx)
             return
         }
+        var record = record
+        if record.requestBody == nil, record.resourceType == "sub_frame" || record.resourceType == "document" {
+            record.requestBody = takePendingForm(url: record.url, method: record.method)
+        }
         setRecord(record)
     }
 
     /// The resource-load delegate does not report the main document on current WebKit, so it is recorded from navigation policy and rebound if a callback arrives.
-    func noteMainFrameRequest(url: URL, method: String, headers: [OrbitHeader]) {
+    func noteMainFrameRequest(url: URL, method: String, headers: [OrbitHeader], body: NetRequestBody?) {
         guard isRecording else { return }
         let absolute = url.absoluteString
         if let idx = provisionalMainDocumentIndex(url: absolute) {
@@ -138,6 +176,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
             if !method.isEmpty { rec.method = method }
             rec.resourceType = "document"
             rec.isMainFrame = true
+            if rec.requestBody == nil { rec.requestBody = body ?? takePendingForm(url: absolute, method: rec.method) }
             setRecord(rec)
             return
         }
@@ -147,6 +186,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
         record.resourceType = "document"
         record.isMainFrame = true
         record.requestHeaders = headers
+        record.requestBody = body ?? takePendingForm(url: absolute, method: record.method)
         record.pending = true
         setRecord(record)
     }
@@ -167,6 +207,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
             rec.resourceType = "document"
             rec.isMainFrame = true
             rec.pending = false
+            rec.nativeResponseSeen = true
             setRecord(rec)
             return
         }
@@ -181,6 +222,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
         record.responseHeaders = headers
         record.mimeType = mime
         record.pending = false
+        record.nativeResponseSeen = true
         setRecord(record)
     }
 
@@ -207,6 +249,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
         rec.status = status
         rec.statusText = statusText
         rec.responseHeaders = headers
+        rec.nativeResponseSeen = true
         if !mimeType.isEmpty { rec.mimeType = mimeType }
         if let u = url, !u.isEmpty { rec.url = u }
         rec.fromCache = fromCache
@@ -247,7 +290,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
         }
         guard !alreadyHas else { return }
         var hdrs = rec.requestHeaders
-        hdrs.append(OrbitHeader(name: "Cookie", value: value + " (from cookie store)"))
+        hdrs.append(OrbitHeader(name: "Cookie", value: value))
         hdrs.sort { $0.name.lowercased() < $1.name.lowercased() }
         rec.requestHeaders = hdrs
         rec.cookieFromStore = true
@@ -273,17 +316,21 @@ final class OrbitNetworkModel: OrbitInspectModule {
             let reqHeaders = OrbitInspectDecode.stringMap(entry, "headers")
             let bodyInfo = OrbitInspectDecode.object(entry, "body")
             let stack = initiatorRaw.split(separator: "\n").map(String.init)
+            let body = bodyInfo.flatMap { OrbitNetworkLogic.decodeRequestBody($0) }
+            let scriptURL = OrbitNetworkLogic.initiatorLocation(OrbitNetworkLogic.stackFrames(stack))?.url
 
             if let nativeIdx = findUnmergedNativeRecord(url: url) {
                 var rec = _all[nativeIdx].rich
                 rec.startTime = startMs
                 rec.initiatorStack = stack
+                rec.initiatorURL = scriptURL
+                rec.jsSource = src
                 // Native headers win: they carry the real Cookie, so page headers only supplement them.
                 if rec.requestHeaders.isEmpty {
                     rec.requestHeaders = reqHeaders.map { OrbitHeader(name: $0.key, value: $0.value) }
                         .sorted { $0.name.lowercased() < $1.name.lowercased() }
                 }
-                rec.requestBodySummary = bodyInfo.flatMap { decodeBodyInfo($0) }
+                rec.requestBody = body ?? rec.requestBody
                 rec.pageTimingMerged = true
                 _all.alias(id, toPosition: nativeIdx)
                 store(rec, at: nativeIdx)
@@ -295,12 +342,22 @@ final class OrbitNetworkModel: OrbitInspectModule {
                 rec.startTime = startMs
                 rec.isMainFrame = frame.isMain
                 rec.initiatorStack = stack
+                rec.initiatorURL = scriptURL
+                rec.jsSource = src
                 rec.requestHeaders = reqHeaders.map { OrbitHeader(name: $0.key, value: $0.value) }
                     .sorted { $0.name.lowercased() < $1.name.lowercased() }
-                rec.requestBodySummary = bodyInfo.flatMap { decodeBodyInfo($0) }
+                rec.requestBody = body
                 rec.resourceType = src == "xhr" ? "fetch" : (src == "beacon" ? "ping" : "fetch")
                 setRecord(rec)
             }
+
+        case "req_body":
+            let id = OrbitInspectDecode.string(entry, "id")
+            guard var rec = getRecord(id),
+                  let info = OrbitInspectDecode.object(entry, "body"),
+                  let body = OrbitNetworkLogic.decodeRequestBody(info) else { return }
+            rec.requestBody = body
+            setRecord(rec)
 
         case "resp_headers":
             let id = OrbitInspectDecode.string(entry, "id")
@@ -318,13 +375,20 @@ final class OrbitNetworkModel: OrbitInspectModule {
             if !mime.isEmpty && rec.mimeType.isEmpty { rec.mimeType = mime }
             if !url.isEmpty { rec.url = url }
             if let d = dur, rec.duration == nil { rec.duration = d }
+            rec.responseType = OrbitInspectDecode.string(entry, "rtype")
             setRecord(rec)
 
         case "resp_body":
             let id = OrbitInspectDecode.string(entry, "id")
             guard var rec = getRecord(id) else { return }
-            rec.responseBody = OrbitInspectDecode.string(entry, "body")
-            rec.responseBodyTruncated = OrbitInspectDecode.bool(entry, "truncated")
+            if let skip = OrbitInspectDecode.optionalString(entry, "skip") {
+                rec.responseBodySkip = skip
+                if rec.mimeType.isEmpty { rec.mimeType = OrbitInspectDecode.string(entry, "mime") }
+            } else {
+                rec.responseBody = OrbitInspectDecode.string(entry, "body")
+                rec.responseBodyTruncated = OrbitInspectDecode.bool(entry, "truncated")
+                rec.responseBodySkip = ""
+            }
             setRecord(rec)
 
         case "done":
@@ -339,8 +403,11 @@ final class OrbitNetworkModel: OrbitInspectModule {
         case "timing":
             let url = OrbitInspectDecode.string(entry, "url")
             guard !url.isEmpty else { return }
-            let timing = decodeTimingEntry(entry)
-            if let idx = findBestMatchRecord(url: url, approxStartMs: timing.startTime) {
+            let timing = OrbitNetworkLogic.decodeResourceTiming(entry)
+            let timingKey = "\(url)|\(timing.startTime)|\(timing.responseEnd)"
+            guard consumedTimings.insert(timingKey).inserted else { return }
+            if consumedTimings.count > 20000 { consumedTimings = [timingKey] }
+            if let idx = findTimingTarget(url: url, startMs: timing.startTime, isNavigation: timing.initiatorType == "navigation") {
                 var rec = _all[idx].rich
                 rec.timingRaw = timing
                 rec.timingBreakdown = OrbitNetworkLogic.phases(from: timing)
@@ -359,6 +426,9 @@ final class OrbitNetworkModel: OrbitInspectModule {
                 }
                 rec.pageTimingMerged = true
                 store(rec, at: idx)
+            } else {
+                // Nothing to attach it to yet, so a later refresh may still place it.
+                consumedTimings.remove(timingKey)
             }
 
         case "ws_open":
@@ -498,21 +568,102 @@ final class OrbitNetworkModel: OrbitInspectModule {
         return nil
     }
 
-    private func findBestMatchRecord(url: String, approxStartMs: Double) -> Int? {
+    /// A timing entry belongs to a record of the same URL that has no timing yet; exact URLs win over ones that differ only in the query.
+    private func findTimingTarget(url: String, startMs: Double, isNavigation: Bool) -> Int? {
         let urlBase = url.prefix { $0 != "?" }
-        var bestIdx: Int? = nil
-        var bestDiff = Double.greatestFiniteMagnitude
+        var exact: [Int] = []
+        var sameBase: [Int] = []
         for i in 0..<_all.count {
             let rec = _all[i].rich
-            guard rec.url.prefix(while: { $0 != "?" }) == urlBase || rec.url == url else { continue }
-            if let st = rec.startTime {
-                let diff = abs(st - approxStartMs)
-                if diff < bestDiff { bestDiff = diff; bestIdx = i }
-            } else if bestIdx == nil {
-                bestIdx = i
+            guard rec.timingRaw == nil else { continue }
+            if isNavigation {
+                let isDocument = rec.resourceType == "document" || rec.resourceType == "main_frame"
+                    || rec.resourceType == "sub_frame" || rec.id.hasPrefix("nav-")
+                guard isDocument else { continue }
             }
+            if rec.url == url { exact.append(i) }
+            else if rec.url.prefix(while: { $0 != "?" }) == urlBase { sameBase.append(i) }
         }
-        return bestIdx
+        let pool = exact.isEmpty ? sameBase : exact
+        var best: Int? = nil
+        var bestDiff = Double.greatestFiniteMagnitude
+        for i in pool {
+            guard let start = _all[i].rich.startTime else { continue }
+            let diff = abs(start - startMs)
+            if diff < bestDiff { bestDiff = diff; best = i }
+        }
+        return best ?? pool.first
+    }
+
+    /// Whether `url` is the page's own body re-read, which must not appear as a page request; each mark is used once.
+    private func consumeRefetchSuppression(url: String) -> Bool {
+        let now = Date()
+        suppressedRefetches = suppressedRefetches.filter { $0.value > now }
+        guard suppressedRefetches.removeValue(forKey: url) != nil else { return false }
+        return true
+    }
+
+    private func takePendingForm(url: String, method: String) -> NetRequestBody? {
+        guard method.caseInsensitiveCompare("POST") == .orderedSame,
+              let index = pendingForms.firstIndex(where: { $0.url == url }) else { return nil }
+        return pendingForms.remove(at: index).body
+    }
+
+    private func handleFormSubmission(_ object: [String: Any]) {
+        guard isRecording,
+              let info = OrbitInspectDecode.object(object, "body"),
+              let body = OrbitNetworkLogic.decodeRequestBody(info) else { return }
+        let url = OrbitInspectDecode.string(object, "url")
+        // WebKit may have reported the navigation before the page's message arrived.
+        for i in stride(from: _all.count - 1, through: max(0, _all.count - 20), by: -1) {
+            var rec = _all[i].rich
+            let isDocument = rec.resourceType == "document" || rec.resourceType == "sub_frame" || rec.id.hasPrefix("nav-")
+            guard isDocument, rec.requestBody == nil, rec.url == url,
+                  rec.method.caseInsensitiveCompare("POST") == .orderedSame else { continue }
+            rec.requestBody = body
+            store(rec, at: i)
+            return
+        }
+        pendingForms.append((url: url, body: body))
+        if pendingForms.count > Self.maxPendingForms { pendingForms.removeFirst(pendingForms.count - Self.maxPendingForms) }
+    }
+
+    private func setFetchedBody(_ body: NetFetchedBody, for id: String) {
+        if fetchedBodies[id] == nil { fetchedOrder.append(id) }
+        fetchedBodies[id] = body
+        while fetchedOrder.count > Self.maxCachedLookups {
+            fetchedBodies.removeValue(forKey: fetchedOrder.removeFirst())
+        }
+    }
+
+    /// Asks the page to re-read a response body that no hook captured (scripts, styles, images, documents), once per record.
+    func fetchBodyIfNeeded(id: String) {
+        guard let rec = getRecord(id), rec.responseBody == nil, fetchedBodies[id] == nil,
+              rec.responseBodySkip != "stream", rec.responseBodySkip != "opaque",
+              case .refetch = OrbitNetworkLogic.bodyFetchability(
+                method: rec.method, status: rec.status, mimeType: rec.mimeType, resourceType: rec.resourceType,
+                url: rec.url, pending: rec.pending, failed: rec.failed, cancelled: rec.cancelled)
+        else { return }
+        setFetchedBody(.loading, for: id)
+        suppressedRefetches[rec.url] = Date().addingTimeInterval(Self.refetchSuppressionWindow)
+        session?.command(["op": "net.body", "id": id, "url": rec.url])
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard let self, self.fetchedBodies[id] == .loading else { return }
+            self.setFetchedBody(.unavailable("The page did not return the body in time."), for: id)
+        }
+    }
+
+    /// Looks up the cookie store for cookies matching the record's URL, used when no Cookie header was observed.
+    func loadStoreCookies(id: String) async {
+        guard let rec = getRecord(id), storeCookies[id] == nil,
+              let contents = session?.contents, let url = URL(string: rec.url) else { return }
+        let found = await OrbitInspectNativeNetwork.storeCookies(contents: contents, url: url)
+        if storeCookies[id] == nil { storeCookieOrder.append(id) }
+        storeCookies[id] = found
+        while storeCookieOrder.count > Self.maxCachedLookups {
+            storeCookies.removeValue(forKey: storeCookieOrder.removeFirst())
+        }
     }
 
     private func rebuildFiltered() {
@@ -570,48 +721,5 @@ final class OrbitNetworkModel: OrbitInspectModule {
         summary = OrbitNetworkLogic.summary(all: published, filtered: filtered,
                                              dclMs: navigationTiming?.dclMs,
                                              loadMs: navigationTiming?.loadMs)
-    }
-
-
-    private func decodeTimingEntry(_ e: [String: Any]) -> NetResourceTimingRaw {
-        func d(_ k: String) -> Double { OrbitInspectDecode.number(e, k) ?? 0 }
-        func i(_ k: String) -> Int { OrbitInspectDecode.integer(e, k) }
-        let serverTiming = OrbitInspectDecode.objects(e, "serverTiming").map { st -> NetServerTimingEntry in
-            NetServerTimingEntry(
-                name: OrbitInspectDecode.string(st, "name"),
-                duration: OrbitInspectDecode.number(st, "dur"),
-                description: OrbitInspectDecode.string(st, "desc"))
-        }
-        return NetResourceTimingRaw(
-            name: OrbitInspectDecode.string(e, "url"),
-            startTime: d("st"), fetchStart: d("fetchStart"),
-            redirectStart: d("rdStart"), redirectEnd: d("rdEnd"),
-            domainLookupStart: d("dnsStart"), domainLookupEnd: d("dnsEnd"),
-            connectStart: d("connStart"), connectEnd: d("connEnd"),
-            secureConnectionStart: d("tlsStart"),
-            requestStart: d("reqStart"), responseStart: d("respStart"),
-            responseEnd: d("respEnd"),
-            transferSize: i("xfer"), encodedBodySize: i("encBody"), decodedBodySize: i("decBody"),
-            nextHopProtocol: OrbitInspectDecode.string(e, "proto"),
-            initiatorType: OrbitInspectDecode.string(e, "init"),
-            duration: d("dur"), serverTiming: serverTiming)
-    }
-
-    private func decodeBodyInfo(_ obj: [String: Any]) -> String? {
-        let type = OrbitInspectDecode.string(obj, "type")
-        switch type {
-        case "string":
-            return "Text: \(OrbitDevToolsFormat.bytes(OrbitInspectDecode.integer(obj, "size")))"
-        case "FormData":
-            let n = OrbitInspectDecode.integer(obj, "fields")
-            return "FormData: \(n) field\(n == 1 ? "" : "s")"
-        case "URLSearchParams":
-            return "URLSearchParams: \(OrbitDevToolsFormat.bytes(OrbitInspectDecode.integer(obj, "size")))"
-        case "Blob":
-            return "Blob: \(OrbitDevToolsFormat.bytes(OrbitInspectDecode.integer(obj, "size")))"
-        case "ArrayBuffer":
-            return "ArrayBuffer: \(OrbitDevToolsFormat.bytes(OrbitInspectDecode.integer(obj, "size")))"
-        default: return nil
-        }
     }
 }

@@ -472,6 +472,8 @@ nonisolated public struct ContextMenuContext: Sendable {
     public var misspelledWord: String?
     public var dictionarySuggestions: [String]
     public var location: CGPoint
+    /// Set when the click landed on a sign-in field that password autofill classified.
+    public var passwordField: PasswordFieldFocus?
 
     public init(
         pageURL: URL? = nil,
@@ -485,8 +487,10 @@ nonisolated public struct ContextMenuContext: Sendable {
         isEditable: Bool = false,
         misspelledWord: String? = nil,
         dictionarySuggestions: [String] = [],
-        location: CGPoint = .zero
+        location: CGPoint = .zero,
+        passwordField: PasswordFieldFocus? = nil
     ) {
+        self.passwordField = passwordField
         self.pageURL = pageURL
         self.frameURL = frameURL
         self.linkURL = linkURL

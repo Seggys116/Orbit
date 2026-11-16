@@ -445,7 +445,9 @@ struct ToolbarView: View {
     }
 
     private var siteProfileDropdown: some View {
-        let name = env.store.boundSiteProfile(forTab: tab.id)?.name ?? SiteProfile.defaultName
+        let name = env.store.boundSiteProfile(forTab: tab.id)?.name
+            ?? env.store.siteProfileDropdownSiteKey(forTab: tab.id).map { env.store.defaultSiteProfileName(forSiteKey: $0) }
+            ?? SiteProfile.defaultName
         return OrbitMenuButton(entries: {
             focusPaneIfNeeded()
             adoptMenuTheme()

@@ -143,7 +143,7 @@ enum MainMenuBuilder {
         menu.addItem(command("Reload", .refresh))
         menu.addItem(command("Hard Refresh", .hardRefresh))
         menu.addItem(command("Clear Cookies and Refresh", .clearCookiesAndRefresh) { hasLiveWebContents })
-        menu.addItem(command("Clear Cache (Entire Session) and Refresh", .clearCacheAndRefresh) { hasLiveWebContents && hasEngine })
+        menu.addItem(command("Clear Cache for This Site and Refresh", .clearCacheAndRefresh) { hasLiveWebContents && hasEngine })
         menu.addItem(.separator())
         menu.addItem(command("Add Split", .addSplit))
         menu.addItem(command("Close Split", .closeSplit))

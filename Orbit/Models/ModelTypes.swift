@@ -145,10 +145,10 @@ nonisolated public struct SiteProfile: Identifiable, Codable, Hashable, Sendable
         return SiteIdentity.registrableDomain(of: url)
     }
 
+    /// "Default" is only the starting name of a site's built-in profile, which can be renamed, so it is not reserved here; a clash with the site's current default name is checked by the store.
     public static func normalizedName(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.caseInsensitiveCompare(defaultName) != .orderedSame else { return nil }
-        return trimmed
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -1141,10 +1141,12 @@ nonisolated public struct OrbitState: Codable, Sendable {
     public var activeSpaceID: SpaceID?
     public var activeTabBySpace: [SpaceID: TabID]
     public var siteProfiles: [SiteProfile]
+    /// Names the user gave a site's built-in profile, keyed by site. A site missing here still calls it `SiteProfile.defaultName`.
+    public var siteDefaultProfileNames: [String: String]
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, profiles, spaces, tabs, splitGroups
-        case boosts, easels, notes, routingRules, activeSpaceID, activeTabBySpace, siteProfiles
+        case boosts, easels, notes, routingRules, activeSpaceID, activeTabBySpace, siteProfiles, siteDefaultProfileNames
     }
 
     public init(from decoder: Decoder) throws {
@@ -1161,6 +1163,7 @@ nonisolated public struct OrbitState: Codable, Sendable {
         activeSpaceID = try container.decodeIfPresent(SpaceID.self, forKey: .activeSpaceID)
         activeTabBySpace = try container.decode([SpaceID: TabID].self, forKey: .activeTabBySpace)
         siteProfiles = try container.decodeIfPresent([SiteProfile].self, forKey: .siteProfiles) ?? []
+        siteDefaultProfileNames = try container.decodeIfPresent([String: String].self, forKey: .siteDefaultProfileNames) ?? [:]
     }
 
     // siteProfiles is omitted while empty so a document that never used the feature keeps its pre-existing key set.
@@ -1180,6 +1183,9 @@ nonisolated public struct OrbitState: Codable, Sendable {
         if !siteProfiles.isEmpty {
             try container.encode(siteProfiles, forKey: .siteProfiles)
         }
+        if !siteDefaultProfileNames.isEmpty {
+            try container.encode(siteDefaultProfileNames, forKey: .siteDefaultProfileNames)
+        }
     }
 
     public init(
@@ -1194,7 +1200,8 @@ nonisolated public struct OrbitState: Codable, Sendable {
         routingRules: [RoutingRule] = [],
         activeSpaceID: SpaceID? = nil,
         activeTabBySpace: [SpaceID: TabID] = [:],
-        siteProfiles: [SiteProfile] = []
+        siteProfiles: [SiteProfile] = [],
+        siteDefaultProfileNames: [String: String] = [:]
     ) {
         self.schemaVersion = schemaVersion
         self.profiles = profiles
@@ -1208,6 +1215,7 @@ nonisolated public struct OrbitState: Codable, Sendable {
         self.activeSpaceID = activeSpaceID
         self.activeTabBySpace = activeTabBySpace
         self.siteProfiles = siteProfiles
+        self.siteDefaultProfileNames = siteDefaultProfileNames
     }
 }
 

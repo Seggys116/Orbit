@@ -72,9 +72,22 @@ final class LittleOrbitWindowController: NSWindowController, NSWindowDelegate {
         return controller
     }
 
+    static func tabID(forWindow window: NSWindow) -> TabID? {
+        openWindows.values.first { $0.window === window }?.tabID
+    }
+
     static var frontmostController: LittleOrbitWindowController? {
         guard let keyWindow = NSApp.keyWindow else { return nil }
         return openWindows.values.first { $0.window === keyWindow }
+    }
+
+    /// A page that calls `window.close()` on a popup it opened must take the popup's window with it. The tab behind a Little Orbit window is not in any sidebar, so closing only the tab would leave a blank window on screen.
+    @discardableResult
+    static func closeWindow(forTab tabID: TabID) -> Bool {
+        guard let controller = openWindows[tabID], !controller.hasRelinquishedTab else { return false }
+        // Deferred a turn: window.close() arrives inside a WebKit delegate callback, and tearing the web view down mid-callback is unsafe.
+        Task { @MainActor in controller.close() }
+        return true
     }
 
     func relinquishTab() {

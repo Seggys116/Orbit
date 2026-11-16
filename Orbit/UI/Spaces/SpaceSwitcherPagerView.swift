@@ -117,7 +117,7 @@ struct SpaceSwitcherPagerView: View {
                 Self.itemProvider(for: SpacePagerDragPayload(spaceID: space.id))
             } preview: {
                 SpaceIconView(
-                    icon: space.resolvedIcon,
+                    icon: Self.pagerIcon(for: space),
                     size: OrbitMetrics.spacePagerDotSize,
                     foregroundColor: theme.readableForeground
                 )
@@ -257,6 +257,16 @@ struct SpaceSwitcherPagerView: View {
     }
 
 
+    /// The symbol a Space is created with when nobody has picked an icon. Arc draws such a Space as a plain dot, so the switcher does too; a symbol the user chose explicitly (`iconKind` set) is kept.
+    static let placeholderSymbol = "circle.grid.2x2"
+
+    static func pagerIcon(for space: Space) -> SpaceIcon {
+        if space.iconKind == nil, !space.iconIsEmoji, space.icon == placeholderSymbol {
+            return .none
+        }
+        return space.resolvedIcon
+    }
+
     static func sizeScale(forSpaceCount count: Int, availableWidth: CGFloat) -> CGFloat {
         guard count > 0, availableWidth > 0 else { return 1 }
         let fullSizeWidth = idealWidth(forSpaceCount: count, scale: 1)
@@ -283,19 +293,30 @@ private struct SpacePagerIconButton: View {
 
     var body: some View {
         let side = OrbitMetrics.spacePagerDotSize * sizeScale
+        let cornerRadius = OrbitMetrics.spacePagerTileCornerRadius * sizeScale
         SpaceIconView(
-            icon: space.resolvedIcon,
+            icon: SpaceSwitcherPagerView.pagerIcon(for: space),
             size: side,
             foregroundColor: theme.readableForeground,
             dim: 1 - highlight,
-            emojiScale: 0.82,
-            symbolScale: 0.9
+            emojiScale: OrbitMetrics.spacePagerEmojiScaleFraction,
+            symbolScale: OrbitMetrics.spacePagerSymbolScaleFraction,
+            dotScale: OrbitMetrics.spacePagerDotScaleFraction,
+            dimmedOpacity: OrbitMetrics.spacePagerIconInactiveOpacity,
+            dimmedSaturation: OrbitMetrics.spacePagerIconInactiveSaturation
         )
         .frame(width: side, height: side)
+        .background {
+            // The active tile fades with `highlight`, so it follows a space swipe instead of snapping.
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity * highlight))
+                .allowsHitTesting(false)
+        }
         .contentShape(Rectangle())
         .orbitHoverHighlight(
-            fill: theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity),
-            cornerRadius: OrbitMetrics.sidebarFaviconCornerRadius
+            fill: theme.readableForeground.opacity(OrbitMetrics.sidebarHoverRowOpacity),
+            cornerRadius: cornerRadius,
+            isActive: highlight < 1
         )
         .scaleEffect(isDropTarget ? 1.12 : 1)
     }

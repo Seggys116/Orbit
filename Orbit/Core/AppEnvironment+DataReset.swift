@@ -168,6 +168,9 @@ extension AppEnvironment {
         var outcome = await resetData(Set(DataResetCategory.allCases))
         let targets = dataResetTargets
 
+        // The vault lives in the Keychain, outside every directory and store the categories above clear.
+        PasswordVaults.shared.deleteAll()
+
         await clearEverythingInEngine()
         await Self.removeSiteProfileStores(siteProfilesBeforeReset, engine: engine)
         materializeActiveTabIfNeeded()

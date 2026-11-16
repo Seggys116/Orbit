@@ -419,7 +419,8 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
 
         @MainActor
         init(_ row: ElFlatRow, session: OrbitInspectSession) async throws {
-            size = NSSize(width: 420, height: InspectChrome.rowHeight)
+            // Wide enough for the row to print in full: rows no longer truncate, so the layout badge follows the text.
+            size = NSSize(width: max(420, ElTreeRowView.contentWidth(of: row)), height: InspectChrome.rowHeight)
             let host = NSHostingView(rootView: ElTreeRowView(row: row, session: session).frame(width: size.width, height: size.height))
             host.frame = NSRect(origin: .zero, size: size)
             window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -479,7 +480,9 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
             try hosted.click(atX: CGFloat(row.depth) * 16 + 16 + 20)
             XCTAssertEqual(elements.selectedID, row.nodeID, "a click on the tag must select the row")
 
-            try hosted.click(atX: hosted.size.width - 8 - 12)
+            // The badge follows the tag text (8pt of padding after it) so it stays reachable when the tree scrolls sideways.
+            let textEnd = ElTreeRowView.contentWidth(of: row) - ElTreeRowView.trailingRoom
+            try hosted.click(atX: textEnd + 8 + 12)
             try await self.waitUntil("flex overlay on", timeout: .seconds(3)) { elements.layoutOverlays[row.nodeID] != nil }
         }
     }
@@ -515,7 +518,8 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
             "app.idbStoreInfo", "app.idbRecords", "app.cacheNames", "app.cacheEntries", "app.serviceWorkers",
             "app.manifest", "app.quota", "app.frames", "app.permissions", "app.error", "lh.loaded", "lh.bundle",
             "sec.page", "fw.evidence", "fw.tree", "fw.data", "fw.routes", "fw.hmr", "fw.overlay", "fw.editResult",
-            "fw.globalStored", "fw.launchResult",
+            "fw.globalStored", "fw.launchResult", "fw.devSocket", "fw.devFrame", "fw.devEvent", "fw.devProbe",
+            "fw.devActionResult", "fw.devEnv", "net.form", "net.body",
         ]
     }()
 
@@ -721,7 +725,7 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
             }
             let openID = try XCTUnwrap(network.records.first { $0.url.hasSuffix("/big-open.txt") }?.id)
             let rich = try XCTUnwrap(network.richRecord(id: openID))
-            XCTAssertEqual(rich.responseBody?.count, 8192)
+            XCTAssertEqual(rich.responseBody?.count, 65536)
             XCTAssertTrue(rich.responseBodyTruncated)
             try await self.waitUntil("page still got the whole body", timeout: .seconds(5)) {
                 (try await session.evaluate("window.__bigLength") as? Int) == 100_000

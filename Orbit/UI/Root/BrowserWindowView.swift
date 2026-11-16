@@ -12,6 +12,15 @@ enum OrbitHoverPanelMetrics {
     static let shadowXOffset: CGFloat = 6
     static let contactShadowRadius: CGFloat = 3
     static let contactShadowOpacity: Double = 0.22
+
+    // The floating panel runs a little wider than the docked sidebar: it has a rounded edge and a shadow, and reads cramped at the docked width.
+    static let extraWidth: CGFloat = 12
+
+    /// The overlay's width for a docked width. Never narrower than the docked width, and never wider than the window less the inset on both sides.
+    static func overlayWidth(forSidebarWidth sidebarWidth: CGFloat, availableWidth: CGFloat = .infinity) -> CGFloat {
+        let ceiling = availableWidth - edgeInset * 2
+        return max(sidebarWidth, min(sidebarWidth + extraWidth, ceiling))
+    }
 }
 
 struct PositionedWindowControls: View {
@@ -31,8 +40,13 @@ struct HoverRevealSidebarLayer: View {
     @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
     #endif
 
+    @State private var layerWidth: CGFloat = .infinity
+
+    // The pointer stays "inside" through the panel's own wider body, so the zone tracks the overlay width, not the docked one.
     private var hotZoneWidth: CGFloat {
-        env.isSidebarHoverRevealed ? env.effectiveSidebarWidth : OrbitMetrics.sidebarHoverEdgeWidth
+        env.isSidebarHoverRevealed
+            ? OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: env.effectiveSidebarWidth, availableWidth: layerWidth)
+            : OrbitMetrics.sidebarHoverEdgeWidth
     }
 
     var body: some View {
@@ -42,7 +56,15 @@ struct HoverRevealSidebarLayer: View {
                 .frame(maxHeight: .infinity, alignment: .leading)
 
             // Always mounted, never inserted/removed: an if-gated insertion would rebuild and lay out the SidebarView subtree while the panel is moving.
-            HoverRevealedFloatingPanel(isRevealed: env.isSidebarHoverRevealed)
+            HoverRevealedFloatingPanel(isRevealed: env.isSidebarHoverRevealed, availableWidth: layerWidth)
+        }
+        // Full width, so the reader below measures the window rather than the panel it is sizing.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.size.width, initial: true) { _, width in layerWidth = width }
+            }
         }
     }
 
@@ -64,10 +86,16 @@ struct HoverRevealedFloatingPanel: View {
     @Environment(AppEnvironment.self) private var env
 
     var isRevealed: Bool = true
+    /// The window width the panel must fit in; unbounded when the panel is hosted on its own.
+    var availableWidth: CGFloat = .infinity
+
+    private var panelWidth: CGFloat {
+        OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: env.effectiveSidebarWidth, availableWidth: availableWidth)
+    }
 
     private var hiddenOffset: CGFloat {
         -(OrbitHoverPanelMetrics.edgeInset
-            + env.effectiveSidebarWidth
+            + panelWidth
             + OrbitHoverPanelMetrics.shadowRadius
             + OrbitHoverPanelMetrics.shadowXOffset
             + 4)
@@ -75,7 +103,7 @@ struct HoverRevealedFloatingPanel: View {
 
     var body: some View {
         SidebarView(paintsOwnBackground: true, backgroundOpacity: OrbitAcrylic.panelTintOpacity)
-            .frame(width: env.effectiveSidebarWidth)
+            .frame(width: panelWidth)
             .frame(maxHeight: .infinity, alignment: .leading)
             .overlay(alignment: .topLeading) { PositionedWindowControls() }
             .background(.ultraThinMaterial)
@@ -406,7 +434,7 @@ struct BrowserWindowView: View {
             return env.effectiveSidebarWidth + OrbitMetrics.sidebarResizeHandleWidth
         }
         if env.isSidebarHoverRevealed {
-            return env.effectiveSidebarWidth
+            return OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: env.effectiveSidebarWidth)
         }
         return 0
     }
