@@ -164,10 +164,12 @@ extension AppEnvironment {
 
     @discardableResult
     func resetEverything() async -> DataResetOutcome {
+        let siteProfilesBeforeReset = state.siteProfiles
         var outcome = await resetData(Set(DataResetCategory.allCases))
         let targets = dataResetTargets
 
         await clearEverythingInEngine()
+        await Self.removeSiteProfileStores(siteProfilesBeforeReset, engine: engine)
         materializeActiveTabIfNeeded()
         if AppEnvironment.removeContents(of: targets.contentBlockingDirectory) {
             ContentBlockingRuntime.shared.reset()
@@ -272,6 +274,10 @@ extension AppEnvironment {
                 identifier: profile.sessionIdentifier,
                 persistent: profile.isPersistent
             ) else { continue }
+            take(session)
+        }
+        for siteProfile in state.siteProfiles {
+            guard let session = try? engine.session(identifier: siteProfile.sessionIdentifier, persistent: true) else { continue }
             take(session)
         }
         take(engine.defaultSession)

@@ -45,7 +45,7 @@ extension AppEnvironment: WebContentsDelegate {
             LittleOrbitWindowController.openFromExternalActivation(url: url)
             return false
         }
-        if let sourceTabID = tabID(for: contents), shouldPeek(sourceTabID: sourceTabID, modifiers: modifiers) {
+        if let sourceTabID = tabID(for: contents), shouldPeek(sourceTabID: sourceTabID, modifiers: modifiers, destination: url) {
             openPeek(sourceTabID: sourceTabID, url: url)
             return false
         }
@@ -56,10 +56,11 @@ extension AppEnvironment: WebContentsDelegate {
 
     // Takes modifiers explicitly rather than reading NSEvent.modifierFlags
     // itself so a test can drive the decision with a real modifier set.
-    func shouldPeek(sourceTabID: TabID, modifiers: NSEvent.ModifierFlags) -> Bool {
-        guard let section = state.tabs[sourceTabID]?.section else { return false }
-        switch section {
+    func shouldPeek(sourceTabID: TabID, modifiers: NSEvent.ModifierFlags, destination: URL? = nil) -> Bool {
+        guard let tab = state.tabs[sourceTabID] else { return false }
+        switch tab.section {
         case .favorite, .pinned:
+            if let destination, SiteIdentity.areSameSite(tab.url, destination) { return false }
             return PeekSettings.isAutomaticPeekEnabled
         case .today:
             return PeekSettings.isShiftClickPeekEnabled && modifiers.contains(.shift)
@@ -166,19 +167,27 @@ extension AppEnvironment: WebContentsDelegate {
 
     // MARK: Content requests
 
+    // A new tab for a page on the opener's own site keeps the opener's site profile; a link to any other site never does.
+    private func siteProfileToInherit(openerTabID: TabID, destination: URL) -> SiteProfileID? {
+        guard let profile = store.boundSiteProfile(forTab: openerTabID),
+              SiteIdentity.registrableDomain(of: destination) == profile.siteKey
+        else { return nil }
+        return profile.id
+    }
+
     func webContents(_ contents: WebContents, requestsNewContent request: NewContentRequest) -> Bool {
         guard let tabID = tabID(for: contents), let tab = state.tabs[tabID] else { return false }
         switch request.disposition {
         case .currentTab:
             return false
         case .newForegroundTab:
-            openTab(url: request.url, in: tab.spaceID, section: .today, activate: true)
+            openTab(url: request.url, in: tab.spaceID, section: .today, activate: true, siteProfileID: siteProfileToInherit(openerTabID: tabID, destination: request.url))
             return true
         case .newBackgroundTab:
-            openTab(url: request.url, in: tab.spaceID, section: .today, activate: false)
+            openTab(url: request.url, in: tab.spaceID, section: .today, activate: false, siteProfileID: siteProfileToInherit(openerTabID: tabID, destination: request.url))
             return true
         case .newWindow:
-            if shouldPeek(sourceTabID: tabID, modifiers: [.shift]) {
+            if shouldPeek(sourceTabID: tabID, modifiers: [.shift], destination: request.url) {
                 openPeek(sourceTabID: tabID, url: request.url)
                 return true
             }
@@ -201,7 +210,7 @@ extension AppEnvironment: WebContentsDelegate {
         case .download:
             return false
         case .newWindow:
-            if shouldPeek(sourceTabID: tabID, modifiers: [.shift]) {
+            if shouldPeek(sourceTabID: tabID, modifiers: [.shift], destination: request.url) {
                 openPeek(sourceTabID: tabID, url: request.url)
                 return false
             }

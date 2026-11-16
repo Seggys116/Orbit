@@ -47,6 +47,9 @@ public protocol SyncTransport: AnyObject {
     func add(pendingRecordZoneChanges: [CKSyncEngine.PendingRecordZoneChange])
     func remove(pendingRecordZoneChanges: [CKSyncEngine.PendingRecordZoneChange])
     func add(pendingDatabaseChanges: [CKSyncEngine.PendingDatabaseChange])
+    func remove(pendingDatabaseChanges: [CKSyncEngine.PendingDatabaseChange])
+
+    func deactivate()
 
     func fetchChanges() async throws
     func sendChanges() async throws
@@ -130,6 +133,14 @@ public final class CloudKitSyncTransport: SyncTransport {
 
     public func add(pendingDatabaseChanges changes: [CKSyncEngine.PendingDatabaseChange]) {
         syncEngine?.state.add(pendingDatabaseChanges: changes)
+    }
+
+    public func remove(pendingDatabaseChanges changes: [CKSyncEngine.PendingDatabaseChange]) {
+        syncEngine?.state.remove(pendingDatabaseChanges: changes)
+    }
+
+    public func deactivate() {
+        syncEngine = nil
     }
 
     public func fetchChanges() async throws {

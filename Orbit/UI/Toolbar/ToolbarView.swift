@@ -45,6 +45,15 @@ enum OrbitToolbarMetrics {
 
     static let addressPillGap: CGFloat = 2
 
+    static let siteProfileNameMaxWidth: CGFloat = 96
+
+    // Room the address row needs before the Site Profile dropdown joins it; below this the URL keeps the space and the profile stays reachable from the right-click menu.
+    static let siteProfileDropdownMinimumAddressWidth: CGFloat = 200
+
+    static func fitsSiteProfileDropdown(regionWidth: CGFloat, sideReserve: CGFloat) -> Bool {
+        guard regionWidth.isFinite else { return true }
+        return regionWidth - 2 * sideReserve >= siteProfileDropdownMinimumAddressWidth
+    }
 
     static let navClusterWidth: CGFloat = navIconSize * 3 + navIconSpacing * 2
     static let trailingClusterWidth: CGFloat = trailingIconSize * 2 + trailingIconSpacing
@@ -399,9 +408,12 @@ struct ToolbarView: View {
 
     private var centredAddressRegion: some View {
         GeometryReader { proxy in
-            centredAddressRow
-                .padding(.horizontal, clampedAddressSideReserve(in: proxy.size.width))
-                .frame(width: proxy.size.width, height: proxy.size.height)
+            let reserve = clampedAddressSideReserve(in: proxy.size.width)
+            centredAddressRow(
+                showsSiteProfileDropdown: OrbitToolbarMetrics.fitsSiteProfileDropdown(regionWidth: proxy.size.width, sideReserve: reserve)
+            )
+            .padding(.horizontal, reserve)
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
     }
 
@@ -415,7 +427,7 @@ struct ToolbarView: View {
         return min(desired, max(0, (width - OrbitToolbarMetrics.minimumAddressWidth) / 2))
     }
 
-    private var centredAddressRow: some View {
+    private func centredAddressRow(showsSiteProfileDropdown: Bool) -> some View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
             HStack(spacing: 0) {
@@ -423,9 +435,45 @@ struct ToolbarView: View {
                     addressLeadingControl
                 }
                 addressField
+                if showsSiteProfileDropdown, hasLoadedPage, !OrbitInternalPageChrome.isDocumentPage(tab.url),
+                   env.store.siteProfileDropdownSiteKey(forTab: tab.id) != nil {
+                    siteProfileDropdown
+                }
             }
             Spacer(minLength: 0)
         }
+    }
+
+    private var siteProfileDropdown: some View {
+        let name = env.store.boundSiteProfile(forTab: tab.id)?.name ?? SiteProfile.defaultName
+        return OrbitMenuButton(entries: {
+            focusPaneIfNeeded()
+            adoptMenuTheme()
+            return ToolbarContextMenu.siteProfileDropdownEntries(forTab: tab.id, in: env)
+        }) {
+            HStack(spacing: 4) {
+                Text(name)
+                    .font(OrbitFont.addressIndicator)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: OrbitToolbarMetrics.siteProfileNameMaxWidth, alignment: .leading)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(headerForeground.opacity(0.85))
+            .padding(.horizontal, 8)
+            .frame(height: OrbitToolbarMetrics.addressCopyPillSize)
+            .fixedSize(horizontal: true, vertical: false)
+            .contentShape(Rectangle())
+        }
+        .orbitHoverHighlight(
+            fill: headerHoverFill,
+            cornerRadius: OrbitToolbarMetrics.hoverHighlightCornerRadius
+        )
+        .layoutPriority(1)
+        .padding(.leading, OrbitToolbarMetrics.addressPillGap)
+        .orbitTooltip("Site Profile: \(name)")
+        .accessibilityLabel("Site Profile: \(name)")
     }
 
     private var addressLeadingControl: some View {

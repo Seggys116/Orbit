@@ -926,11 +926,30 @@ final class RecordingSyncTransport: SyncTransport {
     private(set) var addedRecordZoneChanges: [CKSyncEngine.PendingRecordZoneChange] = []
     private(set) var removedRecordZoneChanges: [CKSyncEngine.PendingRecordZoneChange] = []
     private(set) var addedDatabaseChanges: [CKSyncEngine.PendingDatabaseChange] = []
+    private var pendingDatabase: [CKSyncEngine.PendingDatabaseChange] = []
+
+    private(set) var sentDatabaseChangeBatches: [[CKSyncEngine.PendingDatabaseChange]] = []
+    private(set) var deactivateCount = 0
+    private(set) var activationsHadSerialization: [Bool] = []
+
+    var sendError: Error?
+    var sendErrorQueue: [Error?] = []
+    var onSend: (@MainActor () -> Void)?
+    var fetchError: Error?
+    var onFetch: (@MainActor () -> Void)?
+    /// Models a transient failure: the send returns normally but the zone deletion stays queued.
+    var keepsDatabaseChangesPendingOnSend = false
 
     func activate(delegate: any CKSyncEngineDelegate, stateSerialization: CKSyncEngine.State.Serialization?) throws {
         activateCount += 1
         if let activateError { throw activateError }
+        activationsHadSerialization.append(stateSerialization != nil)
         isActivated = true
+    }
+
+    func deactivate() {
+        deactivateCount += 1
+        isActivated = false
     }
 
     func accountStatus() async throws -> CKAccountStatus {
@@ -942,7 +961,7 @@ final class RecordingSyncTransport: SyncTransport {
         return addedRecordZoneChanges.filter { !removedNames.contains(Self.recordName(of: $0)) }
     }
 
-    var pendingDatabaseChanges: [CKSyncEngine.PendingDatabaseChange] { addedDatabaseChanges }
+    var pendingDatabaseChanges: [CKSyncEngine.PendingDatabaseChange] { pendingDatabase }
 
     func add(pendingRecordZoneChanges changes: [CKSyncEngine.PendingRecordZoneChange]) {
         addedRecordZoneChanges.append(contentsOf: changes)
@@ -954,6 +973,12 @@ final class RecordingSyncTransport: SyncTransport {
 
     func add(pendingDatabaseChanges changes: [CKSyncEngine.PendingDatabaseChange]) {
         addedDatabaseChanges.append(contentsOf: changes)
+        pendingDatabase.append(contentsOf: changes)
+    }
+
+    func remove(pendingDatabaseChanges changes: [CKSyncEngine.PendingDatabaseChange]) {
+        let removed = Set(changes.map(Self.zoneKey(of:)))
+        pendingDatabase.removeAll { removed.contains(Self.zoneKey(of: $0)) }
     }
 
     /// Whether each call arrived with `SimulatedDelegateCallback` set, in call order.
@@ -963,11 +988,18 @@ final class RecordingSyncTransport: SyncTransport {
     func fetchChanges() async throws {
         fetchCount += 1
         fetchCallsInsideDelegateCallback.append(SimulatedDelegateCallback.isActive)
+        onFetch?()
+        if let fetchError { throw fetchError }
     }
 
     func sendChanges() async throws {
         sendCount += 1
         sendCallsInsideDelegateCallback.append(SimulatedDelegateCallback.isActive)
+        sentDatabaseChangeBatches.append(pendingDatabase)
+        onSend?()
+        if !sendErrorQueue.isEmpty, let queued = sendErrorQueue.removeFirst() { throw queued }
+        if let sendError { throw sendError }
+        if !keepsDatabaseChangesPendingOnSend { pendingDatabase.removeAll() }
     }
 
     // MARK: Assertions
@@ -994,10 +1026,22 @@ final class RecordingSyncTransport: SyncTransport {
         addedRecordZoneChanges.removeAll()
         removedRecordZoneChanges.removeAll()
         addedDatabaseChanges.removeAll()
+        pendingDatabase.removeAll()
+        sentDatabaseChangeBatches.removeAll()
+        deactivateCount = 0
+        activationsHadSerialization.removeAll()
         fetchCount = 0
         sendCount = 0
         fetchCallsInsideDelegateCallback.removeAll()
         sendCallsInsideDelegateCallback.removeAll()
+    }
+
+    private static func zoneKey(of change: CKSyncEngine.PendingDatabaseChange) -> String {
+        switch change {
+        case .saveZone(let zone): return "save:\(zone.zoneID.zoneName)"
+        case .deleteZone(let id): return "delete:\(id.zoneName)"
+        @unknown default: return ""
+        }
     }
 
     private static func recordName(of change: CKSyncEngine.PendingRecordZoneChange) -> String {

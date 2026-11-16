@@ -35,6 +35,16 @@ public final class CloudSyncEngine {
 
     public private(set) var status: SyncStatus = .disabled
 
+    public private(set) var isRecovering = false
+
+    private var storedProblem: SyncProblem?
+    private var needsReconcileAfterRecovery = false
+
+    public var lastProblem: SyncProblem? {
+        guard case .error(let message) = status, let problem = storedProblem, problem.message == message else { return nil }
+        return problem
+    }
+
     public private(set) var isStarted = false
 
     public private(set) var isEnabled: Bool = SyncPreferences.isEnabled
@@ -150,7 +160,7 @@ public final class CloudSyncEngine {
     }
 
     public func refreshNow() async {
-        guard transport.isActivated, isEnabled else { return }
+        guard transport.isActivated, isEnabled, !isRecovering else { return }
         await refreshAccountStatus()
         guard isEligibleToSync else { return }
         reconcile()
@@ -246,15 +256,19 @@ public final class CloudSyncEngine {
         let debounce = pushDebounce
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: debounce)
-            guard !Task.isCancelled else { return }
-            self?.reconcileAndPush()
+            guard !Task.isCancelled, let self else { return }
+            if self.isRecovering {
+                self.needsReconcileAfterRecovery = true
+                return
+            }
+            self.reconcileAndPush()
         }
     }
 
     // MARK: Reconcile (local -> desired CKRecord set -> diff -> push)
 
     private func reconcileAndPush() {
-        guard isEligibleToSync else { return }
+        guard isEligibleToSync, !isRecovering else { return }
         reconcile()
         guard !transport.pendingRecordZoneChanges.isEmpty || !transport.pendingDatabaseChanges.isEmpty else { return }
         status = .syncing
@@ -916,26 +930,34 @@ public final class CloudSyncEngine {
 
     private func handleFailedSave(_ failure: CKSyncEngine.Event.SentRecordZoneChanges.FailedRecordSave) {
         let error = failure.error
-        switch error.code {
-        case .serverRecordChanged:
+        let problem = SyncProblem.classify(error, recordType: failure.record.recordType)
+        switch problem.kind {
+        case .conflict:
             if let serverRecord = error.serverRecord {
                 resolveConflict(clientRecord: failure.record, serverRecord: serverRecord)
             } else {
                 abandonPendingSave(failure.record.recordID)
             }
-        case .zoneNotFound, .userDeletedZone:
+        case .zoneMissing:
             transport.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zoneID))])
-        case .networkUnavailable, .networkFailure, .serviceUnavailable, .operationCancelled:
+        case .network, .interrupted:
             break // transient — CKSyncEngine retries automatically
-        case .requestRateLimited, .zoneBusy:
-            scheduleRetry(after: error.retryAfterSeconds ?? 3)
-        case .quotaExceeded:
-            status = .error(message: "iCloud storage is full. Orbit will keep working locally until there's room to sync again.")
-        case .notAuthenticated:
-            status = .unavailable(reason: .noAccount)
+        case .rateLimited(let retryAfter):
+            scheduleRetry(after: retryAfter ?? 3)
         default:
-            status = .error(message: "Couldn't sync a \(failure.record.recordType) record to iCloud: \(error.localizedDescription)")
+            // A rejection that will repeat unchanged is dropped from the queue; the next reconcile re-queues it, so it never retries in a loop.
+            if problem.isPermanent { abandonPendingSave(failure.record.recordID) }
+            surface(problem)
         }
+    }
+
+    private func surface(_ problem: SyncProblem) {
+        if case .notAuthenticated = problem.kind {
+            status = .unavailable(reason: .noAccount)
+            return
+        }
+        storedProblem = problem
+        status = .error(message: problem.message)
     }
 
     private func scheduleRetry(after seconds: Double) {
@@ -948,21 +970,17 @@ public final class CloudSyncEngine {
     }
 
     func handleTopLevelError(_ error: Error) {
-        guard let ckError = error as? CKError else {
-            status = .error(message: error.localizedDescription)
-            return
-        }
-        switch ckError.code {
-        case .networkUnavailable, .networkFailure, .serviceUnavailable, .operationCancelled, .changeTokenExpired:
+        let problem = SyncProblem.classify(error)
+        switch problem.kind {
+        case .network, .interrupted:
             break
-        case .requestRateLimited, .zoneBusy:
-            scheduleRetry(after: ckError.retryAfterSeconds ?? 3)
-        case .quotaExceeded:
-            status = .error(message: "iCloud storage is full. Orbit will keep working locally until there's room to sync again.")
-        case .notAuthenticated:
-            status = .unavailable(reason: .noAccount)
+        case .rateLimited(let retryAfter):
+            scheduleRetry(after: retryAfter ?? 3)
+        case .zoneMissing:
+            transport.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zoneID))])
+            surface(problem)
         default:
-            status = .error(message: "iCloud sync error: \(ckError.localizedDescription)")
+            surface(problem)
         }
     }
 
@@ -990,9 +1008,105 @@ public final class CloudSyncEngine {
         }
         pendingNoteAssetFiles.removeAll()
         persistCaches()
-        if pendingPush.isEmpty, transport.pendingRecordZoneChanges.isEmpty {
+        if pendingPush.isEmpty, transport.pendingRecordZoneChanges.isEmpty, !isRecovering {
             status = .idle(lastSyncedAt: Date())
         }
+    }
+
+    private static let maximumChangesPerBatch = 200
+
+    public func replaceICloudWithThisMac() async {
+        guard await beginRecovery() else { return }
+        do {
+            clearPendingChanges()
+            transport.add(pendingDatabaseChanges: [.deleteZone(Self.zoneID)])
+            try await sendChangesOutsideDelegateCallback()
+            guard zoneDeletionCompleted() else { return finishRecovery() }
+            try restartEngineWithEmptyState()
+            transport.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zoneID))])
+            reconcile()
+            try await sendChangesOutsideDelegateCallback()
+            finishRecovery()
+        } catch {
+            // Left queued, the engine would delete the zone on a later send after the user was told it failed.
+            transport.remove(pendingDatabaseChanges: [.deleteZone(Self.zoneID)])
+            failRecovery(error)
+        }
+    }
+
+    public func replaceThisMacWithICloud() async {
+        guard await beginRecovery() else { return }
+        do {
+            clearPendingChanges()
+            try restartEngineWithEmptyState()
+            transport.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zoneID))])
+            try await fetchChangesOutsideDelegateCallback()
+            reconcile()
+            try await sendChangesOutsideDelegateCallback()
+            finishRecovery()
+        } catch {
+            failRecovery(error)
+        }
+    }
+
+    private func beginRecovery() async -> Bool {
+        guard !isRecovering, isEnabled, isStarted, transport.isActivated else { return false }
+        isRecovering = true
+        storedProblem = nil
+        needsReconcileAfterRecovery = false
+        debounceTask?.cancel()
+        retryTask?.cancel()
+        status = .syncing
+        await refreshAccountStatus()
+        guard case .syncing = status else {
+            isRecovering = false
+            return false
+        }
+        return true
+    }
+
+    private func finishRecovery() {
+        isRecovering = false
+        if case .syncing = status { status = .idle(lastSyncedAt: Date()) }
+        if needsReconcileAfterRecovery {
+            needsReconcileAfterRecovery = false
+            reconcileAndPush()
+        }
+    }
+
+    private func failRecovery(_ error: Error) {
+        surface(SyncProblem.classify(error))
+        finishRecovery()
+    }
+
+    private func clearPendingChanges() {
+        transport.remove(pendingRecordZoneChanges: transport.pendingRecordZoneChanges)
+        transport.remove(pendingDatabaseChanges: transport.pendingDatabaseChanges)
+        for url in pendingNoteAssetFiles {
+            try? FileManager.default.removeItem(at: url)
+        }
+        pendingNoteAssetFiles.removeAll()
+    }
+
+    private func zoneDeletionCompleted() -> Bool {
+        let stillPending = transport.pendingDatabaseChanges.contains { change in
+            if case .deleteZone(let id) = change { return id == Self.zoneID }
+            return false
+        }
+        transport.remove(pendingDatabaseChanges: [.deleteZone(Self.zoneID)])
+        guard case .syncing = status else { return false }
+        guard !stillPending else {
+            surface(.incompleteRecovery())
+            return false
+        }
+        return true
+    }
+
+    // CKSyncEngine has no API to forget its change token, so a full re-fetch needs a new engine built without the saved state.
+    private func restartEngineWithEmptyState() throws {
+        clearLocalCaches()
+        transport.deactivate()
+        try transport.activate(delegate: self, stateSerialization: nil)
     }
 
     // MARK: Test-visible state
@@ -1060,7 +1174,7 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
             for failure in sent.failedZoneSaves {
                 handleTopLevelError(failure.error)
             }
-            for (_, error) in sent.failedZoneDeletes {
+            for (_, error) in sent.failedZoneDeletes where error.code != .zoneNotFound {
                 handleTopLevelError(error)
             }
 
@@ -1071,7 +1185,7 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
             status = .syncing
 
         case .didSendChanges:
-            if status.isActivelyWorking {
+            if status.isActivelyWorking, !isRecovering {
                 status = .idle(lastSyncedAt: Date())
             }
 
@@ -1099,7 +1213,7 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
 
     public func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
         let scope = context.options.scope
-        let changes = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
+        let changes = Array(syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }.prefix(Self.maximumChangesPerBatch))
         guard !changes.isEmpty else { return nil }
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { [weak self] recordID in
             await self?.buildRecordForSave(recordID: recordID)

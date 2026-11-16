@@ -49,14 +49,14 @@ struct PeekPanelView: View {
             panel
             controls
         }
-        .padding(.vertical, 22)
-        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .padding(.horizontal, 18)
         .onExitCommand { dismiss() }
     }
 
     private var panel: some View {
         content
-        .frame(maxWidth: 980, maxHeight: .infinity)
+        .frame(maxWidth: 1600, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: peekCornerRadius))
         .overlay(RoundedRectangle(cornerRadius: peekCornerRadius).strokeBorder(.white.opacity(0.08)))
         .shadow(color: .black.opacity(0.35), radius: 30, y: 12)

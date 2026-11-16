@@ -315,6 +315,8 @@ final class AppEnvironment {
 
     var downloads: [DownloadItem] { downloadStore.downloads }
 
+    var libraryDownloads: [DownloadItem] { downloadStore.allDownloads }
+
     // MARK: - AI provider (Assist features degrade honestly without one)
 
     var hasConfiguredAIProvider: Bool = false
@@ -341,7 +343,7 @@ final class AppEnvironment {
         self.init(
             dataRoot: .processDefault,
             store: BrowserStore(),
-            downloadStore: DownloadStore(),
+            downloadStore: DownloadStore(indexedFolder: WebKitDownloads.downloadsDirectory),
             boostStore: BoostStore(),
             noteStore: NoteStore(),
             easelStore: EaselStore(),
@@ -851,10 +853,11 @@ final class AppEnvironment {
     func pinnedNodes(in spaceID: SpaceID) -> [SidebarNode] { store.pinnedNodes(in: spaceID) }
 
     @discardableResult
-    func openTab(url: URL, in spaceID: SpaceID, section: TabSection = .today, activate: Bool = true) -> TabID {
+    func openTab(url: URL, in spaceID: SpaceID, section: TabSection = .today, activate: Bool = true, siteProfileID: SiteProfileID? = nil) -> TabID {
         let tabID = scopingActiveSpaceToThisWindow {
             store.openTab(url: url, in: spaceID, section: section, activate: activate)
         }
+        if let siteProfileID { _ = store.setSiteProfile(siteProfileID, forTab: tabID) }
         // History recording schedules its own task. Queuing it before materializeWebContents
         // puts that task ahead of the deferred load, so the first navigation waits on a database write.
         materializeWebContents(for: tabID, url: url)
@@ -1079,6 +1082,7 @@ final class AppEnvironment {
 
         #if DEBUG
         if let factory = _test_webContentsFactory {
+            _test_materializations.append((tabID, store.siteProfileForSession(of: tabID)?.id))
             let contents = factory(tabID, url)
             adoptWebContents(contents, for: tabID, url: url)
             return
@@ -1098,13 +1102,15 @@ final class AppEnvironment {
             return
         }
 
+        let siteProfile = store.siteProfileForSession(of: tabID)
+
         // Not try?: a session/browser that fails to come up is the
         // difference between a working browser and a blank window.
         let session: EngineSession
         let contents: WebContents
         do {
             session = try engine.session(
-                identifier: profile.sessionIdentifier,
+                identifier: siteProfile?.sessionIdentifier ?? profile.sessionIdentifier,
                 persistent: profile.isPersistent
             )
             // Bound before the web view exists so the rule compile is already
@@ -1147,10 +1153,10 @@ final class AppEnvironment {
         // GitHub Live Folders only read this session's cookies and poll. They never
         // touch the tab's request, so this must not sit in front of load(). Never
         // reached for a non-persistent Profile or ephemeral Space, so Incognito
-        // can't hand it a session.
+        // can't hand it a session. Nor a Site Profile session: the folders belong to the Space's own account.
         // browserUserAgent is assigned here, not at the store's declaration: OrbitTests
         // compiles the store through a symlink and does not see EngineFactory.
-        if profile.isPersistent, let space = state.spaces.first(where: { $0.id == spaceID }), !space.isEphemeral {
+        if siteProfile == nil, profile.isPersistent, let space = state.spaces.first(where: { $0.id == spaceID }), !space.isEphemeral {
             let capturedSpace = space
             Task { @MainActor in
                 GitHubLiveFolderStore.browserUserAgent = WebKitProduct.userAgent
@@ -1196,6 +1202,7 @@ final class AppEnvironment {
     private func adoptWebContents(_ contents: any WebContents, for tabID: TabID, url: URL) {
         contents.delegate = self
         webContents[tabID] = contents
+        inheritSiteProfile(from: contents, for: tabID)
         navigationStates[tabID] = contents.navigationState
         mediaStates[tabID] = contents.mediaState
         store.setMediaState(contents.mediaState, forTab: tabID)
@@ -1417,6 +1424,8 @@ final class AppEnvironment {
 
     #if DEBUG
     var _test_webContentsFactory: ((TabID, URL) -> any WebContents)?
+    // Every factory-path materialization with the Site Profile its session was chosen for, nil meaning the Space's own Profile session.
+    var _test_materializations: [(tabID: TabID, siteProfileID: SiteProfileID?)] = []
     #endif
 
     // MARK: - Background tab renderer policy
@@ -1729,5 +1738,5 @@ final class AppEnvironment {
         }
     }
 
-    var recentDownloads: [DownloadItem] { Array(downloadStore.downloads.prefix(6)) }
+    var recentDownloads: [DownloadItem] { Array(downloadStore.allDownloads.prefix(6)) }
 }

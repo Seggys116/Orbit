@@ -189,7 +189,7 @@ final class WebKitSession: EngineSession {
     // WebKit refuses while a web view still uses the store, so callers release tabs first.
     // The store is released and recreated under the same identifier so later web views get a fresh one.
     // It is not recreated until removal ends: a live instance makes WebKit report "in use" forever.
-    func removePersistentDataStore() async -> Bool {
+    func removePersistentDataStore(recreating: Bool = true) async -> Bool {
         guard isPersistent else { return true }
         let uuid = Self.dataStoreIdentifier(for: identifier)
         dataStore = .nonPersistent()
@@ -210,7 +210,9 @@ final class WebKitSession: EngineSession {
                 break
             }
         }
-        dataStore = WKWebsiteDataStore(forIdentifier: uuid)
+        if recreating {
+            dataStore = WKWebsiteDataStore(forIdentifier: uuid)
+        }
         return removed
     }
 

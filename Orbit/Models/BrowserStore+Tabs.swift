@@ -148,6 +148,10 @@ public extension BrowserStore {
         guard let tab = state.tabs[id], tab.section == .pinned else { return }
         var newState = state
         newState.tabs[id]?.isUnloaded = true
+        if let origin = tab.pinnedURL, tab.hasNavigatedAwayFromPinnedURL {
+            newState.tabs[id]?.url = origin
+            newState.tabs[id]?.title = tab.pinnedTitle ?? ""
+        }
         if newState.activeTabBySpace[tab.spaceID] == id {
             newState.activeTabBySpace[tab.spaceID] = nil
         }
@@ -545,6 +549,7 @@ public extension BrowserStore {
         copy.customTitle = original.customTitle
         copy.faviconURL = original.faviconURL
         copy.zoomFactor = original.zoomFactor
+        copy.siteProfileID = original.siteProfileID
         newState.tabs[copy.id] = copy
 
         switch original.section {

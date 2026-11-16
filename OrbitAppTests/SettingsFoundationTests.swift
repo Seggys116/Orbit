@@ -35,18 +35,9 @@ final class SettingsPaletteAndMetricsTests: XCTestCase {
         XCTAssertEqual(SettingsMetrics.windowDefaultWidth, expected)
     }
 
-    func test_windowMinWidth_isDerivedFromRailAndContentMinWidth() {
-        let expected = SettingsMetrics.railWidth + 1 + SettingsMetrics.contentMinWidth
-        XCTAssertEqual(SettingsMetrics.windowMinWidth, expected)
-    }
-
-    func test_windowDefaultSize_isAtLeastTheWindowMinimumSize() {
-        XCTAssertGreaterThanOrEqual(SettingsMetrics.windowDefaultWidth, SettingsMetrics.windowMinWidth)
-        XCTAssertGreaterThanOrEqual(SettingsMetrics.windowDefaultHeight, SettingsMetrics.windowMinHeight)
-    }
-
-    func test_contentMinWidth_isLessThanContentMaxWidth() {
-        XCTAssertLessThan(SettingsMetrics.contentMinWidth, SettingsMetrics.contentMaxWidth)
+    @MainActor
+    func test_settingsWindowIsNotResizable() {
+        XCTAssertFalse(SettingsWindowController.windowStyleMask.contains(.resizable), "The Settings window is laid out for one size and must not be resizable.")
     }
 
     func test_windowDefaultHeight_isTallerThanThePreviousDefault() {

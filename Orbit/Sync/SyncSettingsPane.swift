@@ -1,12 +1,66 @@
 import SwiftUI
 
+enum SyncRecoveryAction: Identifiable {
+    case replaceICloudWithThisMac
+    case replaceThisMacWithICloud
+
+    var id: Self { self }
+
+    var buttonTitle: String {
+        switch self {
+        case .replaceICloudWithThisMac: return "Replace iCloud with This Mac…"
+        case .replaceThisMacWithICloud: return "Replace This Mac with iCloud…"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .replaceICloudWithThisMac:
+            return "Deletes everything Orbit has stored in iCloud and uploads what is on this Mac in its place."
+        case .replaceThisMacWithICloud:
+            return "Forgets what this Mac had already synced and downloads everything from iCloud again."
+        }
+    }
+
+    var confirmationTitle: String {
+        switch self {
+        case .replaceICloudWithThisMac: return "Replace everything in iCloud with this Mac?"
+        case .replaceThisMacWithICloud: return "Replace this Mac's synced data with iCloud?"
+        }
+    }
+
+    var confirmButtonTitle: String {
+        switch self {
+        case .replaceICloudWithThisMac: return "Replace iCloud"
+        case .replaceThisMacWithICloud: return "Replace This Mac"
+        }
+    }
+
+    var confirmationMessage: String {
+        switch self {
+        case .replaceICloudWithThisMac:
+            return "This deletes everything Orbit has stored in iCloud, including Spaces, Folders, Pinned and Today tabs, Favorites, Boosts, Easels, Notes and link-routing rules that exist only on your other Macs. Orbit then uploads what is on this Mac as the only copy, and your other Macs will receive it. This cannot be undone."
+        case .replaceThisMacWithICloud:
+            return "Orbit discards its record of what this Mac has synced and downloads everything in iCloud again. Where iCloud and this Mac both have an item, iCloud's version replaces this Mac's, so edits made here that never reached iCloud are lost for those items. Items that exist only on this Mac are kept and uploaded, and items you deleted here that are still in iCloud come back. This cannot be undone."
+        }
+    }
+}
+
 struct SyncSettingsPane: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.colorScheme) private var colorScheme
     @State private var isRefreshing = false
+    @State private var pendingRecovery: SyncRecoveryAction?
 
     private var engine: CloudSyncEngine? { env.syncEngine }
     private var status: SyncStatus { engine?.status ?? .disabled }
+    private var problem: SyncProblem? { engine?.lastProblem }
+    private var isRecovering: Bool { engine?.isRecovering ?? false }
+    private var isBusy: Bool { isRefreshing || isRecovering || status.isActivelyWorking }
+    private var isInError: Bool {
+        if case .error = status { return true }
+        return false
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsMetrics.sectionStackSpacing) {
@@ -38,7 +92,7 @@ struct SyncSettingsPane: View {
                         .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 } trailing: {
-                    OrbitButton(title: "Sync Now", isCompact: true, accentColor: SettingsPalette.accent) {
+                    OrbitButton(title: isInError ? "Try Again" : "Sync Now", isCompact: true, accentColor: SettingsPalette.accent) {
                         Task {
                             isRefreshing = true
                             await engine?.refreshNow()
@@ -46,8 +100,12 @@ struct SyncSettingsPane: View {
                         }
                     }
                     .fixedSize()
-                    .disabled(engine == nil || isRefreshing || !canSyncNow)
+                    .disabled(engine == nil || isRefreshing || isRecovering || !canSyncNow)
                 }
+            }
+
+            if problem != nil || isRecovering {
+                troubleshootingSection(for: problem)
             }
 
             OrbitSettingsSection(title: "What syncs") {
@@ -60,6 +118,68 @@ struct SyncSettingsPane: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        .confirmationDialog(
+            pendingRecovery?.confirmationTitle ?? "",
+            isPresented: Binding(get: { pendingRecovery != nil }, set: { if !$0 { pendingRecovery = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingRecovery
+        ) { action in
+            Button(action.confirmButtonTitle, role: .destructive) { run(action) }
+            Button("Cancel", role: .cancel) {}
+        } message: { action in
+            Text(action.confirmationMessage)
+        }
+    }
+
+    private func run(_ action: SyncRecoveryAction) {
+        Task {
+            switch action {
+            case .replaceICloudWithThisMac: await engine?.replaceICloudWithThisMac()
+            case .replaceThisMacWithICloud: await engine?.replaceThisMacWithICloud()
+            }
+        }
+    }
+
+    private func troubleshootingSection(for problem: SyncProblem?) -> some View {
+        OrbitSettingsSection(title: "Troubleshooting") {
+            if let problem {
+                Text(problem.recoveryHint)
+                    .font(.system(size: OrbitControlMetrics.settingsRowDescriptionFontSize))
+                    .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if isRecovering {
+                HStack(spacing: OrbitControlMetrics.settingsRowContentSpacing) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Working with iCloud")
+                    Text("Working with iCloud…")
+                        .font(.system(size: OrbitControlMetrics.settingsRowDescriptionFontSize))
+                        .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
+                }
+            }
+
+            if let problem, !problem.isSchemaProblem {
+                recoveryRow(.replaceICloudWithThisMac)
+                recoveryRow(.replaceThisMacWithICloud)
+            }
+        }
+    }
+
+    private func recoveryRow(_ action: SyncRecoveryAction) -> some View {
+        OrbitSettingsActionRow {
+            Text(action.summary)
+                .font(.system(size: OrbitControlMetrics.settingsRowDescriptionFontSize))
+                .foregroundStyle(OrbitControlColor.secondaryForeground(for: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        } trailing: {
+            OrbitButton(title: action.buttonTitle, kind: .destructive, isCompact: true) {
+                pendingRecovery = action
+            }
+            .fixedSize()
+            .disabled(engine == nil || isBusy)
         }
     }
 

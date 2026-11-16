@@ -47,7 +47,16 @@ public final class DownloadStore {
     @ObservationIgnored
     private var indexByID: [UUID: Int] = [:]
 
-    public init(fileURL: URL = DownloadStore.defaultFileURL) {
+    /// Nil in scratch, demo and test stores, so they never read the real Downloads folder.
+    let folderIndex: DownloadsFolderIndex?
+
+    @ObservationIgnored
+    var trashItem: (URL) throws -> Void = { url in
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }
+
+    public init(fileURL: URL = DownloadStore.defaultFileURL, indexedFolder: URL? = nil) {
+        self.folderIndex = indexedFolder.map { DownloadsFolderIndex(directory: $0) }
         self.writer = AtomicJSONFileWriter(fileURL: fileURL)
         let file = writer.loadNow(default: DownloadsFile())
         self.downloads = file.items
@@ -61,6 +70,57 @@ public final class DownloadStore {
     }
 
     public nonisolated static var defaultFileURL: URL { OrbitDataRoot.processDefault.downloadsFile }
+
+    // Scanned files are already symlink-resolved; a tracked destination may not be, so it is resolved here and then standardized the same way.
+    private static func canonicalPath(_ url: URL) -> String {
+        guard let resolved = realpath(url.path, nil) else { return url.standardizedFileURL.path }
+        defer { free(resolved) }
+        return URL(fileURLWithPath: String(cString: resolved)).standardizedFileURL.path
+    }
+
+    public var allDownloads: [DownloadItem] {
+        guard let folderIndex, !folderIndex.items.isEmpty else { return downloads }
+        let trackedPaths = Set(downloads.map { Self.canonicalPath($0.destinationURL) })
+        let folderOnly = folderIndex.items.filter { !trackedPaths.contains($0.destinationURL.standardizedFileURL.path) }
+        guard !folderOnly.isEmpty else { return downloads }
+        return (downloads + folderOnly)
+            .enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.startedAt != rhs.element.startedAt { return lhs.element.startedAt > rhs.element.startedAt }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
+
+    public func item(id: UUID) -> DownloadItem? {
+        if let index = indexOfDownload(id) { return downloads[index] }
+        return folderIndex?.item(id: id)
+    }
+
+    public func isFolderOnly(_ id: UUID) -> Bool {
+        indexOfDownload(id) == nil && folderIndex?.item(id: id) != nil
+    }
+
+    public func startWatchingFolder() {
+        folderIndex?.startWatching()
+    }
+
+    public func stopWatchingFolder() {
+        folderIndex?.stopWatching()
+    }
+
+    @discardableResult
+    public func moveToTrash(_ id: UUID) -> Bool {
+        guard indexOfDownload(id) == nil, let folderIndex, let item = folderIndex.item(id: id) else { return false }
+        do {
+            try trashItem(item.destinationURL)
+        } catch {
+            return false
+        }
+        folderIndex.forget(id)
+        folderIndex.requestRescan()
+        return true
+    }
 
     // MARK: - Lifecycle
 
@@ -270,8 +330,7 @@ public final class DownloadStore {
     // MARK: - Finder integration
 
     public func revealInFinder(_ id: UUID) {
-        guard let index = indexOfDownload(id) else { return }
-        let item = downloads[index]
+        guard let item = self.item(id: id) else { return }
         if FileManager.default.fileExists(atPath: item.destinationURL.path) {
             NSWorkspace.shared.activateFileViewerSelecting([item.destinationURL])
         } else {
@@ -280,8 +339,8 @@ public final class DownloadStore {
     }
 
     public func fileStillExists(_ id: UUID) -> Bool {
-        guard let index = indexOfDownload(id) else { return false }
-        return FileManager.default.fileExists(atPath: downloads[index].destinationURL.path)
+        guard let item = self.item(id: id) else { return false }
+        return FileManager.default.fileExists(atPath: item.destinationURL.path)
     }
 
     private func indexOfDownload(_ id: UUID) -> Int? {

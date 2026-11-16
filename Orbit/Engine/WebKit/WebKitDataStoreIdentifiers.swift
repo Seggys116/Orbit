@@ -63,6 +63,11 @@ final class WebKitDataStoreIdentifiers {
         return chosen
     }
 
+    func forget(profile: String) {
+        guard registry.identifiers.removeValue(forKey: profile) != nil else { return }
+        save()
+    }
+
     // MARK: - Derivation
 
     /// RFC 4122 version 5 layout over SHA-256: the first 16 bytes of the digest with the version and variant bits set.

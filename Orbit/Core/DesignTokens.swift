@@ -113,7 +113,6 @@ enum OrbitMetrics {
     static let spacePagerDotSpacing: CGFloat = 2
     static let spacePagerContainerPadding: CGFloat = 2
     static let spacePagerInactiveOpacity: Double = 0.72
-    static let spacePagerInactiveBrightnessDrop: Double = 0.35
 
     static let spacePagerMinimumSizeScale: CGFloat = 0.6
 

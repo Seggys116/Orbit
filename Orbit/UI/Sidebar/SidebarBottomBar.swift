@@ -179,6 +179,7 @@ struct SidebarBottomBar: View {
         downloadsPreviewTask?.cancel()
         downloadsPreviewTask = nil
         guard hovering, !showDownloadsPreview else { return }
+        env.downloadStore.startWatchingFolder()
         downloadsPreviewTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: Self.downloadsPreviewIntentDelay)
             guard !Task.isCancelled, isHoveringLibraryButton else { return }
@@ -215,6 +216,7 @@ struct SidebarBottomBar: View {
         downloadsCloseTask?.cancel()
         downloadsCloseTask = nil
         if shown {
+            env.downloadStore.startWatchingFolder()
             installDownloadsEscapeMonitor()
         } else {
             isHoveringDownloadsPanel = false
@@ -630,9 +632,15 @@ struct DownloadsPreviewRow: View {
             env.downloadStore.revealInFinder(item.id)
             onDismiss()
         }))
-        entries.append(.item(OrbitContextMenuItem(title: "Remove from List", systemImage: "trash", isDestructive: true) {
-            env.downloadStore.remove(item.id)
-        }))
+        if env.downloadStore.isFolderOnly(item.id) {
+            entries.append(.item(OrbitContextMenuItem(title: "Move to Trash", systemImage: "trash", isEnabled: fileExists, isDestructive: true) {
+                env.downloadStore.moveToTrash(item.id)
+            }))
+        } else {
+            entries.append(.item(OrbitContextMenuItem(title: "Remove from List", systemImage: "trash", isDestructive: true) {
+                env.downloadStore.remove(item.id)
+            }))
+        }
         return entries
     }
 

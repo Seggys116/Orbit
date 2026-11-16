@@ -97,7 +97,7 @@ final class LinksSettingsWiringTests: XCTestCase {
 
     func test_automaticPeekSwitch_changesTheRealNavigationDecisionForAPinnedTab() {
         let (_, mock) = makeAttachedTab(section: .pinned)
-        let target = url("https://elsewhere.example.com/article")
+        let target = url("https://elsewhere.example.org/article")
 
         LinksSettingsActions.setAutomaticPeek(true)
         PeekState.shared.activePreview = nil
@@ -110,6 +110,30 @@ final class LinksSettingsWiringTests: XCTestCase {
         let allowedWhenOff = env.webContents(mock, shouldAllowNavigationTo: target, kind: .linkActivated, isMainFrame: true)
         XCTAssertTrue(allowedWhenOff, "With automatic Peek off, the click must navigate normally.")
         XCTAssertNil(PeekState.shared.activePreview, "No Peek may be presented once the switch is off.")
+    }
+
+    func test_sameSiteLinkInAPinnedTabNavigatesInPlaceInsteadOfPeeking() {
+        let (_, mock) = makeAttachedTab(section: .pinned)
+        LinksSettingsActions.setAutomaticPeek(true)
+        PeekState.shared.activePreview = nil
+
+        let sameSite = url("https://docs.example.com/guide")
+        XCTAssertTrue(
+            env.webContents(mock, shouldAllowNavigationTo: sameSite, kind: .linkActivated, isMainFrame: true),
+            "A link within the pinned tab's own site must navigate in place."
+        )
+        XCTAssertNil(PeekState.shared.activePreview, "A same-site link must never open a Peek.")
+    }
+
+    func test_sameSiteDestinationNeverPeeksFromAPinnedOrFavoriteTab() {
+        LinksSettingsActions.setAutomaticPeek(true)
+        let sameSite = url("https://other.example.com/page")
+        let otherSite = url("https://unrelated.org/page")
+        for section in [Orbit.TabSection.pinned, .favorite] {
+            let tab = makeTab(section: section)
+            XCTAssertFalse(env.shouldPeek(sourceTabID: tab, modifiers: [], destination: sameSite))
+            XCTAssertTrue(env.shouldPeek(sourceTabID: tab, modifiers: [], destination: otherSite))
+        }
     }
 
     func test_automaticPeekSwitch_keepsTheLegacySiteControlKeyInStep() {

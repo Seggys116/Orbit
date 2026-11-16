@@ -7,9 +7,9 @@ struct LibraryDownloadsView: View {
     var searchQuery: String
 
     private var filtered: [DownloadItem] {
-        guard !searchQuery.isEmpty else { return env.downloads }
+        guard !searchQuery.isEmpty else { return env.libraryDownloads }
         let query = searchQuery.lowercased()
-        return env.downloads.filter { item in
+        return env.libraryDownloads.filter { item in
             item.suggestedFileName.lowercased().contains(query)
                 || item.destinationURL.lastPathComponent.lowercased().contains(query)
                 || (item.sourceURL.host()?.lowercased().contains(query) ?? false)
@@ -21,6 +21,12 @@ struct LibraryDownloadsView: View {
     }
 
     var body: some View {
+        content
+            .background { Color.clear.onAppear { env.downloadStore.startWatchingFolder() } }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if !groups.isEmpty {
             LazyVStack(alignment: .leading, spacing: LibraryModeMetrics.groupSpacing) {
                 ForEach(groups) { group in
@@ -97,9 +103,31 @@ private struct DownloadRow: View {
         }
     }
 
-    private var statusLine: String { "\(sourceHost) · \(detailText)" }
+    private var statusLine: String {
+        item.sourceURL.isFileURL ? detailText : "\(sourceHost) · \(detailText)"
+    }
+
+    private var isFolderOnly: Bool {
+        env.downloadStore.isFolderOnly(item.id)
+    }
+
+    private var folderOnlyActions: [LibraryRowAction] {
+        guard fileExists else { return [] }
+        return [
+            LibraryRowAction(title: "Show in Finder", symbol: "folder") {
+                env.downloadStore.revealInFinder(item.id)
+            },
+            LibraryRowAction(title: "Open", symbol: "arrow.up.forward.app") {
+                NSWorkspace.shared.open(item.destinationURL)
+            },
+            LibraryRowAction(title: "Move to Trash", symbol: "trash", isDestructive: true) {
+                env.downloadStore.moveToTrash(item.id)
+            },
+        ]
+    }
 
     private var actions: [LibraryRowAction] {
+        if isFolderOnly { return folderOnlyActions }
         switch item.state {
         case .pending, .inProgress, .paused:
             return [LibraryRowAction(title: "Cancel", symbol: "xmark", alwaysVisible: true) {

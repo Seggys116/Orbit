@@ -403,6 +403,7 @@ public enum SyncRecordMapping {
         merged.pinnedTitle = existing.pinnedTitle
         merged.tidiedTitle = existing.tidiedTitle
         merged.tidyGroup = existing.tidyGroup
+        merged.siteProfileID = existing.siteProfileID
         return merged
     }
 

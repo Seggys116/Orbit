@@ -18,12 +18,10 @@ struct SpaceIconView: View {
     }
 
     var body: some View {
-        content.brightness(-OrbitMetrics.spacePagerInactiveBrightnessDrop * dim)
+        content.opacity(1 - (1 - OrbitMetrics.spacePagerInactiveOpacity) * dim)
     }
 
-    private var glyphColor: Color {
-        foregroundColor.opacity(1 - (1 - OrbitMetrics.spacePagerInactiveOpacity) * dim)
-    }
+    private var glyphColor: Color { foregroundColor }
 
     @ViewBuilder
     private var content: some View {

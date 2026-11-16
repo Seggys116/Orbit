@@ -182,3 +182,39 @@ final class HoverTrackingViewTests: XCTestCase {
         }
     }
 }
+
+// MARK: - 3. SidebarDismissIntent: pure pointer-intent rule
+
+final class SidebarDismissIntentTests: XCTestCase {
+
+    private typealias Sample = SidebarDismissIntent.Sample
+    private let zone: CGFloat = 260
+
+    func test_pointerInsideTheZoneNeverDismisses() {
+        XCTAssertFalse(SidebarDismissIntent.shouldDismiss(previous: Sample(x: 100, time: 0), current: Sample(x: 250, time: 0.01), hotZoneWidth: zone))
+    }
+
+    func test_pointerJustOutsideAndSlowKeepsTheGraceDelay() {
+        XCTAssertFalse(SidebarDismissIntent.shouldDismiss(previous: Sample(x: 270, time: 0), current: Sample(x: 280, time: 0.016), hotZoneWidth: zone))
+    }
+
+    func test_pointerFarFromTheZoneDismissesWithoutAnyVelocity() {
+        XCTAssertTrue(SidebarDismissIntent.shouldDismiss(previous: nil, current: Sample(x: zone + SidebarDismissIntent.farDistance, time: 1), hotZoneWidth: zone))
+    }
+
+    func test_fastMovementAwayDismisses() {
+        XCTAssertTrue(SidebarDismissIntent.shouldDismiss(previous: Sample(x: 262, time: 0), current: Sample(x: 300, time: 0.016), hotZoneWidth: zone))
+    }
+
+    func test_fastMovementTowardTheSidebarDoesNotDismiss() {
+        XCTAssertFalse(SidebarDismissIntent.shouldDismiss(previous: Sample(x: 340, time: 0), current: Sample(x: 290, time: 0.016), hotZoneWidth: zone))
+    }
+
+    func test_fastMovementThatHasBarelyLeftTheZoneDoesNotDismiss() {
+        XCTAssertFalse(SidebarDismissIntent.shouldDismiss(previous: Sample(x: 255, time: 0), current: Sample(x: 266, time: 0.004), hotZoneWidth: zone))
+    }
+
+    func test_aStaleSampleCannotProduceAVelocity() {
+        XCTAssertFalse(SidebarDismissIntent.shouldDismiss(previous: Sample(x: 262, time: 0), current: Sample(x: 300, time: 2), hotZoneWidth: zone))
+    }
+}

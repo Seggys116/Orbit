@@ -1155,7 +1155,7 @@ private struct ScreenshotSettingsComposition: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(SettingsPalette.contentBackground)
         }
-        .frame(minWidth: SettingsMetrics.windowMinWidth, minHeight: SettingsMetrics.windowMinHeight)
+        .frame(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight)
         .background(SettingsPalette.contentBackground)
     }
 

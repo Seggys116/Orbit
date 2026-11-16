@@ -139,7 +139,10 @@ final class WindowSession {
             host.closeTabKeepingBookmark(tabID)
             environment = AppEnvironment.makeWindowScoped(sharing: root, activeSpaceID: spaceID, isTornOff: true)
             FeatureRegistration.installAll(into: environment)
-            environment.openTab(url: tab.pinnedURL ?? tab.url, in: spaceID)
+            let tornOffTabID = environment.openTab(url: tab.pinnedURL ?? tab.url, in: spaceID)
+            if let siteProfileID = tab.siteProfileID {
+                environment.switchSiteProfile(tabID: tornOffTabID, to: siteProfileID)
+            }
         } else {
             environment = AppEnvironment.makeWindowScoped(sharing: root, activeSpaceID: spaceID, isTornOff: true)
             FeatureRegistration.installAll(into: environment)

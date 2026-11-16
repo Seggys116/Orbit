@@ -29,19 +29,48 @@ enum SidebarHoverPhase: Equatable {
     }
 }
 
+/// Whether a pointer outside the sidebar is clearly not coming back to it: far away, or leaving quickly.
+enum SidebarDismissIntent {
+
+    struct Sample: Equatable {
+        var x: CGFloat
+        var time: TimeInterval
+    }
+
+    static let farDistance: CGFloat = 240
+    static let fastAwaySpeed: CGFloat = 1100
+    static let minimumAwayDistance: CGFloat = 20
+    static let minimumSampleInterval: TimeInterval = 0.002
+    static let maximumSampleInterval: TimeInterval = 0.12
+
+    static func shouldDismiss(previous: Sample?, current: Sample, hotZoneWidth: CGFloat) -> Bool {
+        let beyondEdge = current.x - hotZoneWidth
+        guard beyondEdge > 0 else { return false }
+        if beyondEdge >= farDistance { return true }
+        guard beyondEdge >= minimumAwayDistance, let previous else { return false }
+        let elapsed = current.time - previous.time
+        guard elapsed >= minimumSampleInterval, elapsed <= maximumSampleInterval else { return false }
+        let speedAway = (current.x - previous.x) / CGFloat(elapsed)
+        return speedAway >= fastAwaySpeed
+    }
+}
+
 struct HoverEdgeDetector: NSViewRepresentable {
     var hotZoneWidth: CGFloat
     var onHoverChanged: (Bool) -> Void
+    var onDismissIntent: () -> Void = {}
 
     func makeNSView(context: Context) -> HoverTrackingView {
         let view = HoverTrackingView()
         view.onHoverChanged = onHoverChanged
+        view.onDismissIntent = onDismissIntent
         view.hotZoneWidth = hotZoneWidth
         return view
     }
 
     func updateNSView(_ nsView: HoverTrackingView, context: Context) {
         nsView.onHoverChanged = onHoverChanged
+        nsView.onDismissIntent = onDismissIntent
         nsView.hotZoneWidth = hotZoneWidth
     }
 }
@@ -49,6 +78,7 @@ struct HoverEdgeDetector: NSViewRepresentable {
 @MainActor
 final class HoverTrackingView: NSView {
     var onHoverChanged: ((Bool) -> Void)?
+    var onDismissIntent: (() -> Void)?
 
     var hotZoneWidth: CGFloat = 0 {
         didSet {
@@ -60,6 +90,7 @@ final class HoverTrackingView: NSView {
     private(set) var isInsideHotZone = false
 
     private var lastKnownLocationInView: NSPoint?
+    private var previousSample: SidebarDismissIntent.Sample?
     private var monitor: Any?
 
     override func viewDidMoveToWindow() {
@@ -92,7 +123,14 @@ final class HoverTrackingView: NSView {
 
     private func handle(_ event: NSEvent) {
         guard let window, event.window === window else { return }
-        updateHover(atLocationInView: convert(event.locationInWindow, from: nil))
+        let point = convert(event.locationInWindow, from: nil)
+        updateHover(atLocationInView: point)
+        let sample = SidebarDismissIntent.Sample(x: point.x, time: event.timestamp)
+        defer { previousSample = sample }
+        guard !isInsideHotZone else { return }
+        if SidebarDismissIntent.shouldDismiss(previous: previousSample, current: sample, hotZoneWidth: hotZoneWidth) {
+            onDismissIntent?()
+        }
     }
 
     func updateHover(atLocationInView point: NSPoint) {

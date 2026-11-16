@@ -61,7 +61,7 @@ enum LibraryPreviewContent: Equatable {
 
         switch selection {
         case .download(let id):
-            guard let item = env.downloads.first(where: { $0.id == id }),
+            guard let item = env.downloadStore.item(id: id),
                   item.state == .completed,
                   env.downloadStore.fileStillExists(id)
             else { return .none }

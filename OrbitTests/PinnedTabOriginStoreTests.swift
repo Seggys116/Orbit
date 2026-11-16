@@ -244,6 +244,19 @@ final class PinnedTabOriginStoreTests: XCTestCase {
         XCTAssertEqual(store.resetPinnedTab(id), wanderedURL)
     }
 
+    func testClosingWithTheMinusResetsAWanderedTabToItsPinnedPage() {
+        let id = makeTodayTab()
+        store.pin(id)
+        navigate(id, to: wanderedURL, title: "World News")
+
+        store.closeTabKeepingPin(id)
+
+        XCTAssertEqual(store.tab(id)?.url, pinnedURL, "Closing with the minus must not keep the page the tab wandered to.")
+        XCTAssertEqual(store.tab(id)?.pinnedURL, pinnedURL, "The pinned origin itself must not change.")
+        XCTAssertEqual(store.tab(id)?.pinnedTitle, "The Article I Pinned")
+        XCTAssertEqual(store.tab(id)?.isUnloaded, true)
+    }
+
     // MARK: - No automatic reversion
 
     func testNothingRevertsAPinnedTabAutomatically() {

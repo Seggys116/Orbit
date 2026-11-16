@@ -10,6 +10,9 @@ struct ProfilesSettingsPane: View {
     @State private var renamingProfileID: ProfileID?
     @State private var draftName = ""
     @FocusState private var renameFieldFocused: Bool
+    @State private var renamingSpaceID: SpaceID?
+    @State private var spaceDraftName = ""
+    @FocusState private var spaceRenameFocused: Bool
 
     private var listedProfiles: [Profile] {
         env.state.profiles.filter(\.isPersistent)
@@ -206,15 +209,61 @@ struct ProfilesSettingsPane: View {
     }
 
     private func spacesUsingProfile(_ spaces: [Space]) -> some View {
-        HStack(spacing: 6) {
-            Text("Spaces:").font(.system(size: 11)).foregroundStyle(.secondary)
-            ForEach(spaces) { space in
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Spaces").font(.system(size: 11)).foregroundStyle(.secondary)
+            FlowLayout(spacing: 6) {
+                ForEach(spaces) { space in
+                    spaceChip(space)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func spaceChip(_ space: Space) -> some View {
+        HStack(spacing: 5) {
+            SpaceIconView(icon: space.resolvedIcon, size: 14, foregroundColor: .primary)
+                .frame(width: 14, height: 14)
+            if renamingSpaceID == space.id {
+                OrbitTextField(
+                    placeholder: "Space name",
+                    text: $spaceDraftName,
+                    accentColor: SettingsPalette.accent,
+                    accessibilityLabel: "Space name",
+                    externalFocus: $spaceRenameFocused
+                )
+                .frame(width: 120)
+                .onSubmit { commitSpaceRename(space.id) }
+                .onExitCommand { renamingSpaceID = nil }
+            } else {
                 Text(space.name)
                     .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Capsule().fill(.tertiary.opacity(0.3)))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
         }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Capsule().fill(.tertiary.opacity(0.3)))
+        .contentShape(Capsule())
+        .onTapGesture(count: 2) { beginSpaceRename(space) }
+        .contextMenu {
+            Button("Rename Space") { beginSpaceRename(space) }
+        }
+        .orbitTooltip("Double-click to rename")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(space.name)
+    }
+
+    private func beginSpaceRename(_ space: Space) {
+        spaceDraftName = space.name
+        renamingSpaceID = space.id
+        DispatchQueue.main.async { spaceRenameFocused = true }
+    }
+
+    private func commitSpaceRename(_ id: SpaceID) {
+        let trimmed = spaceDraftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { env.renameSpace(id, to: trimmed) }
+        renamingSpaceID = nil
     }
 
     private func spacesNotOnThisProfile(_ profile: Profile) -> [Space] {

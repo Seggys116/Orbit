@@ -4,6 +4,7 @@ import Foundation
 // MARK: - Identifiers
 
 public typealias ProfileID = UUID
+public typealias SiteProfileID = UUID
 public typealias SpaceID = UUID
 public typealias TabID = UUID
 public typealias FolderID = UUID
@@ -120,6 +121,35 @@ nonisolated public struct Profile: Identifiable, Codable, Hashable, Sendable {
     }
 
     public var sessionIdentifier: String { id.uuidString }
+}
+
+nonisolated public struct SiteProfile: Identifiable, Codable, Hashable, Sendable {
+    public var id: SiteProfileID
+    public var siteKey: String
+    public var name: String
+    public var createdAt: Date
+
+    public init(id: SiteProfileID = UUID(), siteKey: String, name: String, createdAt: Date = Date()) {
+        self.id = id
+        self.siteKey = siteKey
+        self.name = name
+        self.createdAt = createdAt
+    }
+
+    public static let defaultName = "Default"
+
+    public var sessionIdentifier: String { "site-\(id.uuidString)" }
+
+    public static func siteKey(for url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        return SiteIdentity.registrableDomain(of: url)
+    }
+
+    public static func normalizedName(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.caseInsensitiveCompare(defaultName) != .orderedSame else { return nil }
+        return trimmed
+    }
 }
 
 // MARK: - Colour & theme
@@ -617,6 +647,8 @@ nonisolated public struct Tab: Identifiable, Codable, Hashable, Sendable {
     // nesting even after the tab has been structurally removed from the live pinned tree.
     public var archivedFolderTrail: [ArchivedFolderCrumb]?
 
+    public var siteProfileID: SiteProfileID?
+
     public var displayTitle: String {
         if let customTitle, !customTitle.isEmpty { return customTitle }
         if let tidiedTitle, !tidiedTitle.isEmpty { return tidiedTitle }
@@ -656,7 +688,8 @@ nonisolated public struct Tab: Identifiable, Codable, Hashable, Sendable {
         pinnedTitle: String? = nil,
         tidiedTitle: String? = nil,
         tidyGroup: String? = nil,
-        archivedFolderTrail: [ArchivedFolderCrumb]? = nil
+        archivedFolderTrail: [ArchivedFolderCrumb]? = nil,
+        siteProfileID: SiteProfileID? = nil
     ) {
         self.id = id
         self.spaceID = spaceID
@@ -678,6 +711,7 @@ nonisolated public struct Tab: Identifiable, Codable, Hashable, Sendable {
         self.tidiedTitle = tidiedTitle
         self.tidyGroup = tidyGroup
         self.archivedFolderTrail = archivedFolderTrail
+        self.siteProfileID = siteProfileID
     }
 
 }
@@ -1106,6 +1140,47 @@ nonisolated public struct OrbitState: Codable, Sendable {
     public var routingRules: [RoutingRule]
     public var activeSpaceID: SpaceID?
     public var activeTabBySpace: [SpaceID: TabID]
+    public var siteProfiles: [SiteProfile]
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, profiles, spaces, tabs, splitGroups
+        case boosts, easels, notes, routingRules, activeSpaceID, activeTabBySpace, siteProfiles
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        profiles = try container.decode([Profile].self, forKey: .profiles)
+        spaces = try container.decode([Space].self, forKey: .spaces)
+        tabs = try container.decode([TabID: Tab].self, forKey: .tabs)
+        splitGroups = try container.decode([UUID: SplitGroup].self, forKey: .splitGroups)
+        boosts = try container.decode([Boost].self, forKey: .boosts)
+        easels = try container.decode([Easel].self, forKey: .easels)
+        notes = try container.decode([Note].self, forKey: .notes)
+        routingRules = try container.decode([RoutingRule].self, forKey: .routingRules)
+        activeSpaceID = try container.decodeIfPresent(SpaceID.self, forKey: .activeSpaceID)
+        activeTabBySpace = try container.decode([SpaceID: TabID].self, forKey: .activeTabBySpace)
+        siteProfiles = try container.decodeIfPresent([SiteProfile].self, forKey: .siteProfiles) ?? []
+    }
+
+    // siteProfiles is omitted while empty so a document that never used the feature keeps its pre-existing key set.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(profiles, forKey: .profiles)
+        try container.encode(spaces, forKey: .spaces)
+        try container.encode(tabs, forKey: .tabs)
+        try container.encode(splitGroups, forKey: .splitGroups)
+        try container.encode(boosts, forKey: .boosts)
+        try container.encode(easels, forKey: .easels)
+        try container.encode(notes, forKey: .notes)
+        try container.encode(routingRules, forKey: .routingRules)
+        try container.encodeIfPresent(activeSpaceID, forKey: .activeSpaceID)
+        try container.encode(activeTabBySpace, forKey: .activeTabBySpace)
+        if !siteProfiles.isEmpty {
+            try container.encode(siteProfiles, forKey: .siteProfiles)
+        }
+    }
 
     public init(
         schemaVersion: Int = OrbitState.currentSchemaVersion,
@@ -1118,7 +1193,8 @@ nonisolated public struct OrbitState: Codable, Sendable {
         notes: [Note] = [],
         routingRules: [RoutingRule] = [],
         activeSpaceID: SpaceID? = nil,
-        activeTabBySpace: [SpaceID: TabID] = [:]
+        activeTabBySpace: [SpaceID: TabID] = [:],
+        siteProfiles: [SiteProfile] = []
     ) {
         self.schemaVersion = schemaVersion
         self.profiles = profiles
@@ -1131,6 +1207,7 @@ nonisolated public struct OrbitState: Codable, Sendable {
         self.routingRules = routingRules
         self.activeSpaceID = activeSpaceID
         self.activeTabBySpace = activeTabBySpace
+        self.siteProfiles = siteProfiles
     }
 }
 

@@ -17,14 +17,72 @@ struct ToolbarContextMenu {
             .item(OrbitContextMenuItem(title: "Share") { MenuSharePresenter.shared.present(items: [tab.url]) }),
             .item(OrbitContextMenuItem(title: "Capture...") { env.extensionPoints.presentCaptureTool?(tab.id, false) }),
             .item(OrbitContextMenuItem(title: "Capture Full Page") { env.extensionPoints.presentCaptureTool?(tab.id, true) }),
-            .divider(),
-            .item(OrbitContextMenuItem(title: fullURLRowTitle) { settings.toggleFullURL() }),
-            .item(OrbitContextMenuItem(title: settings.visibilityMenuTitle) { settings.toggleVisible() })
+            .divider()
         ]
+        let profileEntries = siteProfileEntries(in: env)
+        if !profileEntries.isEmpty {
+            entries += profileEntries
+            entries.append(.divider())
+        }
+        entries.append(.item(OrbitContextMenuItem(title: fullURLRowTitle) { settings.toggleFullURL() }))
+        entries.append(.item(OrbitContextMenuItem(title: settings.visibilityMenuTitle) { settings.toggleVisible() }))
 
         if developerModeSettings.isEnabled, let screenSize = screenSizeEntries(in: env) {
             entries.append(.divider())
             entries.append(screenSize)
+        }
+        return entries
+    }
+
+    static let makeProfiledPageTitle = "Make Profiled Page..."
+
+    static func newProfileTitle(forSite siteKey: String) -> String { "New Profile for \(siteKey)..." }
+
+    static let switchProfileTitle = "Switch Profile"
+
+    // Empty when the tab cannot have Site Profiles, which is every non-http(s) page and everything in an Incognito Space.
+    @MainActor
+    func siteProfileEntries(in env: AppEnvironment) -> [OrbitContextMenuEntry] {
+        let tabID = tab.id
+        guard env.store.canOfferSiteProfiles(forTab: tabID) else { return [] }
+        guard let siteKey = env.store.siteProfileDropdownSiteKey(forTab: tabID) else {
+            return [.item(OrbitContextMenuItem(title: Self.makeProfiledPageTitle) { env.promptToCreateSiteProfile(forTab: tabID) })]
+        }
+        return [
+            .item(OrbitContextMenuItem(title: Self.newProfileTitle(forSite: siteKey)) { env.promptToCreateSiteProfile(forTab: tabID) }),
+            .item(OrbitContextMenuItem(title: Self.switchProfileTitle, submenu: Self.siteProfileSwitchEntries(forTab: tabID, siteKey: siteKey, in: env))),
+        ]
+    }
+
+    @MainActor
+    static func siteProfileSwitchEntries(forTab tabID: TabID, siteKey: String, in env: AppEnvironment) -> [OrbitContextMenuEntry] {
+        let boundID = env.store.boundSiteProfile(forTab: tabID)?.id
+        var entries: [OrbitContextMenuEntry] = [
+            .item(OrbitContextMenuItem(title: SiteProfile.defaultName, isChecked: boundID == nil) {
+                env.switchSiteProfile(tabID: tabID, to: nil)
+            })
+        ]
+        for profile in env.store.siteProfiles(forSiteKey: siteKey) {
+            let profileID = profile.id
+            entries.append(.item(OrbitContextMenuItem(title: profile.name, isChecked: boundID == profileID) {
+                env.switchSiteProfile(tabID: tabID, to: profileID)
+            }))
+        }
+        return entries
+    }
+
+    @MainActor
+    static func siteProfileDropdownEntries(forTab tabID: TabID, in env: AppEnvironment) -> [OrbitContextMenuEntry] {
+        guard let siteKey = env.store.siteProfileDropdownSiteKey(forTab: tabID) else { return [] }
+        var entries = siteProfileSwitchEntries(forTab: tabID, siteKey: siteKey, in: env)
+        entries.append(.divider())
+        if env.store.canOfferSiteProfiles(forTab: tabID) {
+            entries.append(.item(OrbitContextMenuItem(title: "New Profile...") { env.promptToCreateSiteProfile(forTab: tabID) }))
+        }
+        if let bound = env.store.boundSiteProfile(forTab: tabID) {
+            let boundID = bound.id
+            entries.append(.item(OrbitContextMenuItem(title: "Rename Profile...") { env.promptToRenameSiteProfile(boundID) }))
+            entries.append(.item(OrbitContextMenuItem(title: "Delete Profile", isDestructive: true) { env.confirmDeleteSiteProfile(boundID) }))
         }
         return entries
     }

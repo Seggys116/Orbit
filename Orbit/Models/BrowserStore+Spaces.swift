@@ -158,6 +158,7 @@ public extension BrowserStore {
                     copy.title = original.title
                     copy.customTitle = original.customTitle
                     copy.faviconURL = original.faviconURL
+                    copy.siteProfileID = original.siteProfileID
                     clonedTabs.append(copy)
                     return .tab(copy.id)
                 case .folder(var folder):

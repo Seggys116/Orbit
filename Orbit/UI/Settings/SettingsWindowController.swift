@@ -40,6 +40,8 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 final class SettingsWindowController: NSWindowController {
     private static var shared: SettingsWindowController?
 
+    static let windowStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+
     @discardableResult
     static func show(
         pane: SettingsPane = .general,
@@ -63,7 +65,7 @@ final class SettingsWindowController: NSWindowController {
                 width: SettingsMetrics.windowDefaultWidth,
                 height: SettingsMetrics.windowDefaultHeight
             ),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: windowStyleMask,
             backing: .buffered,
             defer: false
         )
@@ -71,7 +73,8 @@ final class SettingsWindowController: NSWindowController {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.appearance = NSAppearance(named: .darkAqua)
-        window.minSize = NSSize(width: SettingsMetrics.windowMinWidth, height: SettingsMetrics.windowMinHeight)
+        window.setContentSize(NSSize(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight))
+        window.standardWindowButton(.zoomButton)?.isEnabled = false
         window.backgroundColor = NSColor(SettingsPalette.contentBackground)
         window.center()
         SettingsRouter.shared.selectedPane = pane
@@ -162,7 +165,7 @@ struct SettingsRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(SettingsPalette.contentBackground)
         }
-        .frame(minWidth: SettingsMetrics.windowMinWidth, minHeight: SettingsMetrics.windowMinHeight)
+        .frame(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight)
         .background(SettingsPalette.contentBackground)
     }
 

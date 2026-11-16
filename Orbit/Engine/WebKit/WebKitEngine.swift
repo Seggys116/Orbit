@@ -533,6 +533,11 @@ final class WebKitEngine: NSObject, BrowserEngine {
         return created
     }
 
+    func forgetSession(identifier: String) {
+        sessions.removeValue(forKey: identifier)
+        WebKitDataStoreIdentifiers.shared.forget(profile: identifier)
+    }
+
     private func watchCookies(on session: WebKitSession) {
         session.onCookieChanged = { [weak self] cookie, removed in
             self?.services.reportBrowserCookieChange(cookie, removed: removed)

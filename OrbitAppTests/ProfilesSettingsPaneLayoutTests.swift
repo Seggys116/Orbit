@@ -51,6 +51,31 @@ final class ProfilesSettingsPaneLayoutTests: XCTestCase {
         )
     }
 
+    func test_manySpacesWithIconsWrapAsWholeChipsAndStillFitTheWindow() {
+        let env = AppEnvironment.demo
+        let profileID = env.createDefaultProfileIfNeeded()
+        let names = ["General", "Uni Stuff", "Anime", "Dev", "Japan", "AI", "Homelab", "Unified-Projects"]
+        let symbols = ["house", "graduationcap", "tv", "hammer", "globe.asia.australia", "cpu", "server.rack", "folder"]
+        for (name, symbol) in zip(names, symbols) {
+            _ = env.createSpace(name: name, icon: symbol, iconIsEmoji: false, theme: SpaceTheme(), profileID: profileID)
+        }
+        let width = SettingsMetrics.contentMaxWidth
+
+        let rendered = render(
+            ProfilesSettingsPane()
+                .environment(env)
+                .environment(\.orbitScreenshotModeDragDisabled, true)
+                .padding(SettingsMetrics.contentHorizontalPadding)
+                .frame(maxWidth: width, alignment: .leading),
+            size: CGSize(width: width, height: 1400)
+        )
+        rendered.writeDiagnosticPNG(named: "ProfilesSettingsPane_manySpaces")
+
+        guard let box = rendered.boundingBoxOfContent() else { return XCTFail("ProfilesSettingsPane drew nothing.") }
+        XCTAssertLessThanOrEqual(box.maxX, width + 1)
+        XCTAssertLessThanOrEqual(box.maxY, SettingsMetrics.windowDefaultHeight, "Eight Spaces must wrap into rows, not grow the pane past the fixed window height.")
+    }
+
     func test_orbitSettingsRow_descriptionUsesFullRowWidth_neitherTruncatedNorSqueezedNarrow() {
         let width = ProfilesSettingsPane.cardInteriorWidth
         let fontSize = OrbitControlMetrics.settingsRowDescriptionFontSize

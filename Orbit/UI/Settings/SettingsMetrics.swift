@@ -22,10 +22,6 @@ enum SettingsMetrics {
     static let windowDefaultWidth: CGFloat = railWidth + 1 + contentMaxWidth + (contentHorizontalPadding * 2)
     static let windowDefaultHeight: CGFloat = 640
 
-    static let contentMinWidth: CGFloat = 420
-    static let windowMinWidth: CGFloat = railWidth + 1 + contentMinWidth
-    static let windowMinHeight: CGFloat = 480
-
     // MARK: Row rhythm
 
     static let rowVerticalPadding: CGFloat = 4

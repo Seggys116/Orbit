@@ -25,6 +25,7 @@ struct PositionedWindowControls: View {
 struct HoverRevealSidebarLayer: View {
     @Environment(AppEnvironment.self) private var env
     var onHoverChanged: (Bool) -> Void
+    var onDismissIntent: () -> Void = {}
 
     #if DEBUG
     @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
@@ -51,10 +52,10 @@ struct HoverRevealSidebarLayer: View {
         if screenshotModeDragDisabled {
             Color.clear.allowsHitTesting(false)
         } else {
-            HoverEdgeDetector(hotZoneWidth: hotZoneWidth, onHoverChanged: onHoverChanged)
+            HoverEdgeDetector(hotZoneWidth: hotZoneWidth, onHoverChanged: onHoverChanged, onDismissIntent: onDismissIntent)
         }
         #else
-        HoverEdgeDetector(hotZoneWidth: hotZoneWidth, onHoverChanged: onHoverChanged)
+        HoverEdgeDetector(hotZoneWidth: hotZoneWidth, onHoverChanged: onHoverChanged, onDismissIntent: onDismissIntent)
         #endif
     }
 }
@@ -179,7 +180,7 @@ struct BrowserWindowView: View {
             }
 
             if !env.isSidebarVisible {
-                HoverRevealSidebarLayer(onHoverChanged: handleHoverEdge)
+                HoverRevealSidebarLayer(onHoverChanged: handleHoverEdge, onDismissIntent: handleDismissIntent)
             }
         }
         .coordinateSpace(.named(OrbitWindowCoordinateSpace.name))
@@ -342,6 +343,16 @@ struct BrowserWindowView: View {
         """)
     }
     #endif
+
+    private func handleDismissIntent() {
+        guard hoverPhase == .hiding else { return }
+        hoverHideTask?.cancel()
+        hoverHideTask = nil
+        hoverPhase = .hidden
+        withOrbitAnimation(OrbitMotion.standard) {
+            env.isSidebarHoverRevealed = false
+        }
+    }
 
     private func handleHoverEdge(_ hovering: Bool) {
         hoverHideTask?.cancel()

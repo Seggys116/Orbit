@@ -34,6 +34,24 @@ final class PaneChromeTests: XCTestCase {
         }
     }
 
+    func test_addressBarShowsTheSiteProfileNameWithoutOverflowingTheToolbar() throws {
+        let tab = makeTab(url: "https://github.com/orbit/pulls")
+        defer { cleanup([tab.id]) }
+        let work = try XCTUnwrap(env.createSiteProfile(name: "Work account", for: tab.url))
+        env.switchSiteProfile(tabID: tab.id, to: work.id)
+        let bound = try XCTUnwrap(env.tab(tab.id))
+
+        for width in [560.0, 900.0] {
+            let rendered = render(
+                ToolbarView(tab: bound).environment(env).environment(\.orbitScreenshotModeDragDisabled, true),
+                size: CGSize(width: width, height: OrbitToolbarMetrics.totalHeight)
+            )
+            rendered.writeDiagnosticPNG(named: "ToolbarSiteProfileDropdown_\(Int(width))")
+            let box = try XCTUnwrap(rendered.boundingBoxOfContent())
+            XCTAssertLessThanOrEqual(box.maxX, width + 1)
+        }
+    }
+
     // MARK: - 1. Header background equals the tab's theme colour
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_headerBackground_equalsTabsThemeColorWhenSet

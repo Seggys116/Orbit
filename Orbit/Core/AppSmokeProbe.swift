@@ -39,6 +39,14 @@ enum AppSmokeProbe {
         case windowPixelPaint
     }
 
+    // ORBIT-BENCH: COMMANDS: Scripts/benchmark.py refuses to drive a build missing a command it sends.
+    enum BenchCommand: String, CaseIterable {
+        case openTabs
+        case closeOpenedTabs
+        case status
+        case quit
+    }
+
     private static let logger = Logger(subsystem: "com.orbit.browser", category: "AppSmokeProbe")
     private static let started = Date()
 
@@ -76,10 +84,23 @@ enum AppSmokeProbe {
 
     private static var results: [(check: Check, passed: Bool, detail: String)] = []
 
+    private static var isBenchmarking: Bool {
+        isEnabled && environment["ORBIT_SMOKE_PROBE_BENCH"] == "1"
+    }
+
+    private static var benchOpenedTabs: [TabID] = []
+    private static var benchNextSequence = 1
+    private static var benchWatcher: DispatchSourceFileSystemObject?
+    private static var benchFallbackTimer: DispatchSourceTimer?
+
     // MARK: - Entry points
 
     static func noteStage(_ stage: Stage) {
         guard isEnabled else { return }
+        // A returning user has finished onboarding, so a benchmarked launch must not pay for showing it.
+        if stage == .delegateEntered, isBenchmarking {
+            AppEnvironment.defaults.set(true, forKey: AppEnvironment.Keys.onboardingComplete)
+        }
         emit("stage \(stage.rawValue)")
         guard let directory = outputDirectory else { return }
         let line = String(format: "%.3f\t%@\n", Date().timeIntervalSince(started), stage.rawValue)
@@ -104,6 +125,10 @@ enum AppSmokeProbe {
 
     static func runIfEnabled(host: AppEnvironment) {
         guard isEnabled else { return }
+        if isBenchmarking {
+            Task { await runBenchmark(host: host) }
+            return
+        }
         Task { await run(host: host) }
     }
 
@@ -491,6 +516,185 @@ enum AppSmokeProbe {
         // is exactly the kind of launch-adjacent defect this harness is for.
         noteStage(.terminating)
         NSApp.terminate(nil)
+    }
+
+    // MARK: - Benchmark mode
+
+    private static func runBenchmark(host: AppEnvironment) async {
+        emit("benchmark mode — bundle=\(Bundle.main.bundlePath) pid=\(getpid())")
+        guard let directory = outputDirectory else {
+            emit("ORBIT_SMOKE_PROBE_OUT is unset — benchmark mode has no channel to the harness")
+            return
+        }
+
+        var window: NSWindow?
+        var polls = 0
+        while polls < 3000 {
+            window = NSApp.windows.first(where: { $0 is OrbitBorderlessWindow })
+            if window != nil, host.activeSpace != nil { break }
+            await settle(0.01)
+            polls += 1
+        }
+        guard let window, let space = host.activeSpace else {
+            emit("no browser window and Space within 30s — benchmark mode cannot start")
+            return
+        }
+
+        WindowPixelCapture.moveToBestScreen(window)
+        WindowPixelCapture.bringToFront(window)
+
+        var ready: [String: Any] = [
+            "schema": 1,
+            "pid": Int(getpid()),
+            "bundlePath": Bundle.main.bundlePath,
+            "bundleIdentifier": Bundle.main.bundleIdentifier ?? "",
+            "dataRoot": host.dataRoot.url.path,
+            "engine": host.engine?.versionDescription ?? "",
+            "commands": BenchCommand.allCases.map(\.rawValue),
+        ]
+        if let url = targetURL {
+            let started = Date().timeIntervalSince1970
+            let tabID = host.openTab(url: url, in: space.id, activate: true)
+            benchOpenedTabs.append(tabID)
+            ready["initialTab"] = ["url": url.absoluteString, "startEpoch": started]
+        }
+        ready["epoch"] = Date().timeIntervalSince1970
+        writeBenchJSON(ready, named: "bench-ready.json", in: directory)
+        startBenchWatcher(host: host, directory: directory)
+    }
+
+    private static func startBenchWatcher(host: AppEnvironment, directory: URL) {
+        let descriptor = open(directory.path, O_EVTONLY)
+        if descriptor >= 0 {
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: descriptor, eventMask: .write, queue: .main
+            )
+            source.setEventHandler {
+                MainActor.assumeIsolated { drainBenchCommands(host: host, directory: directory) }
+            }
+            source.setCancelHandler { close(descriptor) }
+            source.resume()
+            benchWatcher = source
+        } else {
+            emit("could not watch \(directory.path); commands are only picked up by the 5s fallback check")
+        }
+
+        // The file watcher is the only wake-up that costs nothing while idle; this covers a missed event.
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 5, repeating: 5)
+        timer.setEventHandler {
+            MainActor.assumeIsolated { drainBenchCommands(host: host, directory: directory) }
+        }
+        timer.resume()
+        benchFallbackTimer = timer
+
+        drainBenchCommands(host: host, directory: directory)
+    }
+
+    private static func drainBenchCommands(host: AppEnvironment, directory: URL) {
+        while true {
+            let sequence = benchNextSequence
+            let commandURL = directory.appendingPathComponent("bench-command-\(sequence).json", isDirectory: false)
+            guard let data = try? Data(contentsOf: commandURL) else { return }
+            benchNextSequence += 1
+            let request = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            var response = executeBench(request, host: host)
+            response["seq"] = sequence
+            writeBenchJSON(response, named: "bench-response-\(sequence).json", in: directory)
+            if response["quit"] as? Bool == true {
+                NSApp.terminate(nil)
+                return
+            }
+        }
+    }
+
+    private static func executeBench(_ request: [String: Any], host: AppEnvironment) -> [String: Any] {
+        guard let name = request["command"] as? String, let command = BenchCommand(rawValue: name) else {
+            return ["ok": false, "error": "unknown command \(String(describing: request["command"]))"]
+        }
+        switch command {
+        case .openTabs: return benchOpenTabs(request, host: host)
+        case .closeOpenedTabs: return benchCloseOpenedTabs(host: host)
+        case .status: return benchStatus(host: host)
+        case .quit: return ["ok": true, "quit": true]
+        }
+    }
+
+    private static func benchOpenTabs(_ request: [String: Any], host: AppEnvironment) -> [String: Any] {
+        guard let urls = request["urls"] as? [String], !urls.isEmpty else {
+            return ["ok": false, "error": "openTabs needs a non-empty \"urls\" array"]
+        }
+        guard let space = host.activeSpace else {
+            return ["ok": false, "error": "host.activeSpace is nil — no Space to open a tab in"]
+        }
+        var opened: [[String: Any]] = []
+        for text in urls {
+            guard let url = URL(string: text) else {
+                return ["ok": false, "error": "not a URL: \(text)", "opened": opened]
+            }
+            let started = Date().timeIntervalSince1970
+            let tabID = host.openTab(url: url, in: space.id, activate: true)
+            benchOpenedTabs.append(tabID)
+            opened.append(["url": text, "startEpoch": started])
+        }
+        return ["ok": true, "opened": opened]
+    }
+
+    // Newest first, so each close activates a tab whose renderer is still live.
+    private static func benchCloseOpenedTabs(host: AppEnvironment) -> [String: Any] {
+        let identifiers = benchOpenedTabs.reversed()
+        benchOpenedTabs.removeAll()
+        for tabID in identifiers { host.closeTab(tabID) }
+        return ["ok": true, "closed": identifiers.count, "liveRenderers": host.webContents.count]
+    }
+
+    private static func benchStatus(host: AppEnvironment) -> [String: Any] {
+        var response: [String: Any] = [
+            "ok": true,
+            "pid": Int(getpid()),
+            "liveRenderers": host.webContents.count,
+            "openedTabs": benchOpenedTabs.count,
+            "dataRoot": host.dataRoot.url.path,
+        ]
+        if let engine = host.engine as? WebKitEngine {
+            let attribution = WebKitProcessAttribution.gather(
+                from: engine.openTabs.map(\.webView),
+                extensionViews: engine.extensionWebViews
+            )
+            response["processes"] = OrbitProcessMonitor.sample(attribution: attribution).processes.map {
+                (info: OrbitProcessInfo) -> [String: Any] in
+                [
+                    "pid": Int(info.processID),
+                    "role": info.role.rawValue,
+                    "name": info.executableName,
+                    "footprintBytes": info.memoryFootprintBytes,
+                ]
+            }
+        } else {
+            response["processes"] = [[String: Any]]()
+            response["warning"] = "the engine is not WebKitEngine, so no helper processes are attributed"
+        }
+        response["tabs"] = benchOpenedTabs.map { (tabID: TabID) -> [String: Any] in
+            let state = host.navigationStates[tabID]
+            return [
+                "url": state?.url?.absoluteString ?? "",
+                "isLoading": state?.isLoading ?? false,
+                "error": host.tabErrors[tabID].map { "\($0.code) \($0.underlyingDescription)" } ?? "",
+            ]
+        }
+        return response
+    }
+
+    private static func writeBenchJSON(_ object: [String: Any], named name: String, in directory: URL) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+            emit("could not encode \(name)")
+            return
+        }
+        do {
+            try data.write(to: directory.appendingPathComponent(name, isDirectory: false), options: .atomic)
+        } catch {
+            emit("could not write \(name): \(error)")
+        }
     }
 
     // MARK: - Plumbing
