@@ -50,7 +50,7 @@ extension AppEnvironment {
 
     // Does not scroll (no scroll-to machinery); expanding collapsed ancestors is what makes the row exist.
     func revealActiveTabInSidebar() -> Bool {
-        guard let spaceID = activeSpace?.id, let tabID = store.activeTab(in: spaceID)?.id else { return false }
+        guard let spaceID = activeSpace?.id, let tabID = activeTab(in: spaceID)?.id else { return false }
 
         withOrbitAnimation(OrbitMotion.standard) {
             if !isSidebarVisible { isSidebarVisible = true }

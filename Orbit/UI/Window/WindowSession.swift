@@ -8,6 +8,8 @@ final class WindowSession {
 
     enum Kind {
         case standard
+        // A second or later ordinary window: its own selection over the shared tabs and Spaces.
+        case independentStandard
         case incognito
         case tornOff
     }
@@ -54,6 +56,26 @@ final class WindowSession {
             ownedSpaceID: nil,
             ownedProfileID: nil
         )
+    }
+
+    // MARK: - Independent standard window
+
+    /// A further ordinary window. It starts in the Space `host` shows, with a new tab of its own, and from then on
+    /// choosing a tab or Space in either window leaves the other alone.
+    static func independentStandard(on host: AppEnvironment) -> WindowSession {
+        let root = host.rootEnvironment
+        let spaceID = host.activeSpace?.id ?? root.activeSpace?.id ?? root.spaces.first?.id
+        let environment = AppEnvironment.makeWindowScoped(
+            sharing: root,
+            activeSpaceID: spaceID ?? SpaceID(),
+            isIndependentStandardWindow: true
+        )
+        // extensionPoints is per-environment, as for Incognito.
+        FeatureRegistration.installAll(into: environment)
+        if let spaceID {
+            environment.openTab(url: NewTabPageModel.url, in: spaceID)
+        }
+        return WindowSession(kind: .independentStandard, environment: environment, root: root, ownedSpaceID: nil, ownedProfileID: nil)
     }
 
     // MARK: - Incognito
@@ -171,7 +193,7 @@ final class WindowSession {
     func dispose() {
         guard !isDisposed else { return }
         isDisposed = true
-        guard kind == .incognito || kind == .tornOff else { return }
+        guard kind == .incognito || kind == .tornOff || kind == .independentStandard else { return }
 
         // Tabs first (disposeWindowSession releases every WebContents), window second: mirrors
         // real teardown order, so OrbitTabRegistry never sees a tab referencing a dead window id.

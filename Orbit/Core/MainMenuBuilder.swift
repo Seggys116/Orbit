@@ -348,7 +348,7 @@ enum MainMenuBuilder {
 
     private static var hasRenderedActiveTab: Bool {
         guard let spaceID = env.activeSpace?.id else { return false }
-        return env.store.activeTab(in: spaceID) != nil
+        return env.activeTab(in: spaceID) != nil
     }
 
     private static var activeTabIsPinned: Bool {

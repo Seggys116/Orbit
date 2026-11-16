@@ -97,7 +97,11 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
 
     @discardableResult
     static func openNewWindow(on host: AppEnvironment = .processRoot) -> OrbitWindowController {
-        open(session: .standard(on: host))
+        // The first window shows the document's own selection. Each one after it is independent, so it can be on a different page.
+        let root = host.rootEnvironment
+        let rootIsInUse = openControllers.contains { $0.session.environment === root }
+        let source = frontmostEnvironment ?? host
+        return open(session: rootIsInUse ? .independentStandard(on: source) : .standard(on: host))
     }
 
     @discardableResult

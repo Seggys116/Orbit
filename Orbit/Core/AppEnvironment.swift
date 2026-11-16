@@ -457,7 +457,12 @@ final class AppEnvironment {
 
     // Shares store and the other document stores with host's root: an Incognito Space is still a real Space in the one OrbitState, kept off disk by StateStore's strippingEphemeralEntities(), so a private document per window must not be introduced.
     // windowActiveSpaceID, the live WebContents map and its mirrors, and per-window UI state are not shared and are torn down by disposeWindowSession() instead.
-    static func makeWindowScoped(sharing host: AppEnvironment, activeSpaceID: SpaceID, isTornOff: Bool = false) -> AppEnvironment {
+    static func makeWindowScoped(
+        sharing host: AppEnvironment,
+        activeSpaceID: SpaceID,
+        isTornOff: Bool = false,
+        isIndependentStandardWindow: Bool = false
+    ) -> AppEnvironment {
         let root = host.rootEnvironment
         let env = AppEnvironment(
             dataRoot: root.dataRoot,
@@ -476,6 +481,12 @@ final class AppEnvironment {
         env.engineProvider = root
         env.windowActiveSpaceID = activeSpaceID
         env.isTornOffWindowSession = isTornOff
+        env.isIndependentStandardWindow = isIndependentStandardWindow
+        if isIndependentStandardWindow {
+            // Chrome that belongs to the user's layout, not to this window's own state.
+            env.isSidebarVisible = root.isSidebarVisible
+            env.sidebarWidth = root.sidebarWidth
+        }
         env.hasConfiguredAIProvider = root.hasConfiguredAIProvider
         return env
     }
@@ -530,6 +541,7 @@ final class AppEnvironment {
         findQuery = ""
         currentFindResult = .none
         windowActiveSpaceID = nil
+        windowActiveTabBySpace.removeAll()
     }
 
     // Cmd+T in an Incognito window must open a tab in that window's own
@@ -614,7 +626,7 @@ final class AppEnvironment {
     // relaunched window shows an empty content area until the user clicks something.
     func materializeActiveTabIfNeeded() {
         guard let spaceID = activeSpace?.id else { return }
-        guard let tab = store.activeTab(in: spaceID) else { return }
+        guard let tab = activeTab(in: spaceID) else { return }
         materializeWebContents(for: tab.id, url: tab.url)
     }
 
@@ -645,6 +657,55 @@ final class AppEnvironment {
     private(set) var isTornOffWindowSession: Bool = false
 
     var isWindowScoped: Bool { windowActiveSpaceID != nil }
+
+    // MARK: - Per-window active tab
+    // The first window follows the document's own active tab. Every further ordinary window is independent: it reads the same
+    // tabs and Spaces but keeps its own selection here, so two windows can show two different pages and choosing a tab in one
+    // never moves the other.
+
+    private(set) var isIndependentStandardWindow: Bool = false
+
+    private(set) var windowActiveTabBySpace: [SpaceID: TabID] = [:]
+
+    /// The tab this independent window shows in a Space, or nil when it has none or the one it had is closed or moved.
+    private func independentActiveTabID(in spaceID: SpaceID) -> TabID? {
+        guard let id = windowActiveTabBySpace[spaceID], let tab = store.tab(id),
+              tab.spaceID == spaceID, tab.section != .archived else { return nil }
+        return tab.id
+    }
+
+    /// The tab this window shows in the Space: its own selection when independent, the document's otherwise.
+    func activeTab(in spaceID: SpaceID) -> Tab? {
+        guard isIndependentStandardWindow else { return store.activeTab(in: spaceID) }
+        return independentActiveTabID(in: spaceID).flatMap { store.tab($0) }
+    }
+
+    /// Whether this window is showing the tab, as the active tab or a pane of the active split.
+    func isDisplaying(_ tabID: TabID) -> Bool {
+        guard let tab = store.tab(tabID), activeSpace?.id == tab.spaceID, let active = activeTabID else { return false }
+        if active == tabID { return true }
+        return splitGroup(for: active)?.tabIDs.contains(tabID) == true
+    }
+
+    /// Another open window that is showing the tab right now. A tab can be on screen in one window only.
+    func otherEnvironmentDisplaying(_ tabID: TabID) -> AppEnvironment? {
+        OrbitWindowController.openEnvironments.first { $0 !== self && $0.isDisplaying(tabID) }
+    }
+
+    /// An environment, other than this one, that holds the tab's live page: another window's, or the process root's when its window is gone.
+    private func otherEnvironmentHolding(_ tabID: TabID) -> AppEnvironment? {
+        let candidates = OrbitWindowController.openEnvironments + [rootEnvironment]
+        return candidates.first { $0 !== self && $0.webContents[tabID] != nil && !$0.isDisplaying(tabID) }
+    }
+
+    /// For an independent window about to lose its active tab, the tab beside it to move to, never one another window is showing.
+    func successorBeforeClosing(_ id: TabID, in spaceID: SpaceID?) -> TabID? {
+        guard isIndependentStandardWindow, let spaceID, activeTabID == id else { return nil }
+        let order = todayTabs(in: spaceID).map(\.id)
+        guard let index = order.firstIndex(of: id) else { return nil }
+        let nearest = order.indices.filter { $0 != index }.sorted { abs($0 - index) < abs($1 - index) }
+        return nearest.map { order[$0] }.first { otherEnvironmentDisplaying($0) == nil }
+    }
 
     // Falls back to state.activeSpaceID raw, not activeSpace?.id: store.activeSpace
     // substitutes spaces.first, but activeTabID/activeTab are strict.
@@ -793,12 +854,25 @@ final class AppEnvironment {
     private func scopingActiveSpaceToThisWindow<T>(_ mutation: () -> T) -> T {
         guard isWindowScoped else { return mutation() }
         let documentActiveSpaceID = state.activeSpaceID
+        let documentActiveTabs = state.activeTabBySpace
         let result = mutation()
         if let moved = state.activeSpaceID, moved != documentActiveSpaceID {
             windowActiveSpaceID = moved
         }
         if state.activeSpaceID != documentActiveSpaceID {
             state.activeSpaceID = documentActiveSpaceID
+        }
+        if isIndependentStandardWindow {
+            // The store moves the document's active tab for the Space. That pointer is the first window's, so this
+            // window keeps the new selection for itself and the document's is put back.
+            for (spaceID, tabID) in state.activeTabBySpace where documentActiveTabs[spaceID] != tabID {
+                windowActiveTabBySpace[spaceID] = tabID
+                if let previous = documentActiveTabs[spaceID] {
+                    state.activeTabBySpace[spaceID] = previous
+                } else {
+                    state.activeTabBySpace.removeValue(forKey: spaceID)
+                }
+            }
         }
         return result
     }
@@ -835,17 +909,22 @@ final class AppEnvironment {
     var activeTabID: TabID? {
         get {
             guard let spaceID = resolvedActiveSpaceID else { return nil }
+            if isIndependentStandardWindow { return independentActiveTabID(in: spaceID) }
             return state.activeTabBySpace[spaceID]
         }
         set {
             guard let spaceID = resolvedActiveSpaceID else { return }
-            state.activeTabBySpace[spaceID] = newValue
+            if isIndependentStandardWindow {
+                windowActiveTabBySpace[spaceID] = newValue
+            } else {
+                state.activeTabBySpace[spaceID] = newValue
+            }
         }
     }
 
     var activeTab: Tab? {
         guard let spaceID = resolvedActiveSpaceID else { return nil }
-        return store.activeTab(in: spaceID)
+        return activeTab(in: spaceID)
     }
 
     func todayTabs(in spaceID: SpaceID) -> [Tab] { store.todayTabs(in: spaceID) }
@@ -868,6 +947,12 @@ final class AppEnvironment {
 
     func activateTab(_ id: TabID) {
         guard let tab = store.tab(id) else { return }
+        // A page is on screen in one window only; asking for it here brings that window forward instead of
+        // taking the page from it or showing it twice.
+        if let owner = otherEnvironmentDisplaying(id) {
+            OrbitWindowController.window(for: owner)?.makeKeyAndOrderFront(nil)
+            return
+        }
         scopingActiveSpaceToThisWindow { store.selectTab(id) }
         materializeWebContents(for: id, url: tab.url)
         syncExtensionActiveTab()
@@ -878,18 +963,21 @@ final class AppEnvironment {
 
     func closeTab(_ id: TabID, destroyRenderer: Bool = true) {
         let spaceID = store.tab(id)?.spaceID
+        let successor = successorBeforeClosing(id, in: spaceID)
         releaseWebContents(for: id, destroyRenderer: destroyRenderer)
         PaneHeaderColorResolver.shared.forget(tab: id)
         store.closeTab(id)
         // BrowserStore's successor has no live renderer yet, so activateTab materialises it and pushes
         // the activation through syncExtensionActiveTab — same as closeTabKeepingBookmark/removeBookmark.
-        if let spaceID, let nowActive = store.activeTab(in: spaceID)?.id {
+        if let spaceID, let nowActive = activeTab(in: spaceID)?.id {
             if nowActive != id {
                 activateTab(nowActive)
             } else if let survivor = store.tab(id) {
                 // Closing a pinned tab unpins it, and with nothing else open it stays on screen — it needs the renderer back that was released above.
                 materializeWebContents(for: id, url: survivor.url)
             }
+        } else if let successor {
+            activateTab(successor)
         }
         syncExtensionActiveTab()
     }
@@ -912,6 +1000,11 @@ final class AppEnvironment {
     // renderer yet. webContents is the thing that actually knows.
     func isTabOpen(_ id: TabID) -> Bool { webContents[id] != nil }
 
+    /// The active tab id the closing verbs below compare against: this window's own selection when independent, the document's otherwise.
+    private func activeTabIDForSuccession(in spaceID: SpaceID) -> TabID? {
+        isIndependentStandardWindow ? independentActiveTabID(in: spaceID) : state.activeTabBySpace[spaceID]
+    }
+
     // Order matters: a Split View pane is separated out first (closeSplitPane),
     // or it would be left rendering a torn-down WebContents as a blank rectangle.
     func closeTabKeepingBookmark(_ id: TabID, destroyRenderer: Bool = true) {
@@ -920,7 +1013,9 @@ final class AppEnvironment {
         releaseWebContents(for: id, destroyRenderer: destroyRenderer)
         PaneHeaderColorResolver.shared.forget(tab: id)
         store.closeTabKeepingPin(id)
-        if let nowActive = state.activeTabBySpace[tab.spaceID], nowActive != id {
+        // Like the document's own pointer, this window's goes empty rather than moving on to a neighbour.
+        if windowActiveTabBySpace[tab.spaceID] == id { windowActiveTabBySpace.removeValue(forKey: tab.spaceID) }
+        if let nowActive = activeTabIDForSuccession(in: tab.spaceID), nowActive != id {
             activateTab(nowActive)
         }
         syncExtensionActiveTab()
@@ -928,13 +1023,16 @@ final class AppEnvironment {
 
     func removeBookmark(_ id: TabID) {
         guard let tab = store.tab(id), tab.section == .pinned else { return }
+        let successor = successorBeforeClosing(id, in: tab.spaceID)
         if splitGroup(for: id) != nil { closeSplitPane(id) }
         releaseWebContents(for: id)
         PaneHeaderColorResolver.shared.forget(tab: id)
         store.removeBookmark(id)
         defer { syncExtensionActiveTab() }
-        if let nowActive = state.activeTabBySpace[tab.spaceID], nowActive != id {
+        if let nowActive = activeTabIDForSuccession(in: tab.spaceID), nowActive != id {
             activateTab(nowActive)
+        } else if let successor {
+            activateTab(successor)
         }
     }
 
@@ -978,12 +1076,15 @@ final class AppEnvironment {
 
     func archiveTab(_ id: TabID) {
         let spaceID = store.tab(id)?.spaceID
+        let successor = successorBeforeClosing(id, in: spaceID)
         store.archiveTab(id)
         releaseWebContents(for: id)
         // Same reasoning as closeTab above: the successor BrowserStore just
         // picked has no live renderer until activateTab materialises it.
-        if let spaceID, let nowActive = store.activeTab(in: spaceID)?.id, nowActive != id {
+        if let spaceID, let nowActive = activeTab(in: spaceID)?.id, nowActive != id {
             activateTab(nowActive)
+        } else if let successor {
+            activateTab(successor)
         }
         syncExtensionActiveTab()
     }
@@ -1079,6 +1180,13 @@ final class AppEnvironment {
 
     func materializeWebContents(for tabID: TabID, url: URL, retryCount: Int = 0) {
         guard webContents[tabID] == nil else { return }
+
+        // The tab's page may already be live in another window (it was last used there). Moving that page here keeps its
+        // state; building a second one would run the same tab twice.
+        if let holder = otherEnvironmentHolding(tabID) {
+            adoptWebContents(for: tabID, from: holder)
+            return
+        }
 
         #if DEBUG
         if let factory = _test_webContentsFactory {

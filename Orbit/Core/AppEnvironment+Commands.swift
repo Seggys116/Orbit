@@ -70,7 +70,7 @@ extension AppEnvironment {
         case .pinUnpinTab:
             // Must use activeSpace's active tab, not activeTabID, and must check keyWindowIsUnrelatedSurface, or this can pin the wrong tab from an unrelated window like Settings or Library.
             guard !OrbitWindowController.keyWindowIsUnrelatedSurface else { return false }
-            guard let spaceID = activeSpace?.id, let tabID = store.activeTab(in: spaceID)?.id else { return false }
+            guard let spaceID = activeSpace?.id, let tabID = activeTab(in: spaceID)?.id else { return false }
             togglePin(tabID)
         case .clearTodayTabs:
             if let spaceID = activeSpace?.id { clearTodayTabs(in: spaceID) }
@@ -299,7 +299,7 @@ extension AppEnvironment {
     }
 
     func isNewTabPageActive(in spaceID: SpaceID) -> Bool {
-        store.activeTab(in: spaceID).map(NewTabPageModel.isUnlisted) ?? false
+        activeTab(in: spaceID).map(NewTabPageModel.isUnlisted) ?? false
     }
 
     func listedTodayTabs(in spaceID: SpaceID) -> [Tab] {
@@ -310,12 +310,13 @@ extension AppEnvironment {
     func discardNewTabPage(_ id: TabID) {
         guard let page = store.tab(id), NewTabPageModel.isUnlisted(page) else { return }
         let spaceID = page.spaceID
-        let wasActive = store.activeTab(in: spaceID)?.id == id
+        let wasActive = activeTab(in: spaceID)?.id == id
+        let neighbour = successorBeforeClosing(id, in: spaceID)
         releaseWebContents(for: id)
         PaneHeaderColorResolver.shared.forget(tab: id)
         store.discardTab(id)
         guard wasActive else { return }
-        if let successor = store.activeTab(in: spaceID)?.id {
+        if let successor = activeTab(in: spaceID)?.id ?? neighbour {
             activateTab(successor)
         } else {
             syncExtensionActiveTab()
@@ -325,7 +326,7 @@ extension AppEnvironment {
     // An unlisted page has no row, so once it stops being its Space's active tab nothing could ever reach it again.
     func discardNewTabPageIfAbandoned(_ id: TabID) {
         guard let page = store.tab(id), NewTabPageModel.isUnlisted(page),
-              store.activeTab(in: page.spaceID)?.id != id else { return }
+              activeTab(in: page.spaceID)?.id != id else { return }
         discardNewTabPage(id)
     }
 
