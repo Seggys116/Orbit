@@ -1367,6 +1367,7 @@
 		D0CDD61DDAFEE74F6BD02668 /* TabRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55A71BE7F6632000CCD0B9B3 /* TabRowView.swift */; };
 		D0FA089C4A4DE2661871BFAF /* WebKitWebContents+Security.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9608F487B490F3FB0E6677C1 /* WebKitWebContents+Security.swift */; };
 		D1196941E2F447D3EA2AF463 /* EaselCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550E9CF371AA0ADD1884B913 /* EaselCanvasView.swift */; };
+		D135C100ADC31A338982013D /* IndependentWindowSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120137150390CC1D1D864CB5 /* IndependentWindowSessionTests.swift */; };
 		D1561349FED112495AB360CD /* LibraryEaselsNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81C85C4C0FF8F09F7A07C949 /* LibraryEaselsNotesView.swift */; };
 		D176CDC78C3B9035C333197B /* ImportSubmenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 686330E8E359A3658287BFF8 /* ImportSubmenuController.swift */; };
 		D17E28C5EB0027DC240C15F9 /* AppEnvironment+Commands.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE3713A3674970EF951FC1A9 /* AppEnvironment+Commands.swift */; };
@@ -1794,6 +1795,7 @@
 		10A324AFFB0313B151D866B9 /* OrbitScreenshotFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitScreenshotFixtures.swift; sourceTree = "<group>"; };
 		110E2FB6EC9E360BB07D5B55 /* SiteControlPopoverVisualTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiteControlPopoverVisualTests.swift; sourceTree = "<group>"; };
 		119791A9FC5579AFE18EE461 /* FindBarVisualTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindBarVisualTests.swift; sourceTree = "<group>"; };
+		120137150390CC1D1D864CB5 /* IndependentWindowSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndependentWindowSessionTests.swift; sourceTree = "<group>"; };
 		1264A6E03076C2AC4EF2A21B /* ChromeExtensionManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeExtensionManifest.swift; sourceTree = "<group>"; };
 		12861046E4D23075E011E4F3 /* OrbitButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitButton.swift; sourceTree = "<group>"; };
 		12BDF96A394B50CAE7D40621 /* AdBlockerSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdBlockerSettingsPane.swift; sourceTree = "<group>"; };
@@ -3921,6 +3923,7 @@
 				8447BB6DB462D900428956E6 /* HostingViewWindowSizingMechanismTests.swift */,
 				904420C8A2A8CFF6BE32F2E9 /* IncognitoSidebarVariantTests.swift */,
 				BC5A8680847C9143104DAFAA /* IncognitoWindowSessionTests.swift */,
+				120137150390CC1D1D864CB5 /* IndependentWindowSessionTests.swift */,
 				63EDF6C6DDF71D60450D95C3 /* InspectElementContextMenuTests.swift */,
 				476D6940D940B16183F7CFE4 /* LibraryDownloadsVisualTests.swift */,
 				100999EC294B29496800C86D /* LibraryModeColumnWidthTests.swift */,
@@ -5702,6 +5705,7 @@
 				707088BB9FBA84ABA0B994DC /* HostingViewWindowSizingMechanismTests.swift in Sources */,
 				EC64100E51056E9CCB8E7752 /* IncognitoSidebarVariantTests.swift in Sources */,
 				D9852BA6655B66B568D7F7C1 /* IncognitoWindowSessionTests.swift in Sources */,
+				D135C100ADC31A338982013D /* IndependentWindowSessionTests.swift in Sources */,
 				F3A859702F90751C5B3038F3 /* InspectElementContextMenuTests.swift in Sources */,
 				EE0A38D7F026B0E6C5FC195E /* LibraryDownloadsVisualTests.swift in Sources */,
 				3DD939BD470996930F8EE842 /* LibraryModeColumnWidthTests.swift in Sources */,
