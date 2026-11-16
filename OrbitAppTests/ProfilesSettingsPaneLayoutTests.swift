@@ -6,8 +6,10 @@ import XCTest
 @MainActor
 final class ProfilesSettingsPaneLayoutTests: XCTestCase {
 
+    private func makeDemoEnvironment() -> AppEnvironment { AppEnvironment.demo }
+
     func test_profilesDetailColumn_fitsInsideProductionContentWidth_andDeleteProfileRenders() {
-        let env = AppEnvironment.demo
+        let env = makeDemoEnvironment()
         let width = SettingsMetrics.contentMaxWidth
 
         let rendered = render(
@@ -52,7 +54,7 @@ final class ProfilesSettingsPaneLayoutTests: XCTestCase {
     }
 
     func test_manySpacesWithIconsWrapAsWholeChipsAndStillFitTheWindow() {
-        let env = AppEnvironment.demo
+        let env = makeDemoEnvironment()
         let profileID = env.createDefaultProfileIfNeeded()
         let names = ["General", "Uni Stuff", "Anime", "Dev", "Japan", "AI", "Homelab", "Unified-Projects"]
         let symbols = ["house", "graduationcap", "tv", "hammer", "globe.asia.australia", "cpu", "server.rack", "folder"]

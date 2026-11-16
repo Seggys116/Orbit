@@ -98,9 +98,7 @@ public final class DownloadsFolderIndex {
         scanGeneration += 1
         let generation = scanGeneration
         let directory = directory
-        let scanned = await Task.detached(priority: .utility) {
-            Self.scan(directory: directory)
-        }.value
+        let scanned = await Self.scanOffMainActor(directory: directory)
         guard generation == scanGeneration else { return }
         apply(scanned)
     }
@@ -117,6 +115,11 @@ public final class DownloadsFolderIndex {
     }
 
     // MARK: - Scanning
+
+    @concurrent
+    nonisolated static func scanOffMainActor(directory: URL) async -> [DownloadItem] {
+        scan(directory: directory)
+    }
 
     nonisolated static func scan(directory: URL) -> [DownloadItem] {
         let keys: [URLResourceKey] = [
