@@ -1012,9 +1012,9 @@ struct ElDeclarationRow: View {
                 Text(";").font(InspectChrome.mono).foregroundStyle(InspectChrome.muted)
             }
 
-            // var() resolved hint
+            // Resolved hint: a var()'s value, or what an inherit takes and from which element.
             if let computed = decl.computedValue, !computed.isEmpty, computed != decl.value {
-                Text(" → \(computed)")
+                Text(" → \(computed)" + (decl.inheritedFrom.map { " (from \($0))" } ?? ""))
                     .font(InspectChrome.caption)
                     .foregroundStyle(InspectChrome.muted)
                     .lineLimit(1)

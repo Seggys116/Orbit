@@ -220,7 +220,9 @@ struct SplitGroupRowView: View {
                     in: bounds,
                     cornerRadius: OrbitMetrics.sidebarSplitGroupPaneCornerRadius
                 )
-            }
+            },
+            // On release: a press that turns into a drag must not switch tabs first.
+            firesOnRelease: true
         ) {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }

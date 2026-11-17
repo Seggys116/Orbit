@@ -591,8 +591,8 @@ final class OrbitInspectLighthouseTests: XCTestCase {
     }
 
     func testMetricKind_readsValuesFromMetrics() {
-        let metrics = LHMetrics(fcp: 1, lcp: 2, tbt: 3, cls: 0.4, inp: 5, ttfb: 6, speedIndex: 7)
-        XCTAssertEqual(LHMetricKind.allCases.map { $0.value(in: metrics) ?? -1 }, [2, 0.4, 5, 1, 3, 7, 6])
+        let metrics = LHMetrics(fcp: 1, lcp: 2, tbt: 3, cls: 0.4, inp: 5, ttfb: 6, speedIndex: 7, tti: 8)
+        XCTAssertEqual(LHMetricKind.allCases.map { $0.value(in: metrics) ?? -1 }, [2, 0.4, 5, 1, 3, 7, 6, 8])
     }
 
     // MARK: - Opportunities

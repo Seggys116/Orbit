@@ -53,6 +53,25 @@ enum OrbitLighthouseSupport {
         return (data, cgImage.width, cgImage.height)
     }
 
+    /// A JPEG exactly `pixelWidth` pixels across. A snapshot comes back at the display's backing scale, not at the
+    /// emulated device's pixel ratio, so it is redrawn at the device's size.
+    static func jpegData(from image: NSImage, quality: Double, pixelWidth: Int) -> (data: Data, width: Int, height: Int)? {
+        guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil), source.width > 0, pixelWidth > 0 else { return nil }
+        guard source.width != pixelWidth else { return jpegData(from: image, quality: quality) }
+        let pixelHeight = max(1, Int((Double(source.height) * Double(pixelWidth) / Double(source.width)).rounded()))
+        guard let context = CGContext(
+            data: nil, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
+        guard let scaled = context.makeImage() else { return nil }
+        let bitmap = NSBitmapImageRep(cgImage: scaled)
+        guard let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]) else { return nil }
+        return (data, pixelWidth, pixelHeight)
+    }
+
     @MainActor
     static func saveFile(data: Data, suggestedName: String, ext: String) {
         let panel = NSSavePanel()

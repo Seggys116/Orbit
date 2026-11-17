@@ -38,11 +38,110 @@ enum LHDevice: String, Codable, CaseIterable, Hashable {
     var tbtCurve:  (p10: Double, median: Double) { mobile ? (200, 600)   : (150, 350)   }
     var clsCurve:  (p10: Double, median: Double) { (0.1, 0.25) }
     var siCurve:   (p10: Double, median: Double) { mobile ? (3387, 5800) : (1311, 2300) }
+    var ttiCurve:  (p10: Double, median: Double) { mobile ? (3785, 7300) : (2468, 4500) }
 
     /// Link speed assumed for byte savings: Lighthouse's mobile preset is 1.6 Mbps, desktop 10 Mbps. Nothing is throttled here.
     var assumedBytesPerSecond: Double { mobile ? 200_000 : 1_250_000 }
 
+    // Lighthouse's screen emulation: a Moto G Power sized phone for mobile, a desktop window for desktop.
+    var viewportWidth: Int { mobile ? 412 : 1350 }
+    var viewportHeight: Int { mobile ? 823 : 940 }
+    var deviceScaleFactor: Double { mobile ? 1.75 : 1 }
+    var usesMobileAgent: Bool { mobile }
+    var hasTouch: Bool { mobile }
+
+    static let preferenceKey = "orbit.lighthouse.device"
+
+    /// Desktop unless the user chose otherwise; a saved value that no longer reads also means desktop.
+    static func restored(from saved: String?) -> LHDevice {
+        saved.flatMap(LHDevice.init(rawValue:)) ?? .desktop
+    }
+
     private var mobile: Bool { self == .mobile }
+}
+
+/// What a run emulated and what the page itself reported while it was measured, so a report can never claim a
+/// device it did not actually render at.
+struct LHEmulation: Codable, Equatable {
+    var device: LHDevice
+    var targetWidth: Int
+    var targetHeight: Int
+    var targetDPR: Double
+    var targetMobileAgent: Bool
+    var targetTouch: Bool
+    var measuredWidth: Double
+    var measuredHeight: Double
+    var measuredDPR: Double
+    var measuredTouchPoints: Int
+    var measuredMobileAgent: Bool
+    /// True when the document was loaded under the emulated user agent, which only a reload achieves.
+    var documentLoadedUnderAgent: Bool
+
+    init(device: LHDevice, measuredWidth: Double, measuredHeight: Double, measuredDPR: Double,
+         measuredTouchPoints: Int, measuredMobileAgent: Bool, documentLoadedUnderAgent: Bool) {
+        self.device = device
+        targetWidth = device.viewportWidth
+        targetHeight = device.viewportHeight
+        targetDPR = device.deviceScaleFactor
+        targetMobileAgent = device.usesMobileAgent
+        targetTouch = device.hasTouch
+        self.measuredWidth = measuredWidth
+        self.measuredHeight = measuredHeight
+        self.measuredDPR = measuredDPR
+        self.measuredTouchPoints = measuredTouchPoints
+        self.measuredMobileAgent = measuredMobileAgent
+        self.documentLoadedUnderAgent = documentLoadedUnderAgent
+    }
+
+    var viewportApplied: Bool {
+        abs(measuredWidth - Double(targetWidth)) <= 1 && abs(measuredHeight - Double(targetHeight)) <= 1
+    }
+
+    var summary: String {
+        let size = "\(targetWidth) \u{00D7} \(targetHeight) CSS px"
+        let dpr = "DPR " + String(format: "%g", targetDPR)
+        let agent = targetMobileAgent ? "mobile user agent" : "desktop user agent"
+        var parts = [size, dpr, agent]
+        if targetTouch { parts.append("touch") }
+        return "\(device.title) emulation: " + parts.joined(separator: ", ") + "."
+    }
+
+    /// Exactly what this run emulated and what it could not, so a reader knows which results depend on the device.
+    var coverage: String {
+        var emulated = ["layout viewport \(targetWidth) \u{00D7} \(targetHeight)", "script-visible pixel ratio, screen and window size",
+                        "matchMedia resolution queries"]
+        if targetTouch { emulated.append("touch") }
+        var not = ["image density selection (srcset) and resolution media queries in stylesheets, which follow this display"]
+        if targetMobileAgent {
+            if documentLoadedUnderAgent {
+                emulated.append("the user agent sent to the server")
+            } else {
+                not.insert("the user agent the server saw, because this mode does not reload the page", at: 0)
+            }
+        }
+        not.append("CPU and network speed")
+        return "Emulated: " + emulated.joined(separator: ", ") + ". Not emulated: " + not.joined(separator: "; ") + "."
+    }
+
+    /// Each way the page's own view of the run differs from what was asked for, in words a reader can act on.
+    var problems: [String] {
+        var out: [String] = []
+        if !viewportApplied {
+            out.append("The page was measured at \(Int(measuredWidth.rounded())) \u{00D7} \(Int(measuredHeight.rounded())) CSS px, not the \(targetWidth) \u{00D7} \(targetHeight) a \(device.title) run emulates, so layout-dependent results describe that size instead.")
+        }
+        if abs(measuredDPR - targetDPR) > 0.01 {
+            out.append("Scripts saw a device pixel ratio of \(String(format: "%g", measuredDPR)), not \(String(format: "%g", targetDPR)).")
+        }
+        if targetMobileAgent && !documentLoadedUnderAgent {
+            out.append("This run did not reload the page, so the server and the page's first scripts saw the desktop user agent. Use a Navigation run to audit what phones are sent.")
+        } else if targetMobileAgent != measuredMobileAgent {
+            out.append("The page reported a \(measuredMobileAgent ? "mobile" : "desktop") user agent.")
+        }
+        if targetTouch && measuredTouchPoints == 0 {
+            out.append("The page did not report touch support.")
+        }
+        return out
+    }
 }
 
 enum LHCategory: String, Codable, CaseIterable, Hashable, Identifiable {
@@ -143,6 +242,266 @@ struct LHAuditResult: Codable, Identifiable {
     }
 }
 
+/// Where the long tasks behind TBT came from. WebKit has no Long Tasks API, so Orbit's own lag sampler is the usual source.
+enum LHLongTaskSource: String, Codable {
+    case longTasksAPI
+    case lagSampler
+    case none
+}
+
+/// A span of main-thread work the page agent timed: a timer or animation-frame callback, or the page's
+/// DOMContentLoaded and load handlers. Times are performance.now() milliseconds.
+struct LHWorkSpan: Codable, Equatable {
+    var category: String
+    var url: String?
+    var startMs: Double
+    var endMs: Double
+}
+
+/// A script's download end and the moment its element fired load, which follows straight after it ran.
+struct LHScriptSpan: Codable, Equatable {
+    var url: String
+    var responseEndMs: Double
+    var loadMs: Double
+}
+
+/// A request from start to finish; `endMs` is nil while it is still in flight.
+struct LHRequestSpan: Codable, Equatable {
+    var startMs: Double
+    var endMs: Double?
+}
+
+struct LHAttribution: Codable, Equatable {
+    var category: String
+    var url: String?
+    var ms: Double
+    /// True when the share was inferred from timing overlap rather than timed directly.
+    var approximate: Bool
+}
+
+/// A stretch when the main thread did not run Orbit's 10 ms timer for more than 50 ms, with what was running in it.
+struct LHBlockingInterval: Codable, Equatable {
+    var startMs: Double
+    var endMs: Double
+    var attribution: [LHAttribution]
+    var durationMs: Double { endMs - startMs }
+}
+
+struct LHMainThreadRow: Codable, Equatable, Identifiable {
+    var category: String
+    var url: String?
+    var ms: Double
+    var count: Int
+    var approximate: Bool
+    var id: String { category + "|" + (url ?? "") }
+}
+
+/// What the main thread did during the observed load, from the agent's measurements.
+struct LHMainThread: Codable, Equatable {
+    var samplerPeriodMs: Double
+    var observedFromMs: Double
+    var observedToMs: Double
+    var byCategory: [LHMainThreadRow]
+    var byScript: [LHMainThreadRow]
+    /// Worst first.
+    var intervals: [LHBlockingInterval]
+    var forcedLayouts: [LHMainThreadRow]
+    var totalMs: Double { byCategory.reduce(0) { $0 + $1.ms } }
+}
+
+/// Time to Interactive and how it was decided.
+struct LHTTI: Codable, Equatable {
+    var valueMs: Double?
+    var quietWindowStartMs: Double?
+    var observedUntilMs: Double
+    var capReached: Bool
+    var note: String?
+}
+
+// MARK: Library versions and advisories
+
+/// A version as libraries report it ("1.12.4", "v3.5.0-rc1", "4.17"). Missing parts count as 0; a pre-release sorts before its release.
+struct LHSemver: Comparable, Equatable, CustomStringConvertible {
+    var major: Int
+    var minor: Int
+    var patch: Int
+    var prerelease: String?
+
+    init(_ major: Int, _ minor: Int, _ patch: Int, prerelease: String? = nil) {
+        self.major = major; self.minor = minor; self.patch = patch; self.prerelease = prerelease
+    }
+
+    init?(_ text: String) {
+        var s = text.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("v") || s.hasPrefix("V") { s.removeFirst() }
+        var pre: String?
+        if let dash = s.firstIndex(where: { $0 == "-" || $0 == "+" }) {
+            if s[dash] == "-" { pre = String(s[s.index(after: dash)...]).components(separatedBy: "+")[0] }
+            s = String(s[..<dash])
+        }
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        guard !parts.isEmpty, parts.count <= 3 else { return nil }
+        var numbers: [Int] = []
+        for part in parts {
+            guard !part.isEmpty, part.allSatisfy(\.isNumber), let n = Int(part) else { return nil }
+            numbers.append(n)
+        }
+        while numbers.count < 3 { numbers.append(0) }
+        self.init(numbers[0], numbers[1], numbers[2], prerelease: pre?.isEmpty == true ? nil : pre)
+    }
+
+    var description: String {
+        "\(major).\(minor).\(patch)" + (prerelease.map { "-" + $0 } ?? "")
+    }
+
+    static func < (lhs: LHSemver, rhs: LHSemver) -> Bool {
+        if lhs.major != rhs.major { return lhs.major < rhs.major }
+        if lhs.minor != rhs.minor { return lhs.minor < rhs.minor }
+        if lhs.patch != rhs.patch { return lhs.patch < rhs.patch }
+        switch (lhs.prerelease, rhs.prerelease) {
+        case (nil, nil), (nil, _?): return false
+        case (_?, nil): return true
+        case let (l?, r?): return comparePrerelease(l, r) < 0
+        }
+    }
+
+    /// Dot-separated identifiers: numbers compare as numbers and sort before words, as semver orders them.
+    private static func comparePrerelease(_ l: String, _ r: String) -> Int {
+        let a = l.split(separator: "."), b = r.split(separator: ".")
+        for i in 0 ..< max(a.count, b.count) {
+            guard i < a.count else { return -1 }
+            guard i < b.count else { return 1 }
+            let x = a[i], y = b[i]
+            switch (Int(x), Int(y)) {
+            case let (p?, q?): if p != q { return p < q ? -1 : 1 }
+            case (_?, nil): return -1
+            case (nil, _?): return 1
+            case (nil, nil): if x != y { return x < y ? -1 : 1 }
+            }
+        }
+        return 0
+    }
+}
+
+/// Lower bound inclusive, upper bound exclusive; a missing bound is open.
+struct LHVersionRange: Equatable {
+    var atLeast: LHSemver?
+    var below: LHSemver?
+
+    func contains(_ version: LHSemver) -> Bool {
+        if let atLeast, version < atLeast { return false }
+        if let below, !(version < below) { return false }
+        return true
+    }
+
+    var text: String {
+        switch (atLeast, below) {
+        case let (l?, u?): return ">= \(l), < \(u)"
+        case let (nil, u?): return "< \(u)"
+        case let (l?, nil): return ">= \(l)"
+        case (nil, nil): return "all versions"
+        }
+    }
+}
+
+enum LHSeverity: String, Codable, Comparable {
+    case low, medium, high, critical
+
+    var title: String { rawValue.capitalized }
+    private var rank: Int { [.low: 0, .medium: 1, .high: 2, .critical: 3][self] ?? 0 }
+    static func < (lhs: LHSeverity, rhs: LHSeverity) -> Bool { lhs.rank < rhs.rank }
+}
+
+struct LHAdvisory: Equatable {
+    /// The name the Frameworks detection gives the library.
+    var library: String
+    var id: String
+    var severity: LHSeverity
+    var summary: String
+    var ranges: [LHVersionRange]
+    /// Nil when no fixed release exists.
+    var fixedIn: String?
+
+    func affects(_ version: LHSemver) -> Bool { ranges.contains { $0.contains(version) } }
+    var rangeText: String { ranges.map(\.text).joined(separator: " or ") }
+}
+
+/// A library seen on the page, as the Frameworks detection reported it.
+struct LHLibrary: Codable, Equatable {
+    var name: String
+    var version: String?
+    var evidence: [String]
+}
+
+struct LHLibraryFinding: Codable, Equatable {
+    var library: String
+    var version: String
+    var advisoryID: String
+    var severity: LHSeverity
+    var summary: String
+    var affectedRange: String
+    var fixedIn: String?
+    var evidence: [String]
+}
+
+/// Two runs side by side: how the scores, the metrics and the audits moved from `base` to `target`.
+struct LHComparison {
+    struct ScoreChange: Identifiable, Equatable {
+        var category: LHCategory
+        var before: Int
+        var after: Int
+        var delta: Int { after - before }
+        var id: String { category.rawValue }
+    }
+
+    struct MetricChange: Identifiable, Equatable {
+        var kind: LHMetricKind
+        var before: Double
+        var after: Double
+        var id: String { kind.rawValue }
+        var delta: Double { after - before }
+        /// Every metric here is better when lower.
+        var improved: Bool { after < before }
+        var ratingBefore: LHRating { kind.rating(for: before) }
+        var ratingAfter: LHRating { kind.rating(for: after) }
+
+        /// Unthrottled timings move by tens of milliseconds between identical loads, so a change has to clear
+        /// 50 ms and 10 percent (0.01 for CLS) before it is called a change rather than noise.
+        var isSignificant: Bool {
+            if kind.isUnitless { return abs(delta) >= 0.01 }
+            return abs(delta) >= 50 && abs(delta) >= abs(before) * 0.1
+        }
+
+        var deltaText: String {
+            let sign = delta > 0 ? "+" : delta < 0 ? "\u{2212}" : ""
+            return sign + kind.format(abs(delta))
+        }
+    }
+
+    struct AuditChange: Identifiable, Equatable {
+        var id: String
+        var title: String
+        var category: LHCategory
+        var before: LHAuditBand
+        var after: LHAuditBand
+        var beforeValue: String
+        var afterValue: String
+    }
+
+    var baseID: UUID
+    var targetID: UUID
+    var baseDate: Date
+    var targetDate: Date
+    var scores: [ScoreChange]
+    var metrics: [MetricChange]
+    /// Audits that got worse: passed to warning or failed, or warning to failed.
+    var regressions: [AuditChange]
+    /// Audits that got better.
+    var fixes: [AuditChange]
+    /// Why the two runs may not measure the same thing.
+    var caveats: [String]
+}
+
 /// A rectangle in CSS pixels.
 struct LHRect: Codable, Equatable {
     var x: Double
@@ -210,6 +569,7 @@ struct LHMetrics: Codable {
     var longTaskCount: Int?  = nil
     var lcpDetail:    LHLCPDetail? = nil
     var ttfbParts:    [LHTimingPart]? = nil
+    var tti:          Double? = nil
 }
 
 struct LHFilmstripFrame: Codable {
@@ -286,7 +646,7 @@ enum LHRating: String, Hashable {
 }
 
 enum LHMetricKind: String, CaseIterable, Identifiable {
-    case lcp, cls, inp, fcp, tbt, speedIndex, ttfb
+    case lcp, cls, inp, fcp, tbt, speedIndex, ttfb, tti
 
     var id: String { rawValue }
 
@@ -302,6 +662,7 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
         case .tbt: return "TBT"
         case .speedIndex: return "Speed Index"
         case .ttfb: return "TTFB"
+        case .tti: return "TTI"
         }
     }
 
@@ -314,6 +675,7 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
         case .tbt: return "Total Blocking Time"
         case .speedIndex: return "Speed Index"
         case .ttfb: return "Time to First Byte"
+        case .tti: return "Time to Interactive"
         }
     }
 
@@ -326,6 +688,7 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
         case .tbt: return 200
         case .speedIndex: return 3_400
         case .ttfb: return 800
+        case .tti: return 3_800
         }
     }
 
@@ -338,6 +701,7 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
         case .tbt: return 600
         case .speedIndex: return 5_800
         case .ttfb: return 1_800
+        case .tti: return 7_300
         }
     }
 
@@ -364,6 +728,7 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
         case .tbt: return metrics.tbt
         case .speedIndex: return metrics.speedIndex
         case .ttfb: return metrics.ttfb
+        case .tti: return metrics.tti
         }
     }
 
@@ -377,6 +742,7 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
         case .tbt: return "total-blocking-time"
         case .speedIndex: return "speed-index"
         case .ttfb: return "server-response-time"
+        case .tti: return "interactive"
         }
     }
 
@@ -388,7 +754,7 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
         case .tbt: return 30
         case .fcp: return 10
         case .speedIndex: return 10
-        case .inp, .ttfb: return 0
+        case .inp, .ttfb, .tti: return 0
         }
     }
 
@@ -409,6 +775,8 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
             return "How quickly the visible part of the page fills in. Orbit estimates it from small snapshots of the page taken every 100 ms, compared with the final frame."
         case .ttfb:
             return "How long the server takes to start answering, including redirects, DNS, connection set-up and waiting for the first byte."
+        case .tti:
+            return "When the page became reliably usable: the end of the last long task before the first 5 seconds with no long task and no more than two requests in flight."
         }
     }
 
@@ -428,6 +796,8 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
             return "Show first-screen content early: inline critical CSS, preload hero images and fonts, and avoid content that only appears after JavaScript has run."
         case .ttfb:
             return "Use a CDN or caching, remove redirect chains, reuse connections, and reduce the server's own work before it responds."
+        case .tti:
+            return "Finish start-up work sooner: split or defer long scripts, load third-party code after the page is usable, and avoid late bursts of requests."
         }
     }
 
@@ -441,6 +811,7 @@ enum LHMetricKind: String, CaseIterable, Identifiable {
         case .tbt: return "From the Long Tasks API, counting tasks that start after First Contentful Paint. Nothing is throttled."
         case .speedIndex: return "An estimate from 20 by 20 pixel snapshots, not a video of the load."
         case .ttfb: return "From the Navigation Timing API for this page load."
+        case .tti: return "WebKit has no Long Tasks API, so long tasks come from a 10 ms timer loop that notes when the main thread did not answer for over 50 ms (resolution about 10 ms). Requests come from Resource Timing and the Network log. Not part of the score, as in Lighthouse."
         }
     }
 
@@ -499,6 +870,11 @@ struct LHReport: Codable, Identifiable {
     var throttlingNote: String
     var redistributionNote: String? = nil
     var visuals: LHVisuals? = nil
+    /// Nil in reports saved before runs emulated the device.
+    var emulation: LHEmulation? = nil
+    var mainThread: LHMainThread? = nil
+    var tti: LHTTI? = nil
+    var libraries: [LHLibrary]? = nil
 
     /// The screenshots are large, so saved history keeps the numbers and evidence but not the pictures.
     func strippingVisuals() -> LHReport {
@@ -582,6 +958,11 @@ struct LHEvidenceNode {
     var selector: String; var nodeID: Int; var snippet: String
 }
 
+/// An element that reaches past the right edge of the viewport and is not clipped by an ancestor.
+struct LHOverflowNode {
+    var selector: String; var nodeID: Int; var right: Double; var snippet: String
+}
+
 struct LHDeprecatedElement {
     var tag: String; var selector: String; var nodeID: Int
 }
@@ -610,8 +991,14 @@ struct LHBundle {
     var pageTitle:      String = ""
     var timestamp:      Date   = Date()
     var mode:           LHRunMode            = .snapshot
-    var device:         LHDevice             = .mobile
+    var device:         LHDevice             = .desktop
     var enabledCategories: Set<LHCategory>   = Set(LHCategory.allCases)
+    var emulation:      LHEmulation?         = nil
+
+    /// The layout viewport and the document's full width, in CSS px, for the content-width check.
+    var viewportWidth:  Double               = 0
+    var documentScrollWidth: Double?         = nil
+    var overflowNodes:  [LHOverflowNode]     = []
 
     var fcpMs:              Double?           = nil
     var lcpMs:              Double?           = nil
@@ -627,6 +1014,21 @@ struct LHBundle {
     var ttfbMs:             Double?           = nil
     var longTasks:          [LHLongTask]      = []
     var longTasksAPIAvailable: Bool           = false
+    var longTaskSource:     LHLongTaskSource  = .longTasksAPI
+
+    // Main-thread evidence from the agent's lag sampler and callback timing.
+    var samplerAvailable:   Bool              = false
+    var samplerPeriodMs:    Double            = 10
+    var samplerFromMs:      Double            = 0
+    var samplerToMs:        Double            = 0
+    var samplerIntervals:   [LHBlockingInterval] = []
+    var workSpans:          [LHWorkSpan]      = []
+    var workTotals:         [LHMainThreadRow] = []
+    var scriptSpans:        [LHScriptSpan]    = []
+    var forcedLayouts:      [LHMainThreadRow] = []
+    var requestSpans:       [LHRequestSpan]   = []
+    var tti:                LHTTI?            = nil
+    var libraries:          [LHLibrary]       = []
     var timespanDurationMs: Double?           = nil
     var siFrames:           [(ms: Double, completeness: Double)] = []
 
@@ -756,11 +1158,12 @@ enum OrbitLighthouseLogic {
                 blend(top[2], bottom[2]), outA]
     }
 
-    /// Sum of (duration − 50 ms) for long tasks after FCP; nil when the long tasks API was unavailable.
-    static func computeTBT(longTasks: [LHLongTask], fcpMs: Double?, apiAvailable: Bool) -> Double? {
+    /// Sum of (duration − 50 ms) for long tasks that start between FCP and TTI, as Lighthouse counts them; with no TTI,
+    /// every task after FCP that was observed. Nil when there was no long-task source.
+    static func computeTBT(longTasks: [LHLongTask], fcpMs: Double?, apiAvailable: Bool, ttiMs: Double? = nil) -> Double? {
         guard apiAvailable, let fcp = fcpMs else { return nil }
         return longTasks
-            .filter { $0.startMs >= fcp }
+            .filter { task in task.startMs >= fcp && (ttiMs.map { tti in task.startMs < tti } ?? true) }
             .reduce(0.0) { acc, task in acc + max(0.0, task.durationMs - 50.0) }
     }
 
@@ -889,7 +1292,8 @@ enum OrbitLighthouseLogic {
         audits += networkAudits(bundle: bundle)
         audits = audits.map { withEstimatedSavings($0, device: bundle.device) }.map(withGuidance)
 
-        let tbt = computeTBT(longTasks: bundle.longTasks, fcpMs: bundle.fcpMs, apiAvailable: bundle.longTasksAPIAvailable)
+        let tbt = computeTBT(longTasks: bundle.longTasks, fcpMs: bundle.fcpMs, apiAvailable: bundle.longTasksAPIAvailable,
+                             ttiMs: bundle.tti?.valueMs)
         let si  = computeSpeedIndex(frames: bundle.siFrames)
 
         // Note redistribution when some performance metrics are absent
@@ -918,7 +1322,8 @@ enum OrbitLighthouseLogic {
             inp: bundle.inpMs, ttfb: bundle.ttfbMs, speedIndex: si,
             longTaskCount: bundle.longTasksAPIAvailable ? bundle.longTasks.count : nil,
             lcpDetail: bundle.lcpDetail,
-            ttfbParts: parts.isEmpty ? nil : parts
+            ttfbParts: parts.isEmpty ? nil : parts,
+            tti: bundle.mode == .navigation ? bundle.tti?.valueMs : nil
         )
 
         return LHReport(
@@ -926,10 +1331,24 @@ enum OrbitLighthouseLogic {
             timestamp: bundle.timestamp, mode: bundle.mode, device: bundle.device,
             runCount: 1, enabledCategories: Array(bundle.enabledCategories),
             scores: scores, metrics: metrics, audits: audits,
-            throttlingNote: "No CPU or network throttling applied; metrics measured on this Mac.",
+            throttlingNote: throttlingNote(device: bundle.device),
             redistributionNote: redist,
-            visuals: visuals(bundle: bundle, shifts: shifts)
+            visuals: visuals(bundle: bundle, shifts: shifts),
+            emulation: bundle.emulation,
+            mainThread: mainThread(bundle: bundle),
+            tti: bundle.mode == .navigation ? bundle.tti : nil,
+            libraries: bundle.libraries
         )
+    }
+
+    /// WebKit offers no CPU or network throttling, so the timings are this Mac's; the note says so in terms of the device chosen.
+    static func throttlingNote(device: LHDevice) -> String {
+        switch device {
+        case .desktop:
+            return "No CPU or network throttling applied; metrics measured on this Mac."
+        case .mobile:
+            return "Laid out and captured at the mobile viewport, but no CPU or network throttling applied: timings are this Mac's, so they will read faster than on a mid-range phone, which Lighthouse's mobile curves assume."
+        }
     }
 
     // MARK: Decoding what the page agent sends
@@ -1218,14 +1637,14 @@ enum OrbitLighthouseLogic {
         if !bundle.longTasksAPIAvailable {
             out.append(naAudit("total-blocking-time", .performance,
                                "Total Blocking Time",
-                               "Long Tasks API not available in this WebKit version; TBT cannot be measured.",
+                               "WebKit has no Long Tasks API and Orbit's lag sampler did not run for this load (it needs a Navigation run), so TBT cannot be measured.",
                                weight: 30))
         } else {
-            let tbt = computeTBT(longTasks: bundle.longTasks, fcpMs: bundle.fcpMs, apiAvailable: true)
+            let tbt = computeTBT(longTasks: bundle.longTasks, fcpMs: bundle.fcpMs, apiAvailable: true, ttiMs: bundle.tti?.valueMs)
             out.append(metricAudit(
                 id: "total-blocking-time",
                 title: "Total Blocking Time",
-                desc: "Sum of (duration − 50 ms) for long tasks after FCP.",
+                desc: tbtDescription(bundle),
                 docs: "https://developer.chrome.com/docs/lighthouse/performance/lighthouse-total-blocking-time/",
                 value: nav ? tbt : nil, curve: dev.tbtCurve, weight: 30, unit: .timeMs,
                 items: blockingTaskItems(bundle)
@@ -1287,7 +1706,29 @@ enum OrbitLighthouseLogic {
             ] : []
         ))
 
-        if bundle.longTasksAPIAvailable && nav {
+        let thread = mainThread(bundle: bundle)
+        if let thread, nav || ts {
+            // Worst first, each with what Orbit could tell was running in it.
+            let items = thread.intervals.prefix(10).map { interval in
+                LHAuditItem(
+                    wastedMs: max(0, interval.durationMs - 50),
+                    label: "\(formatMs(interval.durationMs)) at \(formatMs(interval.startMs))",
+                    subLabel: interval.attribution.prefix(3).map(attributionText).joined(separator: "; ")
+                )
+            }
+            out.append(LHAuditResult(
+                id: "long-tasks", category: .performance,
+                title: "Avoid long main-thread tasks",
+                description: "Stretches longer than 50 ms when the main thread did not run Orbit's 10 ms timer, so taps and typing would have waited. Durations are lower bounds within about 10 ms, and back-to-back short tasks with no gap read as one. What ran in each is timed exactly for timer, animation-frame, DOMContentLoaded and load callbacks; script evaluation is inferred from download and load times and marked approximate.",
+                docsURL: "https://developer.chrome.com/docs/lighthouse/performance/long-tasks/",
+                status: thread.intervals.isEmpty ? .pass : .informative, score: nil, weight: 0,
+                numericValue: Double(bundle.samplerIntervals.count),
+                displayValue: "\(bundle.samplerIntervals.count) blocking interval(s)",
+                items: Array(items)
+            ))
+            out.append(mainThreadBreakdownAudit(thread))
+            out.append(bootupTimeAudit(thread))
+        } else if bundle.longTaskSource == .longTasksAPI && bundle.longTasksAPIAvailable && nav {
             let taskItems = bundle.longTasks.prefix(10).map {
                 LHAuditItem(label: formatMs($0.durationMs), subLabel: "at \(formatMs($0.startMs))")
             }
@@ -1301,6 +1742,10 @@ enum OrbitLighthouseLogic {
                 displayValue: "\(bundle.longTasks.count) long task(s)",
                 items: Array(taskItems)
             ))
+        }
+
+        if nav {
+            out.append(interactiveAudit(bundle))
         }
 
         if ts, let inp = bundle.inpMs {
@@ -1528,10 +1973,90 @@ enum OrbitLighthouseLogic {
     }
 
     /// The tasks that make up Total Blocking Time, longest first.
+    static func attributionText(_ part: LHAttribution) -> String {
+        var text = part.category
+        if let url = part.url { text += " " + shortScriptName(url) }
+        text += " " + formatMs(part.ms)
+        if part.approximate { text += " (approximate)" }
+        return text
+    }
+
+    /// The file name, or the page itself for inline code, so a list of scripts stays readable.
+    static func shortScriptName(_ url: String) -> String {
+        guard let parsed = URL(string: url) else { return url }
+        let name = parsed.lastPathComponent
+        return name.isEmpty || name == "/" ? (parsed.host ?? url) + " (inline)" : name
+    }
+
+    static func tbtDescription(_ bundle: LHBundle) -> String {
+        let window = bundle.tti?.valueMs != nil ? "between FCP and Time to Interactive" : "after FCP"
+        switch bundle.longTaskSource {
+        case .lagSampler:
+            return "Sum of (duration − 50 ms) for main-thread blocks \(window). WebKit has no Long Tasks API, so blocks come from a 10 ms timer loop that notes when the main thread did not answer for over 50 ms; each is a lower bound within about 10 ms."
+        case .longTasksAPI, .none:
+            return "Sum of (duration − 50 ms) for long tasks \(window)."
+        }
+    }
+
+    static func interactiveAudit(_ bundle: LHBundle) -> LHAuditResult {
+        let title = "Time to Interactive"
+        let docs = "https://developer.chrome.com/docs/lighthouse/performance/interactive/"
+        let method = "The end of the last long task before the first 5 s with no long task and at most two requests in flight. Long tasks come from a 10 ms timer loop (resolution about 10 ms); requests from Resource Timing and the Network log. Shown, not scored, as in Lighthouse."
+        guard let tti = bundle.tti, let value = tti.valueMs else {
+            let reason = bundle.tti?.note ?? "Orbit's main-thread sampler did not run for this load, so TTI could not be measured."
+            return naAudit("interactive", .performance, title, reason + " " + method, weight: 0, docs: docs)
+        }
+        let score = logNormalScore(value: max(value, 0.001), p10: bundle.device.ttiCurve.p10, median: bundle.device.ttiCurve.median)
+        var items: [LHAuditItem] = []
+        if let quiet = tti.quietWindowStartMs {
+            items.append(LHAuditItem(label: "Quiet window from \(formatMs(quiet)) to \(formatMs(quiet + ttiQuietWindowMs))",
+                                     subLabel: "Observed until \(formatMs(tti.observedUntilMs))"))
+        }
+        return LHAuditResult(
+            id: "interactive", category: .performance, title: title, description: method, docsURL: docs,
+            status: score >= 0.9 ? .pass : (score >= 0.5 ? .warning : .fail), score: score, weight: 0,
+            numericValue: value, displayValue: formatMs(value), items: items
+        )
+    }
+
+    static func mainThreadBreakdownAudit(_ thread: LHMainThread) -> LHAuditResult {
+        LHAuditResult(
+            id: "mainthread-work-breakdown", category: .performance,
+            title: "Main-thread work by kind",
+            description: "Timer and animation-frame callbacks are timed one by one, and DOMContentLoaded and load handlers come from Navigation Timing; these are exact. Script evaluation and the unattributed rest are only counted inside blocked stretches and are approximate. Style, layout and paint outside script are not separately measurable in WebKit.",
+            docsURL: "https://developer.chrome.com/docs/lighthouse/performance/mainthread-work-breakdown/",
+            status: .informative, score: nil, weight: 0,
+            numericValue: thread.totalMs, displayValue: formatMs(thread.totalMs),
+            items: thread.byCategory.map { row in
+                LHAuditItem(label: row.category, subLabel: formatMs(row.ms) + (row.approximate ? " (approximate)" : "") + ", \(row.count) span(s)")
+            } + thread.forcedLayouts.prefix(5).map { row in
+                LHAuditItem(url: row.url, label: "Forced layout from script",
+                            subLabel: "\(row.count) slow layout read(s), \(formatMs(row.ms)); counted inside its script's time above")
+            }
+        )
+    }
+
+    static func bootupTimeAudit(_ thread: LHMainThread) -> LHAuditResult {
+        let total = thread.byScript.reduce(0) { $0 + $1.ms }
+        return LHAuditResult(
+            id: "bootup-time", category: .performance,
+            title: "JavaScript execution time by script",
+            description: "Callback time each script scheduled, timed exactly, plus script evaluation inferred inside blocked stretches (approximate). Code Orbit could not tie to a file is left out.",
+            docsURL: "https://developer.chrome.com/docs/lighthouse/performance/bootup-time/",
+            status: .informative, score: nil, weight: 0,
+            numericValue: total, displayValue: formatMs(total),
+            items: thread.byScript.prefix(10).map { row in
+                LHAuditItem(url: row.url, label: row.url.map(shortScriptName) ?? "",
+                            subLabel: formatMs(row.ms) + (row.approximate ? " (includes approximate evaluation)" : ""))
+            }
+        )
+    }
+
     private static func blockingTaskItems(_ bundle: LHBundle) -> [LHAuditItem] {
         guard bundle.longTasksAPIAvailable, let fcp = bundle.fcpMs else { return [] }
+        let tti = bundle.tti?.valueMs
         return bundle.longTasks
-            .filter { $0.startMs >= fcp && $0.durationMs > 50 }
+            .filter { task in task.startMs >= fcp && task.durationMs > 50 && (tti.map { end in task.startMs < end } ?? true) }
             .sorted { $0.durationMs > $1.durationMs }
             .prefix(10)
             .map {
@@ -1631,6 +2156,9 @@ enum OrbitLighthouseLogic {
         "is-crawlable": "Remove noindex from the robots meta tag or robots.txt if the page should appear in search.",
         "viewport-seo": "Add <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">.",
         "font-size": "Use at least 12px text so it is legible on phones without zooming.",
+        "interactive": LHMetricKind.tti.improvement,
+        "no-vulnerable-libraries": "Upgrade each listed library to at least its fixed version, or replace it; if the build is patched, check the advisory against the patch. For an end-of-life library such as AngularJS, plan a migration, since new advisories will not be fixed.",
+        "content-width": "Reveal the listed elements: replace fixed pixel widths with max-width: 100%, let flex and grid children shrink with min-width: 0, wrap long words and URLs with overflow-wrap: anywhere, and give wide tables or code their own horizontal scroll container.",
         "canonical": "Point rel=\"canonical\" at one valid absolute URL for this content.",
         "hreflang": "Use valid language codes and absolute URLs in hreflang links, and include a self-reference.",
         "structured-data": "Fix the JSON-LD so it parses as valid JSON and follows the schema.org type it declares.",
@@ -2171,7 +2699,37 @@ enum OrbitLighthouseLogic {
             }
         ))
 
+        out.append(contentWidthAudit(bundle: bundle))
+        out.append(vulnerableLibrariesAudit(bundle: bundle))
+
         return out
+    }
+
+    /// Content wider than the viewport forces sideways scrolling, which at a phone's width usually means a fixed-width
+    /// element. Measured from the document's scroll width at the emulated viewport, with the elements that stick out.
+    static func contentWidthAudit(bundle: LHBundle) -> LHAuditResult {
+        let title = "Content is sized correctly for the viewport"
+        let desc = "If the page is wider than the viewport, visitors have to scroll sideways to read it."
+        guard bundle.viewportWidth > 0, let documentWidth = bundle.documentScrollWidth else {
+            return naAudit("content-width", .bestPractices, title, "The page did not report its width, so this could not be checked.", weight: 3)
+        }
+        let viewport = bundle.viewportWidth
+        let fits = documentWidth <= viewport + 1
+        let items = bundle.overflowNodes.prefix(15).map { node in
+            LHAuditItem(nodeID: node.nodeID, selector: node.selector,
+                        label: "Extends to \(Int(node.right.rounded())) px, \(Int((node.right - viewport).rounded())) px past the edge",
+                        snippet: node.snippet)
+        }
+        return LHAuditResult(
+            id: "content-width", category: .bestPractices, title: title, description: desc,
+            docsURL: "https://developer.chrome.com/docs/lighthouse/pwa/content-width/",
+            status: fits ? .pass : .fail, score: fits ? 1 : 0, weight: 3,
+            numericValue: documentWidth,
+            displayValue: fits
+                ? "Fits \(Int(viewport.rounded())) px"
+                : "\(Int(documentWidth.rounded())) px wide in a \(Int(viewport.rounded())) px viewport",
+            items: fits ? [] : Array(items)
+        )
     }
 
     private static func seoAudits(bundle: LHBundle) -> [LHAuditResult] {
@@ -2270,18 +2828,25 @@ enum OrbitLighthouseLogic {
         let smallRatio = bundle.totalTextNodes > 0
             ? Double(bundle.smallFontNodes.count) / Double(bundle.totalTextNodes) : 0
         let fontPass = smallRatio < 0.4
-        out.append(LHAuditResult(
-            id: "font-size", category: .seo,
-            title: "Document uses legible font sizes",
-            description: "Font sizes smaller than 12px are too small to read comfortably on a screen.",
-            docsURL: "https://developer.chrome.com/docs/lighthouse/seo/font-size/",
-            status: fontPass ? .pass : .fail, score: fontPass ? 1 : 0, weight: 8,
-            numericValue: Double(bundle.smallFontNodes.count),
-            displayValue: bundle.smallFontNodes.isEmpty ? "All legible" : "\(bundle.smallFontNodes.count) small",
-            items: bundle.smallFontNodes.prefix(20).map {
-                LHAuditItem(nodeID: $0.nodeID, selector: $0.selector, label: String(format: "%.1f px", $0.fontSize), snippet: $0.snippet)
-            }
-        ))
+        // As in Lighthouse, legibility is a phone question: a desktop run does not score it.
+        if bundle.device == .desktop {
+            out.append(naAudit("font-size", .seo, "Document uses legible font sizes",
+                               "Only checked in Mobile runs, where small text cannot be read without zooming.",
+                               weight: 8, docs: "https://developer.chrome.com/docs/lighthouse/seo/font-size/"))
+        } else {
+            out.append(LHAuditResult(
+                id: "font-size", category: .seo,
+                title: "Document uses legible font sizes",
+                description: "Font sizes smaller than 12px are too small to read comfortably on a phone.",
+                docsURL: "https://developer.chrome.com/docs/lighthouse/seo/font-size/",
+                status: fontPass ? .pass : .fail, score: fontPass ? 1 : 0, weight: 8,
+                numericValue: Double(bundle.smallFontNodes.count),
+                displayValue: bundle.smallFontNodes.isEmpty ? "All legible" : "\(bundle.smallFontNodes.count) small",
+                items: bundle.smallFontNodes.prefix(20).map {
+                    LHAuditItem(nodeID: $0.nodeID, selector: $0.selector, label: String(format: "%.1f px", $0.fontSize), snippet: $0.snippet)
+                }
+            ))
+        }
 
         let canon = bundle.canonicalURL ?? ""
         var canonIssues: [LHAuditItem] = []
@@ -2589,12 +3154,340 @@ enum OrbitLighthouseLogic {
     }
 
 
+    // MARK: Time to Interactive
+
+    static let ttiQuietWindowMs: Double = 5_000
+
+    /// Lighthouse's definition: the first 5 s window after FCP with no long task and at most two requests in flight;
+    /// TTI is the end of the last long task before that window, or FCP when there is none. Nil while no such window
+    /// has been observed in full, because a window that runs past `observedUntilMs` is unproven.
+    static func timeToInteractive(
+        fcpMs: Double, tasks: [(startMs: Double, endMs: Double)], requests: [LHRequestSpan], observedUntilMs: Double
+    ) -> (ttiMs: Double, quietStartMs: Double)? {
+        let relevant = tasks.filter { $0.endMs > fcpMs }
+        var candidates = [fcpMs] + relevant.map(\.endMs) + requests.compactMap(\.endMs).filter { $0 > fcpMs }
+        candidates = Array(Set(candidates)).sorted()
+        for start in candidates {
+            let end = start + ttiQuietWindowMs
+            if end > observedUntilMs { return nil }
+            if relevant.contains(where: { $0.startMs < end && $0.endMs > start }) { continue }
+            if maxInFlight(requests, from: start, to: end, observedUntilMs: observedUntilMs) > 2 { continue }
+            let lastTaskEnd = relevant.filter { $0.endMs <= start }.map(\.endMs).max()
+            return (max(fcpMs, lastTaskEnd ?? fcpMs), start)
+        }
+        return nil
+    }
+
+    /// The most requests in flight at once inside [from, to]. A request with no end is still in flight when observation stopped.
+    static func maxInFlight(_ requests: [LHRequestSpan], from: Double, to: Double, observedUntilMs: Double) -> Int {
+        var active = 0
+        var events: [(t: Double, delta: Int)] = []
+        for request in requests {
+            let end = request.endMs ?? observedUntilMs
+            guard end > from, request.startMs < to else { continue }
+            if request.startMs <= from { active += 1 } else { events.append((request.startMs, 1)) }
+            if end < to { events.append((end, -1)) }
+        }
+        // An end and a start at the same moment do not overlap, so ends are applied first.
+        events.sort { $0.t != $1.t ? $0.t < $1.t : $0.delta < $1.delta }
+        var peak = active
+        for event in events {
+            active += event.delta
+            peak = max(peak, active)
+        }
+        return peak
+    }
+
+    // MARK: Main-thread attribution
+
+    static let unattributedCategory = "Other: parsing, style, layout or script Orbit could not see"
+    static let scriptEvaluationCategory = "Script evaluation"
+
+    /// What ran inside one blocked stretch. Timed callbacks and handlers count exactly by overlap. What is left goes to a
+    /// script whose download had finished but whose load event had not yet fired, since a classic script runs in exactly
+    /// that gap; this is marked approximate. The rest stays unattributed.
+    static func attribute(startMs: Double, endMs: Double, work: [LHWorkSpan], scripts: [LHScriptSpan]) -> [LHAttribution] {
+        let duration = max(0, endMs - startMs)
+        var exact: [String: (category: String, url: String?, ms: Double)] = [:]
+        var covered = 0.0
+        for span in work {
+            let overlap = min(endMs, span.endMs) - max(startMs, span.startMs)
+            guard overlap > 0.5 else { continue }
+            let key = span.category + "|" + (span.url ?? "")
+            exact[key, default: (span.category, span.url, 0)].ms += overlap
+            covered += overlap
+        }
+        var parts = exact.values.map { LHAttribution(category: $0.category, url: $0.url, ms: $0.ms, approximate: false) }
+        var remainder = max(0, duration - covered)
+        if remainder > 10 {
+            let best = scripts
+                .map { (script: $0, overlap: min(endMs, $0.loadMs) - max(startMs, $0.responseEndMs)) }
+                .filter { $0.overlap > 0 }
+                .max { $0.overlap < $1.overlap }
+            if let best {
+                let share = min(remainder, best.overlap)
+                parts.append(LHAttribution(category: scriptEvaluationCategory, url: best.script.url, ms: share, approximate: true))
+                remainder -= share
+            }
+        }
+        if remainder > 1 {
+            parts.append(LHAttribution(category: unattributedCategory, url: nil, ms: remainder, approximate: true))
+        }
+        return parts.sorted { $0.ms > $1.ms }
+    }
+
+    /// Totals by kind of work and by script. Callback and handler time is exact and covers every callback, short ones too;
+    /// script evaluation and the unattributed rest exist only inside blocked stretches and are approximate.
+    static func mainThread(bundle: LHBundle) -> LHMainThread? {
+        guard bundle.samplerAvailable else { return nil }
+        let intervals = bundle.samplerIntervals.map { interval in
+            LHBlockingInterval(startMs: interval.startMs, endMs: interval.endMs,
+                               attribution: attribute(startMs: interval.startMs, endMs: interval.endMs,
+                                                      work: bundle.workSpans, scripts: bundle.scriptSpans))
+        }
+
+        var categories: [String: LHMainThreadRow] = [:]
+        var scripts: [String: LHMainThreadRow] = [:]
+        func add(_ category: String, _ url: String?, _ ms: Double, count: Int, approximate: Bool) {
+            var row = categories[category] ?? LHMainThreadRow(category: category, url: nil, ms: 0, count: 0, approximate: false)
+            row.ms += ms; row.count += count; row.approximate = row.approximate || approximate
+            categories[category] = row
+            guard let url, !url.isEmpty else { return }
+            var script = scripts[url] ?? LHMainThreadRow(category: "Script", url: url, ms: 0, count: 0, approximate: false)
+            script.ms += ms; script.count += count; script.approximate = script.approximate || approximate
+            scripts[url] = script
+        }
+        for total in bundle.workTotals { add(total.category, total.url, total.ms, count: total.count, approximate: false) }
+        for interval in intervals {
+            for part in interval.attribution where part.approximate {
+                add(part.category, part.url, part.ms, count: 1, approximate: true)
+            }
+        }
+        return LHMainThread(
+            samplerPeriodMs: bundle.samplerPeriodMs,
+            observedFromMs: bundle.samplerFromMs,
+            observedToMs: bundle.samplerToMs,
+            byCategory: categories.values.filter { $0.ms >= 0.5 }.sorted { $0.ms > $1.ms },
+            byScript: scripts.values.filter { $0.ms >= 0.5 }.sorted { $0.ms > $1.ms },
+            intervals: Array(intervals.sorted { $0.durationMs > $1.durationMs }.prefix(20)),
+            forcedLayouts: bundle.forcedLayouts.sorted { $0.ms > $1.ms }
+        )
+    }
+
+    // MARK: Vulnerable libraries
+
+    private static func range(_ atLeast: String?, _ below: String?) -> LHVersionRange {
+        LHVersionRange(atLeast: atLeast.flatMap(LHSemver.init), below: below.flatMap(LHSemver.init))
+    }
+
+    /// Only advisories whose identifier, affected range and fix are established; severity is the CVSS v3 rating published with the advisory.
+    static let advisories: [LHAdvisory] = [
+        LHAdvisory(library: "jQuery", id: "CVE-2015-9251", severity: .medium,
+                   summary: "Cross-site scripting: a cross-domain Ajax request without a dataType runs a text/javascript response as script.",
+                   ranges: [range(nil, "3.0.0")], fixedIn: "3.0.0"),
+        LHAdvisory(library: "jQuery", id: "CVE-2019-11358", severity: .medium,
+                   summary: "Prototype pollution through jQuery.extend(true, {}, ...) with an untrusted object.",
+                   ranges: [range(nil, "3.4.0")], fixedIn: "3.4.0"),
+        LHAdvisory(library: "jQuery", id: "CVE-2020-11022", severity: .medium,
+                   summary: "Cross-site scripting when untrusted HTML, even sanitized, is passed to DOM manipulation methods such as .html().",
+                   ranges: [range("1.2.0", "3.5.0")], fixedIn: "3.5.0"),
+        LHAdvisory(library: "jQuery", id: "CVE-2020-11023", severity: .medium,
+                   summary: "Cross-site scripting when HTML containing <option> elements is passed to DOM manipulation methods.",
+                   ranges: [range("1.0.3", "3.5.0")], fixedIn: "3.5.0"),
+        LHAdvisory(library: "Bootstrap", id: "CVE-2019-8331", severity: .medium,
+                   summary: "Cross-site scripting through the tooltip and popover data-template, data-content and data-title options.",
+                   ranges: [range(nil, "3.4.1"), range("4.0.0", "4.3.1")], fixedIn: "3.4.1 or 4.3.1"),
+        LHAdvisory(library: "Lodash", id: "CVE-2019-10744", severity: .critical,
+                   summary: "Prototype pollution through defaultsDeep.",
+                   ranges: [range(nil, "4.17.12")], fixedIn: "4.17.12"),
+        LHAdvisory(library: "Lodash", id: "CVE-2020-8203", severity: .high,
+                   summary: "Prototype pollution through zipObjectDeep.",
+                   ranges: [range(nil, "4.17.19")], fixedIn: "4.17.19"),
+        LHAdvisory(library: "Lodash", id: "CVE-2020-28500", severity: .medium,
+                   summary: "Regular expression denial of service in toNumber, trim and trimEnd.",
+                   ranges: [range(nil, "4.17.21")], fixedIn: "4.17.21"),
+        LHAdvisory(library: "Lodash", id: "CVE-2021-23337", severity: .high,
+                   summary: "Command injection through the template function.",
+                   ranges: [range(nil, "4.17.21")], fixedIn: "4.17.21"),
+        LHAdvisory(library: "Moment.js", id: "CVE-2017-18214", severity: .high,
+                   summary: "Regular expression denial of service when parsing crafted date strings.",
+                   ranges: [range(nil, "2.19.3")], fixedIn: "2.19.3"),
+        LHAdvisory(library: "Moment.js", id: "CVE-2022-24785", severity: .high,
+                   summary: "Path traversal in locale loading; matters where a locale name comes from user input, mainly on Node.js.",
+                   ranges: [range(nil, "2.29.2")], fixedIn: "2.29.2"),
+        LHAdvisory(library: "Moment.js", id: "CVE-2022-31129", severity: .high,
+                   summary: "Inefficient parsing of RFC 2822 date strings allows denial of service with long input.",
+                   ranges: [range("2.18.0", "2.29.4")], fixedIn: "2.29.4"),
+        LHAdvisory(library: "AngularJS", id: "CVE-2019-10768", severity: .high,
+                   summary: "Prototype pollution through angular.merge.",
+                   ranges: [range(nil, "1.7.9")], fixedIn: "1.7.9"),
+        LHAdvisory(library: "AngularJS", id: "CVE-2020-7676", severity: .medium,
+                   summary: "Cross-site scripting through <option> elements inside <select> after sanitization.",
+                   ranges: [range(nil, "1.8.0")], fixedIn: "1.8.0"),
+        LHAdvisory(library: "AngularJS", id: "CVE-2022-25869", severity: .medium,
+                   summary: "Cross-site scripting through interpolation in <textarea> in Internet Explorer. No fixed release exists.",
+                   ranges: [range(nil, nil)], fixedIn: nil),
+    ]
+
+    /// Libraries that no longer receive security fixes at all, whatever the version.
+    static let endOfLife: [String: String] = [
+        "AngularJS": "AngularJS reached end of life on 31 December 2021 and receives no further security fixes; known advisories stay unfixed."
+    ]
+
+    static var advisoryLibraries: Set<String> { Set(advisories.map(\.library)) }
+
+    /// Matches by reported version only. Libraries with no readable version are returned separately, never guessed.
+    static func vulnerabilities(in libraries: [LHLibrary]) -> (findings: [LHLibraryFinding], unversioned: [LHLibrary]) {
+        var findings: [LHLibraryFinding] = []
+        var unversioned: [LHLibrary] = []
+        for library in libraries where advisoryLibraries.contains(library.name) {
+            guard let text = library.version, let version = LHSemver(text) else {
+                unversioned.append(library)
+                continue
+            }
+            for advisory in advisories where advisory.library == library.name && advisory.affects(version) {
+                findings.append(LHLibraryFinding(
+                    library: library.name, version: text, advisoryID: advisory.id, severity: advisory.severity,
+                    summary: advisory.summary, affectedRange: advisory.rangeText, fixedIn: advisory.fixedIn,
+                    evidence: library.evidence))
+            }
+        }
+        findings.sort { $0.severity != $1.severity ? $0.severity > $1.severity : $0.advisoryID < $1.advisoryID }
+        return (findings, unversioned)
+    }
+
+    static func vulnerableLibrariesAudit(bundle: LHBundle) -> LHAuditResult {
+        let (findings, unversioned) = vulnerabilities(in: bundle.libraries)
+        let eol = bundle.libraries.filter { endOfLife[$0.name] != nil }
+        var items = findings.map { finding in
+            LHAuditItem(
+                label: "\(finding.library) \(finding.version): \(finding.advisoryID) (\(finding.severity.title))",
+                snippet: finding.summary,
+                subLabel: "Affected \(finding.affectedRange); " + (finding.fixedIn.map { "fixed in \($0)" } ?? "no fixed release")
+                    + (finding.evidence.isEmpty ? "" : "; found by \(finding.evidence.joined(separator: ", "))")
+            )
+        }
+        items += eol.map { LHAuditItem(label: "\($0.name) \($0.version ?? "(version not detected)"): end of life", subLabel: endOfLife[$0.name]) }
+        items += unversioned.map { LHAuditItem(label: "\($0.name): version not detected", subLabel: "Not matched against advisories; found by \($0.evidence.joined(separator: ", "))") }
+        let failing = !findings.isEmpty || !eol.isEmpty
+        let worst = findings.map(\.severity).max()
+        return LHAuditResult(
+            id: "no-vulnerable-libraries", category: .bestPractices,
+            title: "Avoids front-end JavaScript libraries with known security vulnerabilities",
+            description: "Libraries detected on the page (globals and their version properties, and versions in script URLs) are matched against a bundled table of published advisories. Matching is by version only: a back-ported or patched build reports the old version and can be a false positive, and a library Orbit cannot identify is not checked.",
+            docsURL: "https://owasp.org/www-project-top-ten/2017/A9_2017-Using_Components_with_Known_Vulnerabilities",
+            status: failing ? .fail : .pass, score: failing ? 0 : 1, weight: 3,
+            numericValue: Double(findings.count),
+            displayValue: findings.isEmpty
+                ? (eol.isEmpty ? (bundle.libraries.isEmpty ? "No libraries detected" : "No known vulnerabilities") : "End-of-life library")
+                : "\(findings.count) advisor\(findings.count == 1 ? "y" : "ies")" + (worst.map { ", worst \($0.title)" } ?? ""),
+            items: items
+        )
+    }
+
+    // MARK: History and comparison
+
+    /// Newest first, at most `perPage` runs for each page and device and `total` overall, so one busy page cannot push every other page's runs out.
+    static func trimmedHistory(_ reports: [LHReport], perPage: Int = 10, total: Int = 20) -> [LHReport] {
+        var counts: [String: Int] = [:]
+        var kept: [LHReport] = []
+        for report in reports.sorted(by: { $0.timestamp > $1.timestamp }) {
+            let key = historyKey(report)
+            guard counts[key, default: 0] < perPage, kept.count < total else { continue }
+            counts[key, default: 0] += 1
+            kept.append(report)
+        }
+        return kept
+    }
+
+    static func historyKey(_ report: LHReport) -> String {
+        "\(report.device.rawValue) \(report.url)"
+    }
+
+    /// The run to compare against by default: the latest earlier run of the same page, device and mode, since only those measure the same thing.
+    static func comparisonBaseline(for report: LHReport, in history: [LHReport]) -> LHReport? {
+        history
+            .filter { $0.id != report.id && $0.timestamp < report.timestamp && $0.url == report.url
+                && $0.device == report.device && $0.mode == report.mode }
+            .max(by: { $0.timestamp < $1.timestamp })
+    }
+
+    static func compare(base: LHReport, target: LHReport) -> LHComparison {
+        var scores: [LHComparison.ScoreChange] = []
+        for category in LHCategory.allCases {
+            guard let before = base.scores[category], let after = target.scores[category] else { continue }
+            scores.append(.init(category: category, before: before, after: after))
+        }
+
+        var metrics: [LHComparison.MetricChange] = []
+        if base.mode != .snapshot && target.mode != .snapshot {
+            for kind in LHMetricKind.allCases {
+                guard let before = kind.value(in: base.metrics), let after = kind.value(in: target.metrics) else { continue }
+                metrics.append(.init(kind: kind, before: before, after: after))
+            }
+        }
+
+        func rank(_ band: LHAuditBand) -> Int? {
+            switch band {
+            case .passed: return 0
+            case .warning: return 1
+            case .failed: return 2
+            case .informative, .notApplicable: return nil
+            }
+        }
+        let earlier = Dictionary(base.audits.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var regressions: [LHComparison.AuditChange] = []
+        var fixes: [LHComparison.AuditChange] = []
+        for audit in target.audits {
+            guard let old = earlier[audit.id], let was = rank(old.band), let now = rank(audit.band), was != now else { continue }
+            let change = LHComparison.AuditChange(id: audit.id, title: audit.title, category: audit.category,
+                                                  before: old.band, after: audit.band,
+                                                  beforeValue: old.displayValue, afterValue: audit.displayValue)
+            if now > was { regressions.append(change) } else { fixes.append(change) }
+        }
+
+        var caveats: [String] = []
+        if base.url != target.url { caveats.append("The runs audited different addresses.") }
+        if base.device != target.device {
+            caveats.append("One run emulated \(base.device.title) and the other \(target.device.title), so their layouts and scoring curves differ.")
+        }
+        if base.mode != target.mode { caveats.append("The runs used different modes (\(base.mode.title) and \(target.mode.title)).") }
+        if base.runCount != target.runCount {
+            caveats.append("One figure is a median of \(max(base.runCount, target.runCount)) runs and the other of \(min(base.runCount, target.runCount)).")
+        }
+        if [base, target].contains(where: { $0.emulation.map { !$0.viewportApplied } ?? false }) {
+            caveats.append("At least one run was not measured at its device's viewport.")
+        }
+        return LHComparison(baseID: base.id, targetID: target.id, baseDate: base.timestamp, targetDate: target.timestamp,
+                            scores: scores, metrics: metrics, regressions: regressions, fixes: fixes, caveats: caveats)
+    }
+
+    /// The device as the report header states it: the emulated viewport when there was one.
+    static func deviceLine(_ report: LHReport) -> String {
+        guard let emulation = report.emulation else {
+            return "\(report.device.title) scoring, device not emulated"
+        }
+        let size = emulation.viewportApplied
+            ? "\(emulation.targetWidth) \u{00D7} \(emulation.targetHeight)"
+            : "measured at \(Int(emulation.measuredWidth.rounded())) \u{00D7} \(Int(emulation.measuredHeight.rounded()))"
+        return "\(report.device.title), \(size), DPR \(String(format: "%g", emulation.targetDPR))"
+    }
+
+    /// Reasons the run may not reflect the chosen device; empty when it does.
+    static func emulationProblems(_ report: LHReport) -> [String] {
+        guard let emulation = report.emulation else {
+            return ["This run was saved before Orbit emulated the device, so it was laid out at the tab's own size."]
+        }
+        return emulation.problems
+    }
+
     static func summaryText(_ report: LHReport) -> String {
         var lines = [
             "Lighthouse — \(report.url)",
             DateFormatter.localizedString(from: report.timestamp, dateStyle: .short, timeStyle: .short)
-                + " · \(report.mode.title) · \(report.device.title) curves"
+                + " · \(report.mode.title) · \(deviceLine(report))"
         ]
+        lines += emulationProblems(report).map { "Note: " + $0 }
         if let p = report.scores.performance    { lines.append("Performance:    \(p)/100") }
         if let a = report.scores.accessibility  { lines.append("Accessibility:  \(a)/100") }
         if let b = report.scores.bestPractices  { lines.append("Best practices: \(b)/100") }
@@ -2663,6 +3556,29 @@ enum OrbitLighthouseLogic {
                 if let url = lcp.url { sections += " loaded from <code>\(esc(url))</code>" }
                 sections += "</p><table>\(phaseRows)</table>"
             }
+        }
+
+        if let tti = report.tti, tti.valueMs == nil, let note = tti.note {
+            sections += "<p class=\"dim\">Time to Interactive not measured: \(esc(note))</p>"
+        }
+
+        if let thread = report.mainThread {
+            var rows = ""
+            for row in thread.byCategory {
+                rows += "<tr><td>\(esc(row.category))</td><td>\(esc(formatMs(row.ms)))\(row.approximate ? " (approximate)" : "")</td><td>\(row.count)</td></tr>"
+            }
+            var scripts = ""
+            for row in thread.byScript.prefix(10) {
+                scripts += "<tr><td><code>\(esc(row.url ?? ""))</code></td><td>\(esc(formatMs(row.ms)))\(row.approximate ? " (approximate)" : "")</td></tr>"
+            }
+            var blocks = ""
+            for interval in thread.intervals.prefix(10) {
+                blocks += "<tr><td>\(esc(formatMs(interval.durationMs)))</td><td>\(esc(formatMs(interval.startMs)))</td><td>\(esc(interval.attribution.map(attributionText).joined(separator: "; ")))</td></tr>"
+            }
+            sections += "<h2>Main thread</h2><p class=\"dim\">Observed from \(esc(formatMs(thread.observedFromMs))) to \(esc(formatMs(thread.observedToMs))) with a \(Int(thread.samplerPeriodMs)) ms sampler.</p>"
+            if !rows.isEmpty { sections += "<table><tr><th>Kind</th><th>Time</th><th>Spans</th></tr>\(rows)</table>" }
+            if !scripts.isEmpty { sections += "<h3>By script</h3><table>\(scripts)</table>" }
+            if !blocks.isEmpty { sections += "<h3>Blocking intervals</h3><table><tr><th>Length</th><th>At</th><th>What ran</th></tr>\(blocks)</table>" }
         }
 
         if let visuals = report.visuals {
@@ -2753,7 +3669,9 @@ enum OrbitLighthouseLogic {
         h2{font-size:16px;margin-top:28px}h3{font-size:14px}.dim{color:#888;font-size:12px}code{font-size:12px;word-break:break-all}</style></head>
         <body>
         <h1>Lighthouse — \(esc(report.pageTitle.isEmpty ? report.url : report.pageTitle))</h1>
-        <p style="color:#666;font-size:13px">\(esc(DateFormatter.localizedString(from: report.timestamp, dateStyle: .long, timeStyle: .medium))) · \(report.mode.title) · \(report.device.title) curves</p>
+        <p style="color:#666;font-size:13px">\(esc(DateFormatter.localizedString(from: report.timestamp, dateStyle: .long, timeStyle: .medium))) · \(report.mode.title) · \(esc(deviceLine(report)))</p>
+        \(emulationProblems(report).map { "<p style=\"color:#b06000;font-size:12px\">\(esc($0))</p>" }.joined())
+        \(report.emulation.map { "<p style=\"color:#888;font-size:12px\">\(esc($0.coverage))</p>" } ?? "")
         <p style="color:#888;font-size:12px">\(esc(report.throttlingNote))</p>
         <div>\(badge("Performance", report.scores.performance))\(badge("Accessibility", report.scores.accessibility))\(badge("Best practices", report.scores.bestPractices))\(badge("SEO", report.scores.seo))\(badge("Security", report.scores.security))</div>
         \(sections)

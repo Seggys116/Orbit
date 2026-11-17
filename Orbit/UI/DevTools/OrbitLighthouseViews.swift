@@ -35,6 +35,13 @@ enum LHStyle {
         }
     }
 
+    /// A run as menus and headers name it: when, on which device, how, and which page when the path tells runs apart.
+    static func runLabel(_ report: LHReport) -> String {
+        let when = DateFormatter.localizedString(from: report.timestamp, dateStyle: .short, timeStyle: .short)
+        let path = URL(string: report.url).map { $0.path.isEmpty ? "/" : $0.path } ?? report.url
+        return "\(when) · \(report.device.title) · \(report.mode.title) · \(path)"
+    }
+
     /// Matches the wording under the category gauges, and is short enough for the narrowest tile.
     static func shortWord(_ rating: LHRating) -> String {
         switch rating {
@@ -1058,6 +1065,194 @@ struct LHFilmstripFrameView: View {
     }
 }
 
+// MARK: - Main thread
+
+/// Where main-thread time went: by kind, by script, and the worst blocked stretches with what ran in them.
+/// Exact and approximate figures are labelled apart.
+struct LHMainThreadView: View {
+    var thread: LHMainThread
+    var tti: LHTTI?
+    var session: OrbitInspectSession
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let tti, tti.valueMs == nil, let note = tti.note {
+                Text("Time to Interactive not measured: " + note)
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(OrbitNeutral.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Observed \(OrbitLighthouseLogic.formatMs(thread.observedFromMs)) to \(OrbitLighthouseLogic.formatMs(thread.observedToMs)) with a \(Int(thread.samplerPeriodMs)) ms sampler. Callback times are exact; rows marked approximate are inferred from timing.")
+                .font(InspectChrome.caption)
+                .foregroundStyle(OrbitNeutral.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            rows("By kind", thread.byCategory.map { ($0.id, $0.category, $0.ms, $0.approximate) })
+            if !thread.byScript.isEmpty {
+                rows("By script", thread.byScript.prefix(8).map { ($0.id, OrbitLighthouseLogic.shortScriptName($0.url ?? ""), $0.ms, $0.approximate) })
+            }
+            if !thread.intervals.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Worst blocking intervals")
+                        .font(InspectChrome.sectionTitle)
+                        .foregroundStyle(OrbitNeutral.muted)
+                    ForEach(Array(thread.intervals.prefix(6).enumerated()), id: \.offset) { _, interval in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(OrbitLighthouseLogic.formatMs(interval.durationMs)) at \(OrbitLighthouseLogic.formatMs(interval.startMs))")
+                                .font(InspectChrome.mono)
+                                .foregroundStyle(OrbitNeutral.ink)
+                            Text(interval.attribution.map(OrbitLighthouseLogic.attributionText).joined(separator: "; "))
+                                .font(InspectChrome.caption)
+                                .foregroundStyle(OrbitNeutral.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            if !thread.forcedLayouts.isEmpty {
+                rows("Forced layout reads (inside script time)", thread.forcedLayouts.prefix(5).map {
+                    ($0.id, "\(OrbitLighthouseLogic.shortScriptName($0.url ?? "")), \($0.count) read(s)", $0.ms, false)
+                })
+            }
+        }
+    }
+
+    private func rows(_ title: String, _ items: [(id: String, label: String, ms: Double, approximate: Bool)]) -> some View {
+        let scale = max(items.map(\.ms).max() ?? 1, 1)
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(InspectChrome.sectionTitle)
+                .foregroundStyle(OrbitNeutral.muted)
+            ForEach(items, id: \.id) { item in
+                HStack(spacing: 6) {
+                    Text(item.label)
+                        .font(InspectChrome.label)
+                        .foregroundStyle(OrbitNeutral.ink2)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(width: 220, alignment: .leading)
+                    GeometryReader { geo in
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(item.approximate ? OrbitNeutral.muted2 : OrbitNeutral.accent)
+                            .frame(width: max(2, geo.size.width * item.ms / scale))
+                    }
+                    .frame(height: 6)
+                    Text(OrbitLighthouseLogic.formatMs(item.ms) + (item.approximate ? " approx." : ""))
+                        .font(InspectChrome.mono)
+                        .foregroundStyle(OrbitNeutral.ink)
+                        .frame(width: 110, alignment: .trailing)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(item.label), \(OrbitLighthouseLogic.formatMs(item.ms))" + (item.approximate ? ", approximate" : ""))
+            }
+        }
+    }
+}
+
+// MARK: - Comparison
+
+/// Score, metric and audit changes between two runs. Metric changes inside run-to-run noise are shown as unchanged, not as wins or losses.
+struct LHComparisonView: View {
+    var comparison: LHComparison
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(comparison.caveats, id: \.self) { caveat in
+                Label(caveat, systemImage: "exclamationmark.triangle.fill")
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(OrbitNeutral.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !comparison.scores.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 6) {
+                    ForEach(comparison.scores) { change in
+                        HStack(spacing: 6) {
+                            Text(change.category.title)
+                                .font(InspectChrome.label)
+                                .foregroundStyle(OrbitNeutral.ink2)
+                            Text("\(change.before) \u{2192} \(change.after)")
+                                .font(InspectChrome.mono)
+                                .foregroundStyle(OrbitNeutral.ink)
+                            Text(change.delta == 0 ? "=" : (change.delta > 0 ? "+\(change.delta)" : "\u{2212}\(-change.delta)"))
+                                .font(InspectChrome.mono)
+                                .foregroundStyle(change.delta > 0 ? OrbitNeutral.good : change.delta < 0 ? OrbitNeutral.bad : OrbitNeutral.muted)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(change.category.title) score \(change.before) to \(change.after)")
+                    }
+                }
+            }
+            if !comparison.metrics.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(comparison.metrics) { change in
+                        metricRow(change)
+                    }
+                }
+            }
+            if !comparison.regressions.isEmpty {
+                auditList("Got worse (\(comparison.regressions.count))", comparison.regressions, color: OrbitNeutral.bad, symbol: "arrow.down.circle.fill")
+            }
+            if !comparison.fixes.isEmpty {
+                auditList("Got better (\(comparison.fixes.count))", comparison.fixes, color: OrbitNeutral.good, symbol: "arrow.up.circle.fill")
+            }
+            if comparison.regressions.isEmpty && comparison.fixes.isEmpty {
+                Text("No audit changed between passed, warning and failed.")
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(OrbitNeutral.muted)
+            }
+        }
+    }
+
+    private func metricRow(_ change: LHComparison.MetricChange) -> some View {
+        let color: Color = !change.isSignificant ? OrbitNeutral.muted : change.improved ? OrbitNeutral.good : OrbitNeutral.bad
+        return HStack(spacing: 6) {
+            Text(change.kind.title)
+                .font(InspectChrome.label)
+                .foregroundStyle(OrbitNeutral.ink2)
+                .frame(width: 84, alignment: .leading)
+            Text("\(change.kind.format(change.before)) \u{2192} \(change.kind.format(change.after))")
+                .font(InspectChrome.mono)
+                .foregroundStyle(OrbitNeutral.ink)
+            Text(change.isSignificant ? change.deltaText : "about the same")
+                .font(InspectChrome.caption)
+                .foregroundStyle(color)
+            if change.ratingBefore != change.ratingAfter {
+                Text("\(LHStyle.shortWord(change.ratingBefore)) to \(LHStyle.shortWord(change.ratingAfter))")
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(LHStyle.color(change.ratingAfter))
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(change.kind.fullName) \(change.kind.format(change.before)) to \(change.kind.format(change.after))"
+                            + (change.isSignificant ? (change.improved ? ", better" : ", worse") : ", about the same"))
+    }
+
+    private func auditList(_ title: String, _ changes: [LHComparison.AuditChange], color: Color, symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(InspectChrome.sectionTitle)
+                .foregroundStyle(OrbitNeutral.muted)
+            ForEach(changes) { change in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 10))
+                        .foregroundStyle(color)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(change.title)
+                            .font(InspectChrome.label)
+                            .foregroundStyle(OrbitNeutral.ink)
+                        Text("\(change.category.title): \(change.beforeValue) \u{2192} \(change.afterValue)")
+                            .font(InspectChrome.caption)
+                            .foregroundStyle(OrbitNeutral.muted)
+                            .lineLimit(2)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - History chip
 
 struct LHHistoryChip: View {
@@ -1078,7 +1273,7 @@ struct LHHistoryChip: View {
             Text(DateFormatter.localizedString(from: report.timestamp, dateStyle: .none, timeStyle: .short))
                 .font(InspectChrome.caption)
                 .foregroundStyle(OrbitNeutral.ink2)
-            Text(report.mode.title)
+            Text("\(report.device.title) · \(report.mode.title)")
                 .font(InspectChrome.caption)
                 .foregroundStyle(OrbitNeutral.muted)
         }
@@ -1089,7 +1284,7 @@ struct LHHistoryChip: View {
         )
         .overlay(InspectHitTarget(action: onSelect))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Run at \(DateFormatter.localizedString(from: report.timestamp, dateStyle: .none, timeStyle: .short)), \(report.mode.title)")
+        .accessibilityLabel("Run at \(DateFormatter.localizedString(from: report.timestamp, dateStyle: .none, timeStyle: .short)), \(report.device.title), \(report.mode.title)")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .contextMenu {
             Button("Delete") { onDelete() }

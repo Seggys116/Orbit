@@ -164,8 +164,10 @@ struct OrbitLighthousePane: View {
                 reportHeader(report)
                 gaugeRow(report)
                 throttlingNote(report)
+                comparisonSection(report)
                 if report.enabledCategories.contains(.performance) {
                     metricsSection(report)
+                    mainThreadSection(report)
                 }
                 visualEvidenceSection(report)
                 if report.enabledCategories.contains(.performance) {
@@ -189,7 +191,7 @@ struct OrbitLighthousePane: View {
 
     private func reportHeader(_ report: LHReport) -> some View {
         let when = DateFormatter.localizedString(from: report.timestamp, dateStyle: .short, timeStyle: .short)
-        var detail = "\(when) · \(report.mode.title) · \(report.device.title) curves"
+        var detail = "\(when) · \(report.mode.title) · \(OrbitLighthouseLogic.deviceLine(report))"
         if report.runCount > 1 { detail += " · median of \(report.runCount)" }
         return VStack(alignment: .leading, spacing: 2) {
             Text(report.pageTitle.isEmpty ? report.url : report.pageTitle)
@@ -243,10 +245,26 @@ struct OrbitLighthousePane: View {
 
     private func throttlingNote(_ report: LHReport) -> some View {
         Group {
+            ForEach(OrbitLighthouseLogic.emulationProblems(report), id: \.self) { problem in
+                Label(problem, systemImage: "iphone.slash")
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(OrbitNeutral.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.bottom, 2)
+            }
             if let note = report.redistributionNote {
                 Label(note, systemImage: "exclamationmark.triangle.fill")
                     .font(InspectChrome.caption)
                     .foregroundStyle(OrbitNeutral.warn)
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.bottom, 2)
+            }
+            if let emulation = report.emulation {
+                Text(emulation.coverage)
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(OrbitNeutral.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, InspectChrome.panelPadding)
                     .padding(.bottom, 2)
             }
@@ -255,6 +273,36 @@ struct OrbitLighthousePane: View {
                 .foregroundStyle(OrbitNeutral.muted)
                 .padding(.horizontal, InspectChrome.panelPadding)
                 .padding(.bottom, 8)
+        }
+    }
+
+    /// What changed since an earlier run: by default the previous run of the same page and device, or any run picked from the menu.
+    private func comparisonSection(_ report: LHReport) -> some View {
+        let candidates = model.comparisonCandidates
+        return Group {
+            if !candidates.isEmpty {
+                Divider()
+                HStack(spacing: 6) {
+                    let base = model.comparison.flatMap { c in candidates.first { $0.id == c.baseID } }
+                    InspectSectionHeader("Compared with", detail: base.map(LHStyle.runLabel) ?? "no other run")
+                    Spacer(minLength: 0)
+                    InspectMenuButton(symbol: "arrow.left.arrow.right", help: "Compare with another run") {
+                        [InspectMenuItem(title: "No comparison", checked: model.comparison == nil) { model.compare(withID: nil) }]
+                            + candidates.map { other in
+                                InspectMenuItem(title: LHStyle.runLabel(other), checked: other.id == model.comparisonBaseID) {
+                                    model.compare(withID: other.id)
+                                }
+                            }
+                    }
+                }
+                .padding(.horizontal, InspectChrome.panelPadding)
+                .padding(.vertical, 6)
+                if let comparison = model.comparison {
+                    LHComparisonView(comparison: comparison)
+                        .padding(.horizontal, InspectChrome.panelPadding)
+                        .padding(.bottom, 10)
+                }
+            }
         }
     }
 
@@ -276,6 +324,27 @@ struct OrbitLighthousePane: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, InspectChrome.panelPadding)
                 .padding(.bottom, 8)
+        }
+    }
+
+    private func mainThreadSection(_ report: LHReport) -> some View {
+        Group {
+            if let thread = report.mainThread {
+                Divider()
+                InspectSectionHeader("Main thread", detail: OrbitLighthouseLogic.formatMs(thread.totalMs))
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.vertical, 6)
+                LHMainThreadView(thread: thread, tti: report.tti, session: session)
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.bottom, 10)
+            } else if let note = report.tti?.note, report.tti?.valueMs == nil {
+                Text("Time to Interactive not measured: " + note)
+                    .font(InspectChrome.caption)
+                    .foregroundStyle(OrbitNeutral.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, InspectChrome.panelPadding)
+                    .padding(.bottom, 8)
+            }
         }
     }
 

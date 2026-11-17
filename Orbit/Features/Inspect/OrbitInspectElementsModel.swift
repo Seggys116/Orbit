@@ -10,7 +10,8 @@ struct ElDeclaration: Identifiable, Equatable {
     var priority: String     // "" | "important"
     var disabled: Bool
     var overridden: Bool
-    var computedValue: String?  // resolved var() / shorthand expansion
+    var computedValue: String?  // resolved var() / shorthand expansion / what an inherit takes
+    var inheritedFrom: String?  // the element an inherit (or inheriting unset) takes its value from
     var longhands: [ElDeclaration] = []
     var isShorthand: Bool { !longhands.isEmpty }
     var isImportant: Bool { priority == "important" }
@@ -952,6 +953,7 @@ final class OrbitElementsModel: OrbitInspectModule {
                 disabled:      OrbitInspectDecode.bool(d, "disabled"),
                 overridden:    OrbitInspectDecode.bool(d, "overridden"),
                 computedValue: OrbitInspectDecode.optionalString(d, "computedValue"),
+                inheritedFrom: OrbitInspectDecode.optionalString(d, "inheritedFrom"),
                 longhands:     OrbitInspectDecode.objects(d, "longhands").enumerated().map { li, l in
                     declaration(l, id: "\(id)_\(li)")
                 }

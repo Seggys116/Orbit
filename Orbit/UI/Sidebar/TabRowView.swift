@@ -303,7 +303,8 @@ private struct TabRowChrome: View, Equatable {
 
     // Behind the close control and favicon, which keep their own clicks; the title does not hit-test, so a click on the words lands here, and the whole row pitch is the target.
     private var rowActivationCatcher: some View {
-        OrbitNSActionButton(onClickCount: { handleRowClick($0) }) {
+        // On release: a press that turns into a drag must not switch tabs first.
+        OrbitNSActionButton(onClickCount: { handleRowClick($0) }, firesOnRelease: true) {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

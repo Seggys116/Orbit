@@ -323,8 +323,21 @@ final class SplitPaneDropCatcherView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard bounds.contains(point), sidebarDragIsActive else { return nil }
+        guard bounds.contains(point),
+              Self.claimsHit(duringEvent: NSApp.currentEvent?.type, dragInFlight: sidebarDragIsActive) else { return nil }
         return self
+    }
+
+    // A drop target is only wanted while a drag is moving over the page. A click, a release or a scroll is never part of a drag, so it passes through to the page even if a drag record has been left behind; claiming it would leave every pane of a split unclickable until the next drag.
+    static func claimsHit(duringEvent type: NSEvent.EventType?, dragInFlight: Bool) -> Bool {
+        guard dragInFlight else { return false }
+        switch type {
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp,
+             .scrollWheel, .mouseMoved, .keyDown, .keyUp, .flagsChanged:
+            return false
+        default:
+            return true
+        }
     }
 
     override var mouseDownCanMoveWindow: Bool { false }

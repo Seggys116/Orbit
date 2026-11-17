@@ -3,7 +3,8 @@ import SwiftUI
 
 enum LibraryModeLayout {
     static let baseWidth: CGFloat = 340
-    static let spacesWidth: CGFloat = OrbitMetrics.sidebarMaxWidth
+    // Wide enough for two to three Space columns at a time; the sidebar's own maximum (560) showed barely more than two.
+    static let spacesWidth: CGFloat = 720
 
     static func targetWidth(for section: LibrarySection) -> CGFloat {
         section == .spaces ? spacesWidth : baseWidth

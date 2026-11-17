@@ -151,6 +151,10 @@ private struct SplitSideHint: View {
             .frame(width: width, height: height)
             .position(x: x, y: y)
         }
+        // Clipped to the pill's own rounded shape and inset the way the pill is, so the tint neither spills past the border nor lets the border touch the row's edge.
+        .clipShape(RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius))
+        .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
+        .padding(.vertical, OrbitMetrics.sidebarRowPillVerticalInset)
         .frame(height: OrbitMetrics.sidebarRowHeight)
         .allowsHitTesting(false)
     }
@@ -458,7 +462,9 @@ struct SidebarDropTarget<Content: View>: View {
                 } onUpdate: { location in
                     noteDragActivity()
                     guard !rejects(draggedPayload()) else {
+                        // The payload is not always readable when the drag first enters, so entry can mark this row targeted before it is known to be the dragged row itself; once known, the highlight and its glyph must go too, not only the edge.
                         proposedEdge = nil
+                        if insideTargeted { insideTargeted = false }
                         return
                     }
                     guard case .createSplit(let axis) = bodyDropIntent, rowSize.width > 0, rowSize.height > 0 else {
@@ -552,6 +558,9 @@ struct SidebarDropTarget<Content: View>: View {
                     RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius)
                         .strokeBorder(accentColor.opacity(insideTargeted && showsBodyHighlight ? 0.9 : 0), lineWidth: 1.5)
                 )
+                // Inset to the drawn pill, as rows and split groups draw it: full-width, the border sat on the sidebar's edge.
+                .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
+                .padding(.vertical, OrbitMetrics.sidebarRowPillVerticalInset)
         )
         .orbitAnimation(OrbitMotion.quick, value: dropIndicatorState)
     }

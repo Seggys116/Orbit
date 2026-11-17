@@ -28,6 +28,140 @@ extension OrbitInspectAgent {
       }
 
 
+
+      var FW_SCAN_LIMIT = 6000;
+
+      function fw_forEachElement(limit, visit) {
+        var count = 0;
+        try {
+          var walker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT);
+          var node = walker.currentNode;
+          while (node && count < limit) {
+            if (!(node.id === 'orbit-inspect-root')) {
+              count++;
+              if (visit(node) === false) break;
+            }
+            node = walker.nextNode();
+          }
+        } catch(e) {}
+        return count;
+      }
+
+      // Attribute names that identify a framework or UI kit, recorded as markers.
+      var fw_attrMarkers = [
+        ['_ngcontent-', 'ngcontent'], ['_nghost-', 'ngcontent'], ['ng-reflect-', 'ng-reflect'],
+        ['data-radix-', 'data-radix'], ['data-astro-cid-', 'data-astro-cid'], ['data-v-', 'data-v-*']
+      ];
+      var fw_exactAttrMarkers = {
+        'data-v-app': 'data-v-app', 'data-server-rendered': 'data-server-rendered', 'data-hk': 'data-hk',
+        'data-emotion': 'data-emotion', 'data-styled': 'data-styled', 'data-aos': 'data-aos', 'data-wf-site': 'data-wf-site',
+        'data-wf-page': 'data-wf-page', 'data-controller': 'data-controller', 'wire:id': 'wire:id', 'data-theme': 'data-theme',
+        'data-vite-dev-id': 'data-vite-dev-id', 'data-svelte-h': 'data-svelte-h'
+      };
+
+      // One bounded pass over the page's elements: which frameworks left their mark, and which class names are in use.
+      function fw_scanPageElements() {
+        var markers = {};
+        var classTokens = {};
+        var tokenCount = 0;
+        var vueVersion = null;
+
+        fw_forEachElement(FW_SCAN_LIMIT, function(el) {
+          var keys;
+          try { keys = Object.keys(el); } catch(e) { keys = []; }
+          for (var i = 0; i < keys.length; i++) {
+            var k = keys[i];
+            if (k.charCodeAt(0) !== 95 && k.charCodeAt(0) !== 36) continue;
+            if (k.indexOf('__reactFiber$') === 0 || k.indexOf('__reactInternalInstance$') === 0) markers['react-fiber'] = true;
+            else if (k.indexOf('__reactContainer$') === 0 || k === '_reactRootContainer') markers['react-container'] = true;
+            else if (k === '__vue_app__') {
+              markers['vue3-root'] = true;
+              try { if (!vueVersion && el.__vue_app__ && el.__vue_app__.version) vueVersion = fw_version(el.__vue_app__.version); } catch(e) {}
+            }
+            else if (k === '_vnode') {
+              try { if (el._vnode && (el._vnode.shapeFlag !== undefined || el._vnode.component)) markers['vue3-root'] = true; } catch(e) {}
+            }
+            else if (k === '__vue__') markers['vue2-root'] = true;
+            else if (k === '__k' || k === '_children') {
+              try { var kids = el[k]; if (kids && typeof kids === 'object' && (Array.isArray(kids) || 'type' in kids || '__e' in kids || '_dom' in kids)) markers['preact-root'] = true; } catch(e) {}
+            }
+            else if (k === '__svelte_meta') markers['svelte-meta'] = true;
+          }
+
+          var attrs = el.attributes;
+          if (attrs) {
+            for (var a = 0; a < attrs.length; a++) {
+              var name = attrs[a].name;
+              var exact = fw_exactAttrMarkers[name];
+              if (exact) { markers[exact] = true; if (name === 'data-theme') markers['data-theme'] = true; continue; }
+              if (name === 'data-page' && el.id === 'app') { markers['data-page'] = true; markers['#app'] = true; continue; }
+              for (var m = 0; m < fw_attrMarkers.length; m++) {
+                if (name.indexOf(fw_attrMarkers[m][0]) === 0) { markers[fw_attrMarkers[m][1]] = true; break; }
+              }
+            }
+          }
+
+          var tag = el.localName || '';
+          if (tag.indexOf('-') > 0) {
+            markers['custom-element'] = true;
+            if (tag === 'turbo-frame') markers['turbo-frame'] = true;
+            try { if (el.renderRoot !== undefined && el.hasUpdated !== undefined) markers['lit-element'] = true; } catch(e) {}
+          }
+
+          if (tokenCount < 2500) {
+            var cls = null;
+            try { cls = el.getAttribute('class'); } catch(e) {}
+            if (cls) {
+              var parts = cls.split(/\s+/);
+              for (var c = 0; c < parts.length; c++) {
+                var token = parts[c];
+                if (token && token.length <= 64 && !classTokens[token]) { classTokens[token] = 1; tokenCount++; }
+              }
+            }
+          }
+        });
+
+        return { markers: Object.keys(markers), classTokens: Object.keys(classTokens), vueVersion: vueVersion };
+      }
+
+      // The first segment of every custom property the page's own stylesheets define: "tw" for --tw-ring-offset-width, "bs" for --bs-blue.
+      function fw_cssVariablePrefixes() {
+        var seen = {};
+        var budget = 6000;
+        function collect(rules, depth) {
+          if (!rules) return;
+          for (var i = 0; i < rules.length && budget > 0; i++) {
+            budget--;
+            var rule = rules[i];
+            try {
+              var text = rule.cssText || '';
+              if (text.indexOf('@property') === 0) {
+                var pm = /^@property\s+(--[A-Za-z0-9_-]+)/.exec(text);
+                if (pm) seen[pm[1].slice(2).split('-')[0]] = true;
+              }
+              if (rule.style) {
+                for (var j = 0; j < rule.style.length; j++) {
+                  var prop = rule.style[j];
+                  if (prop && prop.charCodeAt(0) === 45 && prop.charCodeAt(1) === 45) seen[prop.slice(2).split('-')[0]] = true;
+                }
+              }
+              if (depth < 3 && rule.cssRules) collect(rule.cssRules, depth + 1);
+            } catch(e) {}
+          }
+        }
+        try {
+          var sheets = document.styleSheets;
+          for (var s = 0; s < sheets.length && s < 60; s++) {
+            var sheetRules = null;
+            try { sheetRules = sheets[s].cssRules; } catch(e) { continue; }
+            collect(sheetRules, 0);
+          }
+          var adopted = document.adoptedStyleSheets || [];
+          for (var ad = 0; ad < adopted.length && ad < 20; ad++) collect(adopted[ad].cssRules, 0);
+        } catch(e) {}
+        return Object.keys(seen).filter(function(p) { return p; }).slice(0, 80);
+      }
+
       function fw_scanEvidence() {
         var globals = [];
         var globalVersions = {};
@@ -47,7 +181,14 @@ extension OrbitInspectAgent {
           'htmx', 'Alpine', 'jQuery', '$', 'litElementVersions',
           '__webpack_require__', 'parcelRequire',
           'ng', 'useNuxtApp', '__reactRouterContext', '__reactRouterDataRouter', '__remixRouter',
-          '__STORYBOOK_PREVIEW__', '___loader', '___emitter', '___gatsby', '__astro_dev_toolbar__'
+          '__STORYBOOK_PREVIEW__', '___loader', '___emitter', '___gatsby', '__astro_dev_toolbar__',
+          'bootstrap', 'Shopify', 'Stripe', 'gtag', '_gaq', 'GoogleAnalyticsObject', 'dataLayer', 'google_tag_manager',
+          'fbq', '_fbq', 'hj', '_hjSettings', 'mixpanel', 'amplitude', 'posthog', 'plausible', 'fathom', '_paq', 'Matomo',
+          'clarity', 'Sentry', '__SENTRY__', 'DD_RUM', 'DD_LOGS', 'NREUM', 'newrelic', 'LogRocket', '_fs_namespace', 'Bugsnag',
+          'Rollbar', '_rollbarConfig', '_hsq', 'hbspt', 'Intercom', 'drift', '$crisp', 'zE', 'zESettings', 'OneTrust',
+          'OptanonWrapper', 'Cookiebot', 'grecaptcha', 'hcaptcha', 'turnstile', '_', 'moment', 'd3', 'THREE', 'gsap', 'Chart',
+          'L', 'mapboxgl', 'Backbone', 'ko', 'firebase', 'Modernizr', 'Swiper', 'lottie', 'Ember', 'angular', 'Turbo',
+          'Livewire', 'litHtmlVersions', '__REDUX_DEVTOOLS_EXTENSION__', '__VUE_DEVTOOLS_GLOBAL_HOOK__', '__svelte'
         ];
         probes.forEach(function(name) {
           try {
@@ -76,7 +217,21 @@ extension OrbitInspectAgent {
           ['litElementVersions', ['litElementVersions', '0']],
           ['__NUXT__.versions.nuxt', ['__NUXT__', 'versions', 'nuxt']],
           ['__reactRouterVersion', ['__reactRouterVersion']],
-          ['__astro_dev_toolbar__.version', ['__astro_dev_toolbar__', 'version']]
+          ['__astro_dev_toolbar__.version', ['__astro_dev_toolbar__', 'version']],
+          ['bootstrap.version', ['bootstrap', 'Tooltip', 'VERSION']],
+          ['_.VERSION', ['_', 'VERSION']],
+          ['moment.version', ['moment', 'version']],
+          ['d3.version', ['d3', 'version']],
+          ['THREE.REVISION', ['THREE', 'REVISION']],
+          ['gsap.version', ['gsap', 'version']],
+          ['Chart.version', ['Chart', 'version']],
+          ['L.version', ['L', 'version']],
+          ['mapboxgl.version', ['mapboxgl', 'version']],
+          ['Backbone.VERSION', ['Backbone', 'VERSION']],
+          ['ko.version', ['ko', 'version']],
+          ['firebase.SDK_VERSION', ['firebase', 'SDK_VERSION']],
+          ['Ember.VERSION', ['Ember', 'VERSION']],
+          ['angular.version.full', ['angular', 'version', 'full']]
         ];
         versionProbes.forEach(function(probe) {
           try {
@@ -127,14 +282,16 @@ extension OrbitInspectAgent {
           try { if (check[1]()) domMarkers.push(check[0]); } catch(e) {}
         });
 
+        var pageScan = fw_scanPageElements();
+        pageScan.markers.forEach(function(marker) { if (domMarkers.indexOf(marker) < 0) domMarkers.push(marker); });
         try {
-          var sample = document.querySelector('[class]');
-          if (sample) {
-            var attrs = sample.attributes;
-            for (var i = 0; i < attrs.length; i++) {
-              if (attrs[i].name.startsWith('data-v-')) { domMarkers.push('data-v-*'); break; }
-            }
+          // Svelte 5 records its version in a Set on window.__svelte.
+          if (window.__svelte && window.__svelte.v && typeof window.__svelte.v.forEach === 'function') {
+            window.__svelte.v.forEach(function(v) { if (!globalVersions['svelte.version']) globalVersions['svelte.version'] = fw_version(v); });
           }
+        } catch(e) {}
+        try {
+          if (pageScan.vueVersion && !globalVersions['Vue.version']) globalVersions['Vue.version'] = pageScan.vueVersion;
         } catch(e) {}
 
         try {
@@ -169,6 +326,8 @@ extension OrbitInspectAgent {
           scriptURLs: scriptURLs.slice(0, 200),
           linkURLs: linkURLs.slice(0, 100),
           metaGenerators: metaGenerators,
+          classTokens: pageScan.classTokens,
+          cssVariablePrefixes: fw_cssVariablePrefixes(),
           hostname: String(location.hostname)
         });
         try { fw_attachHooks(); fw_devProbe(); } catch(e) {}
@@ -220,59 +379,51 @@ extension OrbitInspectAgent {
         return null;
       }
 
+      // The FiberRoot a fibre belongs to, found by climbing to the top of its tree. Works in production, where no DevTools hook exists.
+      function fw_rootFromFiber(fiber) {
+        if (!fiber) return null;
+        try {
+          if (fiber.current && typeof fiber.tag !== 'number') return fiber;
+          var cur = fiber;
+          var guard = 0;
+          while (cur.return && guard++ < 50000) cur = cur.return;
+          if (cur.stateNode && cur.stateNode.current) return cur.stateNode;
+          return cur.tag === 3 ? cur : null;
+        } catch(e) { return null; }
+      }
+
       function fw_findReactRoots() {
         var roots = [];
-        // Via DevTools hook (most reliable in dev mode)
+        var seen = new Set();
+        function add(root) {
+          if (root && !seen.has(root)) { seen.add(root); roots.push(root); }
+        }
+
+        // The DevTools hook knows every root, when something installed it before React loaded.
         try {
           var hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
           if (hook && hook.getFiberRoots) {
-            hook.getFiberRoots(1).forEach(function(root) { roots.push(root); });
+            hook.getFiberRoots(1).forEach(add);
           } else if (hook && hook.renderers) {
             hook.renderers.forEach(function(renderer) {
-              if (renderer.getFiberRoots) {
-                renderer.getFiberRoots().forEach(function(r) { roots.push(r); });
-              }
+              if (renderer.getFiberRoots) renderer.getFiberRoots().forEach(add);
             });
           }
         } catch(e) {}
 
-        if (roots.length > 0) return roots;
-
-        // Fallback: scan common root IDs for __reactContainer$* keys
-        var candidates = [
-          '__next', 'root', 'app', '__gatsby', 'gatsby-focus-wrapper',
-          '__nuxt', 'app-root', '__remix-root', '__reactRoot'
-        ];
-        candidates.forEach(function(id) {
-          try {
-            var el = document.getElementById(id);
-            if (!el) return;
-            var keys = Object.keys(el);
-            for (var i = 0; i < keys.length; i++) {
-              if (keys[i].startsWith('__reactContainer$')) {
-                var fiber = el[keys[i]];
-                if (fiber && fiber.current) { roots.push(fiber); return; }
-              }
-            }
-          } catch(e) {}
+        // Every React 17+ DOM node carries its fibre and every root container carries its root, so a scan finds roots anywhere in
+        // the page, in production builds and with no hook. React 16 and 17 legacy roots live on _reactRootContainer.
+        fw_forEachElement(FW_SCAN_LIMIT, function(el) {
+          var keys;
+          try { keys = Object.keys(el); } catch(e) { return; }
+          for (var i = 0; i < keys.length; i++) {
+            var k = keys[i];
+            if (k.charCodeAt(0) !== 95) continue;
+            if (k.indexOf('__reactContainer$') === 0) add(fw_rootFromFiber(el[k]));
+            else if (k === '_reactRootContainer') { var legacy = el[k]; add(fw_rootFromFiber(legacy && (legacy._internalRoot || legacy))); }
+            else if (k.indexOf('__reactFiber$') === 0 || k.indexOf('__reactInternalInstance$') === 0) add(fw_rootFromFiber(el[k]));
+          }
         });
-
-        if (roots.length === 0) {
-          try {
-            var children = document.body ? document.body.children : [];
-            for (var i = 0; i < Math.min(children.length, 20); i++) {
-              var el = children[i];
-              var keys = Object.keys(el);
-              for (var j = 0; j < keys.length; j++) {
-                if (keys[j].startsWith('__reactContainer$')) {
-                  var fiber = el[keys[j]];
-                  if (fiber && fiber.current) { roots.push(fiber); break; }
-                }
-              }
-            }
-          } catch(e) {}
-        }
-
         return roots;
       }
 
@@ -341,244 +492,417 @@ extension OrbitInspectAgent {
         return hooks;
       }
 
+      // Accumulates a framework's component nodes into the shape the Components tab reads.
+      function fw_makeTree(framework, cap) {
+        var nodes = [];
+        var byId = {};
+        var roots = [];
+        var state = { capped: false, minified: false };
+        return {
+          add: function(spec, parentId) {
+            if (nodes.length >= cap) { state.capped = true; return null; }
+            var id = nodes.length + 1;
+            var node = {
+              id: id, name: spec.name || 'Anonymous', isHost: false, key: spec.key == null ? null : fw_str(spec.key),
+              domId: spec.domId == null ? null : spec.domId,
+              src: spec.src || null, srcLine: spec.srcLine == null ? null : spec.srcLine, srcCol: spec.srcCol == null ? null : spec.srcCol,
+              owner: spec.owner || null, props: spec.props || {}, hooks: spec.hooks || [], children: [],
+              minified: !!spec.minified, framework: framework
+            };
+            if (spec.minified) state.minified = true;
+            nodes.push(node);
+            byId[id] = node;
+            if (parentId != null && byId[parentId]) byId[parentId].children.push(id); else roots.push(id);
+            return id;
+          },
+          count: function() { return nodes.length; },
+          result: function() {
+            if (nodes.length === 0) return null;
+            return { framework: framework, nodes: nodes, roots: roots, minified: state.minified, capped: state.capped, cappedAt: cap };
+          }
+        };
+      }
+
+      function fw_previewProps(source, skip) {
+        var props = {};
+        try {
+          if (source && typeof source === 'object') {
+            Object.keys(source).filter(function(k) { return k !== skip; }).slice(0, 20).forEach(function(k) {
+              try { props[k] = preview(source[k], 2, new WeakSet()); } catch(e) { props[k] = '?'; }
+            });
+          }
+        } catch(e) {}
+        return props;
+      }
+
+      function fw_basename(path) {
+        var text = fw_str(path);
+        if (!text) return '';
+        var last = text.split(/[\\/]/).pop() || '';
+        return last.replace(/\.(vue|svelte|jsx?|tsx?|mjs)(\?.*)?$/, '');
+      }
+
+      function fw_elementId(el) {
+        try { if (el && el.nodeType === 1) return idOf(el); } catch(e) {}
+        return null;
+      }
+
+      function fw_isClassFiber(fiber) {
+        try { return typeof fiber.type === 'function' && !!(fiber.type.prototype && fiber.type.prototype.isReactComponent); } catch(e) { return false; }
+      }
+
       function fw_walkReactTree() {
         var roots = fw_findReactRoots();
         if (roots.length === 0) return null;
+        var tree = fw_makeTree('react', 3000);
+        var componentTags = { 0: 1, 1: 1, 2: 1, 11: 1, 14: 1, 15: 1 };
 
-        var flat = [];
-        var fiberIds = new Map();
-        var nextId = 1;
-        var total = 0;
-        var MAX = 2000;
-        var anyMinified = false;
-
-        function fid(fiber) {
-          if (fiberIds.has(fiber)) return fiberIds.get(fiber);
-          var id = nextId++;
-          fiberIds.set(fiber, id);
-          return id;
-        }
-
-        function walk(fiber, parentNodeId) {
-          if (!fiber || total >= MAX) return;
-
-          var isHost = typeof fiber.type === 'string';
-          var name = fw_fiberName(fiber);
-          var skipHost = isHost; // skip plain DOM nodes to keep tree manageable
-
-          var myNodeId = null;
-
-          if (!skipHost && name) {
-            total++;
-            myNodeId = fid(fiber);
-            var node = {
-              id: myNodeId,
-              name: name,
-              isHost: isHost,
-              key: fiber.key != null ? fw_str(fiber.key) : null,
-              domId: null,
-              src: null, srcLine: null, srcCol: null,
-              owner: null,
-              props: {},
-              hooks: [],
-              children: [],
-              minified: false
-            };
-
-            try {
-              if (fiber.stateNode && fiber.stateNode.nodeType) {
-                node.domId = idOf(fiber.stateNode);
-              }
-            } catch(e) {}
-
-            try {
-              if (fiber._debugSource) {
-                node.src = fw_str(fiber._debugSource.fileName || '');
-                node.srcLine = finite(fiber._debugSource.lineNumber);
-                node.srcCol = finite(fiber._debugSource.columnNumber);
-              } else if (fiber._debugStack && fiber._debugStack.stack) {
-                // React 19: parse the first frame of the stack string
-                var line = fw_str(fiber._debugStack.stack).split('\n')[1] || '';
-                var m = line.match(/\((.+):(\d+):(\d+)\)$/) || line.match(/at (.+):(\d+):(\d+)$/);
-                if (m) { node.src = m[1]; node.srcLine = parseInt(m[2], 10); node.srcCol = parseInt(m[3], 10); }
-              }
-            } catch(e) {}
-
-            try {
-              if (fiber._debugOwner) node.owner = fw_fiberName(fiber._debugOwner) || null;
-            } catch(e) {}
-
-            try {
-              var props = fiber.memoizedProps;
-              if (props && typeof props === 'object') {
-                Object.keys(props).filter(function(k) { return k !== 'children'; }).slice(0, 20).forEach(function(k) {
-                  node.props[k] = preview(props[k], 2, new WeakSet());
-                });
-              }
-            } catch(e) {}
-
-            try {
-              if (fiber.memoizedState && !isHost) {
-                node.hooks = fw_fiberHooks(fiber.memoizedState);
-              }
-            } catch(e) {}
-
-            if (name.length <= 2 && /^[a-z]/.test(name)) {
-              node.minified = true;
-              anyMinified = true;
-            }
-
-            flat.push({ n: node, p: parentNodeId });
-          }
-
-          var passId = myNodeId !== null ? myNodeId : parentNodeId;
-          var child = fiber.child;
+        function walk(fiber, parentId) {
           var guard = 0;
-          while (child && total < MAX && guard < 2000) {
-            walk(child, passId);
-            child = child.sibling;
-            guard++;
+          var cur = fiber;
+          while (cur && guard++ < 100000) {
+            var passId = parentId;
+            var isHost = typeof cur.type === 'string';
+            var name = isHost ? null : fw_fiberName(cur);
+            if (!name && !isHost && componentTags[cur.tag] && (typeof cur.type === 'function' || typeof cur.type === 'object')) name = 'Anonymous';
+            if (name) {
+              var spec = { name: name, key: cur.key, props: {}, hooks: [], minified: name.length <= 2 && /^[a-z]/.test(name) };
+              try { if (cur.stateNode && cur.stateNode.nodeType) spec.domId = fw_elementId(cur.stateNode); } catch(e) {}
+              if (spec.domId == null) {
+                // A component renders into its first host descendant.
+                try {
+                  var host = cur.child;
+                  var hostGuard = 0;
+                  while (host && typeof host.type !== 'string' && hostGuard++ < 200) host = host.child;
+                  if (host && host.stateNode) spec.domId = fw_elementId(host.stateNode);
+                } catch(e) {}
+              }
+              try {
+                if (cur._debugSource) {
+                  spec.src = fw_str(cur._debugSource.fileName || '');
+                  spec.srcLine = finite(cur._debugSource.lineNumber);
+                  spec.srcCol = finite(cur._debugSource.columnNumber);
+                } else if (cur._debugStack && cur._debugStack.stack) {
+                  var line = fw_str(cur._debugStack.stack).split('\n')[1] || '';
+                  var m = line.match(/\((.+):(\d+):(\d+)\)$/) || line.match(/at (.+):(\d+):(\d+)$/);
+                  if (m) { spec.src = m[1]; spec.srcLine = parseInt(m[2], 10); spec.srcCol = parseInt(m[3], 10); }
+                }
+              } catch(e) {}
+              try { if (cur._debugOwner) spec.owner = fw_fiberName(cur._debugOwner) || null; } catch(e) {}
+              spec.props = fw_previewProps(cur.memoizedProps, 'children');
+              try {
+                if (cur.memoizedState != null) {
+                  if (fw_isClassFiber(cur)) spec.hooks = [{ i: 0, l: 'state', v: preview(cur.memoizedState, 2, new WeakSet()) }];
+                  else if (cur.tag !== 10 && cur.tag !== 9) spec.hooks = fw_fiberHooks(cur.memoizedState);
+                }
+              } catch(e) {}
+              var id = tree.add(spec, parentId);
+              if (id == null) return;
+              passId = id;
+            }
+            if (cur.child) walk(cur.child, passId);
+            cur = cur.sibling;
           }
         }
 
-        roots.forEach(function(r) {
-          var start = (r.current) ? r.current : r;
-          walk(start, null);
-        });
-
-        var nodeMap = {};
-        flat.forEach(function(item) { nodeMap[item.n.id] = item.n; });
-        flat.forEach(function(item) {
-          if (item.p !== null && nodeMap[item.p]) {
-            nodeMap[item.p].children.push(item.n.id);
-          }
-        });
-
-        var rootIds = flat.filter(function(i) { return i.p === null; }).map(function(i) { return i.n.id; });
-
-        return {
-          framework: 'react',
-          nodes: flat.map(function(i) { return i.n; }),
-          roots: rootIds,
-          minified: anyMinified,
-          capped: total >= MAX,
-          cappedAt: MAX
-        };
+        roots.forEach(function(r) { walk(r.current ? r.current : r, null); });
+        return tree.result();
       }
 
-
-      function fw_walkVueTree() {
-        var nodes = [];
-        var nextId = 1;
-
-        function walkInstance(inst, parentId) {
-          if (!inst || nextId > 500) return;
-          var id = nextId++;
-          var name = fw_str(inst.type && (inst.type.__name || inst.type.name || inst.type.__file) || '?');
-          var file = fw_str(inst.type && inst.type.__file || '');
-          var props = {};
-          try {
-            if (inst.props && typeof inst.props === 'object') {
-              Object.keys(inst.props).slice(0, 20).forEach(function(k) {
-                props[k] = preview(inst.props[k], 2, new WeakSet());
-              });
-            }
-          } catch(e) {}
-
-          var domId = null;
-          try {
-            if (inst.vnode && inst.vnode.el && inst.vnode.el.nodeType) {
-              domId = idOf(inst.vnode.el);
-            }
-          } catch(e) {}
-
-          nodes.push({ n: { id: id, name: name, isHost: false, key: null, domId: domId,
-            src: file, srcLine: null, srcCol: null, owner: null, props: props,
-            hooks: [], children: [], minified: false }, p: parentId });
-
-          try {
-            var subTree = inst.subTree;
-            if (subTree && subTree.component) walkInstance(subTree.component, id);
-            var slots = inst.slots && inst.slots.default && inst.slots.default();
-            if (Array.isArray(slots)) {
-              slots.forEach(function(vnode) {
-                if (vnode && vnode.component) walkInstance(vnode.component, id);
-              });
-            }
-          } catch(e) {}
-        }
-
+      function fw_findVue3Roots() {
+        var instances = [];
+        var seen = new Set();
+        function add(inst) { if (inst && !seen.has(inst)) { seen.add(inst); instances.push(inst); } }
+        try { if (window.__vue_app__ && window.__vue_app__._instance) add(window.__vue_app__._instance); } catch(e) {}
         try {
-          var app = window.__vue_app__;
-          if (app && app._instance) walkInstance(app._instance, null);
+          var hook = window.__VUE_DEVTOOLS_GLOBAL_HOOK__;
+          if (hook && hook.apps) hook.apps.forEach(function(entry) { var app = entry && (entry.app || entry); if (app && app._instance) add(app._instance); });
         } catch(e) {}
-
-        if (nodes.length === 0) return null;
-
-        var nodeMap = {};
-        nodes.forEach(function(item) { nodeMap[item.n.id] = item.n; });
-        nodes.forEach(function(item) {
-          if (item.p !== null && nodeMap[item.p]) nodeMap[item.p].children.push(item.n.id);
+        // The root container keeps its vnode in every build, and the vnode points at the root component instance.
+        fw_forEachElement(FW_SCAN_LIMIT, function(el) {
+          try {
+            if (el.__vue_app__ && el.__vue_app__._instance) add(el.__vue_app__._instance);
+            else if (el._vnode && el._vnode.component) add(el._vnode.component);
+          } catch(e) {}
         });
-        var rootIds = nodes.filter(function(i) { return i.p === null; }).map(function(i) { return i.n.id; });
-
-        return {
-          framework: 'vue',
-          nodes: nodes.map(function(i) { return i.n; }),
-          roots: rootIds,
-          minified: false,
-          capped: false,
-          cappedAt: 500
-        };
+        return instances;
       }
 
+      function fw_walkVue3Tree() {
+        var instances = fw_findVue3Roots();
+        if (instances.length === 0) return null;
+        var tree = fw_makeTree('vue', 3000);
+        var seen = new Set();
+
+        function visitInstance(inst, parentId) {
+          if (!inst || seen.has(inst)) return;
+          seen.add(inst);
+          var type = inst.type || {};
+          var file = fw_str(type.__file || '');
+          var name = fw_str(type.name || type.__name || fw_basename(file) || (inst.parent ? 'Anonymous' : 'Root'));
+          var hooks = [];
+          try {
+            var setup = inst.setupState;
+            if (setup && typeof setup === 'object') {
+              Object.keys(setup).slice(0, 30).forEach(function(k, i) {
+                var v = setup[k];
+                if (typeof v === 'function') return;
+                hooks.push({ i: i, l: 'state', v: k + ': ' + preview(v, 2, new WeakSet()) });
+              });
+            }
+            var data = inst.data;
+            if (data && typeof data === 'object') {
+              Object.keys(data).slice(0, 30).forEach(function(k, i) {
+                hooks.push({ i: hooks.length, l: 'data', v: k + ': ' + preview(data[k], 2, new WeakSet()) });
+              });
+            }
+          } catch(e) {}
+          var el = null;
+          try { el = inst.vnode && inst.vnode.el; if (el && el.nodeType !== 1) el = inst.subTree && inst.subTree.el; } catch(e) {}
+          var id = tree.add({
+            name: name, key: inst.vnode && inst.vnode.key, domId: fw_elementId(el), src: file,
+            props: fw_previewProps(inst.props), hooks: hooks, minified: name.length <= 2 && /^[a-z]/.test(name)
+          }, parentId);
+          if (id == null) return;
+          visitVNode(inst.subTree, id);
+        }
+
+        function visitVNode(vnode, parentId) {
+          if (!vnode || typeof vnode !== 'object') return;
+          if (vnode.component) { visitInstance(vnode.component, parentId); return; }
+          try { if (vnode.suspense && vnode.suspense.activeBranch) visitVNode(vnode.suspense.activeBranch, parentId); } catch(e) {}
+          var kids = vnode.children;
+          if (Array.isArray(kids)) for (var i = 0; i < kids.length; i++) visitVNode(kids[i], parentId);
+        }
+
+        instances.forEach(function(inst) { visitInstance(inst, null); });
+        return tree.result();
+      }
+
+      function fw_walkVue2Roots() {
+        var roots = [];
+        var seen = new Set();
+        fw_forEachElement(FW_SCAN_LIMIT, function(el) {
+          try {
+            var vm = el.__vue__;
+            if (vm && vm.$root && !seen.has(vm.$root)) { seen.add(vm.$root); roots.push(vm.$root); }
+          } catch(e) {}
+        });
+        return roots;
+      }
+
+      function fw_walkVue2Tree() {
+        var roots = fw_walkVue2Roots();
+        if (roots.length === 0) return null;
+        var tree = fw_makeTree('vue', 3000);
+
+        function visit(vm, parentId) {
+          if (!vm) return;
+          var options = vm.$options || {};
+          var file = fw_str(options.__file || '');
+          var name = fw_str(options.name || options._componentTag || fw_basename(file) || (vm === vm.$root ? 'Root' : 'Anonymous'));
+          var hooks = [];
+          try {
+            var data = vm._data;
+            if (data && typeof data === 'object') {
+              Object.keys(data).slice(0, 30).forEach(function(k, i) {
+                hooks.push({ i: i, l: 'data', v: k + ': ' + preview(data[k], 2, new WeakSet()) });
+              });
+            }
+          } catch(e) {}
+          var id = tree.add({
+            name: name, domId: fw_elementId(vm.$el), src: file,
+            props: fw_previewProps(vm.$props || options.propsData), hooks: hooks, minified: name.length <= 2 && /^[a-z]/.test(name)
+          }, parentId);
+          if (id == null) return;
+          (vm.$children || []).forEach(function(child) { visit(child, id); });
+        }
+        roots.forEach(function(vm) { visit(vm, null); });
+        return tree.result();
+      }
+
+      function fw_walkPreactTree() {
+        var containers = [];
+        fw_forEachElement(FW_SCAN_LIMIT, function(el) {
+          try {
+            var root = el.__k || el._children;
+            if (root && typeof root === 'object' && (Array.isArray(root) || 'type' in root || '__e' in root || '_dom' in root)) containers.push(root);
+          } catch(e) {}
+        });
+        if (containers.length === 0) return null;
+        var tree = fw_makeTree('preact', 3000);
+        var seen = new Set();
+
+        function visit(vnode, parentId) {
+          if (!vnode || typeof vnode !== 'object' || seen.has(vnode)) return;
+          seen.add(vnode);
+          var passId = parentId;
+          var type = vnode.type;
+          if (typeof type === 'function') {
+            var name = fw_str(type.displayName || type.name || 'Anonymous');
+            var inst = vnode.__c || vnode._component;
+            var hooks = [];
+            try {
+              if (inst && inst.state && typeof inst.state === 'object') hooks.push({ i: 0, l: 'state', v: preview(inst.state, 2, new WeakSet()) });
+            } catch(e) {}
+            var dom = vnode.__e || vnode._dom;
+            var id = tree.add({
+              name: name, key: vnode.key, domId: fw_elementId(dom), props: fw_previewProps(vnode.props, 'children'),
+              hooks: hooks, minified: name.length <= 2 && /^[a-z]/.test(name)
+            }, parentId);
+            if (id == null) return;
+            passId = id;
+          }
+          var kids = vnode.__k || vnode._children;
+          if (Array.isArray(kids)) for (var i = 0; i < kids.length; i++) visit(kids[i], passId);
+        }
+        containers.forEach(function(root) {
+          if (Array.isArray(root)) root.forEach(function(v) { visit(v, null); }); else visit(root, null);
+        });
+        return tree.result();
+      }
+
+      // Angular only exposes its component instances through the ng debugging API, which development builds provide.
+      function fw_walkAngularTree() {
+        var ng = window.ng;
+        if (!ng || typeof ng.getComponent !== 'function') return null;
+        var hosts = document.querySelectorAll('[ng-version]');
+        if (!hosts.length) return null;
+        var tree = fw_makeTree('angular', 2000);
+        var budget = FW_SCAN_LIMIT;
+
+        function visit(el, parentId) {
+          if (!el || el.nodeType !== 1 || budget-- <= 0) return;
+          var passId = parentId;
+          var instance = null;
+          try { instance = ng.getComponent(el); } catch(e) {}
+          if (instance) {
+            var ctor = instance.constructor;
+            var name = fw_str(ctor && ctor.name || el.localName);
+            var props = {};
+            var hooks = [];
+            try {
+              Object.keys(instance).slice(0, 30).forEach(function(k, i) {
+                var v = instance[k];
+                if (typeof v === 'function') return;
+                hooks.push({ i: i, l: 'state', v: k + ': ' + preview(v, 2, new WeakSet()) });
+              });
+            } catch(e) {}
+            props['selector'] = fw_str(el.localName);
+            var id = tree.add({ name: name, domId: fw_elementId(el), props: props, hooks: hooks, minified: name.length <= 2 && /^[a-z]/.test(name) }, parentId);
+            if (id == null) return;
+            passId = id;
+          }
+          for (var c = el.firstElementChild; c; c = c.nextElementSibling) visit(c, passId);
+        }
+        for (var i = 0; i < hosts.length; i++) visit(hosts[i], null);
+        return tree.result();
+      }
 
       function fw_walkAstroIslands() {
-        var nodes = [];
-        try {
-          var islands = document.querySelectorAll('astro-island');
-          for (var i = 0; i < islands.length; i++) {
-            var el = islands[i];
-            var node = {
-              id: i + 1,
-              name: fw_str(el.getAttribute('component-export') || el.getAttribute('component-url') || 'AstroIsland'),
-              isHost: false,
-              key: null,
-              domId: idOf(el),
-              src: fw_str(el.getAttribute('component-url') || ''),
-              srcLine: null, srcCol: null, owner: null,
-              props: {},
-              hooks: [],
-              children: [],
-              minified: false
-            };
-            try {
-              var rawProps = el.getAttribute('props');
-              if (rawProps) {
-                var parsed = JSON.parse(rawProps);
-                if (parsed && typeof parsed === 'object') {
-                  Object.keys(parsed).slice(0, 20).forEach(function(k) {
-                    node.props[k] = preview(parsed[k], 2, new WeakSet());
-                  });
-                }
-              }
-            } catch(e) {}
-            node.props['client'] = fw_str(el.getAttribute('client') || 'load');
-            nodes.push(node);
-          }
-        } catch(e) {}
+        var islands = document.querySelectorAll('astro-island');
+        if (!islands.length) return null;
+        var tree = fw_makeTree('astro', 500);
+        for (var i = 0; i < islands.length; i++) {
+          var el = islands[i];
+          var props = {};
+          try {
+            var rawProps = el.getAttribute('props');
+            if (rawProps) props = fw_previewProps(JSON.parse(rawProps));
+          } catch(e) {}
+          props['client'] = fw_str(el.getAttribute('client') || 'load');
+          var url = fw_str(el.getAttribute('component-url') || '');
+          tree.add({
+            name: fw_str(el.getAttribute('component-export') || fw_basename(url) || 'AstroIsland'),
+            domId: fw_elementId(el), src: url, props: props
+          }, null);
+        }
+        return tree.result();
+      }
 
-        if (nodes.length === 0) return null;
-        return { framework: 'astro', nodes: nodes, roots: nodes.map(function(n) { return n.id; }), minified: false, capped: false, cappedAt: 500 };
+      // Svelte compiles components away. A development build marks each element with the file it came from, which at least
+      // names the components in play and where their markup is.
+      function fw_walkSvelteDev() {
+        var byFile = {};
+        var order = [];
+        fw_forEachElement(FW_SCAN_LIMIT, function(el) {
+          try {
+            var meta = el.__svelte_meta;
+            if (!meta || !meta.loc || !meta.loc.file) return;
+            var file = fw_str(meta.loc.file);
+            if (!byFile[file]) { byFile[file] = { count: 0, first: el, line: meta.loc.line }; order.push(file); }
+            byFile[file].count++;
+          } catch(e) {}
+        });
+        if (!order.length) return null;
+        var tree = fw_makeTree('svelte', 500);
+        order.forEach(function(file) {
+          var entry = byFile[file];
+          tree.add({
+            name: fw_basename(file) || file, domId: fw_elementId(entry.first), src: file,
+            srcLine: finite(entry.line), props: { elements: String(entry.count) }
+          }, null);
+        });
+        return tree.result();
+      }
+
+      // Last resort and the whole story for Lit, Stencil and hand-written components: the custom elements, nested as they are on the page, shadow roots included.
+      function fw_walkCustomElements() {
+        var tree = fw_makeTree('webcomponents', 1500);
+        var budget = FW_SCAN_LIMIT;
+        function visit(node, parentId) {
+          if (!node || budget-- <= 0) return;
+          var passId = parentId;
+          if (node.nodeType === 1) {
+            var tag = node.localName || '';
+            if (tag.indexOf('-') > 0 && tag !== 'astro-island') {
+              var props = {};
+              try {
+                var attrs = node.attributes;
+                for (var a = 0; a < attrs.length && a < 20; a++) props[attrs[a].name] = fw_str(attrs[a].value).slice(0, 120);
+              } catch(e) {}
+              var ctorName = '';
+              try { ctorName = fw_str(window.customElements && customElements.get(tag) && customElements.get(tag).name); } catch(e) {}
+              if (ctorName && ctorName !== tag) props['class'] = ctorName;
+              var id = tree.add({ name: '<' + tag + '>', domId: fw_elementId(node), props: props }, parentId);
+              if (id == null) return;
+              passId = id;
+            }
+            if (node.shadowRoot) for (var s = node.shadowRoot.firstElementChild; s; s = s.nextElementSibling) visit(s, passId);
+          }
+          for (var c = node.firstElementChild; c; c = c.nextElementSibling) visit(c, passId);
+        }
+        visit(document.documentElement, null);
+        return tree.result();
+      }
+
+      // Why there is no tree, in terms of what the page actually has.
+      function fw_treeNote() {
+        var notes = [];
+        try {
+          var scan = fw_scanPageElements();
+          var has = function(m) { return scan.markers.indexOf(m) >= 0; };
+          if (document.querySelector('[ng-version]') && !(window.ng && window.ng.getComponent)) {
+            notes.push('Angular is running a production build. Angular only exposes its component tree through the ng debugging API, which is present in development builds.');
+          }
+          if (scan.classTokens.some(function(t) { return /^svelte-[a-z0-9]{4,10}$/.test(t); }) && !has('svelte-meta')) {
+            notes.push('Svelte compiles components away. Only development builds mark elements with the component file they came from.');
+          }
+          if (document.querySelector('[q\\:container]')) notes.push('Qwik resumes from serialised state and has no client component tree to inspect.');
+          if (has('data-hk') || window.Solid || window._$getOwner) notes.push('Solid keeps no component tree at runtime.');
+          if (!notes.length) notes.push('Scanned the page for React, Vue 2 and 3, Preact, Angular, Svelte, Astro islands and custom elements, and found none mounted.');
+        } catch(e) {}
+        return notes.join(' ');
       }
 
       ops['fw.tree'] = function(msg) {
+        var walkers = [fw_walkReactTree, fw_walkVue3Tree, fw_walkVue2Tree, fw_walkPreactTree, fw_walkAngularTree,
+                       fw_walkAstroIslands, fw_walkSvelteDev, fw_walkCustomElements];
         var result = null;
-        try { result = fw_walkReactTree(); } catch(e) {}
-        if (!result) try { result = fw_walkVueTree(); } catch(e) {}
-        if (!result) try { result = fw_walkAstroIslands(); } catch(e) {}
-
-        post({ t: 'fw.tree', result: result });
+        for (var i = 0; i < walkers.length && !result; i++) {
+          try { result = walkers[i](); } catch(e) {}
+        }
+        post({ t: 'fw.tree', result: result, note: result ? null : fw_treeNote() });
       };
 
 
@@ -644,18 +968,151 @@ extension OrbitInspectAgent {
       };
 
 
+      // JSON.stringify that survives what real pages hold: cycles, DOM nodes, Maps and Sets, functions, proxies, enormous arrays.
+      function fw_safeJSON(value) {
+        var budget = { nodes: 30000 };
+        var active = new WeakSet();
+        function keyString(key) { try { return typeof key === 'object' ? '[object]' : String(key); } catch(e) { return '?'; } }
+        function copy(v, depth) {
+          if (v === undefined) return '[undefined]';
+          if (v === null) return null;
+          var t = typeof v;
+          if (t === 'string') return v.length > 4000 ? v.slice(0, 4000) + '…[' + v.length + ' chars]' : v;
+          if (t === 'number') return isFinite(v) ? v : String(v);
+          if (t === 'boolean') return v;
+          if (t === 'bigint') return String(v) + 'n';
+          if (t === 'symbol') return String(v);
+          if (t === 'function') return '[Function ' + (v.name || 'anonymous') + ']';
+          if (budget.nodes-- <= 0) return '[truncated]';
+          if (active.has(v)) return '[Circular]';
+          try { if (v.nodeType === 1) return '[Element <' + v.localName + (v.id ? '#' + v.id : '') + '>]'; if (v.nodeType) return '[Node]'; } catch(e) {}
+          if (depth <= 0) return Array.isArray(v) ? '[Array(' + v.length + ')]' : '[Object]';
+          active.add(v);
+          var out;
+          try {
+            if (v instanceof Date) out = isNaN(v) ? 'Invalid Date' : v.toISOString();
+            else if (v instanceof Error) out = { name: v.name, message: v.message };
+            else if (v instanceof Map) {
+              out = {}; var mi = 0;
+              v.forEach(function(val, key) { if (mi++ < 300) out[keyString(key)] = copy(val, depth - 1); });
+            } else if (v instanceof Set) {
+              out = []; var si = 0;
+              v.forEach(function(val) { if (si++ < 300) out.push(copy(val, depth - 1)); });
+            } else if (Array.isArray(v)) {
+              out = [];
+              for (var i = 0; i < v.length && i < 500; i++) out.push(copy(v[i], depth - 1));
+              if (v.length > 500) out.push('…' + (v.length - 500) + ' more');
+            } else if (ArrayBuffer.isView(v)) {
+              out = '[' + v.constructor.name + '(' + v.length + ')]';
+            } else {
+              out = {};
+              var keys = Object.keys(v);
+              for (var k = 0; k < keys.length && k < 300; k++) {
+                try { out[keys[k]] = copy(v[keys[k]], depth - 1); } catch(e) { out[keys[k]] = '[unreadable]'; }
+              }
+              if (keys.length > 300) out['…'] = (keys.length - 300) + ' more keys';
+            }
+          } catch(e) { out = '[unreadable]'; }
+          active.delete(v);
+          return out;
+        }
+        try {
+          var text = JSON.stringify(copy(value, 14), null, 2);
+          if (text && text.length > 4000000) return JSON.stringify({ note: 'Too large to display', characters: text.length }, null, 2);
+          return text;
+        } catch(e) { return null; }
+      }
+
+      // The fibres' context providers, where stores such as Redux, React Query and Apollo are handed down to the tree.
+      function fw_reactProviderValues(maxFibers) {
+        var values = [];
+        var visited = 0;
+        try {
+          fw_findReactRoots().forEach(function(root) {
+            var stack = [root.current ? root.current : root];
+            while (stack.length && visited < maxFibers) {
+              var fiber = stack.pop();
+              visited++;
+              if (fiber.tag === 10) {
+                try { var v = fiber.memoizedProps && fiber.memoizedProps.value; if (v && typeof v === 'object') values.push(v); } catch(e) {}
+              }
+              if (fiber.sibling) stack.push(fiber.sibling);
+              if (fiber.child) stack.push(fiber.child);
+            }
+          });
+        } catch(e) {}
+        return values;
+      }
+
+      function fw_pageMetadata() {
+        var info = { title: document.title || null, url: location.href, lang: document.documentElement.lang || null, charset: document.characterSet };
+        var openGraph = {};
+        var twitter = {};
+        var other = {};
+        var metas = document.querySelectorAll('meta');
+        for (var i = 0; i < metas.length; i++) {
+          var m = metas[i];
+          var key = m.getAttribute('property') || m.getAttribute('name') || m.getAttribute('http-equiv') || (m.hasAttribute('charset') ? 'charset' : '');
+          if (!key) continue;
+          var content = m.getAttribute('content');
+          if (content === null) content = m.getAttribute('charset');
+          if (/^(og:|article:|product:|fb:)/.test(key)) openGraph[key] = content;
+          else if (/^twitter:/.test(key)) twitter[key] = content;
+          else other[key] = content;
+        }
+        if (Object.keys(openGraph).length) info.openGraph = openGraph;
+        if (Object.keys(twitter).length) info.twitter = twitter;
+        if (Object.keys(other).length) info.meta = other;
+        var canonical = document.querySelector('link[rel~="canonical"]');
+        if (canonical) info.canonical = canonical.href;
+        var manifest = document.querySelector('link[rel~="manifest"]');
+        if (manifest) info.manifest = manifest.href;
+        function links(selector, pick) {
+          var out = [];
+          var list = document.querySelectorAll(selector);
+          for (var j = 0; j < list.length && j < 40; j++) out.push(pick(list[j]));
+          return out;
+        }
+        var icons = links('link[rel~="icon"], link[rel="apple-touch-icon"], link[rel="mask-icon"]', function(l) { return { rel: l.rel, href: l.href, sizes: l.sizes && l.sizes.value || undefined, type: l.type || undefined }; });
+        if (icons.length) info.icons = icons;
+        var alternates = links('link[rel~="alternate"]', function(l) { return { hreflang: l.hreflang || undefined, type: l.type || undefined, title: l.title || undefined, href: l.href }; });
+        if (alternates.length) info.alternates = alternates;
+        var hints = links('link[rel~="preconnect"], link[rel~="dns-prefetch"], link[rel~="preload"], link[rel~="modulepreload"], link[rel~="prefetch"]', function(l) { return l.rel + ' ' + l.href; });
+        if (hints.length) info.resourceHints = hints;
+        try {
+          var scripts = document.scripts;
+          var external = 0, modules = 0, inline = 0;
+          for (var s = 0; s < scripts.length; s++) { if (scripts[s].src) external++; else inline++; if (scripts[s].type === 'module') modules++; }
+          info.counts = {
+            elements: document.getElementsByTagName('*').length, scripts: scripts.length, externalScripts: external, inlineScripts: inline,
+            moduleScripts: modules, stylesheets: document.styleSheets.length, images: document.images.length, iframes: document.getElementsByTagName('iframe').length,
+            forms: document.forms.length, links: document.links.length
+          };
+        } catch(e) {}
+        return info;
+      }
+
       function fw_extractData() {
         var items = [];
+        function add(id, label, json, framework, kind) {
+          if (json === null || json === undefined) return;
+          items.push({ id: id, label: label, kind: kind || 'json', json: json, framework: framework || null });
+        }
+        var handled = {};
+        function take(name, id, label, framework) {
+          handled[name] = true;
+          try {
+            var v = window[name];
+            if (v === undefined || v === null) return;
+            add(id, label, fw_safeJSON(v), framework);
+          } catch(e) {}
+        }
 
-        try {
-          if (window.__NEXT_DATA__) {
-            var json = JSON.stringify(window.__NEXT_DATA__, null, 2);
-            items.push({ id: 'next-page-data', label: 'Next.js Page Data', kind: 'json', json: json, framework: 'nextjs' });
-          }
-        } catch(e) {}
+        take('__NEXT_DATA__', 'next-page-data', 'Next.js Page Data', 'nextjs');
 
         try {
           if (window.__next_f && Array.isArray(window.__next_f) && window.__next_f.length > 0) {
+            handled['__next_f'] = true;
             var chunks = window.__next_f.map(function(entry) {
               if (Array.isArray(entry) && entry.length >= 2) return fw_str(entry[1]);
               return fw_str(entry);
@@ -664,83 +1121,132 @@ extension OrbitInspectAgent {
           }
         } catch(e) {}
 
+        // Nuxt removes window.__NUXT__ after hydration; the app's payload keeps the same data.
         try {
-          if (window.__NUXT__) {
-            items.push({ id: 'nuxt-payload', label: 'Nuxt Payload', kind: 'json',
-              json: JSON.stringify(window.__NUXT__, null, 2), framework: 'nuxt' });
-          }
+          var nuxt = window.__NUXT__;
+          if (!nuxt && typeof window.useNuxtApp === 'function') { var app = window.useNuxtApp(); nuxt = app && (app.payload || app._payload); }
+          handled['__NUXT__'] = true;
+          if (nuxt) add('nuxt-payload', 'Nuxt Payload', fw_safeJSON(nuxt), 'nuxt');
         } catch(e) {}
 
-        try {
-          if (window.__remixContext) {
-            items.push({ id: 'remix-context', label: 'Remix Context', kind: 'json',
-              json: JSON.stringify(window.__remixContext, null, 2), framework: 'remix' });
-          }
-        } catch(e) {}
+        take('__remixContext', 'remix-context', 'Remix Context', 'remix');
+        take('___gatsby', 'gatsby', 'Gatsby', 'gatsby');
+        take('__REACT_QUERY_STATE__', 'react-query-state', 'React Query (dehydrated)', 'react-query');
 
         try {
           var apollo = window.__APOLLO_STATE__ || (window.__APOLLO_CLIENT__ && window.__APOLLO_CLIENT__.cache && window.__APOLLO_CLIENT__.cache.extract());
-          if (apollo) {
-            items.push({ id: 'apollo-state', label: 'Apollo Cache', kind: 'json',
-              json: JSON.stringify(apollo, null, 2), framework: 'apollo' });
-          }
+          handled['__APOLLO_STATE__'] = true; handled['__APOLLO_CLIENT__'] = true;
+          if (apollo) add('apollo-state', 'Apollo Cache', fw_safeJSON(apollo), 'apollo');
         } catch(e) {}
 
         try {
           var redux = window.__REDUX_STATE__ || window.__PRELOADED_STATE__ || window.__INITIAL_STATE__;
-          if (redux) {
-            items.push({ id: 'redux-state', label: 'Redux State', kind: 'json',
-              json: JSON.stringify(redux, null, 2), framework: 'redux' });
-          }
+          handled['__REDUX_STATE__'] = true; handled['__PRELOADED_STATE__'] = true; handled['__INITIAL_STATE__'] = true;
+          if (redux) add('redux-state', 'Redux State (preloaded)', fw_safeJSON(redux), 'redux');
+        } catch(e) {}
+
+        // Live stores, read from where the framework keeps them.
+        try {
+          var vueRoots = fw_findVue3Roots();
+          var storeSeen = new Set();
+          vueRoots.forEach(function(inst, index) {
+            var props = inst.appContext && inst.appContext.config && inst.appContext.config.globalProperties;
+            if (!props) return;
+            try {
+              var pinia = props.$pinia;
+              if (pinia && pinia.state && pinia.state.value && !storeSeen.has(pinia)) {
+                storeSeen.add(pinia);
+                add('pinia-' + index, 'Pinia Stores', fw_safeJSON(pinia.state.value), 'vue');
+              }
+            } catch(e) {}
+            try {
+              var vuex = props.$store;
+              if (vuex && vuex.state && !storeSeen.has(vuex)) {
+                storeSeen.add(vuex);
+                add('vuex-' + index, 'Vuex Store', fw_safeJSON(vuex.state), 'vue');
+              }
+            } catch(e) {}
+          });
+        } catch(e) {}
+        try {
+          fw_walkVue2Roots().forEach(function(vm, index) {
+            try { if (vm.$store && vm.$store.state) add('vuex2-' + index, 'Vuex Store', fw_safeJSON(vm.$store.state), 'vue'); } catch(e) {}
+          });
         } catch(e) {}
 
         try {
-          if (window.___gatsby) {
-            items.push({ id: 'gatsby', label: 'Gatsby Page Data', kind: 'json',
-              json: JSON.stringify(window.___gatsby, null, 2), framework: 'gatsby' });
-          }
+          var reduxSeen = new Set(), queryClients = new Set(), apolloClients = new Set();
+          fw_reactProviderValues(8000).forEach(function(value) {
+            try {
+              var store = (typeof value.getState === 'function' && typeof value.dispatch === 'function') ? value
+                : (value.store && typeof value.store.getState === 'function' ? value.store : null);
+              if (store && !reduxSeen.has(store)) {
+                reduxSeen.add(store);
+                add('redux-live-' + reduxSeen.size, 'Redux Store' + (reduxSeen.size > 1 ? ' #' + reduxSeen.size : ''), fw_safeJSON(store.getState()), 'redux');
+              }
+              var client = typeof value.getQueryCache === 'function' ? value : (value.queryClient && typeof value.queryClient.getQueryCache === 'function' ? value.queryClient : null);
+              if (client && !queryClients.has(client)) {
+                queryClients.add(client);
+                var queries = client.getQueryCache().getAll().slice(0, 150).map(function(q) {
+                  var state = q.state || {};
+                  return { key: q.queryKey, status: state.status, fetchStatus: state.fetchStatus, updatedAt: state.dataUpdatedAt ? new Date(state.dataUpdatedAt).toISOString() : null, data: state.data, error: state.error ? fw_str(state.error.message || state.error) : null };
+                });
+                add('react-query-' + queryClients.size, 'React Query Cache' + (queryClients.size > 1 ? ' #' + queryClients.size : ''), fw_safeJSON(queries), 'react-query');
+              }
+              var apolloClient = value.client && value.client.cache && typeof value.client.cache.extract === 'function' ? value.client : null;
+              if (apolloClient && !apolloClients.has(apolloClient)) {
+                apolloClients.add(apolloClient);
+                add('apollo-live-' + apolloClients.size, 'Apollo Cache (live)', fw_safeJSON(apolloClient.cache.extract()), 'apollo');
+              }
+            } catch(e) {}
+          });
         } catch(e) {}
 
         try {
-          var ldScripts = document.querySelectorAll('script[type="application/ld+json"]');
-          for (var i = 0; i < ldScripts.length; i++) {
-            var text = ldScripts[i].textContent || '';
-            if (text.trim()) {
-              items.push({ id: 'ld-json-' + i, label: 'JSON-LD #' + (i + 1), kind: 'json',
-                json: text.trim(), framework: null });
-            }
+          if (Array.isArray(window.dataLayer) && window.dataLayer.length) {
+            handled['dataLayer'] = true;
+            add('data-layer', 'Tag Manager dataLayer', fw_safeJSON(window.dataLayer), null);
           }
         } catch(e) {}
 
+        // Inertia hands each page's props to the client as JSON in data-page on the app root.
         try {
-          var jsonScripts = document.querySelectorAll('script[type="application/json"]');
-          for (var i = 0; i < jsonScripts.length; i++) {
-            var text = jsonScripts[i].textContent || '';
-            var id = jsonScripts[i].id || ('json-script-' + i);
-            if (text.trim()) {
-              items.push({ id: 'json-script-' + i, label: 'JSON Script' + (id !== 'json-script-' + i ? ' #' + id : ' #' + (i + 1)),
-                kind: 'json', json: text.trim(), framework: null });
-            }
+          var inertiaRoot = document.querySelector('[data-page]');
+          if (inertiaRoot) {
+            var page = JSON.parse(inertiaRoot.getAttribute('data-page'));
+            if (page && typeof page === 'object') add('inertia-page', 'Inertia Page', fw_safeJSON(page), 'inertia');
+          }
+        } catch(e) {}
+
+        // Every JSON script the page embeds: JSON-LD, Angular's ng-state, Qwik's resumable state, framework hydration payloads.
+        try {
+          var jsonScripts = document.querySelectorAll('script[type$="json"], script[type$="+json"]');
+          for (var i = 0; i < jsonScripts.length && i < 40; i++) {
+            var node = jsonScripts[i];
+            var text = (node.textContent || '').trim();
+            if (!text || node.id === '__NEXT_DATA__') continue;
+            var kind = (node.getAttribute('type') || '').toLowerCase();
+            var label = kind.indexOf('ld+json') >= 0 ? 'JSON-LD #' + (i + 1)
+              : kind.indexOf('qwik') >= 0 ? 'Qwik State'
+              : node.id === 'ng-state' ? 'Angular Transfer State'
+              : 'JSON Script' + (node.id ? ' #' + node.id : ' #' + (i + 1));
+            items.push({ id: 'json-script-' + i, label: label, kind: 'json', json: text, framework: kind.indexOf('qwik') >= 0 ? 'qwik' : (node.id === 'ng-state' ? 'angular' : null) });
           }
         } catch(e) {}
 
         try {
           var im = document.querySelector('script[type="importmap"]');
-          if (im && im.textContent.trim()) {
-            items.push({ id: 'importmap', label: 'Import Map', kind: 'json',
-              json: im.textContent.trim(), framework: null });
-          }
+          if (im && im.textContent.trim()) items.push({ id: 'importmap', label: 'Import Map', kind: 'json', json: im.textContent.trim(), framework: null });
         } catch(e) {}
 
         try {
           var sr = document.querySelector('script[type="speculationrules"]');
-          if (sr && sr.textContent.trim()) {
-            items.push({ id: 'speculationrules', label: 'Speculation Rules', kind: 'json',
-              json: sr.textContent.trim(), framework: null });
-          }
+          if (sr && sr.textContent.trim()) items.push({ id: 'speculationrules', label: 'Speculation Rules', kind: 'json', json: sr.textContent.trim(), framework: null });
         } catch(e) {}
 
-        // Global snapshot: non-standard window properties
+        add('page-metadata', 'Page Metadata', fw_safeJSON(fw_pageMetadata()), null);
+
+        // Global snapshot: non-standard window properties, with the ones that look like embedded application state offered as data of their own.
         try {
           var standard = new Set(['window','self','top','parent','opener','frames','closed',
             'location','history','navigator','screen','document','performance','console',
@@ -765,6 +1271,7 @@ extension OrbitInspectAgent {
             'atob','btoa','escape','unescape','globalThis','global',
             'webkit','__orbitInspect']);
           var globs = [];
+          var embedded = 0;
           try {
             Object.keys(window).forEach(function(k) {
               if (standard.has(k)) return;
@@ -772,6 +1279,15 @@ extension OrbitInspectAgent {
               var v;
               try { v = preview(window[k], 1, new WeakSet()); } catch(e) { v = '?'; }
               globs.push({ name: k, preview: v });
+              if (handled[k] || embedded >= 12 || /^on[a-z]/.test(k)) return;
+              if (!/(STATE|STORE|DATA|PAYLOAD|PRELOAD|BOOTSTRAP|INITIAL|HYDRAT|SETTINGS|CONFIG)/i.test(k)) return;
+              try {
+                var value = window[k];
+                if (value && typeof value === 'object' && !value.nodeType && value !== window) {
+                  var json = fw_safeJSON(value);
+                  if (json && json.length > 2) { embedded++; add('embedded-' + k, 'Embedded data: ' + k, json, null); }
+                }
+              } catch(e) {}
             });
           } catch(e) {}
           if (globs.length > 0) {

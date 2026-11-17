@@ -285,11 +285,12 @@ enum OrbitInspectAgent {
         });
       }
 
+      // Each box-model layer paints only its own band (margin, border and padding are rings, content is the middle), so the colours never stack into something opaque, and the translucency is low enough to read the page through.
       var fills = {
-        margin: "rgba(246, 178, 107, 0.66)",
-        border: "rgba(255, 229, 153, 0.72)",
-        padding: "rgba(147, 196, 125, 0.66)",
-        content: "rgba(111, 168, 220, 0.55)"
+        margin: "rgba(246, 178, 107, 0.42)",
+        border: "rgba(255, 229, 153, 0.50)",
+        padding: "rgba(147, 196, 125, 0.42)",
+        content: "rgba(111, 168, 220, 0.30)"
       };
 
       function ensureOverlay() {
@@ -356,66 +357,147 @@ enum OrbitInspectAgent {
         var origin = pageOrigin(element);
         var x = rect.left + origin.x;
         var y = rect.top + origin.y;
-        var margin = { top: px(style.marginTop), right: px(style.marginRight), bottom: px(style.marginBottom), left: px(style.marginLeft) };
-        var border = { top: px(style.borderTopWidth), right: px(style.borderRightWidth), bottom: px(style.borderBottomWidth), left: px(style.borderLeftWidth) };
-        var padding = { top: px(style.paddingTop), right: px(style.paddingRight), bottom: px(style.paddingBottom), left: px(style.paddingLeft) };
-        var boxes = {
-          margin: { x: x - margin.left, y: y - margin.top, w: rect.width + margin.left + margin.right, h: rect.height + margin.top + margin.bottom },
-          border: { x: x, y: y, w: rect.width, h: rect.height },
-          padding: { x: x + border.left, y: y + border.top, w: rect.width - border.left - border.right, h: rect.height - border.top - border.bottom },
-          content: { x: x + border.left + padding.left, y: y + border.top + padding.top, w: rect.width - border.left - border.right - padding.left - padding.right, h: rect.height - border.top - border.bottom - padding.top - padding.bottom }
+        function sides(prefix, suffix) {
+          return {
+            top: Math.max(0, px(style[prefix + "Top" + suffix])),
+            right: Math.max(0, px(style[prefix + "Right" + suffix])),
+            bottom: Math.max(0, px(style[prefix + "Bottom" + suffix])),
+            left: Math.max(0, px(style[prefix + "Left" + suffix]))
+          };
+        }
+        var margin = sides("margin", "");
+        var border = sides("border", "Width");
+        var padding = sides("padding", "");
+        // Outer box of each band and the thickness of that band on each side. Content has no band: it fills its box.
+        var bands = {
+          margin: { x: x - margin.left, y: y - margin.top, w: rect.width + margin.left + margin.right, h: rect.height + margin.top + margin.bottom, edge: margin },
+          border: { x: x, y: y, w: rect.width, h: rect.height, edge: border },
+          padding: { x: x + border.left, y: y + border.top, w: rect.width - border.left - border.right, h: rect.height - border.top - border.bottom, edge: padding },
+          content: { x: x + border.left + padding.left, y: y + border.top + padding.top, w: rect.width - border.left - border.right - padding.left - padding.right, h: rect.height - border.top - border.bottom - padding.top - padding.bottom, edge: null }
         };
+        var labelTop = bands.margin.y;
+        var labelLeft = bands.margin.x;
         Array.prototype.forEach.call(root.querySelectorAll("[data-part]"), function (layer) {
           var part = layer.dataset.part;
           if (part === "shield") return;
           if (part === "label") {
-            pin(layer, "display:block;left:" + Math.max(0, boxes.margin.x) + "px;top:" + (boxes.margin.y > 20 ? boxes.margin.y - 18 : boxes.margin.y) + "px;width:auto;height:auto;background:rgba(20,20,20,0.92);color:white;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;padding:2px 6px;border-radius:4px;white-space:nowrap");
+            pin(layer, "display:block;left:" + Math.max(0, labelLeft) + "px;top:" + (labelTop > 20 ? labelTop - 18 : labelTop) + "px;width:auto;height:auto;background:rgba(20,20,20,0.92);color:white;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;padding:2px 6px;border-radius:4px;white-space:nowrap");
             layer.textContent = nodeLabel(element) + " " + Math.round(rect.width) + "×" + Math.round(rect.height);
             return;
           }
-          var box = boxes[part];
+          var box = bands[part];
           if (!box) return;
-          pin(layer, "display:block;left:" + box.x + "px;top:" + box.y + "px;width:" + Math.max(0, box.w) + "px;height:" + Math.max(0, box.h) + "px;background:" + fills[part]);
+          var position = "display:block;left:" + box.x + "px;top:" + box.y + "px;width:" + Math.max(0, box.w) + "px;height:" + Math.max(0, box.h) + "px;";
+          if (box.edge) {
+            // The band is the layer's own border, drawn inside its outer box, so the middle stays clear.
+            pin(layer, position + "background:transparent;border-style:solid;border-color:" + fills[part] + ";border-width:" + box.edge.top + "px " + box.edge.right + "px " + box.edge.bottom + "px " + box.edge.left + "px");
+          } else {
+            pin(layer, position + "background:" + fills[part] + ";border-width:0px");
+          }
         });
+      }
+
+      // True when a text node directly inside `el` is drawn under the point.
+      function ownsTextAt(el, x, y) {
+        var children = el.childNodes;
+        for (var index = 0; index < children.length && index < 60; index++) {
+          var child = children[index];
+          if (child.nodeType !== 3 || !/\S/.test(child.nodeValue || "")) continue;
+          var range = document.createRange();
+          range.selectNodeContents(child);
+          var rects = range.getClientRects();
+          for (var r = 0; r < rects.length; r++) {
+            var box = rects[r];
+            if (x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) return true;
+          }
+        }
+        return false;
+      }
+
+      // True when `el` paints something solid, so whatever is below it in the stack is not visible through it.
+      function paintsSolid(el) {
+        if (/^(IMG|VIDEO|CANVAS|SVG|IFRAME|PICTURE|OBJECT|EMBED)$/i.test(el.tagName)) return true;
+        var style = getComputedStyle(el);
+        if (style.backgroundImage && style.backgroundImage !== "none") return true;
+        var match = /rgba?\(([^)]*)\)/.exec(style.backgroundColor || "");
+        if (!match) return false;
+        var parts = match[1].split(/[ ,\/]+/).filter(Boolean);
+        var alpha = parts.length > 3 ? parseFloat(parts[3]) : 1;
+        return alpha >= 0.9;
+      }
+
+      // The element a person is pointing at: the topmost one, unless text sits under the point beneath nothing but see-through boxes, in which case the text's own element. Without this, a transparent box laid over a heading (or a heading whose pointer-events is off) is picked and the highlight lands on the background.
+      function chooseFromStack(stack, x, y) {
+        for (var index = 0; index < stack.length; index++) {
+          var el = stack[index];
+          if (ownsTextAt(el, x, y)) return el;
+          if (paintsSolid(el)) break;
+        }
+        return stack[0];
+      }
+
+      // Hit testing normally skips pointer-events:none, which hides text in decorative layers and picks whatever is behind. Only while picking is every element made hit-testable.
+      function setHitTestAll(on) {
+        var existing = document.getElementById("orbit-inspect-hit-all");
+        if (!on) {
+          if (existing) existing.remove();
+          return;
+        }
+        if (existing) return;
+        var style = document.createElement("style");
+        style.id = "orbit-inspect-hit-all";
+        style.textContent = "*:not(#orbit-inspect-root){pointer-events:auto !important}";
+        (document.head || document.documentElement).appendChild(style);
       }
 
       // Topmost real page element at a viewport point, looking through our overlay and into same-origin iframes.
       function nodeAt(x, y) {
         var host = document.getElementById("orbit-inspect-root");
         function fromStack() {
-          var stack = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [];
-          if (!stack.length) {
+          var raw = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [];
+          if (!raw.length) {
             var one = document.elementFromPoint(x, y);
-            stack = one ? [one] : [];
+            raw = one ? [one] : [];
           }
-          for (var index = 0; index < stack.length; index++) {
-            var el = stack[index];
-            if (!el || isOurs(el) || el === document.body || el === document.documentElement) continue;
-            if (el.tagName === "IFRAME") {
-              try {
-                var inner = el.contentDocument;
-                if (inner) {
-                  var frame = el.getBoundingClientRect();
-                  var nested = inner.elementFromPoint(x - frame.left, y - frame.top);
-                  if (nested && !isOurs(nested) && nested !== inner.body) return nested;
-                }
-              } catch (error) {}
-            }
-            return el;
+          var stack = [];
+          for (var index = 0; index < raw.length && stack.length < 16; index++) {
+            var candidate = raw[index];
+            if (!candidate || isOurs(candidate) || candidate === document.body || candidate === document.documentElement) continue;
+            stack.push(candidate);
           }
-          return null;
+          if (!stack.length) return null;
+          var el = chooseFromStack(stack, x, y);
+          if (el.tagName === "IFRAME") {
+            try {
+              var inner = el.contentDocument;
+              if (inner) {
+                var frame = el.getBoundingClientRect();
+                var nested = inner.elementFromPoint(x - frame.left, y - frame.top);
+                if (nested && !isOurs(nested) && nested !== inner.body) return nested;
+              }
+            } catch (error) {}
+          }
+          return el;
         }
-        var found = fromStack();
-        if (!found && host) {
-          pin(host, "pointer-events:none");
+        var oneShot = !state.picking;
+        if (oneShot) setHitTestAll(true);
+        var found;
+        try {
           found = fromStack();
-          if (state.picking) pin(host, "pointer-events:auto");
+          if (!found && host) {
+            pin(host, "pointer-events:none");
+            found = fromStack();
+            if (state.picking) pin(host, "pointer-events:auto");
+          }
+        } finally {
+          if (oneShot) setHitTestAll(false);
         }
         return found;
       }
 
       function stopPick() {
         state.picking = false;
+        setHitTestAll(false);
         state.hoverEl = null;
         var host = document.getElementById("orbit-inspect-root");
         var shield = host && host.shadowRoot && host.shadowRoot.getElementById("orbit-inspect-shield");
@@ -431,6 +513,7 @@ enum OrbitInspectAgent {
         pin(shield, "display:block;position:fixed;inset:0;width:100vw;height:100vh;cursor:crosshair;background:transparent;pointer-events:auto;z-index:2147483646");
         if (host) pin(host, "pointer-events:auto");
         state.picking = true;
+        setHitTestAll(true);
         state.treeHover = false;
         post({ t: "picking", on: true });
       }

@@ -180,6 +180,9 @@ struct OrbitDeviceSettings: Equatable {
     var dpr: Double?
     var type: OrbitDeviceType
 var userAgent: String?
+    /// A size-only setting is a window, not a screen; a tool that emulates a whole device (Lighthouse) sets this so
+    /// screen and outer sizes match it too.
+    var emulatesScreen = false
 
     static let responsiveDefault = OrbitDeviceSettings(
         profileID: nil, width: 800, height: 600, dpr: nil, type: .desktop, userAgent: nil
@@ -248,8 +251,8 @@ var userAgent: String?
             dpr: dpr,
             touch: type.hasTouch,
             // The screen is only a device's; a responsive window is not a screen.
-            screenWidth: profileID == nil ? nil : width,
-            screenHeight: profileID == nil ? nil : height
+            screenWidth: profileID == nil && !emulatesScreen ? nil : width,
+            screenHeight: profileID == nil && !emulatesScreen ? nil : height
         )
     }
 
@@ -337,6 +340,9 @@ enum OrbitDeviceEmulationScript {
         override(Screen.prototype, 'availWidth', screenWidth);
         override(Screen.prototype, 'height', screenHeight);
         override(Screen.prototype, 'availHeight', screenHeight);
+        // On an emulated device the browser window is the screen, as in Chrome's device mode.
+        override(window, 'outerWidth', screenWidth);
+        override(window, 'outerHeight', screenHeight);
       }
 
       // Each tested pointer/hover feature becomes always-true or always-false, so the rest of the query still evaluates.
@@ -344,16 +350,41 @@ enum OrbitDeviceEmulationScript {
       if (typeof realMatchMedia === 'function') {
         var TRUE_FEATURE = '(min-width: 0px)';
         var FALSE_FEATURE = '(width: 0px)';
+        // A resolution value in dppx: dpi is 96 per dppx, dpcm 96 / 2.54, and x or a bare ratio is dppx already.
+        function dppx(value, unit) {
+          var v = parseFloat(value);
+          var u = (unit || '').toLowerCase();
+          if (u === 'dpi') return v / 96;
+          if (u === 'dpcm') return v * 2.54 / 96;
+          return v;
+        }
         window.matchMedia = function matchMedia(query) {
           var text = String(query);
-          if (!(active() && state.touch === true)) return realMatchMedia.call(window, text);
-          var rewritten = text
-            .replace(/\(\s*(?:any-)?pointer\s*:\s*(coarse|fine|none)\s*\)/gi, function (match, value) {
-              return value.toLowerCase() === 'coarse' ? TRUE_FEATURE : FALSE_FEATURE;
-            })
-            .replace(/\(\s*(?:any-)?hover\s*:\s*(hover|none)\s*\)/gi, function (match, value) {
-              return value.toLowerCase() === 'none' ? TRUE_FEATURE : FALSE_FEATURE;
-            });
+          var touch = active() && state.touch === true;
+          var ratio = active() && state.dpr > 0 ? state.dpr : 0;
+          if (!touch && !ratio) return realMatchMedia.call(window, text);
+          var rewritten = text;
+          if (touch) {
+            rewritten = rewritten
+              .replace(/\(\s*(?:any-)?pointer\s*:\s*(coarse|fine|none)\s*\)/gi, function (match, value) {
+                return value.toLowerCase() === 'coarse' ? TRUE_FEATURE : FALSE_FEATURE;
+              })
+              .replace(/\(\s*(?:any-)?hover\s*:\s*(hover|none)\s*\)/gi, function (match, value) {
+                return value.toLowerCase() === 'none' ? TRUE_FEATURE : FALSE_FEATURE;
+              });
+          }
+          if (ratio) {
+            rewritten = rewritten.replace(
+              /\(\s*(min-|max-)?(-webkit-(min-|max-)?device-pixel-ratio|resolution)\s*:\s*([0-9]*\.?[0-9]+)\s*(dppx|dpi|dpcm|x)?\s*\)/gi,
+              function (match, prefix, name, webkitPrefix, value, unit) {
+                var bound = (prefix || webkitPrefix || '').toLowerCase();
+                var wanted = dppx(value, name.toLowerCase() === 'resolution' ? unit : 'x');
+                var holds = bound === 'min-' ? ratio >= wanted - 1e-6
+                  : bound === 'max-' ? ratio <= wanted + 1e-6
+                  : Math.abs(ratio - wanted) < 1e-6;
+                return holds ? TRUE_FEATURE : FALSE_FEATURE;
+              });
+          }
           var list = realMatchMedia.call(window, rewritten);
           if (rewritten !== text) {
             try { Object.defineProperty(list, 'media', { configurable: true, get: function () { return text; } }); } catch (e) {}

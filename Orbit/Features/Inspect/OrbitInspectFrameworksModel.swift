@@ -58,6 +58,8 @@ final class OrbitFrameworksModel: OrbitInspectModule {
     var minifiedBanner: Bool = false
     var componentFramework: String?
     var componentsCapped: Bool = false
+    /// Why there is no tree, in terms of what the page has; nil when there is one or none has been asked for yet.
+    var treeNote: String?
     var isTreeLoading: Bool = false
     var treeLoadError: String?
 
@@ -203,6 +205,7 @@ final class OrbitFrameworksModel: OrbitInspectModule {
         minifiedBanner = false
         componentFramework = nil
         componentsCapped = false
+        treeNote = nil
         isTreeLoading = false
         treeLoadError = nil
         dataItems = []
@@ -383,6 +386,8 @@ final class OrbitFrameworksModel: OrbitInspectModule {
         e.scriptURLs = OrbitInspectDecode.strings(object, "scriptURLs")
         e.linkURLs = OrbitInspectDecode.strings(object, "linkURLs")
         e.metaGenerators = OrbitInspectDecode.strings(object, "metaGenerators")
+        e.classTokens = Set(OrbitInspectDecode.strings(object, "classTokens"))
+        e.cssVariablePrefixes = Set(OrbitInspectDecode.strings(object, "cssVariablePrefixes"))
         e.hostname = OrbitInspectDecode.string(object, "hostname")
         e.pageURL = session?.pageURL ?? ""
 
@@ -400,7 +405,11 @@ final class OrbitFrameworksModel: OrbitInspectModule {
 
     private func handleTree(_ object: [String: Any]) {
         isTreeLoading = false
+        treeNote = OrbitInspectDecode.optionalString(object, "note")
         guard let result = OrbitInspectDecode.object(object, "result") else {
+            componentNodes = []
+            componentRoots = []
+            componentFramework = nil
             treeLoadError = nil
             return
         }

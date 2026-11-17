@@ -1,7 +1,7 @@
 import XCTest
 @testable import Orbit
 
-/// Pure tests of `NewTabPageModel.siteTiles`: no window, no view, no app activation.
+/// Pure tests of `NewTabPageModel.recentSites` and `frequentSites`: no window, no view, no app activation.
 final class NewTabPageSiteTilesTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let profileID = UUID()
@@ -18,7 +18,11 @@ final class NewTabPageSiteTilesTests: XCTestCase {
     }
 
     private func tiles(_ entries: [HistoryEntry], limit: Int = 6) -> [NewTabPageModel.SiteTile] {
-        NewTabPageModel.siteTiles(from: entries, limit: limit, now: now)
+        NewTabPageModel.recentSites(from: entries, limit: limit, now: now)
+    }
+
+    private func frequent(_ entries: [HistoryEntry], limit: Int = 6) -> [NewTabPageModel.SiteTile] {
+        NewTabPageModel.frequentSites(from: entries, limit: limit, now: now)
     }
 
     func test_deepURLsCollapseToTheOriginRoot_withTheHostAsTitleAndSubtitle() {
@@ -93,7 +97,27 @@ final class NewTabPageSiteTilesTests: XCTestCase {
         XCTAssertEqual(result.first?.url.absoluteString, "https://www.example.com", "The root follows the newest visit.")
     }
 
-    func test_recentAndFrequentSitesAreBothRepresented() {
+    func test_recentSitesAreNewestFirst_regardlessOfHowOftenTheyWereVisited() {
+        let result = tiles([
+            entry("https://often.example.com/home", visits: 900, minutesAgo: 30 * 24 * 60),
+            entry("https://older.example.com/", visits: 1, minutesAgo: 20),
+            entry("https://newest.example.com/", visits: 1, minutesAgo: 1),
+        ])
+
+        XCTAssertEqual(result.map(\.title), ["newest.example.com", "older.example.com", "often.example.com"])
+    }
+
+    func test_frequentSitesAreRankedByFrequency_notByRecency() {
+        let result = frequent([
+            entry("https://fresh.example.com/", visits: 2, minutesAgo: 1),
+            entry("https://often-a.example.com/home", visits: 500, minutesAgo: 30 * 24 * 60),
+            entry("https://often-b.example.com/home", visits: 200, minutesAgo: 20 * 24 * 60),
+        ])
+
+        XCTAssertEqual(result.map(\.title), ["often-a.example.com", "often-b.example.com", "fresh.example.com"])
+    }
+
+    func test_recentAndFrequentAreSeparateLists_notMergedOrInterleaved() {
         var entries: [HistoryEntry] = []
         for index in 0..<6 {
             entries.append(entry("https://recent\(index).example.com/page", visits: 1, minutesAgo: Double(index + 1)))
@@ -101,24 +125,26 @@ final class NewTabPageSiteTilesTests: XCTestCase {
         entries.append(entry("https://often-a.example.com/home", visits: 500, minutesAgo: 30 * 24 * 60))
         entries.append(entry("https://often-b.example.com/home", visits: 200, minutesAgo: 20 * 24 * 60))
 
-        let result = tiles(entries, limit: 4)
-
         XCTAssertEqual(
-            result.map(\.title),
-            ["recent0.example.com", "often-a.example.com", "recent1.example.com", "often-b.example.com"],
-            "Newest and most frequent sites alternate."
+            tiles(entries, limit: 4).map(\.title),
+            ["recent0.example.com", "recent1.example.com", "recent2.example.com", "recent3.example.com"]
         )
+        XCTAssertEqual(frequent(entries, limit: 4).map(\.title), ["often-a.example.com", "often-b.example.com"])
     }
 
-    func test_aSiteThatIsBothNewestAndMostFrequentTakesOneSlot() {
-        let result = tiles([
+    func test_aSiteThatIsBothRecentAndFrequentAppearsInBothLists() {
+        let entries = [
             entry("https://top.example.com/", visits: 900, minutesAgo: 1),
             entry("https://second.example.com/", visits: 1, minutesAgo: 2),
-            entry("https://third.example.com/", visits: 1, minutesAgo: 3),
-        ], limit: 3)
+        ]
 
-        XCTAssertEqual(result.map(\.title), ["top.example.com", "second.example.com", "third.example.com"])
-        XCTAssertEqual(Set(result.map(\.url)).count, 3)
+        XCTAssertEqual(tiles(entries).map(\.title), ["top.example.com", "second.example.com"])
+        XCTAssertEqual(frequent(entries).map(\.title), ["top.example.com"])
+    }
+
+    func test_aSiteSeenOnlyOnceIsNotFrequent() {
+        XCTAssertTrue(frequent([entry("https://once.example.com/", visits: 1, minutesAgo: 1)]).isEmpty)
+        XCTAssertEqual(frequent([entry("https://twice.example.com/", visits: 2, minutesAgo: 1)]).map(\.title), ["twice.example.com"])
     }
 
     func test_visitsToDifferentPagesOfOneSiteAddUpToItsFrequency() {
@@ -126,9 +152,7 @@ final class NewTabPageSiteTilesTests: XCTestCase {
         entries.append(entry("https://lone.example.com/p", visits: 5, minutesAgo: 10_000))
         entries.append(entry("https://fresh.example.com/", visits: 1, minutesAgo: 1))
 
-        let result = tiles(entries, limit: 2)
-
-        XCTAssertEqual(result.map(\.title), ["fresh.example.com", "busy.example.com"])
+        XCTAssertEqual(frequent(entries, limit: 2).map(\.title), ["busy.example.com", "lone.example.com"])
     }
 
     func test_theLimitIsRespected_andFewerSitesReturnEverything() {
@@ -138,7 +162,9 @@ final class NewTabPageSiteTilesTests: XCTestCase {
         XCTAssertEqual(tiles(many, limit: 3).count, 3)
         XCTAssertEqual(tiles(many, limit: 0).count, 0)
         XCTAssertEqual(tiles(Array(many.prefix(2)), limit: 6).count, 2)
-        XCTAssertEqual(NewTabPageModel.siteTiles(from: many, now: now).count, NewTabPageModel.maximumRecents)
+        XCTAssertEqual(NewTabPageModel.recentSites(from: many, now: now).count, NewTabPageModel.maximumRecents)
+        XCTAssertEqual(frequent(many.map { entry($0.url.absoluteString, visits: 3) }, limit: 3).count, 3)
+        XCTAssertEqual(frequent(many, limit: 0).count, 0)
     }
 
     func test_nonWebURLsAreIgnored() {
@@ -155,5 +181,6 @@ final class NewTabPageSiteTilesTests: XCTestCase {
 
     func test_noHistoryYieldsNoTiles() {
         XCTAssertTrue(tiles([]).isEmpty)
+        XCTAssertTrue(frequent([]).isEmpty)
     }
 }

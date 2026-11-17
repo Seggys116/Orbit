@@ -22,7 +22,7 @@ struct ManageSpacesDragPayload: Codable, Transferable, Equatable {
 }
 
 enum ManageSpacesMetrics {
-    static let columnWidth: CGFloat = 236
+    static let columnWidth: CGFloat = 256
     static let columnSpacing: CGFloat = 12
     static let columnCornerRadius: CGFloat = 12
     static let headerPadding: CGFloat = 10

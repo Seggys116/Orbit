@@ -997,6 +997,8 @@ extension OrbitInspectAgent {
           });
         }
 
+        // Which element each inherited rule belongs to, kept out of the posted JSON; every other rule applies to the node itself.
+        var ownerOf = new Map();
         var ancestor = node.parentElement;
         var ancestorLevel = 0;
         while (ancestor && ancestor.nodeType === 1 && ancestorLevel < 5) {
@@ -1021,7 +1023,8 @@ extension OrbitInspectAgent {
               selector: "", sheetIdx: -1, ruleIdx: -1, specificity: [0,0,0,0],
               declarations: [], mediaQuery: null, sheetHref: null,
               ancestorLabel: "Inherited from " + el_nodeLabel(ancestor) });
-            inheritedForAncestor.forEach(function(r) { result.push(r); });
+            var headerOwner = ancestor;
+            inheritedForAncestor.forEach(function(r) { ownerOf.set(r, headerOwner); result.push(r); });
           }
           ancestor = ancestor.parentElement;
           ancestorLevel++;
@@ -1053,10 +1056,18 @@ extension OrbitInspectAgent {
         try {
           var cs = getComputedStyle(node);
           finalResult.forEach(function(rule) {
+            var owner = ownerOf.get(rule) || node;
+            var isPseudo = rule.ruleType === "pseudo" || !!rule.pseudoElement;
             rule.declarations.forEach(function(d) {
               [d].concat(d.longhands || []).forEach(function(entry) {
                 if (entry.value && entry.value.indexOf("var(") >= 0) {
                   try { entry.computedValue = cs.getPropertyValue(entry.property); } catch(e) {}
+                  return;
+                }
+                var hint = el_inheritHint(owner, isPseudo, entry.property, entry.value);
+                if (hint) {
+                  entry.computedValue = hint.value;
+                  entry.inheritedFrom = hint.from;
                 }
               });
             });
@@ -1274,7 +1285,20 @@ extension OrbitInspectAgent {
 
       function el_declaration(property, value, priority) {
         return { property: property, value: value, priority: priority || "",
-                 disabled: false, overridden: false, computedValue: null, longhands: [] };
+                 disabled: false, overridden: false, computedValue: null, inheritedFrom: null, longhands: [] };
+      }
+
+      // What an `inherit` (or an `unset` on an inherited property) takes: the parent's computed value. A pseudo-element's parent is the element it hangs off; the root has no parent, so it takes the initial value.
+      function el_inheritHint(owner, isPseudo, property, value) {
+        var keyword = String(value || "").trim().toLowerCase();
+        var inheritsOnUnset = property.indexOf("--") === 0 || el_isInheritable(property);
+        if (keyword !== "inherit" && !(keyword === "unset" && inheritsOnUnset)) return null;
+        var parent = isPseudo ? owner : (owner.parentElement || (owner.getRootNode && owner.getRootNode().host) || null);
+        try {
+          var inherited = getComputedStyle(parent || owner).getPropertyValue(property);
+          if (!inherited) return null;
+          return { value: inherited, from: parent ? el_nodeLabel(parent) : "initial value" };
+        } catch(e) { return null; }
       }
 
       function el_styleDeclarations(style, filter) {

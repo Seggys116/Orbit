@@ -69,6 +69,14 @@ enum SidebarTearOffDetector {
         timer = nil
     }
 
+    // A session that stops sampling without reaching decide(...) must still clear SidebarDragSession's record, or the page keeps believing a drag is in flight. Not when a drop already consumed it: that path has cleared the record itself.
+    private static func endWithoutDecision() {
+        let wasConsumed = consumed
+        stopSampling()
+        reset()
+        if !wasConsumed { SidebarDragSession.discardStaleRecord() }
+    }
+
     private static func reset() {
         payload = nil
         changeCountAtStart = nil
@@ -80,14 +88,12 @@ enum SidebarTearOffDetector {
 
     private static func tick() {
         guard let startedAt, Date().timeIntervalSince(startedAt) < safetyTimeoutInterval else {
-            stopSampling()
-            reset()
+            endWithoutDecision()
             return
         }
         if let changeCountAtStart {
             guard NSPasteboard(name: .drag).changeCount == changeCountAtStart else {
-                stopSampling()
-                reset()
+                endWithoutDecision()
                 return
             }
         } else {
@@ -102,8 +108,7 @@ enum SidebarTearOffDetector {
         }
 
         guard let payload else {
-            stopSampling()
-            reset()
+            endWithoutDecision()
             return
         }
         let releasePoint = lastKnownPressedLocation ?? NSEvent.mouseLocation

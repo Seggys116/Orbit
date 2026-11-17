@@ -44,6 +44,12 @@ final class LibraryModeTests: XCTestCase {
         }
     }
 
+    func testSpacesOverlayIsWiderThanTheSidebarsOwnMaximum_andFitsAtLeastTwoColumns() {
+        XCTAssertGreaterThan(LibraryModeLayout.spacesWidth, OrbitMetrics.sidebarMaxWidth)
+        let twoColumns = 2 * ManageSpacesMetrics.columnWidth + ManageSpacesMetrics.columnSpacing
+        XCTAssertGreaterThanOrEqual(LibraryModeLayout.spacesWidth - LibraryModeMetrics.contentPadding * 2, twoColumns)
+    }
+
     func testLibraryNeverNarrowsTheSidebarBelowTheUsersWidth() {
         for userWidth in stride(from: OrbitMetrics.sidebarMinWidth, through: OrbitMetrics.sidebarMaxWidth, by: 20) {
             for section in LibrarySection.allCases {

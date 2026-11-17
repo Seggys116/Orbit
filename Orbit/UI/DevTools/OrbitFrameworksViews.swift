@@ -191,7 +191,7 @@ struct FWComponentsTab: View {
             if model.componentsCapped {
                 Text("Capped").font(InspectChrome.caption).foregroundStyle(InspectChrome.warnColor)
                     .lineLimit(1).fixedSize()
-                    .orbitTooltip("The tree was truncated at 2000 nodes to avoid hanging the page.")
+                    .orbitTooltip("The tree was truncated to avoid hanging the page. Filter by name to find a component past the cut.")
             }
         }
         .padding(.horizontal, InspectChrome.panelPadding)
@@ -212,13 +212,13 @@ struct FWComponentsTab: View {
                 InspectEmptyState(
                     symbol: "square.3.layers.3d",
                     title: "No components found",
-                    message: "Detected framework: \(fw). The component tree requires a dev build with source maps, or React DevTools hook exposure."
+                    message: model.treeNote ?? "Detected framework: \(fw). The page has not mounted any component Orbit can read."
                 )
             } else {
                 InspectEmptyState(
                     symbol: "square.3.layers.3d",
                     title: "No component tree available",
-                    message: "No React root was found on this page. Production builds still expose React roots. If React is present but nothing appears, the DevTools hook may be disabled. Other frameworks (Vue, Angular, Svelte) require developer mode."
+                    message: model.treeNote ?? "Press Refresh to scan the page for React, Vue, Preact, Angular, Svelte, Astro islands and custom elements."
                 )
             }
         }

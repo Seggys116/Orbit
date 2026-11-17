@@ -228,14 +228,20 @@ extension OrbitInspectAgent {
           }).observe({ type: "layout-shift", buffered: true });
         } catch (e) {}
 
+        // WebKit accepts observe({ type: "longtask" }) without error and then never reports a task, so support is read
+        // from supportedEntryTypes; otherwise TBT would read a false 0 ms.
         try {
-          new PerformanceObserver(function (list) {
+          var lh_types = (typeof PerformanceObserver !== "undefined" && PerformanceObserver.supportedEntryTypes) || [];
+          if (lh_types.indexOf("longtask") >= 0) {
+            new PerformanceObserver(function (list) {
+              list.getEntries().forEach(function (e) {
+                lh_longTasks.push({ s: e.startTime, d: e.duration });
+              });
+            }).observe({ type: "longtask", buffered: true });
             lh_longTasksOk = true;
-            list.getEntries().forEach(function (e) {
-              lh_longTasks.push({ s: e.startTime, d: e.duration });
-            });
-          }).observe({ type: "longtask", buffered: true });
-          lh_longTasksOk = true;
+          } else {
+            lh_longTasksOk = false;
+          }
         } catch (e) { lh_longTasksOk = false; }
 
         try {
@@ -338,6 +344,185 @@ extension OrbitInspectAgent {
       });
 
 
+      // Main-thread observation. With no Long Tasks API, a Navigation run arms this through sessionStorage before its
+      // reload so the new document starts it at document start, ahead of the page's own scripts.
+      var lh_realSetTimeout = window.setTimeout;
+      var lh_obs = null;
+
+      // The first page script in the call stack, so work is charged to the file that scheduled it. Agent frames have no URL.
+      function lh_callerURL() {
+        try {
+          var lines = String(new Error().stack || "").split("\n");
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            var at = line.lastIndexOf("@");
+            var loc = (at >= 0 ? line.slice(at + 1) : line).trim().replace(/^\(|\)$/g, "").replace(/:\d+:\d+$/, "");
+            if (/^(https?|file):/.test(loc)) return loc.slice(0, 300);
+          }
+        } catch (e) {}
+        return null;
+      }
+
+      function lh_record(o, category, src, t0, t1) {
+        var key = category + "|" + src;
+        var total = o.totals[key] || (o.totals[key] = { c: category, u: src, n: 0, t: 0 });
+        total.n++; total.t += t1 - t0;
+        if (t1 - t0 >= 5 && o.spans.length < 3000) o.spans.push({ c: category, u: src, s: t0, e: t1 });
+      }
+
+      function lh_wrapObserved(o) {
+        function timed(category, fn, src) {
+          return function () {
+            if (!o.on) return fn.apply(this, arguments);
+            var t0 = performance.now();
+            try { return fn.apply(this, arguments); } finally { lh_record(o, category, src, t0, performance.now()); }
+          };
+        }
+        function wrapScheduler(name, category) {
+          var real = window[name];
+          if (typeof real !== "function") return;
+          var wrap = function (fn) {
+            if (!o.on || typeof fn !== "function") return real.apply(window, arguments);
+            var src = lh_callerURL();
+            if (!src) return real.apply(window, arguments);
+            var args = Array.prototype.slice.call(arguments);
+            args[0] = timed(category, fn, src);
+            return real.apply(window, args);
+          };
+          window[name] = wrap;
+          // Put back only if nothing replaced it since; a reference the page kept still works, as it passes calls through once off.
+          o.restore.push(function () { if (window[name] === wrap) window[name] = real; });
+        }
+        wrapScheduler("setTimeout", "Timer callbacks");
+        wrapScheduler("setInterval", "Timer callbacks");
+        wrapScheduler("requestAnimationFrame", "Animation frame callbacks");
+
+        // A layout read is microseconds on a clean layout; one that takes a millisecond or more had to lay the page out first.
+        function wrapRead(proto, name, isMethod) {
+          try {
+            var desc = Object.getOwnPropertyDescriptor(proto, name);
+            if (!desc) return;
+            var real = isMethod ? desc.value : desc.get;
+            if (typeof real !== "function") return;
+            var measured = function () {
+              if (!o.on) return real.apply(this, arguments);
+              var t0 = performance.now();
+              var result = real.apply(this, arguments);
+              var dt = performance.now() - t0;
+              if (dt >= 1) {
+                var src = lh_callerURL();
+                if (src) { var r = o.layouts[src] || (o.layouts[src] = { u: src, n: 0, t: 0 }); r.n++; r.t += dt; }
+              }
+              return result;
+            };
+            var next = {};
+            for (var k in desc) { next[k] = desc[k]; }
+            if (isMethod) { next.value = measured; } else { next.get = measured; }
+            Object.defineProperty(proto, name, next);
+            o.restore.push(function () {
+              var now = Object.getOwnPropertyDescriptor(proto, name);
+              if (now && (isMethod ? now.value : now.get) === measured) Object.defineProperty(proto, name, desc);
+            });
+          } catch (e) {}
+        }
+        wrapRead(Element.prototype, "getBoundingClientRect", true);
+        ["offsetWidth", "offsetHeight", "offsetTop", "offsetLeft"].forEach(function (n) { wrapRead(HTMLElement.prototype, n, false); });
+        ["clientWidth", "clientHeight", "scrollWidth", "scrollHeight"].forEach(function (n) { wrapRead(Element.prototype, n, false); });
+      }
+
+      function lh_startObservation(budgetMs) {
+        if (lh_obs || window !== window.top) return;
+        var start = performance.now();
+        var o = lh_obs = { period: 10, from: start, last: start, until: start + budgetMs, on: true,
+                           blocks: [], spans: [], totals: {}, layouts: {}, scripts: [], restore: [] };
+        function tick() {
+          if (!o.on) return;
+          var now = performance.now();
+          var due = o.last + o.period;
+          // The tick was due at `due` and ran at `now`, so the thread was busy at least that long: a lower bound within one period.
+          if (now - due > 50 && o.blocks.length < 2000) o.blocks.push({ s: due, e: now });
+          o.last = now;
+          if (now > o.until) { lh_stopObservation(); return; }
+          lh_realSetTimeout.call(window, tick, o.period);
+        }
+        lh_realSetTimeout.call(window, tick, o.period);
+        lh_wrapObserved(o);
+        // A classic script fires load straight after it has run, so download end to load is its evaluation window.
+        document.addEventListener("load", function (ev) {
+          var el = ev.target;
+          if (!o.on || !el || el.tagName !== "SCRIPT" || !el.src) return;
+          try {
+            var entries = performance.getEntriesByName(el.src, "resource");
+            if (entries.length && o.scripts.length < 300) {
+              o.scripts.push({ u: String(el.src).slice(0, 300), re: entries[entries.length - 1].responseEnd, ld: performance.now() });
+            }
+          } catch (e) {}
+        }, true);
+      }
+
+      function lh_stopObservation() {
+        var o = lh_obs;
+        if (!o || !o.on) return;
+        o.on = false;
+        o.to = performance.now();
+        o.restore.forEach(function (f) { try { f(); } catch (e) {} });
+        o.restore = [];
+      }
+
+      function lh_resourceSpans() {
+        var out = [];
+        try {
+          (performance.getEntriesByType("resource") || []).slice(0, 500).forEach(function (r) {
+            out.push({ s: r.startTime, e: r.responseEnd > 0 ? r.responseEnd : null, u: String(r.name).slice(0, 300) });
+          });
+        } catch (e) {}
+        return out;
+      }
+
+      function lh_observationPayload(sinceMs) {
+        var o = lh_obs;
+        if (!o) return { ok: false };
+        var since = sinceMs || 0;
+        var spans = o.spans.filter(function (x) { return x.e > since; });
+        var handlers = [];
+        try {
+          var nav = (performance.getEntriesByType("navigation") || [])[0];
+          if (nav && since === 0) {
+            if (nav.domContentLoadedEventEnd - nav.domContentLoadedEventStart > 0.5) {
+              handlers.push({ c: "DOMContentLoaded handlers", u: null, s: nav.domContentLoadedEventStart, e: nav.domContentLoadedEventEnd });
+            }
+            if (nav.loadEventEnd - nav.loadEventStart > 0.5) {
+              handlers.push({ c: "load handlers", u: null, s: nav.loadEventStart, e: nav.loadEventEnd });
+            }
+          }
+        } catch (e) {}
+        return {
+          ok: true, period: o.period, from: Math.max(o.from, since), to: o.on ? performance.now() : o.to,
+          blocks: o.blocks.filter(function (b) { return b.s >= since; }),
+          spans: spans.concat(handlers),
+          totals: Object.keys(o.totals).map(function (k) { return o.totals[k]; }),
+          layouts: Object.keys(o.layouts).map(function (k) { return o.layouts[k]; }),
+          scripts: o.scripts,
+          res: lh_resourceSpans(),
+          fcp: finite(lh_fcpMs)
+        };
+      }
+
+      try {
+        if (window === window.top && sessionStorage.getItem("__orbitLHArm") === "1") {
+          sessionStorage.removeItem("__orbitLHArm");
+          lh_startObservation(60000);
+        }
+      } catch (e) {}
+
+      ops["lh.arm"] = function () {
+        try { sessionStorage.setItem("__orbitLHArm", "1"); } catch (e) {}
+      };
+
+      ops["lh.probe"] = function () {
+        post({ t: "lh.probe", obs: lh_observationPayload(0) });
+      };
+
       ops["lh.reset"] = function () {
         lh_fcpMs = null; lh_lcpMs = null; lh_lcpElement = null; lh_lcpSelector = "";
         lh_lcpURL = ""; lh_lcpTag = ""; lh_lcpSnippet = ""; lh_lcpLoadMs = null; lh_lcpRenderMs = null;
@@ -350,6 +535,8 @@ extension OrbitInspectAgent {
 
       ops["lh.timespanStart"] = function () {
         lh_timespanStartMs = (typeof performance !== "undefined") ? performance.now() : null;
+        if (lh_obs && !lh_obs.on) { lh_obs = null; }
+        lh_startObservation(600000);
         lh_clsAtTimespanStart = lh_clsScore;
         lh_longTasksAtTimespanStart = lh_longTasks.length;
       };
@@ -357,6 +544,19 @@ extension OrbitInspectAgent {
       ops["lh.collect"] = function (msg) {
         try {
           var isTimespan = msg && msg.timespan;
+          // Stopped first, so the audit's own DOM reads below are neither slowed nor counted.
+          lh_stopObservation();
+          var observation = lh_observationPayload(isTimespan ? (lh_timespanStartMs || 0) : 0);
+
+          // The Frameworks tool's own scan, captured as it posts, so library versions come from one detector.
+          var fwEvidence = null;
+          try {
+            if (typeof fw_scanEvidence === "function") {
+              var realPost = post;
+              post = function (m) { if (m && m.t === "fw.evidence") { fwEvidence = m; } return realPost(m); };
+              try { fw_scanEvidence(); } finally { post = realPost; }
+            }
+          } catch (e) {}
 
           var navEntry = null;
           try {
@@ -949,8 +1149,47 @@ extension OrbitInspectAgent {
             }
           } catch (e) {}
 
+          // Content wider than the viewport: the outermost elements past the right edge that no ancestor clips,
+          // since those are what makes the page scroll sideways.
+          var docW = null;
+          var overflow = [];
+          try {
+            var vw = window.innerWidth;
+            docW = finite(Math.max(doc ? doc.scrollWidth : 0, document.body ? document.body.scrollWidth : 0));
+            if (docW !== null && vw > 0 && docW > vw + 1) {
+              var clips = function (el) {
+                var ox = getComputedStyle(el).overflowX;
+                return ox === "hidden" || ox === "auto" || ox === "scroll" || ox === "clip";
+              };
+              var all = document.body ? document.body.getElementsByTagName("*") : [];
+              var limit = Math.min(all.length, 5000);
+              for (var oi = 0; oi < limit && overflow.length < 15; oi++) {
+                var oel = all[oi];
+                if (isOurs(oel)) { continue; }
+                var orect = oel.getBoundingClientRect();
+                if (orect.width === 0 || orect.right + window.scrollX <= vw + 1) { continue; }
+                var parent = oel.parentElement, clipped = false, parentOut = false;
+                if (parent && parent !== document.body && parent !== doc &&
+                    parent.getBoundingClientRect().right + window.scrollX > vw + 1) { parentOut = true; }
+                for (var anc = parent; anc && anc !== document.body && anc !== doc; anc = anc.parentElement) {
+                  if (clips(anc)) { clipped = true; break; }
+                }
+                if (clipped || parentOut) { continue; }
+                // A fixed element does not widen the scrollable page, so it is not why the page scrolls sideways.
+                if (getComputedStyle(oel).position === "fixed") { continue; }
+                overflow.push({ sel: lh_cssSelector(oel), id: idOf(oel), right: finite(orect.right + window.scrollX) || 0, snip: lh_snippet(oel) });
+              }
+            }
+          } catch (e) {}
+
           var bundle = {
             lcpInfo: lcpInfo,
+            obs: observation,
+            fw: fwEvidence,
+            docW: docW,
+            overflow: overflow,
+            touchPts: (typeof navigator.maxTouchPoints === "number") ? navigator.maxTouchPoints : 0,
+            uaMobile: /Mobile|iPhone|iPod|Android/.test(navigator.userAgent || ""),
             ttfbParts: ttfbParts,
             vp: { w: finite(window.innerWidth) || 0, h: finite(window.innerHeight) || 0,
                   sx: finite(window.scrollX) || 0, sy: finite(window.scrollY) || 0 },

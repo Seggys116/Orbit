@@ -306,7 +306,7 @@ enum CommandBarEngine {
 
         let typedURL = Self.detectTypedURL(trimmed)
         if let url = typedURL {
-            items.append(CommandResult(id: "typed-url", kind: .typedURL(url), title: url.absoluteString, subtitle: "Go to this address", symbolName: "arrow.right", score: PriorityScore.typedURL, faviconURL: nil, faviconHost: nil))
+            items.append(CommandResult(id: "typed-url", kind: .typedURL(url), title: url.absoluteString, subtitle: "Go to this address", symbolName: "arrow.right", score: PriorityScore.typedURL, faviconURL: faviconGuessURL(for: url), faviconHost: url.host()))
         } else {
             let instantURL = isInstantLinksEnabled ? InstantLinkResolver.instantURL(for: trimmed, engine: searchEngine) : nil
             items.append(CommandResult(id: "search-\(trimmed)", kind: .searchSuggestion(trimmed), title: trimmed, subtitle: "Search \(searchEngine.displayName)", symbolName: "magnifyingglass", score: PriorityScore.literalSearchFallback, faviconURL: nil, faviconHost: nil, instantOpenURL: instantURL))
@@ -418,7 +418,54 @@ enum CommandBarEngine {
             items.append(CommandResult(id: "suggest-\(suggestion)", kind: .searchSuggestion(suggestion), title: suggestion, subtitle: "Search \(searchEngine.displayName)", symbolName: "magnifyingglass", score: PriorityScore.networkSuggestion))
         }
 
-        return pinningVerbatimRows(in: items.sorted { $0.score > $1.score }, query: trimmed, atTop: mode.editsCurrentPage)
+        return pinningVerbatimRows(in: limitingRepeatedPages(in: items.sorted { $0.score > $1.score }), query: trimmed, atTop: mode.editsCurrentPage)
+    }
+
+    // MARK: One site, not a flood
+
+    // At most this many open-tab rows from one host. History is already held to historyRowBudget, but open tabs have no budget, so a site with dozens of tabs open would fill the list with itself and push the site's own address, the thing being typed towards, out of view.
+    private static let openTabRowsPerHostLimit = 4
+
+    // Best-first input. Keeps the first row for each (host, title): seventeen pages all called "Settings" on one site are one useful answer, not seventeen. Then caps each host's open-tab rows at openTabRowsPerHostLimit. Site-root rows are never dropped, and rows that are not pages (the typed address, searches, actions) are untouched.
+    static func limitingRepeatedPages(in results: [CommandResult]) -> [CommandResult] {
+        var seenTitles = Set<String>()
+        var tabRowsPerHost: [String: Int] = [:]
+        return results.filter { result in
+            guard let page = pageIdentity(of: result) else { return true }
+            if isSiteRootRow(result) { return true }
+            guard seenTitles.insert(page.host + "\u{1}" + page.title).inserted else { return false }
+            guard isOpenTabRow(result) else { return true }
+            let count = tabRowsPerHost[page.host, default: 0]
+            guard count < openTabRowsPerHostLimit else { return false }
+            tabRowsPerHost[page.host] = count + 1
+            return true
+        }
+    }
+
+    private static func isOpenTabRow(_ result: CommandResult) -> Bool {
+        switch result.kind {
+        case .openTab, .pinnedTab, .tabInOtherSpace: return true
+        default: return false
+        }
+    }
+
+    // A history row whose address is already its site's root, whether synthesised by siteRootRows or promoted from a real visit.
+    private static func isSiteRootRow(_ result: CommandResult) -> Bool {
+        guard case .history(let entry) = result.kind, let root = siteRootURL(for: entry.url) else { return false }
+        return dedupeKey(for: root) == dedupeKey(for: entry.url)
+    }
+
+    private static func pageIdentity(of result: CommandResult) -> (host: String, title: String)? {
+        let host: String?
+        switch result.kind {
+        case .history(let entry): host = entry.url.host()
+        case .favorite(let favorite): host = favorite.url.host()
+        // A tab row carries its host as the faviconHost it was built with.
+        case .openTab, .pinnedTab, .tabInOtherSpace: host = result.faviconHost
+        default: return nil
+        }
+        guard let host else { return nil }
+        return (host.lowercased(), result.title.lowercased())
     }
 
     // MARK: Site roots
@@ -559,6 +606,7 @@ enum CommandBarEngine {
         var components = URLComponents()
         components.scheme = scheme
         components.host = host
+        components.port = url.port
         components.path = "/favicon.ico"
         return components.url
     }

@@ -25,6 +25,7 @@ final class OrbitInspectDeviceModel {
     @ObservationIgnored private var loadObservation: NSKeyValueObservation?
     @ObservationIgnored private var resizeStart: OrbitDeviceSettings?
     @ObservationIgnored private var resizeScale: CGFloat = 1
+    @ObservationIgnored private var borrowed: (settings: OrbitDeviceSettings, wasActive: Bool)?
 
     init(
         preferences: OrbitDevicePreferences = OrbitDevicePreferences(defaults: OrbitDefaults.standard),
@@ -101,6 +102,25 @@ final class OrbitInspectDeviceModel {
 
     func reloadNow() {
         webViewProvider()?.reload()
+    }
+
+
+    /// Whether another tool (Lighthouse) is emulating through the toolbar right now.
+    var isBorrowed: Bool { borrowed != nil }
+
+    /// Lends the toolbar's emulation to another tool for a while. Nothing is saved, and `endBorrow()` puts back the
+    /// user's own selection and whether the toolbar was on, so a run never changes what the user chose.
+    func borrow(_ settings: OrbitDeviceSettings) {
+        if borrowed == nil { borrowed = (settings: self.settings, wasActive: isActive) }
+        self.settings = settings
+        if isActive { apply() } else { activate() }
+    }
+
+    func endBorrow() {
+        guard let lent = borrowed else { return }
+        borrowed = nil
+        settings = lent.settings
+        if lent.wasActive { apply() } else { deactivate() }
     }
 
 
@@ -193,6 +213,12 @@ final class OrbitInspectDeviceModel {
 
 
     private func change(_ next: OrbitDeviceSettings, persist: Bool = true) {
+        // While lent, the borrower owns the viewport; the user's change is kept and takes effect when it is returned.
+        if borrowed != nil {
+            borrowed?.settings = next
+            if persist { preferences.saveSelection(next) }
+            return
+        }
         settings = next
         if persist { preferences.saveSelection(next) }
         apply()

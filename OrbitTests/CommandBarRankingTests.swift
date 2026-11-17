@@ -772,4 +772,63 @@ final class CommandBarRankingTests: XCTestCase {
             "KnownTLDs holds only \(KnownTLDs.count) entries — it has been gutted, and most typed domains will fall through to search."
         )
     }
+
+    // MARK: - One site, not a flood
+
+    private func historyRow(_ urlString: String, title: String, score: Double) -> CommandResult {
+        let url = URL(string: urlString)!
+        let entry = HistoryEntry(url: url, title: title, profileID: UUID())
+        return CommandResult(
+            id: "hist-\(entry.id)", kind: .history(entry), title: title, subtitle: nil,
+            symbolName: "clock", score: score, faviconURL: nil, faviconHost: url.host()
+        )
+    }
+
+    func test_limitingRepeatedPages_keepsOneRowPerHostAndTitle() {
+        let rows = (0..<17).map { historyRow("https://example.com/account/\($0)/settings", title: "Settings", score: Double(100 - $0)) }
+
+        let limited = CommandBarEngine.limitingRepeatedPages(in: rows)
+
+        XCTAssertEqual(limited.count, 1, "Seventeen pages all titled \"Settings\" on one site are one answer, not seventeen rows.")
+        XCTAssertEqual(limited.first?.score, 100, "The best-ranked of them is the one kept.")
+    }
+
+    private func tabRow(_ host: String, title: String, score: Double) -> CommandResult {
+        CommandResult(
+            id: "tab-\(UUID())", kind: .openTab(UUID()), title: title, subtitle: host,
+            symbolName: "square.on.square", score: score, faviconURL: nil, faviconHost: host
+        )
+    }
+
+    func test_limitingRepeatedPages_capsOpenTabRowsOfOneHost() {
+        let rows = (0..<10).map { tabRow("example.com", title: "Page \($0)", score: Double(50 - $0)) }
+
+        let limited = CommandBarEngine.limitingRepeatedPages(in: rows)
+
+        XCTAssertEqual(limited.map(\.title), ["Page 0", "Page 1", "Page 2", "Page 3"], "The cap keeps the best-ranked tab rows and their order.")
+    }
+
+    func test_limitingRepeatedPages_leavesDistinctHistoryRowsToTheirOwnBudget() {
+        let rows = (0..<10).map { historyRow("https://example.com/page/\($0)", title: "Page \($0)", score: Double(50 - $0)) }
+
+        XCTAssertEqual(CommandBarEngine.limitingRepeatedPages(in: rows).count, 10)
+    }
+
+    func test_limitingRepeatedPages_doesNotLimitAcrossHosts() {
+        let rows = (0..<6).map { historyRow("https://site\($0).example.com/settings", title: "Settings", score: Double(10 - $0)) }
+
+        XCTAssertEqual(CommandBarEngine.limitingRepeatedPages(in: rows).count, 6, "Same title on different sites is not a repeat.")
+    }
+
+    func test_limitingRepeatedPages_neverDropsASiteRootOrANonPageRow() {
+        var rows = (0..<6).map { tabRow("example.com", title: "Page \($0)", score: Double(90 - $0)) }
+        let root = historyRow("https://example.com", title: "example.com", score: 1)
+        let search = CommandResult(id: "search-x", kind: .searchSuggestion("x"), title: "x", subtitle: nil, symbolName: "magnifyingglass", score: 0, faviconURL: nil, faviconHost: nil)
+        rows.append(contentsOf: [root, search])
+
+        let limited = CommandBarEngine.limitingRepeatedPages(in: rows)
+
+        XCTAssertTrue(limited.contains { $0.id == root.id }, "The site's own address survives even behind a full set of its open tabs.")
+        XCTAssertTrue(limited.contains { $0.id == search.id })
+    }
 }

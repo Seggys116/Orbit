@@ -12,7 +12,9 @@ private func evidence(
     linkURLs: [String] = [],
     metaGenerators: [String] = [],
     responseHeaders: [String: String] = [:],
-    hostname: String = "localhost"
+    hostname: String = "localhost",
+    classTokens: Set<String> = [],
+    cssVariablePrefixes: Set<String> = []
 ) -> FWEvidenceBundle {
     FWEvidenceBundle(
         globals: globals,
@@ -22,7 +24,9 @@ private func evidence(
         linkURLs: linkURLs,
         metaGenerators: metaGenerators,
         responseHeaders: responseHeaders,
-        hostname: hostname
+        hostname: hostname,
+        classTokens: classTokens,
+        cssVariablePrefixes: cssVariablePrefixes
     )
 }
 
@@ -1572,5 +1576,174 @@ class FWDevDetectionTests: XCTestCase {
     func testAstroDevToolbarGlobal() {
         let d = OrbitFrameworksLogic.detect(evidence: evidence(globals: ["__astro_dev_toolbar__"], globalVersions: ["__astro_dev_toolbar__.version": "5.1.0"]))
         XCTAssertEqual(d.first { $0.name == "Astro" }?.version, "5.1.0")
+    }
+}
+
+
+// MARK: - Production builds, styling, libraries and infrastructure
+
+class FWStackDetectionTests: XCTestCase {
+
+    private func detect(_ e: FWEvidenceBundle) -> [FWDetected] { OrbitFrameworksLogic.detect(evidence: e) }
+    private func find(_ name: String, in list: [FWDetected]) -> FWDetected? { list.first { $0.name == name } }
+
+    private let tailwindPage: Set<String> = [
+        "flex", "items-center", "justify-between", "px-4", "py-2", "text-sm", "text-gray-700", "bg-white", "rounded-lg", "shadow-md",
+        "md:flex", "hover:bg-gray-100", "dark:bg-gray-900", "w-1/2", "mt-4", "gap-2", "font-semibold", "lg:grid-cols-3",
+    ]
+
+    // MARK: Tailwind
+
+    func testTailwindIsRecognisedFromItsUtilityClasses() {
+        let tailwind = find("Tailwind CSS", in: detect(evidence(classTokens: tailwindPage)))
+        XCTAssertNotNil(tailwind)
+        XCTAssertEqual(tailwind?.confidence, .likely)
+        XCTAssertEqual(tailwind?.category, .styling)
+        XCTAssertTrue(tailwind?.evidence.contains(where: { $0.contains("utility classes") }) == true)
+    }
+
+    func testTailwindIsCertainFromItsCustomProperties() {
+        let tailwind = find("Tailwind CSS", in: detect(evidence(cssVariablePrefixes: ["tw"])))
+        XCTAssertEqual(tailwind?.confidence, .certain)
+    }
+
+    func testTailwindIsCertainFromTheCDNScriptAndReadsItsVersion() {
+        let tailwind = find("Tailwind CSS", in: detect(evidence(scriptURLs: ["https://cdn.tailwindcss.com/3.4.1"])))
+        XCTAssertEqual(tailwind?.confidence, .certain)
+        XCTAssertEqual(tailwind?.version, "3.4.1")
+    }
+
+    func testBareWordsAloneAreNotTailwind() {
+        let page: Set<String> = ["flex", "hidden", "block", "container", "grid", "fixed", "static", "inline", "shadow", "border"]
+        XCTAssertNil(find("Tailwind CSS", in: detect(evidence(classTokens: page))))
+    }
+
+    func testBootstrapClassesAreNotMistakenForTailwind() {
+        let page: Set<String> = ["container", "row", "col-md-6", "btn", "btn-primary", "navbar", "card-body", "form-control", "mb-3", "mt-4", "p-3", "d-flex"]
+        let result = detect(evidence(classTokens: page))
+        XCTAssertNil(find("Tailwind CSS", in: result), "Bootstrap's spacing helpers (mb-3, p-3) are not enough to call it Tailwind.")
+        XCTAssertNotNil(find("Bootstrap", in: result))
+    }
+
+    func testTailwindVariantsAreCountedAsStrongEvidence() {
+        let page: Set<String> = ["md:flex", "lg:px-8", "hover:bg-blue-500", "dark:text-white", "sm:grid-cols-2", "focus:ring-2"]
+        XCTAssertNotNil(find("Tailwind CSS", in: detect(evidence(classTokens: page))))
+    }
+
+    func testTailwindEvidenceNamesExampleClasses() {
+        let (strong, total) = OrbitFrameworksLogic.tailwindEvidence(classTokens: tailwindPage)
+        XCTAssertGreaterThanOrEqual(strong.count, 10)
+        XCTAssertGreaterThanOrEqual(total, strong.count)
+        XCTAssertTrue(strong.contains("md:flex"))
+    }
+
+    // MARK: UI kits and CSS-in-JS
+
+    func testShadcnNeedsTailwindAndItsThemeVariables() {
+        let vars: Set<String> = ["tw", "background", "foreground", "primary", "radius", "muted", "accent", "border", "ring"]
+        let result = detect(evidence(domMarkers: ["data-radix"], classTokens: tailwindPage, cssVariablePrefixes: vars))
+        XCTAssertEqual(find("shadcn/ui", in: result)?.confidence, .likely)
+        XCTAssertNotNil(find("Radix UI", in: result))
+        XCTAssertNil(find("shadcn/ui", in: detect(evidence(classTokens: tailwindPage, cssVariablePrefixes: ["tw"]))))
+    }
+
+    func testMaterialUIFromItsClassPrefix() {
+        let result = detect(evidence(classTokens: ["MuiButton-root", "MuiTypography-body1", "MuiPaper-root", "css-1abc23"]))
+        XCTAssertNotNil(find("Material UI", in: result))
+    }
+
+    func testStyledComponentsAndEmotion() {
+        XCTAssertNotNil(find("styled-components", in: detect(evidence(domMarkers: ["data-styled"]))))
+        XCTAssertNotNil(find("Emotion", in: detect(evidence(domMarkers: ["data-emotion"]))))
+        XCTAssertNotNil(find("styled-components", in: detect(evidence(classTokens: ["sc-aBcDeF", "sc-gHiJkL", "sc-mNoPqR"]))))
+    }
+
+    func testCSSModulesFromHashedLocalNames() {
+        let page: Set<String> = ["Button_root__x1y2z", "Card_title__a9b8c", "Nav_link__q7w6e", "Hero_wrap__z3x2c", "Footer_col__v5b4n"]
+        XCTAssertNotNil(find("CSS Modules", in: detect(evidence(classTokens: page))))
+    }
+
+    func testIconAndFontKits() {
+        let result = detect(evidence(linkURLs: ["https://fonts.googleapis.com/css2?family=Inter"], classTokens: ["fa-solid", "fa-user"]))
+        XCTAssertNotNil(find("Google Fonts", in: result))
+        XCTAssertNotNil(find("Font Awesome", in: result))
+    }
+
+    // MARK: Frameworks in production builds
+
+    func testReactIsFoundInAProductionBuildWithNoGlobals() {
+        let react = find("React", in: detect(evidence(domMarkers: ["react-fiber", "react-container"])))
+        XCTAssertEqual(react?.confidence, .certain)
+        XCTAssertEqual(react?.category, .framework)
+    }
+
+    func testVueIsFoundFromItsRootContainer() {
+        XCTAssertEqual(find("Vue", in: detect(evidence(domMarkers: ["vue3-root"])))?.confidence, .certain)
+        XCTAssertEqual(find("Vue", in: detect(evidence(domMarkers: ["vue2-root"])))?.confidence, .certain)
+        XCTAssertEqual(find("Vue", in: detect(evidence(globalVersions: ["Vue.version": "3.5.1"], domMarkers: ["data-v-app"])))?.version, "3.5.1")
+    }
+
+    func testSvelteIsFoundFromItsScopedClasses() {
+        let result = detect(evidence(classTokens: ["svelte-1abc2de", "svelte-9xyz8ab", "svelte-3qwe4rt", "svelte-7mnb6vc"]))
+        XCTAssertEqual(find("Svelte", in: result)?.confidence, .certain)
+    }
+
+    func testPreactAndSolidAndAngularFromTheirMarkers() {
+        XCTAssertNotNil(find("Preact", in: detect(evidence(domMarkers: ["preact-root"]))))
+        XCTAssertNotNil(find("Solid", in: detect(evidence(domMarkers: ["data-hk"]))))
+        XCTAssertNotNil(find("Angular", in: detect(evidence(domMarkers: ["ngcontent"]))))
+        XCTAssertEqual(find("AngularJS", in: detect(evidence(globals: ["angular"], globalVersions: ["angular.version.full": "1.8.3"])))?.version, "1.8.3")
+    }
+
+    // MARK: Libraries, analytics, generators, infrastructure
+
+    func testLibrariesReportTheirVersions() {
+        let result = detect(evidence(globals: ["_", "moment", "d3", "THREE"], globalVersions: ["_.VERSION": "4.17.21", "moment.version": "2.30.1", "d3.version": "7.9.0", "THREE.REVISION": "160"]))
+        XCTAssertEqual(find("Lodash / Underscore", in: result)?.version, "4.17.21")
+        XCTAssertEqual(find("Moment.js", in: result)?.version, "2.30.1")
+        XCTAssertEqual(find("D3", in: result)?.version, "7.9.0")
+        XCTAssertEqual(find("Three.js", in: result)?.version, "160")
+    }
+
+    func testAShortGlobalAloneIsNotALibrary() {
+        let result = detect(evidence(globals: ["L", "ko", "io"]))
+        XCTAssertNil(find("Leaflet", in: result))
+        XCTAssertNil(find("Knockout", in: result))
+        XCTAssertNil(find("Socket.IO", in: result))
+    }
+
+    func testAnalyticsFromGlobalsAndScripts() {
+        let result = detect(evidence(globals: ["gtag", "dataLayer", "Sentry"], scriptURLs: ["https://www.googletagmanager.com/gtag/js?id=G-1", "https://js.sentry-cdn.com/x.min.js"]))
+        XCTAssertEqual(find("Google Analytics", in: result)?.confidence, .certain)
+        XCTAssertEqual(find("Sentry", in: result)?.category, .analytics)
+        XCTAssertNil(find("Segment", in: detect(evidence(globals: ["analytics"]))), "A global named analytics is not Segment without its script.")
+    }
+
+    func testGeneratorMetaTagsNameTheSiteBuilderAndVersion() {
+        let result = detect(evidence(metaGenerators: ["Astro v4.5.0", "Hugo 0.121.2", "Webflow"]))
+        XCTAssertEqual(find("Astro", in: result)?.version, "4.5.0")
+        XCTAssertNotNil(find("Hugo", in: result))
+        XCTAssertEqual(find("Webflow", in: result)?.category, .cms)
+    }
+
+    func testServerAndHostingFromResponseHeaders() {
+        let result = detect(evidence(responseHeaders: ["server": "nginx/1.25.3", "via": "1.1 abc.cloudfront.net (CloudFront)", "x-github-request-id": "ABCD"]))
+        XCTAssertEqual(find("nginx", in: result)?.version, "1.25.3")
+        XCTAssertEqual(find("nginx", in: result)?.category, .server)
+        XCTAssertNotNil(find("Amazon CloudFront", in: result))
+        XCTAssertNotNil(find("GitHub Pages", in: result))
+    }
+
+    func testCategoriesSortFrameworksBeforeStylingBeforeHosting() {
+        XCTAssertLessThan(FWCategory.framework.sortOrder, FWCategory.styling.sortOrder)
+        XCTAssertLessThan(FWCategory.styling.sortOrder, FWCategory.analytics.sortOrder)
+        XCTAssertLessThan(FWCategory.analytics.sortOrder, FWCategory.hosting.sortOrder)
+        XCTAssertEqual(Set(FWCategory.allCases.map(\.sortOrder)).count, FWCategory.allCases.count, "Every category needs its own place in the list.")
+    }
+
+    func testFirstVersionInAURL() {
+        XCTAssertEqual(OrbitFrameworksLogic.firstVersion(in: "https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css"), "3.4.1")
+        XCTAssertEqual(OrbitFrameworksLogic.firstVersion(in: "https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css"), "5.3.2")
+        XCTAssertNil(OrbitFrameworksLogic.firstVersion(in: "https://example.com/app.js"))
     }
 }

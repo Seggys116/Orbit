@@ -12,6 +12,10 @@ struct FWEvidenceBundle: Equatable, Sendable {
     var responseHeaders: [String: String] = [:]
     var hostname: String = ""
     var pageURL: String = ""
+    /// Distinct class names seen on the page's elements (a sample, not every one).
+    var classTokens: Set<String> = []
+    /// First segment of every CSS custom property the page's stylesheets define: "tw" for --tw-ring-offset-width.
+    var cssVariablePrefixes: Set<String> = []
 }
 
 
@@ -19,8 +23,11 @@ enum FWCategory: String, Equatable, CaseIterable, Sendable {
     case framework = "Framework"
     case metaFramework = "Meta-framework"
     case buildTool = "Build & Dev"
+    case styling = "Styling & UI"
     case hosting = "Hosting & CDN"
+    case server = "Server"
     case library = "Library"
+    case analytics = "Analytics & Monitoring"
     case cms = "CMS"
 
     var sortOrder: Int {
@@ -28,9 +35,12 @@ enum FWCategory: String, Equatable, CaseIterable, Sendable {
         case .framework: return 0
         case .metaFramework: return 1
         case .buildTool: return 2
-        case .library: return 3
-        case .cms: return 4
-        case .hosting: return 5
+        case .styling: return 3
+        case .library: return 4
+        case .analytics: return 5
+        case .cms: return 6
+        case .server: return 7
+        case .hosting: return 8
         }
     }
 }
@@ -458,6 +468,13 @@ enum OrbitFrameworksLogic {
             }
         }
 
+        results.append(contentsOf: detectRenderingMarkers(evidence: e))
+        results.append(contentsOf: detectStyling(evidence: e))
+        results.append(contentsOf: detectLibraries(evidence: e))
+        results.append(contentsOf: detectAnalytics(evidence: e))
+        results.append(contentsOf: detectGenerators(evidence: e))
+        results.append(contentsOf: detectInfrastructure(evidence: e))
+
         var deduped: [String: FWDetected] = [:]
         for d in results {
             if let existing = deduped[d.name] {
@@ -472,6 +489,526 @@ enum OrbitFrameworksLogic {
             if a.confidence != b.confidence { return a.confidence > b.confidence }
             return a.name < b.name
         }
+    }
+
+    // MARK: - Rendering markers (frameworks that leave no global behind in a production build)
+
+    static func detectRenderingMarkers(evidence e: FWEvidenceBundle) -> [FWDetected] {
+        var out: [FWDetected] = []
+        let m = e.domMarkers
+
+        // React 17+ keeps its fibre on every DOM node it renders, in development and production alike.
+        if m.contains("react-fiber") || m.contains("react-container") {
+            var ev: [String] = []
+            if m.contains("react-fiber") { ev.append("DOM nodes carry a React fibre (__reactFiber$)") }
+            if m.contains("react-container") { ev.append("root container carries __reactContainer$") }
+            out.append(FWDetected(name: "React", version: e.globalVersions["React.version"], category: .framework, confidence: .certain, evidence: ev))
+        }
+
+        if m.contains("vue3-root") || m.contains("data-v-app") {
+            var ev: [String] = []
+            if m.contains("vue3-root") { ev.append("root container carries a Vue 3 vnode") }
+            if m.contains("data-v-app") { ev.append("DOM attr data-v-app") }
+            out.append(FWDetected(name: "Vue", version: e.globalVersions["Vue.version"], category: .framework, confidence: .certain, evidence: ev))
+        } else if m.contains("vue2-root") {
+            out.append(FWDetected(name: "Vue", version: e.globalVersions["Vue.version"], category: .framework, confidence: .certain, evidence: ["DOM node carries a Vue 2 instance (__vue__)"]))
+        } else if m.contains("data-server-rendered") {
+            out.append(FWDetected(name: "Vue", category: .framework, confidence: .likely, evidence: ["DOM attr data-server-rendered (Vue 2 SSR)"]))
+        }
+
+        if m.contains("preact-root") {
+            out.append(FWDetected(name: "Preact", category: .framework, confidence: .certain, evidence: ["root container carries a Preact vnode tree"]))
+        }
+
+        let svelteScoped = e.classTokens.filter { matches($0, #"^svelte-[a-z0-9]{4,10}$"#) }
+        if m.contains("svelte-meta") || svelteScoped.count >= 2 {
+            var ev: [String] = []
+            if m.contains("svelte-meta") { ev.append("DOM nodes carry __svelte_meta (development build)") }
+            if svelteScoped.count >= 2 { ev.append("\(svelteScoped.count) scoped classes like \(svelteScoped.sorted().first ?? "svelte-xyz")") }
+            out.append(FWDetected(name: "Svelte", version: e.globalVersions["svelte.version"], category: .framework,
+                                  confidence: m.contains("svelte-meta") || svelteScoped.count >= 4 ? .certain : .likely, evidence: ev))
+        }
+
+        if m.contains("ngcontent") || m.contains("ng-reflect") {
+            out.append(FWDetected(name: "Angular", version: e.globalVersions["ng.version.full"], category: .framework, confidence: .likely,
+                                  evidence: [m.contains("ngcontent") ? "DOM attrs _ngcontent-* / _nghost-*" : "DOM attrs ng-reflect-*"]))
+        }
+
+        if e.globals.contains("angular"), let v = e.globalVersions["angular.version.full"] {
+            out.append(FWDetected(name: "AngularJS", version: v, category: .framework, confidence: .certain, evidence: ["global angular \(v)"]))
+        }
+
+        if m.contains("data-hk") {
+            out.append(FWDetected(name: "Solid", category: .framework, confidence: .likely, evidence: ["DOM attr data-hk (hydration keys)"]))
+        }
+
+        if e.globals.contains("Ember") || e.classTokens.contains("ember-view") {
+            out.append(FWDetected(name: "Ember", version: e.globalVersions["Ember.VERSION"], category: .framework,
+                                  confidence: e.globals.contains("Ember") ? .certain : .likely,
+                                  evidence: [e.globals.contains("Ember") ? "global Ember" : "class ember-view"]))
+        }
+
+        if m.contains("data-page") && (m.contains("#app") || e.scriptURLs.contains(where: { $0.lowercased().contains("inertia") })) {
+            out.append(FWDetected(name: "Inertia.js", category: .metaFramework, confidence: .likely, evidence: ["DOM attr data-page on the app root"]))
+        }
+
+        if e.globals.contains("Turbo") || m.contains("turbo-frame") {
+            out.append(FWDetected(name: "Hotwire Turbo", category: .library, confidence: .certain, evidence: [e.globals.contains("Turbo") ? "global Turbo" : "custom element <turbo-frame>"]))
+        }
+        if m.contains("data-controller") {
+            out.append(FWDetected(name: "Stimulus", category: .library, confidence: .likely, evidence: ["DOM attr data-controller"]))
+        }
+        if e.globals.contains("Livewire") || m.contains("wire:id") {
+            out.append(FWDetected(name: "Livewire", category: .library, confidence: .certain, evidence: [e.globals.contains("Livewire") ? "global Livewire" : "DOM attr wire:id"]))
+        }
+        if m.contains("lit-element") || e.globals.contains("litHtmlVersions") {
+            out.append(FWDetected(name: "Lit", category: .library, confidence: .certain, evidence: ["lit-html / LitElement present"]))
+        }
+        return out
+    }
+
+    // MARK: - Styling and UI kits
+
+    /// Tailwind utility shapes, matched against a class name with any variant prefix (md:, hover:, dark:) removed.
+    private static let tailwindUtility: NSRegularExpression? = {
+        let scale = #"(?:\d+(?:\.\d+)?|px|auto|full|screen|min|max|fit|\[[^\]]+\])"#
+        let pattern = "^(?:"
+            + #"-?(?:m|p)[trblxyse]?-"# + scale
+            + #"|(?:w|h|min-w|min-h|max-w|max-h|size)-(?:\d+(?:\.\d+)?(?:/\d+)?|full|screen|auto|min|max|fit|px|xs|sm|md|lg|xl|[2-7]xl|prose|\[[^\]]+\])"#
+            + #"|text-(?:xs|sm|base|lg|xl|[2-9]xl)"#
+            + #"|(?:bg|text|border|ring|from|to|via|fill|stroke|divide|outline|accent|caret|decoration|shadow|placeholder)-(?:[a-z]+-(?:50|100|200|300|400|500|600|700|800|900|950)|white|black|transparent|current)(?:/\d+)?"#
+            + #"|rounded(?:-(?:[trbl]|tl|tr|bl|br|s|e))?(?:-(?:none|sm|md|lg|xl|2xl|3xl|full))?"#
+            + #"|(?:flex|inline-flex)(?:-(?:row|col|wrap|nowrap|1|auto|none|grow|shrink))?"#
+            + #"|grid-(?:cols|rows)-\d+|col-span-\d+|row-span-\d+|order-\d+"#
+            + #"|gap-(?:[xy]-)?\d+(?:\.\d+)?|space-[xy]-\d+(?:\.\d+)?"#
+            + #"|items-(?:start|end|center|baseline|stretch)|justify-(?:start|end|center|between|around|evenly)|self-(?:auto|start|end|center|stretch)"#
+            + #"|font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black)"#
+            + #"|leading-(?:none|tight|snug|normal|relaxed|loose|\d+)|tracking-(?:tighter|tight|normal|wide|wider|widest)"#
+            + #"|z-(?:\d+|auto)|opacity-\d+|duration-\d+|ease-(?:linear|in|out|in-out)"#
+            + #"|overflow-(?:x-|y-)?(?:hidden|auto|scroll|visible)|(?:top|right|bottom|left|inset|inset-x|inset-y)-"# + scale
+            + #"|aspect-(?:square|video|auto)|animate-(?:spin|ping|pulse|bounce)|backdrop-blur(?:-\w+)?|sr-only|not-sr-only|line-clamp-\d+"#
+            + ")$"
+        return try? NSRegularExpression(pattern: pattern)
+    }()
+
+    private static let tailwindVariants: Set<String> = [
+        "sm", "md", "lg", "xl", "2xl", "hover", "focus", "active", "dark", "group-hover", "peer", "disabled", "first", "last", "odd",
+        "even", "focus-visible", "focus-within", "placeholder", "motion-reduce", "motion-safe", "print", "max-sm", "max-md", "max-lg",
+        "visited", "checked", "empty", "group-focus", "aria-selected", "data-[state=open]", "rtl", "ltr",
+    ]
+
+    static func matches(_ text: String, _ pattern: String) -> Bool {
+        text.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// Distinct class names that read as Tailwind utilities. A name with a number, a fraction, an arbitrary value or a variant prefix
+    /// ("px-4", "w-1/2", "md:flex") is strong evidence; bare words like "flex" or "hidden" are only counted when a strong one is present.
+    static func tailwindEvidence(classTokens: Set<String>) -> (strong: [String], total: Int) {
+        guard let regex = tailwindUtility else { return ([], 0) }
+        var strong: [String] = []
+        var total = 0
+        for token in classTokens {
+            var base = token
+            var hasVariant = false
+            if let colon = token.lastIndex(of: ":") {
+                let prefix = String(token[token.startIndex..<colon])
+                let parts = prefix.split(separator: ":").map(String.init)
+                if !parts.isEmpty, parts.allSatisfy({ tailwindVariants.contains($0) || $0.hasPrefix("[") || $0.hasPrefix("group-") || $0.hasPrefix("peer-") }) {
+                    hasVariant = true
+                    base = String(token[token.index(after: colon)...])
+                } else {
+                    continue
+                }
+            }
+            let range = NSRange(base.startIndex..., in: base)
+            guard regex.firstMatch(in: base, range: range) != nil else { continue }
+            total += 1
+            let hasScale = base.contains("-") && (base.rangeOfCharacter(from: .decimalDigits) != nil || base.contains("["))
+            if hasVariant || hasScale { strong.append(token) }
+        }
+        return (strong.sorted(), total)
+    }
+
+    private static func tokens(_ e: FWEvidenceBundle, withPrefix prefix: String) -> [String] {
+        e.classTokens.filter { $0.hasPrefix(prefix) }.sorted()
+    }
+
+    private static func anyURL(_ e: FWEvidenceBundle, containing needles: [String]) -> String? {
+        let all = e.scriptURLs + e.linkURLs
+        for url in all {
+            let lower = url.lowercased()
+            if needles.contains(where: { lower.contains($0) }) { return url }
+        }
+        return nil
+    }
+
+    private static func shortURL(_ url: String) -> String {
+        guard let u = URL(string: url), let host = u.host else { return String(url.prefix(60)) }
+        return host + u.path
+    }
+
+    static func detectStyling(evidence e: FWEvidenceBundle) -> [FWDetected] {
+        var out: [FWDetected] = []
+        let prefixes = e.cssVariablePrefixes
+        let m = e.domMarkers
+
+        // Tailwind
+        let tw = tailwindEvidence(classTokens: e.classTokens)
+        let twCDN = anyURL(e, containing: ["cdn.tailwindcss.com", "tailwindcss"])
+        let twVars = prefixes.contains("tw")
+        var twEvidence: [String] = []
+        if twVars { twEvidence.append("CSS custom properties --tw-* in the page's stylesheets") }
+        if let twCDN { twEvidence.append("loads \(shortURL(twCDN))") }
+        if tw.strong.count >= 4 {
+            twEvidence.append("\(tw.strong.count) utility classes, e.g. \(tw.strong.prefix(5).joined(separator: ", "))")
+        }
+        let twConfidence: FWConfidence? = {
+            if twVars || twCDN != nil { return .certain }
+            if tw.strong.count >= 8 { return .likely }
+            if tw.strong.count >= 4 { return .possible }
+            return nil
+        }()
+        var tailwindPresent = false
+        if let twConfidence {
+            tailwindPresent = twConfidence >= .likely
+            var version: String? = nil
+            if let twCDN, let v = firstVersion(in: twCDN) { version = v }
+            out.append(FWDetected(name: "Tailwind CSS", version: version, category: .styling, confidence: twConfidence, evidence: twEvidence))
+        }
+
+        // Bootstrap
+        let bsURL = anyURL(e, containing: ["bootstrap"])
+        let bsGrid = e.classTokens.contains("row") && e.classTokens.contains(where: { matches($0, #"^col(?:-(?:sm|md|lg|xl|xxl))?(?:-\d{1,2})?$"#) })
+        let bsButtons = e.classTokens.contains("btn") && e.classTokens.contains(where: { matches($0, #"^btn-(?:primary|secondary|success|danger|warning|info|light|dark|outline-\w+)$"#) })
+        let bsComponents = ["navbar", "navbar-expand-lg", "card-body", "modal-dialog", "form-control", "container-fluid"].filter { e.classTokens.contains($0) }
+        if prefixes.contains("bs") || bsURL != nil || e.globals.contains("bootstrap") || ((bsGrid || bsButtons) && bsComponents.count >= 1 && !tailwindPresent) {
+            var ev: [String] = []
+            if prefixes.contains("bs") { ev.append("CSS custom properties --bs-*") }
+            if let bsURL { ev.append("loads \(shortURL(bsURL))") }
+            if e.globals.contains("bootstrap") { ev.append("global bootstrap") }
+            if bsGrid || bsButtons { ev.append("grid/button classes (row, col-*, btn-*)") }
+            if !bsComponents.isEmpty { ev.append("component classes: \(bsComponents.prefix(4).joined(separator: ", "))") }
+            let strong = prefixes.contains("bs") || bsURL != nil || e.globals.contains("bootstrap")
+            out.append(FWDetected(name: "Bootstrap", version: e.globalVersions["bootstrap.version"] ?? bsURL.flatMap { firstVersion(in: $0) },
+                                  category: .styling, confidence: strong ? .certain : .likely, evidence: ev))
+        }
+
+        // Component libraries identified by their own class or variable prefix.
+        let kits: [(name: String, tokenPrefix: String, varPrefix: String?, minTokens: Int)] = [
+            ("Material UI", "Mui", "mui", 3),
+            ("Chakra UI", "chakra-", "chakra", 2),
+            ("Ant Design", "ant-", "ant", 3),
+            ("Mantine", "mantine-", "mantine", 2),
+            ("UIkit", "uk-", nil, 4),
+            ("Radix Themes", "rt-", nil, 4),
+            ("Element Plus", "el-", "el", 4),
+            ("Fluent UI", "fui-", nil, 3),
+            ("Carbon Design System", "cds--", nil, 2),
+            ("Blueprint", "bp5-", nil, 2),
+            ("NextUI / HeroUI", "nextui-", nil, 2),
+        ]
+        for kit in kits {
+            let tokenHits = tokens(e, withPrefix: kit.tokenPrefix)
+            let varHit = kit.varPrefix.map { prefixes.contains($0) } ?? false
+            guard tokenHits.count >= kit.minTokens || varHit else { continue }
+            var ev: [String] = []
+            if !tokenHits.isEmpty { ev.append("\(tokenHits.count) classes like \(tokenHits.prefix(3).joined(separator: ", "))") }
+            if varHit, let vp = kit.varPrefix { ev.append("CSS custom properties --\(vp)-*") }
+            out.append(FWDetected(name: kit.name, category: .styling, confidence: tokenHits.count >= kit.minTokens * 2 || varHit ? .certain : .likely, evidence: ev))
+        }
+        if e.classTokens.contains("columns") && e.classTokens.contains("column") && (anyURL(e, containing: ["bulma"]) != nil || e.classTokens.contains(where: { $0.hasPrefix("is-") })) {
+            out.append(FWDetected(name: "Bulma", category: .styling, confidence: anyURL(e, containing: ["bulma"]) != nil ? .certain : .likely, evidence: ["classes columns/column and is-* modifiers"]))
+        }
+        if let v = anyURL(e, containing: ["foundation.min", "foundation-sites", "/foundation."]) {
+            out.append(FWDetected(name: "Foundation", category: .styling, confidence: .likely, evidence: ["loads \(shortURL(v))"]))
+        } else if e.classTokens.contains("grid-x") && e.classTokens.contains("cell") {
+            out.append(FWDetected(name: "Foundation", category: .styling, confidence: .likely, evidence: ["classes grid-x / cell"]))
+        }
+        if e.classTokens.contains("v-application") || e.classTokens.contains("v-btn") || e.classTokens.contains("v-card") {
+            out.append(FWDetected(name: "Vuetify", category: .styling, confidence: .certain, evidence: ["classes v-application / v-btn / v-card"]))
+        }
+        if anyURL(e, containing: ["materialize"]) != nil || e.classTokens.contains("waves-effect") {
+            out.append(FWDetected(name: "Materialize", category: .styling, confidence: .likely, evidence: ["materialize asset or waves-effect class"]))
+        }
+        if let v = anyURL(e, containing: ["semantic.min", "semantic-ui", "fomantic"]) {
+            out.append(FWDetected(name: "Semantic UI", category: .styling, confidence: .likely, evidence: ["loads \(shortURL(v))"]))
+        }
+        if anyURL(e, containing: ["picocss", "pico.min", "/pico."]) != nil {
+            out.append(FWDetected(name: "Pico CSS", category: .styling, confidence: .likely, evidence: ["loads a Pico stylesheet"]))
+        }
+        if anyURL(e, containing: ["tachyons"]) != nil {
+            out.append(FWDetected(name: "Tachyons", category: .styling, confidence: .likely, evidence: ["loads a Tachyons stylesheet"]))
+        }
+
+        // Radix primitives and the shadcn/ui convention built on them.
+        let radix = m.contains("data-radix") || prefixes.contains("radix")
+        if radix {
+            out.append(FWDetected(name: "Radix UI", category: .styling, confidence: .certain,
+                                  evidence: [m.contains("data-radix") ? "DOM attrs data-radix-*" : "CSS custom properties --radix-*"]))
+        }
+        let shadcnVars: Set<String> = ["background", "foreground", "primary", "radius", "muted", "accent", "border", "ring"]
+        if tailwindPresent, shadcnVars.isSubset(of: prefixes) || (radix && shadcnVars.intersection(prefixes).count >= 5) {
+            out.append(FWDetected(name: "shadcn/ui", category: .styling, confidence: radix ? .likely : .possible,
+                                  evidence: ["Tailwind with the shadcn theme variables (--background, --foreground, --primary, --radius ...)" + (radix ? " and Radix primitives" : "")]))
+        }
+        let daisyComponents = e.classTokens.contains(where: { matches($0, #"^(?:btn-(?:primary|secondary|accent|ghost|neutral)|card-body|modal-box|drawer-content|navbar-start|badge-\w+)$"#) })
+        if tailwindPresent, e.classTokens.contains("btn"), daisyComponents || m.contains("data-theme") {
+            out.append(FWDetected(name: "daisyUI", category: .styling, confidence: .likely, evidence: ["Tailwind with daisyUI component classes (btn, card-body, modal-box ...)"]))
+        }
+        if prefixes.contains("un") {
+            out.append(FWDetected(name: "UnoCSS", category: .styling, confidence: .certain, evidence: ["CSS custom properties --un-*"]))
+        }
+        if prefixes.contains("windi") {
+            out.append(FWDetected(name: "Windi CSS", category: .styling, confidence: .certain, evidence: ["CSS custom properties --windi-*"]))
+        }
+
+        // CSS-in-JS and scoped-style conventions.
+        let scClasses = e.classTokens.filter { matches($0, #"^sc-[A-Za-z]{5,8}$"#) }
+        if m.contains("data-styled") || scClasses.count >= 3 {
+            out.append(FWDetected(name: "styled-components", category: .styling, confidence: m.contains("data-styled") ? .certain : .likely,
+                                  evidence: [m.contains("data-styled") ? "style tag data-styled" : "\(scClasses.count) classes like \(scClasses.sorted().first ?? "sc-abc")"]))
+        }
+        let emotionClasses = e.classTokens.filter { matches($0, #"^css-[a-z0-9]{5,9}(?:-[A-Za-z0-9]+)?$"#) }
+        if m.contains("data-emotion") || emotionClasses.count >= 3 {
+            out.append(FWDetected(name: "Emotion", category: .styling, confidence: m.contains("data-emotion") ? .certain : .likely,
+                                  evidence: [m.contains("data-emotion") ? "style tag data-emotion" : "\(emotionClasses.count) classes like \(emotionClasses.sorted().first ?? "css-abc123")"]))
+        }
+        let jsxScoped = e.classTokens.filter { matches($0, #"^jsx-\d{6,12}$"#) }
+        if jsxScoped.count >= 2 {
+            out.append(FWDetected(name: "styled-jsx", category: .styling, confidence: .certain, evidence: ["\(jsxScoped.count) classes like \(jsxScoped.sorted().first ?? "jsx-123456")"]))
+        }
+        let cssModules = e.classTokens.filter { matches($0, #"^[A-Za-z][A-Za-z0-9]*_[A-Za-z][A-Za-z0-9-]*__[A-Za-z0-9_-]{4,8}$"#) || matches($0, #"^[a-z][A-Za-z0-9-]*_[a-z][A-Za-z0-9-]*_{1,3}[A-Za-z0-9_-]{5,8}$"#) }
+        if cssModules.count >= 4, !tailwindPresent || cssModules.count >= 10 {
+            out.append(FWDetected(name: "CSS Modules", category: .styling, confidence: .likely,
+                                  evidence: ["\(cssModules.count) hashed local class names like \(cssModules.sorted().first ?? "Button_root__x1y2z")"]))
+        }
+        if m.contains("data-vite-dev-id") {
+            out.append(FWDetected(name: "Vite", category: .buildTool, confidence: .certain, evidence: ["dev style tags with data-vite-dev-id"]))
+        }
+        if m.contains("data-astro-cid") {
+            out.append(FWDetected(name: "Astro", category: .metaFramework, confidence: .likely, evidence: ["scoped style attribute data-astro-cid-*"]))
+        }
+
+        // Icons, fonts and motion.
+        let faClasses = e.classTokens.filter { ["fa", "fas", "far", "fab", "fal", "fad", "fa-solid", "fa-regular", "fa-brands", "fa-light"].contains($0) }
+        if let fa = anyURL(e, containing: ["fontawesome", "font-awesome", "kit.fontawesome"]) {
+            out.append(FWDetected(name: "Font Awesome", category: .styling, confidence: .certain, evidence: ["loads \(shortURL(fa))"]))
+        } else if !faClasses.isEmpty {
+            out.append(FWDetected(name: "Font Awesome", category: .styling, confidence: .likely, evidence: ["icon classes \(faClasses.sorted().prefix(3).joined(separator: ", "))"]))
+        }
+        if e.classTokens.contains("material-icons") || e.classTokens.contains("material-symbols-outlined") || e.classTokens.contains("material-symbols-rounded") {
+            out.append(FWDetected(name: "Material Icons", category: .styling, confidence: .certain, evidence: ["class material-icons / material-symbols-*"]))
+        }
+        if !tokens(e, withPrefix: "bi-").isEmpty && e.classTokens.contains("bi") {
+            out.append(FWDetected(name: "Bootstrap Icons", category: .styling, confidence: .likely, evidence: ["classes bi, bi-*"]))
+        }
+        if e.classTokens.contains("lucide") || e.classTokens.contains(where: { $0.hasPrefix("lucide-") }) {
+            out.append(FWDetected(name: "Lucide", category: .styling, confidence: .likely, evidence: ["svg classes lucide, lucide-*"]))
+        }
+        if e.classTokens.contains(where: { $0.hasPrefix("animate__") }) {
+            out.append(FWDetected(name: "Animate.css", category: .styling, confidence: .certain, evidence: ["classes animate__*"]))
+        }
+        if m.contains("data-aos") {
+            out.append(FWDetected(name: "AOS", category: .styling, confidence: .likely, evidence: ["DOM attr data-aos"]))
+        }
+        if let gf = anyURL(e, containing: ["fonts.googleapis.com", "fonts.gstatic.com"]) {
+            out.append(FWDetected(name: "Google Fonts", category: .styling, confidence: .certain, evidence: ["loads \(shortURL(gf))"]))
+        }
+        if let tk = anyURL(e, containing: ["use.typekit.net", "fonts.adobe.com"]) {
+            out.append(FWDetected(name: "Adobe Fonts", category: .styling, confidence: .certain, evidence: ["loads \(shortURL(tk))"]))
+        }
+        return out
+    }
+
+    // MARK: - Libraries
+
+    static func detectLibraries(evidence e: FWEvidenceBundle) -> [FWDetected] {
+        var out: [FWDetected] = []
+        let g = e.globals
+        // strict: a short global ("L", "ko") is only believed when its version probe answered too.
+        func lib(_ name: String, global: String, versionKey: String? = nil, urls: [String] = [], strict: Bool = false, category: FWCategory = .library) {
+            let version = versionKey.flatMap { e.globalVersions[$0] }
+            if g.contains(global), !strict || version != nil {
+                out.append(FWDetected(name: name, version: version, category: category, confidence: .certain, evidence: ["global \(global)"]))
+            } else if let u = anyURL(e, containing: urls), !urls.isEmpty {
+                out.append(FWDetected(name: name, version: firstVersion(in: u), category: category, confidence: .likely, evidence: ["loads \(shortURL(u))"]))
+            }
+        }
+        // `_` is lodash or underscore; the version string does not say which, the presence of a lodash-only name does.
+        if g.contains("_"), let v = e.globalVersions["_.VERSION"] {
+            let isLodash = e.globals.contains("__lodash") || (anyURL(e, containing: ["lodash"]) != nil)
+            out.append(FWDetected(name: isLodash ? "Lodash" : "Lodash / Underscore", version: v, category: .library, confidence: isLodash ? .certain : .likely, evidence: ["global _ \(v)"]))
+        } else if let u = anyURL(e, containing: ["lodash"]) {
+            out.append(FWDetected(name: "Lodash", version: firstVersion(in: u), category: .library, confidence: .likely, evidence: ["loads \(shortURL(u))"]))
+        }
+        lib("Moment.js", global: "moment", versionKey: "moment.version", urls: ["moment.min", "moment.js", "/moment@"])
+        lib("D3", global: "d3", versionKey: "d3.version", urls: ["/d3.v", "d3.min", "/d3@"])
+        lib("Three.js", global: "THREE", versionKey: "THREE.REVISION", urls: ["three.min", "three.module", "/three@"])
+        lib("GSAP", global: "gsap", versionKey: "gsap.version", urls: ["gsap.min", "/gsap@", "tweenmax"])
+        lib("Chart.js", global: "Chart", versionKey: "Chart.version", urls: ["chart.min", "chart.js", "/chart.js@"])
+        lib("Leaflet", global: "L", versionKey: "L.version", urls: ["leaflet"], strict: true)
+        lib("Mapbox GL", global: "mapboxgl", versionKey: "mapboxgl.version", urls: ["mapbox-gl"])
+        lib("Backbone.js", global: "Backbone", versionKey: "Backbone.VERSION", urls: ["backbone"])
+        lib("Knockout", global: "ko", versionKey: "ko.version", urls: ["knockout"], strict: true)
+        lib("Stripe.js", global: "Stripe", urls: ["js.stripe.com"])
+        lib("Firebase", global: "firebase", versionKey: "firebase.SDK_VERSION", urls: ["firebase", "gstatic.com/firebasejs"])
+        lib("Modernizr", global: "Modernizr", urls: ["modernizr"])
+        lib("Swiper", global: "Swiper", urls: ["swiper"])
+        lib("Lottie", global: "lottie", urls: ["lottie"])
+        lib("Socket.IO", global: "", urls: ["socket.io"])
+        lib("Redux DevTools", global: "__REDUX_DEVTOOLS_EXTENSION__")
+        if let u = anyURL(e, containing: ["cdn.jsdelivr.net"]) { out.append(FWDetected(name: "jsDelivr", category: .hosting, confidence: .likely, evidence: ["loads \(shortURL(u))"])) }
+        if let u = anyURL(e, containing: ["unpkg.com"]) { out.append(FWDetected(name: "unpkg", category: .hosting, confidence: .likely, evidence: ["loads \(shortURL(u))"])) }
+        if let u = anyURL(e, containing: ["cdnjs.cloudflare.com"]) { out.append(FWDetected(name: "cdnjs", category: .hosting, confidence: .likely, evidence: ["loads \(shortURL(u))"])) }
+        return out
+    }
+
+    // MARK: - Analytics, monitoring and third-party widgets
+
+    static func detectAnalytics(evidence e: FWEvidenceBundle) -> [FWDetected] {
+        var out: [FWDetected] = []
+        let g = e.globals
+        func tool(_ name: String, globals: [String] = [], urls: [String] = []) {
+            var ev: [String] = []
+            for global in globals where g.contains(global) { ev.append("global \(global)") }
+            if let u = anyURL(e, containing: urls), !urls.isEmpty { ev.append("loads \(shortURL(u))") }
+            guard !ev.isEmpty else { return }
+            out.append(FWDetected(name: name, category: .analytics, confidence: ev.count > 1 ? .certain : .likely, evidence: ev))
+        }
+        tool("Google Analytics", globals: ["gtag", "_gaq", "GoogleAnalyticsObject"], urls: ["google-analytics.com", "googletagmanager.com/gtag/js", "/analytics.js"])
+        tool("Google Tag Manager", globals: ["google_tag_manager"], urls: ["googletagmanager.com/gtm.js", "googletagmanager.com/ns.html"])
+        tool("Meta Pixel", globals: ["fbq", "_fbq"], urls: ["connect.facebook.net"])
+        tool("Hotjar", globals: ["hj", "_hjSettings"], urls: ["static.hotjar.com", "hotjar.com"])
+        tool("Segment", globals: [], urls: ["cdn.segment.com", "segment.io"])
+        tool("Mixpanel", globals: ["mixpanel"], urls: ["cdn.mxpnl.com", "mixpanel.com"])
+        tool("Amplitude", globals: ["amplitude"], urls: ["amplitude.com"])
+        tool("PostHog", globals: ["posthog"], urls: ["posthog.com", "us.i.posthog", "eu.i.posthog"])
+        tool("Plausible", globals: ["plausible"], urls: ["plausible.io"])
+        tool("Fathom", globals: ["fathom"], urls: ["usefathom.com"])
+        tool("Matomo", globals: ["_paq", "Matomo"], urls: ["matomo", "piwik"])
+        tool("Microsoft Clarity", globals: ["clarity"], urls: ["clarity.ms"])
+        tool("Sentry", globals: ["Sentry", "__SENTRY__"], urls: ["sentry-cdn.com", "browser.sentry", "sentry.io"])
+        tool("Datadog RUM", globals: ["DD_RUM", "DD_LOGS"], urls: ["datadoghq-browser-agent.com"])
+        tool("New Relic", globals: ["NREUM", "newrelic"], urls: ["js-agent.newrelic.com", "nr-data.net"])
+        tool("LogRocket", globals: ["LogRocket"], urls: ["logrocket"])
+        tool("FullStory", globals: ["_fs_namespace"], urls: ["fullstory.com"])
+        tool("Bugsnag", globals: ["Bugsnag"], urls: ["bugsnag"])
+        tool("Rollbar", globals: ["Rollbar", "_rollbarConfig"], urls: ["rollbar"])
+        tool("HubSpot", globals: ["_hsq", "hbspt"], urls: ["js.hs-scripts.com", "hubspot.com", "hs-analytics"])
+        tool("Intercom", globals: ["Intercom"], urls: ["widget.intercom.io", "intercomcdn.com"])
+        tool("Drift", globals: ["drift"], urls: ["js.driftt.com", "drift.com"])
+        tool("Crisp", globals: ["$crisp"], urls: ["client.crisp.chat"])
+        tool("Zendesk", globals: ["zE", "zESettings"], urls: ["static.zdassets.com", "zendesk"])
+        tool("OneTrust", globals: ["OneTrust", "OptanonWrapper"], urls: ["onetrust.com", "cookielaw.org"])
+        tool("Cookiebot", globals: ["Cookiebot"], urls: ["cookiebot.com"])
+        tool("reCAPTCHA", globals: ["grecaptcha"], urls: ["google.com/recaptcha", "gstatic.com/recaptcha"])
+        tool("hCaptcha", globals: ["hcaptcha"], urls: ["hcaptcha.com"])
+        tool("Cloudflare Turnstile", globals: ["turnstile"], urls: ["challenges.cloudflare.com/turnstile"])
+        return out
+    }
+
+    // MARK: - Generators (static site generators, site builders)
+
+    static func detectGenerators(evidence e: FWEvidenceBundle) -> [FWDetected] {
+        var out: [FWDetected] = []
+        let known: [(needle: String, name: String, category: FWCategory)] = [
+            ("astro", "Astro", .metaFramework), ("gatsby", "Gatsby", .metaFramework), ("hugo", "Hugo", .metaFramework),
+            ("jekyll", "Jekyll", .metaFramework), ("hexo", "Hexo", .metaFramework), ("eleventy", "Eleventy", .metaFramework),
+            ("docusaurus", "Docusaurus", .metaFramework), ("vitepress", "VitePress", .metaFramework),
+            ("vuepress", "VuePress", .metaFramework), ("nuxt", "Nuxt", .metaFramework), ("next.js", "Next.js", .metaFramework),
+            ("mkdocs", "MkDocs", .metaFramework), ("sphinx", "Sphinx", .metaFramework), ("docsy", "Docsy", .metaFramework),
+            ("webflow", "Webflow", .cms), ("framer", "Framer", .cms), ("squarespace", "Squarespace", .cms), ("wix", "Wix", .cms),
+            ("ghost", "Ghost", .cms), ("drupal", "Drupal", .cms), ("joomla", "Joomla", .cms), ("typo3", "TYPO3", .cms),
+            ("prestashop", "PrestaShop", .cms), ("magento", "Magento", .cms), ("bigcommerce", "BigCommerce", .cms),
+            ("shopify", "Shopify", .cms), ("wordpress", "WordPress", .cms), ("elementor", "Elementor", .cms),
+            ("divi", "Divi", .cms), ("hubspot", "HubSpot CMS", .cms), ("contentful", "Contentful", .cms),
+        ]
+        for generator in e.metaGenerators {
+            let lower = generator.lowercased()
+            for entry in known where lower.contains(entry.needle) {
+                out.append(FWDetected(name: entry.name, version: extractVersion(from: generator), category: entry.category,
+                                      confidence: .certain, evidence: ["meta generator: \(generator)"]))
+            }
+        }
+        if e.domMarkers.contains("data-wf-site") || e.domMarkers.contains("data-wf-page") {
+            out.append(FWDetected(name: "Webflow", category: .cms, confidence: .certain, evidence: ["DOM attrs data-wf-site / data-wf-page"]))
+        }
+        if e.globals.contains("Shopify") {
+            out.append(FWDetected(name: "Shopify", category: .cms, confidence: .certain, evidence: ["global Shopify"]))
+        }
+        if e.classTokens.contains(where: { $0.hasPrefix("wp-block-") }) || e.classTokens.contains("wp-site-blocks") {
+            out.append(FWDetected(name: "WordPress", category: .cms, confidence: .likely, evidence: ["block editor classes wp-block-*"]))
+        }
+        return out
+    }
+
+    // MARK: - Servers and hosting, from response headers
+
+    static func detectInfrastructure(evidence e: FWEvidenceBundle) -> [FWDetected] {
+        var out: [FWDetected] = []
+        let h = Dictionary(uniqueKeysWithValues: e.responseHeaders.map { ($0.key.lowercased(), $0.value) })
+
+        if let server = h["server"], !server.isEmpty {
+            let lower = server.lowercased()
+            let servers: [(needle: String, name: String)] = [
+                ("nginx", "nginx"), ("apache", "Apache"), ("caddy", "Caddy"), ("litespeed", "LiteSpeed"), ("microsoft-iis", "IIS"),
+                ("openresty", "OpenResty"), ("envoy", "Envoy"), ("gunicorn", "Gunicorn"), ("uvicorn", "Uvicorn"), ("kestrel", "Kestrel"),
+                ("cowboy", "Cowboy"), ("jetty", "Jetty"), ("tomcat", "Tomcat"), ("werkzeug", "Werkzeug"), ("deno", "Deno"),
+            ]
+            for entry in servers where lower.contains(entry.needle) {
+                out.append(FWDetected(name: entry.name, version: extractVersion(from: server), category: .server, confidence: .certain, evidence: ["response header server: \(server)"]))
+            }
+            let hosts: [(needle: String, name: String)] = [
+                ("cloudflare", "Cloudflare"), ("netlify", "Netlify"), ("vercel", "Vercel"), ("amazons3", "Amazon S3"),
+                ("cloudfront", "Amazon CloudFront"), ("github.com", "GitHub Pages"), ("gws", "Google Web Server"),
+                ("akamaighost", "Akamai"), ("fly.io", "Fly.io"), ("render", "Render"),
+            ]
+            for entry in hosts where lower.contains(entry.needle) {
+                out.append(FWDetected(name: entry.name, category: .hosting, confidence: .certain, evidence: ["response header server: \(server)"]))
+            }
+        }
+        if let via = h["via"]?.lowercased(), via.contains("cloudfront") {
+            out.append(FWDetected(name: "Amazon CloudFront", category: .hosting, confidence: .certain, evidence: ["response header via: \(h["via"] ?? "")"]))
+        }
+        if h["x-github-request-id"] != nil {
+            out.append(FWDetected(name: "GitHub Pages", category: .hosting, confidence: .certain, evidence: ["response header x-github-request-id"]))
+        }
+        if let served = h["x-served-by"], served.lowercased().contains("cache") {
+            out.append(FWDetected(name: "Fastly", category: .hosting, confidence: .likely, evidence: ["response header x-served-by: \(served)"]))
+        }
+        if h["fly-request-id"] != nil {
+            out.append(FWDetected(name: "Fly.io", category: .hosting, confidence: .certain, evidence: ["response header fly-request-id"]))
+        }
+        if h["x-azure-ref"] != nil || h["x-ms-request-id"] != nil {
+            out.append(FWDetected(name: "Microsoft Azure", category: .hosting, confidence: .likely, evidence: ["response header x-azure-ref / x-ms-request-id"]))
+        }
+        if h.keys.contains(where: { $0.hasPrefix("x-goog-") }) {
+            out.append(FWDetected(name: "Google Cloud", category: .hosting, confidence: .likely, evidence: ["response header x-goog-*"]))
+        }
+        if h["x-render-origin-server"] != nil {
+            out.append(FWDetected(name: "Render", category: .hosting, confidence: .certain, evidence: ["response header x-render-origin-server"]))
+        }
+        if h.keys.contains(where: { $0.hasPrefix("x-railway") }) {
+            out.append(FWDetected(name: "Railway", category: .hosting, confidence: .certain, evidence: ["response header x-railway-*"]))
+        }
+        if let poweredBy = h["x-powered-by"], poweredBy.lowercased().contains("next.js") {
+            out.append(FWDetected(name: "Next.js", version: extractVersion(from: poweredBy), category: .metaFramework, confidence: .certain, evidence: ["response header x-powered-by: \(poweredBy)"]))
+        }
+        if let poweredBy = h["x-powered-by"], poweredBy.lowercased().contains("nuxt") {
+            out.append(FWDetected(name: "Nuxt", category: .metaFramework, confidence: .certain, evidence: ["response header x-powered-by: \(poweredBy)"]))
+        }
+        if let cdn = h["x-cdn"] ?? h["x-cache-provider"] {
+            out.append(FWDetected(name: cdn, category: .hosting, confidence: .possible, evidence: ["response header x-cdn: \(cdn)"]))
+        }
+        return out
+    }
+
+    /// The first "1.2.3"-shaped version in a URL such as ".../tailwindcss@3.4.1/..." or ".../bootstrap/5.3.2/...".
+    static func firstVersion(in url: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: #"(?:[@/\-v])(\d+\.\d+(?:\.\d+)?)(?=[/\-.@?]|$)"#) else { return nil }
+        let range = NSRange(url.startIndex..., in: url)
+        guard let match = regex.firstMatch(in: url, range: range), let r = Range(match.range(at: 1), in: url) else { return nil }
+        return String(url[r])
     }
 
     static func primary(among detections: [FWDetected]) -> String? {
