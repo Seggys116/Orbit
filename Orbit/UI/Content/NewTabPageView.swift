@@ -24,6 +24,106 @@ enum NewTabPageModel {
         Array(distinctWebEntries(entries).prefix(limit))
     }
 
+    /// One site on the page: always an origin root, never a deep link.
+    struct SiteTile: Identifiable, Hashable {
+        var url: URL
+        /// The host, with the port when it is not the scheme's default ("localhost:3000").
+        var title: String
+        var subtitle: String
+        var id: URL { url }
+    }
+
+    private struct SiteAccumulator {
+        var key: String
+        var url: URL
+        var label: String
+        var lastVisit: Date
+        var score: Double
+    }
+
+    /// Scheme, host and non-default port of a web URL, plus the label shown for it. Nil for anything that is not http(s).
+    /// The key ignores scheme and a leading "www." so http and https (or www and bare) visits of one site count as one tile.
+    private static func siteOrigin(of url: URL) -> (key: String, root: URL, label: String)? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host()?.lowercased() else { return nil }
+        let bareHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        guard !bareHost.isEmpty else { return nil }
+
+        let defaultPort = scheme == "https" ? 443 : 80
+        let port = url.port.flatMap { $0 == defaultPort ? nil : $0 }
+        let portSuffix = port.map { ":\($0)" } ?? ""
+        let authorityHost = bareHost.contains(":") ? "[\(bareHost)]" : bareHost
+        guard let root = URL(string: "\(scheme)://\(authorityHost)\(portSuffix)") else { return nil }
+
+        let shownHost = authorityHost.hasPrefix("www.") ? String(authorityHost.dropFirst(4)) : authorityHost
+        let label = shownHost + portSuffix
+        return (label, root, label)
+    }
+
+    private static func nextUnpicked(in sites: [SiteAccumulator], from index: inout Int, excluding picked: Set<String>) -> SiteAccumulator? {
+        while index < sites.count {
+            let site = sites[index]
+            index += 1
+            if !picked.contains(site.key) { return site }
+        }
+        return nil
+    }
+
+    /// The sites to show: history collapsed to one tile per origin, covering both what was visited last and what is visited most.
+    /// Origins are ranked twice, newest visit first and highest summed frecency first, and the two rankings are taken in turn
+    /// (newest, most frecent, next newest, ...) skipping any origin already taken, until `limit` tiles are chosen.
+    static func siteTiles(from entries: [HistoryEntry], limit: Int = maximumRecents, now: Date = Date()) -> [SiteTile] {
+        guard limit > 0 else { return [] }
+
+        var sites: [String: SiteAccumulator] = [:]
+        for entry in entries {
+            guard let origin = siteOrigin(of: entry.url) else { continue }
+            let score = HistoryStore.frecencyScore(
+                visitCount: entry.visitCount,
+                typedCount: entry.wasTyped ? 1 : 0,
+                lastVisit: entry.visitedAt,
+                now: now
+            )
+            if var site = sites[origin.key] {
+                site.score += score
+                // The root takes the scheme and host spelling of the newest visit.
+                if entry.visitedAt > site.lastVisit {
+                    site.lastVisit = entry.visitedAt
+                    site.url = origin.root
+                }
+                sites[origin.key] = site
+            } else {
+                sites[origin.key] = SiteAccumulator(
+                    key: origin.key, url: origin.root, label: origin.label,
+                    lastVisit: entry.visitedAt, score: score
+                )
+            }
+        }
+
+        let newest = sites.values.sorted {
+            $0.lastVisit != $1.lastVisit ? $0.lastVisit > $1.lastVisit : $0.key < $1.key
+        }
+        let mostFrecent = sites.values.sorted {
+            $0.score != $1.score ? $0.score > $1.score : $0.key < $1.key
+        }
+
+        var chosen: [SiteAccumulator] = []
+        var picked = Set<String>()
+        var newestIndex = 0
+        var frecentIndex = 0
+        var takeNewest = true
+        while chosen.count < limit {
+            let next = takeNewest
+                ? nextUnpicked(in: newest, from: &newestIndex, excluding: picked)
+                : nextUnpicked(in: mostFrecent, from: &frecentIndex, excluding: picked)
+            guard let site = next else { break }
+            picked.insert(site.key)
+            chosen.append(site)
+            takeNewest.toggle()
+        }
+        return chosen.map { SiteTile(url: $0.url, title: $0.label, subtitle: $0.label) }
+    }
+
     static func isNewTabPage(_ tab: Tab) -> Bool {
         if case .newTab = OrbitScheme.parse(tab.url) { return true }
         return false
@@ -74,7 +174,7 @@ struct NewTabPageView: View {
     }
 
     var body: some View {
-        let recents = NewTabPageModel.recents(from: history)
+        let sites = NewTabPageModel.siteTiles(from: history)
 
         GeometryReader { proxy in
             ScrollView {
@@ -88,8 +188,8 @@ struct NewTabPageView: View {
                     )
                     // Re-creates the embedded bar when the page switches tabs.
                     .id(tab?.id)
-                    if !hasInput, !recents.isEmpty {
-                        recentsSection(recents)
+                    if !hasInput, !sites.isEmpty {
+                        sitesSection(sites)
                     }
                 }
                 .frame(maxWidth: Self.contentMaxWidth)
@@ -108,9 +208,9 @@ struct NewTabPageView: View {
         }
     }
 
-    private func recentsSection(_ entries: [HistoryEntry]) -> some View {
+    private func sitesSection(_ sites: [NewTabPageModel.SiteTile]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Recently visited")
+            Text("Recent and frequent")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
 
@@ -118,8 +218,8 @@ struct NewTabPageView: View {
                 columns: [GridItem(.adaptive(minimum: 200), spacing: 12, alignment: .top)],
                 spacing: 12
             ) {
-                ForEach(entries) { entry in
-                    NewTabRecentCard(entry: entry) { open(entry.url) }
+                ForEach(sites) { site in
+                    NewTabOriginCard(site: site) { open(site.url) }
                 }
             }
         }
@@ -136,33 +236,31 @@ struct NewTabPageView: View {
     }
 }
 
-private struct NewTabRecentCard: View {
-    var entry: HistoryEntry
+private struct NewTabOriginCard: View {
+    var site: NewTabPageModel.SiteTile
     var action: () -> Void
 
     @State private var isHovering = false
 
-    private var title: String {
-        let trimmed = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? NewTabPageModel.displayHost(entry.url) : trimmed
-    }
-
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                FaviconView(url: nil, host: entry.url.host() ?? entry.url.absoluteString)
+                FaviconView(url: nil, host: site.url.host() ?? site.url.absoluteString)
                     .frame(width: 24, height: 24)
                     .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
+                    Text(site.title)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    Text(NewTabPageModel.displayHost(entry.url))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    // A site's name is its host, so the second line would only repeat the first.
+                    if site.subtitle != site.title {
+                        Text(site.subtitle)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -181,6 +279,6 @@ private struct NewTabRecentCard: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .accessibilityLabel(title)
+        .accessibilityLabel(site.title)
     }
 }

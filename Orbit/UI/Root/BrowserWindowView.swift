@@ -217,6 +217,7 @@ struct BrowserWindowView: View {
                 commandBarOverlay
             }
         }
+        .overlay(alignment: .topTrailing) { BackgroundTabNoticeView() }
         .orbitAnimation(OrbitMotion.standard, value: env.isSidebarVisible)
         // No ambient .animation(value: env.isSidebarHoverRevealed): every mutation already runs in an explicit withAnimation in handleHoverEdge, and an ambient one could desynchronize the panel from its content.
         .orbitAnimation(OrbitMotion.standard, value: env.isCommandBarPresented)

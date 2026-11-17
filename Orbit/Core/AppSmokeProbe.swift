@@ -37,6 +37,7 @@ enum AppSmokeProbe {
         case userAgent
         case rendererSurfacePaint
         case windowPixelPaint
+        case mainMenuBar
     }
 
     // ORBIT-BENCH: COMMANDS: Scripts/benchmark.py refuses to drive a build missing a command it sends.
@@ -160,6 +161,8 @@ enum AppSmokeProbe {
         checkEngineStorage(host: host, tabID: tabID)
         await checkPaint(host: host, tabID: tabID, window: window, baseline: paneBaseline)
         noteStage(.painted)
+
+        await checkMainMenuBar()
 
         await finish(host: host, tabID: tabID)
     }
@@ -466,6 +469,19 @@ enum AppSmokeProbe {
     }
 
     // MARK: - Verdict
+
+    /// SwiftUI's App scene installs a stock menu with no Edit menu; without Orbit's own bar Cmd-V, Cmd-C and Cmd-A beep in every text field.
+    /// Judged only after the window has painted and settled, long after SwiftUI's own installation has had its chance to run.
+    private static func checkMainMenuBar() async {
+        NSApp.activate(ignoringOtherApps: true)
+        await settle(1.5)
+        let top = NSApp.mainMenu?.items.map { $0.submenu?.title ?? $0.title } ?? []
+        let edit = NSApp.mainMenu?.items.compactMap(\.submenu).first { $0.title == "Edit" }
+        let paste = edit?.items.first { $0.title == "Paste" }
+        let isKept = NSApp.mainMenu === MainMenuKeeper.shared.menu
+        let passed = paste?.keyEquivalent == "v" && isKept
+        record(.mainMenuBar, passed, "menus=\(top) pasteRow=\(paste != nil) keptByKeeper=\(isKept)")
+    }
 
     private static func record(_ check: Check, _ passed: Bool, _ detail: String) {
         results.append((check, passed, detail))

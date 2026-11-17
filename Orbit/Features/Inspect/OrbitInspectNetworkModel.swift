@@ -6,8 +6,18 @@ import AppKit
 final class OrbitNetworkModel: OrbitInspectModule {
     @ObservationIgnored weak var session: OrbitInspectSession?
 
-    private(set) var records: [OrbitNetworkRecord] = []
+    /// Every record, in arrival order. Other tools read this on demand, so it is projected lazily when the log changed while the Network panel was not on screen.
+    var records: [OrbitNetworkRecord] {
+        access(keyPath: \.records)
+        if publishedStale {
+            publishedRecords = _all.map(\.pub)
+            publishedStale = false
+        }
+        return publishedRecords
+    }
 
+    @ObservationIgnored private var publishedRecords: [OrbitNetworkRecord] = []
+    @ObservationIgnored private var publishedStale = false
 
     private(set) var navigationTiming: NetNavigationTiming? = nil
 
@@ -65,12 +75,28 @@ final class OrbitNetworkModel: OrbitInspectModule {
     /// Resource-timing entries already attached to a record, so a re-delivery (panel refresh, re-attach) cannot land on another request for the same URL.
     @ObservationIgnored private var consumedTimings: Set<String> = []
 
-    @ObservationIgnored private var _all = OrbitRingBuffer<Entry>(capacity: 5000)
+    private static let logCapacity = 5000
+    @ObservationIgnored private var _all = OrbitRingBuffer<Entry>(capacity: OrbitNetworkModel.logCapacity)
+
+    /// Record ids by URL with the query removed, so a timing entry finds its candidates without scanning the log.
+    /// Ids that no longer resolve, or whose URL moved elsewhere, are dropped when a lookup meets them.
+    @ObservationIgnored private var idsByURLBase: [String: [String]] = [:]
+    @ObservationIgnored private var indexedReferences = 0
 
     /// A page load is hundreds of messages, so derived state is rebuilt once per frame, not once per message.
     @ObservationIgnored private var derivedDirty = false
     @ObservationIgnored private var flushScheduled = false
     private static let flushDelay: Duration = .milliseconds(16)
+
+    /// Overrides the session lookup for whether the Network panel is on screen; a model without a session has no other way to say so.
+    @ObservationIgnored var presentationProbe: (() -> Bool)?
+
+    /// Rebuilding the filtered table, counts and summary is only worth it while someone can see them; the log itself is always kept.
+    private var isPanelPresented: Bool {
+        if let presentationProbe { return presentationProbe() }
+        guard let session else { return false }
+        return session.isPresented && session.panel == .network
+    }
 
     var messageTypes: Set<String> { ["net.batch", "net.nav", "net.form", "net.body"] }
 
@@ -107,10 +133,15 @@ final class OrbitNetworkModel: OrbitInspectModule {
             }
             _all.removeAll()
             for entry in kept { _all.append(entry) }
+            rebuildTimingIndex()
             navigationTiming = nil
         }
         selectedID = nil
-        rebuildFiltered()
+        if isPanelPresented {
+            rebuildFiltered()
+        } else {
+            invalidateDerived()
+        }
     }
 
     private static func sameDocument(_ recorded: String, _ page: String) -> Bool {
@@ -122,6 +153,8 @@ final class OrbitNetworkModel: OrbitInspectModule {
     }
 
     func panelDidAppear(force: Bool) {
+        // Changes made while the panel was hidden were not projected, so show them now, once.
+        flushIfDirty()
         if force {
             session?.command(["op": "net.refresh"])
         }
@@ -514,24 +547,40 @@ final class OrbitNetworkModel: OrbitInspectModule {
             store(record, at: idx)
         } else {
             _all.append(Entry(record))
+            indexForTiming(record)
             markDirty()
         }
     }
 
     private func store(_ record: NetRecord, at idx: Int) {
+        let previous = _all[idx].rich
         _all[idx] = Entry(record)
+        // A record already indexed under the same id and URL base needs nothing; the rest are added and the old keys are dropped lazily.
+        if previous.id != record.id || (previous.url != record.url && urlBase(previous.url) != urlBase(record.url)) {
+            indexForTiming(record)
+        }
         markDirty()
     }
 
     private func markDirty() {
         derivedDirty = true
-        guard !flushScheduled else { return }
+        publishedStale = true
+        guard isPanelPresented, !flushScheduled else { return }
         flushScheduled = true
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.flushDelay)
-            self?.flushScheduled = false
-            self?.flushIfDirty()
+            guard let self else { return }
+            self.flushScheduled = false
+            // Hidden again before the frame: stay dirty, and panelDidAppear projects the log when it is shown.
+            guard self.isPanelPresented else { return }
+            self.flushIfDirty()
         }
+    }
+
+    /// Marks derived state out of date without projecting it, for changes made while the panel is hidden.
+    private func invalidateDerived() {
+        derivedDirty = true
+        publishedStale = true
     }
 
     func flushIfDirty() {
@@ -570,10 +619,32 @@ final class OrbitNetworkModel: OrbitInspectModule {
 
     /// A timing entry belongs to a record of the same URL that has no timing yet; exact URLs win over ones that differ only in the query.
     private func findTimingTarget(url: String, startMs: Double, isNavigation: Bool) -> Int? {
-        let urlBase = url.prefix { $0 != "?" }
+        let base = urlBase(url)
+        let key = String(base)
+        guard let bucket = idsByURLBase[key] else { return nil }
+
+        // Resolve the bucket to live positions, dropping ids that were evicted, retimed or moved to another URL.
+        var seen = Set<Int>()
+        var positions: [Int] = []
+        var live: [String] = []
+        live.reserveCapacity(bucket.count)
+        for id in bucket {
+            guard let i = _all.position(forID: id) else { continue }
+            let rec = _all[i].rich
+            guard rec.timingRaw == nil, urlBase(rec.url) == base else { continue }
+            live.append(id)
+            if seen.insert(i).inserted { positions.append(i) }
+        }
+        if live.count != bucket.count {
+            indexedReferences -= bucket.count - live.count
+            if live.isEmpty { idsByURLBase.removeValue(forKey: key) } else { idsByURLBase[key] = live }
+        }
+        // Positions are visited in log order so ties resolve to the earliest record, as a scan of the whole log would.
+        positions.sort()
+
         var exact: [Int] = []
         var sameBase: [Int] = []
-        for i in 0..<_all.count {
+        for i in positions {
             let rec = _all[i].rich
             guard rec.timingRaw == nil else { continue }
             if isNavigation {
@@ -582,7 +653,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
                 guard isDocument else { continue }
             }
             if rec.url == url { exact.append(i) }
-            else if rec.url.prefix(while: { $0 != "?" }) == urlBase { sameBase.append(i) }
+            else { sameBase.append(i) }
         }
         let pool = exact.isEmpty ? sameBase : exact
         var best: Int? = nil
@@ -593,6 +664,29 @@ final class OrbitNetworkModel: OrbitInspectModule {
             if diff < bestDiff { bestDiff = diff; best = i }
         }
         return best ?? pool.first
+    }
+
+    private func urlBase(_ url: String) -> Substring {
+        url.prefix { $0 != "?" }
+    }
+
+    private func indexForTiming(_ record: NetRecord) {
+        guard record.timingRaw == nil else { return }
+        idsByURLBase[String(urlBase(record.url)), default: []].append(record.id)
+        indexedReferences += 1
+        // Evicted and re-keyed records leave dead ids behind; sweeping the whole index now and then bounds them.
+        if indexedReferences > Self.logCapacity * 3 { rebuildTimingIndex() }
+    }
+
+    private func rebuildTimingIndex() {
+        idsByURLBase.removeAll(keepingCapacity: true)
+        indexedReferences = 0
+        for i in 0..<_all.count {
+            let rec = _all[i].rich
+            guard rec.timingRaw == nil else { continue }
+            idsByURLBase[String(urlBase(rec.url)), default: []].append(rec.id)
+            indexedReferences += 1
+        }
     }
 
     /// Whether `url` is the page's own body re-read, which must not appear as a page request; each mark is used once.
@@ -671,7 +765,10 @@ final class OrbitNetworkModel: OrbitInspectModule {
         let tokens = OrbitNetworkLogic.parseFilterQuery(searchQuery)
         let pageHost = URL(string: session?.pageURL ?? "")?.host
         let published = _all.map(\.pub)
-        records = published
+        withMutation(keyPath: \.records) {
+            publishedRecords = published
+            publishedStale = false
+        }
 
         var filtered = published.filter { r in
             if typeFilter != "all" {

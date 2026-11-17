@@ -404,6 +404,8 @@ final class MainMenuKeeper {
     static let shared = MainMenuKeeper()
 
     private(set) var menu: NSMenu?
+    /// The rows Orbit installed, in order. SwiftUI can edit the installed menu in place instead of swapping it, which an identity check on the menu cannot see.
+    private var installedItems: [NSMenuItem] = []
     private var observation: NSKeyValueObservation?
     private var notificationTokens: [NSObjectProtocol] = []
 
@@ -413,6 +415,7 @@ final class MainMenuKeeper {
     /// belong to one menu at a time, so rebuilding would trip over items still attached to the old one.
     func install(_ menu: NSMenu) {
         self.menu = menu
+        installedItems = menu.items
         restoreIfReplaced()
         guard observation == nil else { return }
 
@@ -423,10 +426,14 @@ final class MainMenuKeeper {
         }
 
         let center = NotificationCenter.default
+        // didUpdate fires after every event the app handles, so a menu swapped or edited during any event is put back before the next one.
+        // A long-running session is where this matters: the stock menu can arrive hours after launch, with no activation to prompt a check.
         let names: [Notification.Name] = [
             NSApplication.didBecomeActiveNotification,
+            NSApplication.didUpdateNotification,
             NSWindow.didBecomeMainNotification,
             NSWindow.didBecomeKeyNotification,
+            NSMenu.didBeginTrackingNotification,
         ]
         notificationTokens = names.map { name in
             center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -435,8 +442,19 @@ final class MainMenuKeeper {
         }
     }
 
+    /// True while the installed menu is the app's menu and still holds exactly the rows Orbit put in it.
+    var isIntact: Bool {
+        guard let menu, NSApp.mainMenu === menu else { return false }
+        let items = menu.items
+        return items.count == installedItems.count && zip(items, installedItems).allSatisfy { $0 === $1 }
+    }
+
     func restoreIfReplaced() {
-        guard let menu, NSApp.mainMenu !== menu else { return }
-        NSApp.mainMenu = menu
+        guard let menu, !isIntact else { return }
+        if menu.items.count != installedItems.count || !zip(menu.items, installedItems).allSatisfy({ $0 === $1 }) {
+            menu.removeAllItems()
+            for item in installedItems { menu.addItem(item) }
+        }
+        if NSApp.mainMenu !== menu { NSApp.mainMenu = menu }
     }
 }

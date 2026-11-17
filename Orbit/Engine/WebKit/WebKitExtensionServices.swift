@@ -42,7 +42,11 @@ final class WebKitExtensionServices {
     let state: WebKitExtensionStateStore
     let nativeMessaging = WebKitNativeMessaging()
     private(set) lazy var system = WebKitExtensionSystemAPIs(services: self)
-    private(set) var entries: [String: WebKitExtensionEntry] = [:]
+    private(set) var entries: [String: WebKitExtensionEntry] = [:] {
+        didSet { anyExtensionMayUseWebRequest = entries.values.contains(where: Self.mayUseWebRequest) }
+    }
+    /// False means no loaded extension can hold webRequest, so a per-request report has nobody to tell and skips building its details.
+    private(set) var anyExtensionMayUseWebRequest = false
     private var loadOrder: [String] = []
     private var pendingLifecycle: [String: [[String: Any]]] = [:]
     private var observers: [NSObjectProtocol] = []
@@ -57,6 +61,13 @@ final class WebKitExtensionServices {
     }
 
     func entry(_ extensionID: String) -> WebKitExtensionEntry? { entries[extensionID] }
+
+    /// Every way hasPermission can answer yes for webRequest: native, declared, or optional (granted later at runtime).
+    private static func mayUseWebRequest(_ entry: WebKitExtensionEntry) -> Bool {
+        entry.webKitPermissions.contains("webRequest")
+            || entry.declaredPermissions.contains("webRequest")
+            || entry.optionalPermissions.contains("webRequest")
+    }
 
     func entry(for context: WKWebExtensionContext) -> WebKitExtensionEntry? {
         entries[context.uniqueIdentifier] ?? entries.values.first { $0.context === context }
@@ -468,6 +479,7 @@ final class WebKitExtensionServices {
         default:
             return
         }
+        guard anyExtensionMayUseWebRequest else { return }
         var details: [String: Any] = [
             "requestId": requestID,
             "url": url.absoluteString,
@@ -521,7 +533,8 @@ final class WebKitExtensionServices {
         contents: WebKitWebContents,
         error: String? = nil
     ) {
-        guard Self.webRequestSchemes.contains(record.url.scheme?.lowercased() ?? "") else { return }
+        guard anyExtensionMayUseWebRequest,
+              Self.webRequestSchemes.contains(record.url.scheme?.lowercased() ?? "") else { return }
         var details: [String: Any] = [
             "requestId": record.requestID,
             "url": record.url.absoluteString,

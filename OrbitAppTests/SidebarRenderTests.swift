@@ -486,8 +486,8 @@ final class NewTabPageTests: XCTestCase {
         for removed in ["OrbitGlyph", "NewTabSite", "sitesRow", "func sites(", "Image(\"", "OrbitSegmentedControl"] {
             XCTAssertFalse(source.contains(removed), "NewTabPageView.swift still contains `\(removed)`.")
         }
-        XCTAssertEqual(source.components(separatedBy: "Text(\"").count - 1, 1, "Recently visited is the only labelled section.")
-        XCTAssertTrue(source.contains("Recently visited"))
+        XCTAssertEqual(source.components(separatedBy: "Text(\"").count - 1, 1, "Recent and frequent is the only labelled section.")
+        XCTAssertTrue(source.contains("Recent and frequent"))
         XCTAssertTrue(source.contains("CommandBarView("), "The page's field is the Command Bar, embedded.")
     }
 

@@ -184,7 +184,8 @@ extension AppEnvironment: WebContentsDelegate {
             openTab(url: request.url, in: tab.spaceID, section: .today, activate: true, siteProfileID: siteProfileToInherit(openerTabID: tabID, destination: request.url))
             return true
         case .newBackgroundTab:
-            openTab(url: request.url, in: tab.spaceID, section: .today, activate: false, siteProfileID: siteProfileToInherit(openerTabID: tabID, destination: request.url))
+            let opened = openTab(url: request.url, in: tab.spaceID, section: .today, activate: false, siteProfileID: siteProfileToInherit(openerTabID: tabID, destination: request.url))
+            announceBackgroundTab(opened)
             return true
         case .newWindow:
             if shouldPeek(sourceTabID: tabID, modifiers: [.shift], destination: request.url) {
@@ -226,12 +227,13 @@ extension AppEnvironment: WebContentsDelegate {
         case .currentTab, .newForegroundTab, .newBackgroundTab:
             guard let adopted = pending.adopt() else { return false }
             seedCrossSitePopupCookies(for: adopted, openedBy: contents, openerTabID: tabID)
-            adoptPageCreatedTab(
+            let opened = adoptPageCreatedTab(
                 adopted,
                 url: request.url,
                 in: tab.spaceID,
                 activate: request.disposition != .newBackgroundTab
             )
+            if request.disposition == .newBackgroundTab { announceBackgroundTab(opened) }
             return true
         }
     }
@@ -474,6 +476,16 @@ extension AppEnvironment: WebContentsDelegate {
     func webContents(_ contents: WebContents, didChangeMediaState state: MediaState) {
         guard let tabID = tabID(for: contents) else { return }
         let previous = mediaStates[tabID]
+        // Decided against the previous state, so it has to run before mediaStates is overwritten.
+        if MiniPlayerVisibility.pausedByOrbit(
+            previous: previous,
+            current: state,
+            wasPausedByOrbit: orbitPausedMediaTabIDs.contains(tabID)
+        ) {
+            orbitPausedMediaTabIDs.insert(tabID)
+        } else {
+            orbitPausedMediaTabIDs.remove(tabID)
+        }
         mediaStates[tabID] = state
         store.setMediaState(state, forTab: tabID)
         if let tab = contents as? WebKitWebContents {

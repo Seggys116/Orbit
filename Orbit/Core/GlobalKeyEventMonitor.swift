@@ -12,9 +12,11 @@ final class GlobalKeyEventMonitor {
     func start() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Before AppKit looks for a key equivalent: Cmd-V, Cmd-C and the rest live in Orbit's Edit menu, and a stock menu in its place makes them beep.
+            MainMenuKeeper.shared.restoreIfReplaced()
             // Resolved per event, not captured once — the frontmost window's
             // environment can change between key presses.
-            GlobalKeyEventMonitor.handle(event, in: .frontmost)
+            return GlobalKeyEventMonitor.handle(event, in: .frontmost)
         }
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .otherMouseUp]) { event in
             MouseNavigationButton.handle(event)

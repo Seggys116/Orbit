@@ -129,8 +129,9 @@ enum SidebarTearOffDetector {
             SidebarDragSession.discardStaleRecord()
         }
 
+        // A window that ignores the mouse cannot take a drop, so it does not count as somewhere the tab was dropped.
         let windowFrames = NSApp.windows
-            .filter { $0.isVisible && !$0.isMiniaturized }
+            .filter { $0.isVisible && !$0.isMiniaturized && !$0.ignoresMouseEvents }
             .map(\.frame)
         guard shouldTearOff(payload: payload, releasedAt: point, windowFrames: windowFrames, wasConsumed: wasConsumed) else { return }
         guard !resolvesToFolder(payload) else { return }

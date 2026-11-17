@@ -117,6 +117,18 @@ final class AppEnvironment {
 
     var dismissedMiniPlayerTabIDs: Set<TabID> = []
 
+    // Tabs whose current pause came from Orbit's own controls (the mini player, or the picture-in-picture
+    // window). Only those keep a mini player row while paused; a pause made on the page itself drops it.
+    // See MiniPlayerVisibility for the rule and AppEnvironment+Media for where it is set.
+    var orbitPausedMediaTabIDs: Set<TabID> = []
+
+    // MARK: - Background tab notice
+
+    /// Set when a link opens in a background tab; see AppEnvironment+BackgroundTabNotice.swift.
+    var backgroundTabNotice: BackgroundTabNotice?
+    // Not observed: it only lets a notice's own dismissal timer tell it has been replaced.
+    @ObservationIgnored var backgroundTabNoticeGeneration = 0
+
     // MARK: - Live web contents, keyed by Tab.id
 
     private(set) var webContents: [TabID: any WebContents] = [:]
@@ -532,6 +544,7 @@ final class AppEnvironment {
         findResultsByTab.removeAll()
         downloadIDByTab.removeAll()
         dismissedMiniPlayerTabIDs.removeAll()
+        orbitPausedMediaTabIDs.removeAll()
         hoveredLinkURL = nil
         hoveredSidebarTabID = nil
         isCommandBarPresented = false
@@ -1514,6 +1527,7 @@ final class AppEnvironment {
         // Closing archives the tab rather than deleting it, so a stale "playing" state here would keep a card for it in the mini player, and clicking that card would reopen the closed page.
         mediaStates.removeValue(forKey: tabID)
         dismissedMiniPlayerTabIDs.remove(tabID)
+        orbitPausedMediaTabIDs.remove(tabID)
     }
 
     // The one caller that must not close what it removes: tearing a tab off

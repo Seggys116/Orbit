@@ -630,6 +630,111 @@ final class CommandBarRankingTests: XCTestCase {
         XCTAssertEqual(text, "google.c")
     }
 
+    // MARK: - A site the text names leads with its root URL, not a deep history page
+
+    private func makeEnvironment(history: (ProfileID) -> [HistoryEntry]) -> AppEnvironment {
+        let env = AppEnvironment()
+        let profile = Profile(name: "Personal")
+        env.state.profiles = [profile]
+        let space = Space(name: "Personal", profileID: profile.id)
+        env.state.spaces = [space]
+        env.state.activeSpaceID = space.id
+        env.historyEntries = history(profile.id)
+        return env
+    }
+
+    private func historyURLs(in results: [CommandResult]) -> [String] {
+        results.compactMap { result in
+            if case .history(let entry) = result.kind { return entry.url.absoluteString }
+            return nil
+        }
+    }
+
+    func test_results_partialSiteNameLeadsWithTheSiteRootEvenWhenADeepPageIsTheMostRecentVisit() {
+        let env = makeEnvironment { profileID in
+            [
+                HistoryEntry(
+                    url: URL(string: "https://x.com/someuser/status/123")!, title: "someuser on X: a post",
+                    visitedAt: Date().addingTimeInterval(-60), visitCount: 9, profileID: profileID, wasTyped: true
+                ),
+                HistoryEntry(
+                    url: URL(string: "https://x.com/home")!, title: "Home / X",
+                    visitedAt: Date().addingTimeInterval(-86_400), visitCount: 2, profileID: profileID
+                ),
+            ]
+        }
+
+        let results = CommandBarEngine.results(query: "x", mode: .newTab, env: env, suggestions: [])
+
+        guard case .navigate(let url)? = results.first?.kind.activationIntent else {
+            return XCTFail("Enter on \"x\" must navigate to the site, got \(String(describing: results.first?.kind)); rows: \(results.map(\.title))")
+        }
+        XCTAssertEqual(url.absoluteString, "https://x.com", "The first row must be the bare site root, with no path, query or fragment.")
+
+        let urls = historyURLs(in: results)
+        XCTAssertEqual(urls.first, "https://x.com")
+        guard let deepIndex = urls.firstIndex(of: "https://x.com/someuser/status/123"),
+              let homeIndex = urls.firstIndex(of: "https://x.com/home") else {
+            return XCTFail("The deeper history rows must still be offered below the root; got \(urls)")
+        }
+        XCTAssertLessThan(0, deepIndex)
+        XCTAssertLessThan(deepIndex, homeIndex, "Deeper entries keep their normal frecency order (the recent, frequent post before /home).")
+    }
+
+    func test_results_siteRootAlreadyInHistoryIsPromotedNotDuplicated() {
+        let env = makeEnvironment { profileID in
+            [
+                HistoryEntry(
+                    url: URL(string: "https://x.com/home")!, title: "Home / X",
+                    visitedAt: Date().addingTimeInterval(-60), visitCount: 30, profileID: profileID, wasTyped: true
+                ),
+                HistoryEntry(url: URL(string: "https://x.com")!, title: "X", visitedAt: Date().addingTimeInterval(-7 * 86_400), visitCount: 1, profileID: profileID),
+            ]
+        }
+
+        let results = CommandBarEngine.results(query: "x", mode: .newTab, env: env, suggestions: [])
+
+        let urls = historyURLs(in: results)
+        XCTAssertEqual(urls.first, "https://x.com", "A root already in history must lead, above the busier /home page.")
+        XCTAssertEqual(urls.filter { $0 == "https://x.com" }.count, 1, "The root must appear once, not as both a history row and a synthesised one; got \(urls)")
+        XCTAssertTrue(urls.contains("https://x.com/home"))
+    }
+
+    func test_results_exactSiteNameLeadsOverAMoreFrecentSiteThatOnlyContainsTheText() {
+        let env = makeEnvironment { profileID in
+            [
+                HistoryEntry(
+                    url: URL(string: "https://xkcd.com")!, title: "xkcd",
+                    visitedAt: Date().addingTimeInterval(-60), visitCount: 200, profileID: profileID, wasTyped: true
+                ),
+                HistoryEntry(url: URL(string: "https://x.com/someuser")!, title: "someuser / X", visitedAt: Date().addingTimeInterval(-3 * 86_400), visitCount: 3, profileID: profileID),
+            ]
+        }
+
+        let results = CommandBarEngine.results(query: "x", mode: .newTab, env: env, suggestions: [])
+
+        XCTAssertEqual(historyURLs(in: results).first, "https://x.com", "Typing exactly \"x\" names x.com; xkcd.com merely contains the letter.")
+    }
+
+    func test_results_textThatOnlyAppearsInAPageTitleDoesNotPromoteASiteRoot() {
+        let env = makeEnvironment { profileID in
+            [
+                HistoryEntry(url: URL(string: "https://news.example.org/topics/orbits")!, title: "Orbits explained", visitCount: 4, profileID: profileID),
+            ]
+        }
+
+        let results = CommandBarEngine.results(query: "explained", mode: .newTab, env: env, suggestions: [])
+
+        let urls = historyURLs(in: results)
+        XCTAssertEqual(urls, ["https://news.example.org/topics/orbits"], "No host named \"explained\", so no root row may be invented; got \(urls)")
+    }
+
+    func test_siteRootURL_dropsPathQueryAndFragmentButKeepsSchemeAndPort() {
+        XCTAssertEqual(CommandBarEngine.siteRootURL(for: URL(string: "https://x.com/a/b?c=d#e")!)?.absoluteString, "https://x.com")
+        XCTAssertEqual(CommandBarEngine.siteRootURL(for: URL(string: "http://localhost:3000/app?x=1")!)?.absoluteString, "http://localhost:3000")
+        XCTAssertNil(CommandBarEngine.siteRootURL(for: URL(string: "file:///Users/me/file.txt")!))
+    }
+
     func test_results_historyRowSubtitleIsRelativeTime() {
         let env = AppEnvironment()
         let profile = Profile(name: "Personal")

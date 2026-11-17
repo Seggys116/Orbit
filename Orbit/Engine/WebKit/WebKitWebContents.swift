@@ -3,6 +3,36 @@ import OSLog
 import Security
 import WebKit
 
+/// A window that exists only so a floating background page has one. It is on screen at one percent opacity,
+/// ignores the mouse, and stays out of the window cycle, Mission Control and the Windows menu.
+@MainActor
+final class PictureInPictureHostWindow: NSWindow {
+    init(size: NSSize) {
+        let origin = NSScreen.main?.visibleFrame.origin ?? .zero
+        super.init(
+            contentRect: NSRect(origin: origin, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        isReleasedWhenClosed = false
+        alphaValue = 0.01
+        ignoresMouseEvents = true
+        hasShadow = false
+        isOpaque = false
+        backgroundColor = .clear
+        canHide = false
+        hidesOnDeactivate = false
+        animationBehavior = .none
+        isExcludedFromWindowsMenu = true
+        collectionBehavior = [.transient, .ignoresCycle, .stationary, .fullScreenAuxiliary]
+        contentView = NSView(frame: NSRect(origin: .zero, size: size))
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 enum WebKitMediaPreferences {
     // Picture-in-picture's public flag is iOS-only. WebGL stays explicitly on.
     static func enable(_ configuration: WKWebViewConfiguration) {
@@ -45,7 +75,11 @@ final class OrbitWebView: WKWebView {
     /// While the command bar owns the keyboard WebKit must not take it back; a page already first responder stays so until moved.
     var suppressesFirstResponder = false
 
-    var isInRealWindow: Bool { super.window != nil }
+    var isInRealWindow: Bool { super.window != nil && super.window !== pictureInPictureHost }
+
+    /// The window that holds the page while it floats with no pane showing it. Picture-in-picture's Restore button
+    /// does nothing when the page it came from has no window at all, so a floating background tab is kept in this one.
+    private var pictureInPictureHost: PictureInPictureHostWindow?
 
     override func becomeFirstResponder() -> Bool {
         if suppressesFirstResponder { return false }
@@ -64,12 +98,51 @@ final class OrbitWebView: WKWebView {
             if super.window == nil {
                 if hasJoinedRealWindow { snapshotIsStale = true }
                 keepsCompositingWithoutWindow = false
+            } else if super.window === pictureInPictureHost {
+                // Parked for picture-in-picture: the page neither joined a pane nor lost its window.
             } else {
                 hasJoinedRealWindow = true
                 snapshotIsStale = false
+                // A pane now shows the page, so the stand-in is no longer needed.
+                dropPictureInPictureHost()
             }
         }
         super.viewDidMoveToWindow()
+    }
+
+    /// Called as the page enters or leaves picture-in-picture. A page with no pane of its own is parked in a
+    /// near-invisible window for as long as it floats, so the floating window's Restore button keeps working.
+    func setFloatingInPictureInPicture(_ floating: Bool) {
+        if floating {
+            parkForPictureInPicture()
+        } else {
+            releasePictureInPictureHost()
+        }
+    }
+
+    private func parkForPictureInPicture() {
+        guard pictureInPictureHost == nil, super.window == nil else { return }
+        let size = bounds.width >= 100 && bounds.height >= 100 ? bounds.size : NSSize(width: 800, height: 600)
+        let host = PictureInPictureHostWindow(size: size)
+        pictureInPictureHost = host
+        frame = NSRect(origin: .zero, size: size)
+        autoresizingMask = [.width, .height]
+        host.contentView?.addSubview(self)
+        host.orderBack(nil)
+    }
+
+    /// Takes the page back out of the stand-in window, leaving it windowless as any other background tab.
+    private func releasePictureInPictureHost() {
+        guard let host = pictureInPictureHost else { return }
+        if super.window === host { removeFromSuperview() }
+        dropPictureInPictureHost()
+    }
+
+    private func dropPictureInPictureHost() {
+        guard let host = pictureInPictureHost else { return }
+        pictureInPictureHost = nil
+        host.orderOut(nil)
+        host.contentView = nil
     }
 
     override func removeFromSuperview() {
@@ -230,7 +303,12 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     let session: EngineSession
     weak var delegate: WebContentsDelegate?
     var navigationState = NavigationState()
-    var mediaState = MediaState.idle
+    var mediaState = MediaState.idle {
+        didSet {
+            guard oldValue.isPictureInPictureActive != mediaState.isPictureInPictureActive else { return }
+            (webView as? OrbitWebView)?.setFloatingInPictureInPicture(mediaState.isPictureInPictureActive)
+        }
+    }
     private(set) var isClosed = false
     private var webViewReleased = false
     var zoomFactor: Double { webView.pageZoom }
@@ -886,6 +964,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     func teardown(notifyExtensionController: Bool) {
         guard !isClosed else { return }
         isClosed = true
+        (webView as? OrbitWebView)?.setFloatingInPictureInPicture(false)
         OrbitDevToolsStore.shared.pageClosed(self)
         extras.tearDown()
         inspectorCloseSuppressed = true

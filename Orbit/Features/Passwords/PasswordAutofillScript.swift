@@ -577,15 +577,37 @@ enum PasswordAutofillScript {
         root.addEventListener('contextmenu', onContextMenu, true);
       }
 
+      // A busy page adds thousands of nodes in bursts, and adopt scans every descendant of the node it is given.
+      // Added elements are collected, the ones inside another collected element are dropped (adopting that one covers them), and the rest are adopted once per batch.
+      var pendingAdopts = new Set();
+      var adoptTimer = 0;
+
       var observer = new MutationObserver(function (records) {
         var removed = false;
         for (var i = 0; i < records.length; i++) {
           var added = records[i].addedNodes;
-          for (var j = 0; j < added.length; j++) { adopt(added[j]); }
+          for (var j = 0; j < added.length; j++) {
+            if (added[j].nodeType === 1) { pendingAdopts.add(added[j]); }
+          }
           if (records[i].removedNodes.length) { removed = true; }
         }
+        if (pendingAdopts.size && !adoptTimer) { adoptTimer = setTimeout(flushAdopts, 0); }
         if (removed && watch) { scheduleWatchCheck(); }
       });
+
+      function flushAdopts() {
+        adoptTimer = 0;
+        var collected = pendingAdopts;
+        pendingAdopts = new Set();
+        var roots = [];
+        collected.forEach(function (node) {
+          for (var up = node.parentNode; up; up = up.parentNode) {
+            if (collected.has(up)) { return; }
+          }
+          roots.push(node);
+        });
+        for (var i = 0; i < roots.length; i++) { adopt(roots[i]); }
+      }
 
       function adopt(node) {
         if (!node || node.nodeType !== 1) { return; }

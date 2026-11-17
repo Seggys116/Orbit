@@ -242,13 +242,15 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
     // MARK: - Pause
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pausing_keepsTheCardSoItsPlayButtonCanResume
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pausingFromTheCard_keepsTheCardSoItsPlayButtonCanResume
 
-    func test_pausing_keepsTheCardSoItsPlayButtonCanResume() throws {
+    func test_pausingFromTheCard_keepsTheCardSoItsPlayButtonCanResume() async throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
+        contents.scriptResult = true
         XCTAssertEqual(env.nowPlayingTabs.map(\.id), [tabs.playing], "Precondition: the card is up.")
 
+        await env.toggleMediaPlayback(for: tabs.playing)
         env.webContents(contents, didChangeMediaState: Self.pausedState())
 
         XCTAssertEqual(
@@ -257,14 +259,69 @@ final class SidebarMiniPlayerTests: XCTestCase {
         )
     }
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_whenTheMediaEnds_theCardGoes
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pausingOnThePageItself_removesTheCard
 
-    func test_whenTheMediaEnds_theCardGoes() throws {
+    func test_pausingOnThePageItself_removesTheCard() throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
+        XCTAssertEqual(env.nowPlayingTabs.map(\.id), [tabs.playing], "Precondition: the card is up.")
 
         env.webContents(contents, didChangeMediaState: Self.pausedState())
-        XCTAssertFalse(env.nowPlayingTabs.isEmpty, "Precondition: paused keeps the card.")
+
+        XCTAssertTrue(
+            env.nowPlayingTabs.isEmpty,
+            "The user paused the media on the page itself, so there is nothing playing to show a card for."
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_pausingInPictureInPicture_keepsTheCard
+
+    func test_pausingInPictureInPicture_keepsTheCard() throws {
+        let tabs = try twoTabs()
+        let contents = makePlaying(tabs.playing)
+        var floating = Self.playingState()
+        floating.isPictureInPictureActive = true
+        env.webContents(contents, didChangeMediaState: floating)
+
+        var pausedWhileFloating = Self.pausedState()
+        pausedWhileFloating.isPictureInPictureActive = true
+        env.webContents(contents, didChangeMediaState: pausedWhileFloating)
+
+        XCTAssertEqual(
+            env.nowPlayingTabs.map(\.id), [tabs.playing],
+            "A pause from the picture-in-picture window is Orbit's own control and must keep the card."
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_resumingAfterAnOrbitPause_thenPausingOnThePage_removesTheCard
+
+    func test_resumingAfterAnOrbitPause_thenPausingOnThePage_removesTheCard() async throws {
+        let tabs = try twoTabs()
+        let contents = makePlaying(tabs.playing)
+        contents.scriptResult = true
+        await env.toggleMediaPlayback(for: tabs.playing)
+        env.webContents(contents, didChangeMediaState: Self.pausedState())
+        XCTAssertFalse(env.nowPlayingTabs.isEmpty, "Precondition: the Orbit pause kept the card.")
+
+        env.webContents(contents, didChangeMediaState: Self.playingState())
+        env.webContents(contents, didChangeMediaState: Self.pausedState())
+
+        XCTAssertTrue(
+            env.nowPlayingTabs.isEmpty,
+            "The earlier Orbit pause was resumed, so a later pause on the page must not inherit it."
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_whenTheMediaEnds_theCardGoes
+
+    func test_whenTheMediaEnds_theCardGoes() async throws {
+        let tabs = try twoTabs()
+        let contents = makePlaying(tabs.playing)
+        contents.scriptResult = true
+
+        await env.toggleMediaPlayback(for: tabs.playing)
+        env.webContents(contents, didChangeMediaState: Self.pausedState())
+        XCTAssertFalse(env.nowPlayingTabs.isEmpty, "Precondition: an Orbit pause keeps the card.")
 
         env.webContents(contents, didChangeMediaState: Self.stoppedState)
 
@@ -366,10 +423,12 @@ final class SidebarMiniPlayerTests: XCTestCase {
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_thePlayGlyphIsReachable_aTabCanBeInTheTrayWhileNotPlaying
 
-    func test_thePlayGlyphIsReachable_aTabCanBeInTheTrayWhileNotPlaying() throws {
+    func test_thePlayGlyphIsReachable_aTabCanBeInTheTrayWhileNotPlaying() async throws {
         let tabs = try twoTabs()
         let contents = makePlaying(tabs.playing)
+        contents.scriptResult = true
 
+        await env.toggleMediaPlayback(for: tabs.playing)
         env.webContents(contents, didChangeMediaState: Self.pausedState())
 
         let inTray = env.nowPlayingTabs.map(\.id)

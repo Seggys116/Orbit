@@ -215,9 +215,15 @@ enum CommandBarEngine {
         static let chatGPTAsk: Double = 14
         // A history row scores textScore + frecency, and textScore can legitimately be 0; this must stay high enough that such a row cannot outrank every fetched suggestion on nothing at all.
         static let networkSuggestion: Double = 5
+        // How far a site's root row sits above the best-ranked history row of that site, so Enter on a partial like "x" lands on the root rather than the last deep page visited. Kept tiny so the root stays below an open tab that outranks that history row today.
+        static let siteRootMargin: Double = 0.01
+        // Added when the query is exactly the site's name ("x" for x.com), so that site's root also leads other sites that merely contain the text and are more frecent.
+        static let exactSiteBonus: Double = 40
     }
 
     private static let historyRowBudget = 8
+    // Site root rows share historyRowBudget with ordinary history rows; this caps how many of those slots they can take.
+    private static let siteRootRowLimit = 2
 
     // Mirrors HistoryStore.frecencyScore, reimplemented because this file also compiles into the host-less OrbitTests target, which has no HistoryStore.
     // Both read the same three HistoryEntry fields, so they can't disagree about "frecent" without one being edited alone.
@@ -233,14 +239,28 @@ enum CommandBarEngine {
     }
 
     static func searchFields(for url: URL) -> [String] {
-        var fields = [url.absoluteString]
-        guard let host = url.host() else { return fields }
-        fields.append(host)
+        [url.absoluteString] + hostFields(for: url)
+    }
+
+    // The host-derived subset of searchFields: what "the typed text names this site" is judged against, so a word that only appears in a page's path or title never promotes that site's root.
+    private static func hostFields(for url: URL) -> [String] {
+        guard let host = url.host() else { return [] }
+        var fields = [host]
         let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         if bare != host { fields.append(bare) }
         let labels = bare.split(separator: ".")
         if labels.count > 1, let name = labels.first { fields.append(String(name)) }
         return fields
+    }
+
+    // Scheme, host and port only. Port is kept because localhost:3000 and localhost:8080 are different sites. Nil for schemes with no meaningful root (file, orbit, view-source).
+    static func siteRootURL(for url: URL) -> URL? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", let host = url.host() else { return nil }
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        components.port = url.port
+        return components.url
     }
 
     // Query strings are kept: ?q=a and ?q=b are genuinely different pages.
@@ -284,7 +304,8 @@ enum CommandBarEngine {
             items.append(compound)
         }
 
-        if let url = Self.detectTypedURL(trimmed) {
+        let typedURL = Self.detectTypedURL(trimmed)
+        if let url = typedURL {
             items.append(CommandResult(id: "typed-url", kind: .typedURL(url), title: url.absoluteString, subtitle: "Go to this address", symbolName: "arrow.right", score: PriorityScore.typedURL, faviconURL: nil, faviconHost: nil))
         } else {
             let instantURL = isInstantLinksEnabled ? InstantLinkResolver.instantURL(for: trimmed, engine: searchEngine) : nil
@@ -357,6 +378,9 @@ enum CommandBarEngine {
 
         // now is a parameter, not read directly: frecency makes this function's output time-dependent, and two calls microseconds apart can break a test comparing two result lists for equality.
         // Store is asked for a wide net (40) so entries rank against each other, but only historyRowBudget reach the list, or a query like "wikipedia" fills the list with near-identical rows.
+        // Taken before the history loop adds its own keys: a site root already offered as an open tab, a favourite or the typed address must not be offered again as a synthesised row.
+        var siteRootClaims = claimedDestinations
+        if let typedURL { siteRootClaims.insert(dedupeKey(for: typedURL)) }
         var historyItems: [CommandResult] = []
         for entry in env.historyResults(matching: trimmed, limit: 40) {
             let key = dedupeKey(for: entry.url)
@@ -375,7 +399,11 @@ enum CommandBarEngine {
                 faviconHost: entry.url.host() ?? entry.url.absoluteString
             ))
         }
-        items.append(contentsOf: historyItems.sorted { $0.score > $1.score }.prefix(historyRowBudget))
+        // A site the text names gets its root URL (no path, query or fragment) ranked above every history row of that site, so Enter on "x" opens x.com instead of the last post visited there. Roots count against historyRowBudget.
+        let rankedHistory = historyItems.sorted { $0.score > $1.score }
+        let siteRoots = siteRootRows(query: trimmed, rankedHistory: rankedHistory, claimed: siteRootClaims)
+        items.append(contentsOf: siteRoots.rows)
+        items.append(contentsOf: rankedHistory.filter { !siteRoots.absorbedIDs.contains($0.id) }.prefix(max(historyRowBudget - siteRoots.rows.count, 0)))
 
         for action in allActions() {
             let haystacks = [action.title] + action.keywords
@@ -391,6 +419,65 @@ enum CommandBarEngine {
         }
 
         return pinningVerbatimRows(in: items.sorted { $0.score > $1.score }, query: trimmed, atTop: mode.editsCurrentPage)
+    }
+
+    // MARK: Site roots
+
+    // Walks history best-first and, for each of the first few sites whose host the query names, produces one root row. A history row that already is the root is promoted (re-scored, absorbed) rather than copied; otherwise a row is synthesised from the site's best history entry. Roots are only offered for sites with history behind them, and never for a root already claimed elsewhere in the list.
+    private static func siteRootRows(
+        query: String,
+        rankedHistory: [CommandResult],
+        claimed: Set<String>
+    ) -> (rows: [CommandResult], absorbedIDs: Set<String>) {
+        var rows: [CommandResult] = []
+        var absorbedIDs = Set<String>()
+        var visitedSites = Set<String>()
+        let loweredQuery = query.lowercased()
+
+        for row in rankedHistory {
+            guard rows.count < siteRootRowLimit else { break }
+            guard case .history(let entry) = row.kind, let root = siteRootURL(for: entry.url) else { continue }
+            let siteKey = dedupeKey(for: root)
+            // rankedHistory is best-first, so the first row seen for a site is that site's best one.
+            guard visitedSites.insert(siteKey).inserted, !claimed.contains(siteKey) else { continue }
+            guard FuzzyMatcher.matchQuery(query, in: hostFields(for: entry.url), strictness: .substring) != nil else { continue }
+
+            var score = row.score + PriorityScore.siteRootMargin
+            if isExactSiteName(loweredQuery, for: entry.url) { score += PriorityScore.exactSiteBonus }
+
+            let existingRoot = rankedHistory.first { candidate in
+                if case .history(let other) = candidate.kind { return dedupeKey(for: other.url) == siteKey }
+                return false
+            }
+            if var promoted = existingRoot {
+                promoted.score = score
+                rows.append(promoted)
+                absorbedIDs.insert(promoted.id)
+            } else {
+                let host = root.host() ?? root.absoluteString
+                let rootEntry = HistoryEntry(url: root, title: host, visitedAt: entry.visitedAt, visitCount: entry.visitCount, profileID: entry.profileID, spaceID: entry.spaceID)
+                rows.append(CommandResult(
+                    id: "site-root-\(siteKey)",
+                    kind: .history(rootEntry),
+                    title: host,
+                    subtitle: "Go to this site",
+                    symbolName: "globe",
+                    score: score,
+                    faviconURL: faviconGuessURL(for: root),
+                    faviconHost: host
+                ))
+            }
+        }
+        return (rows.sorted { $0.score > $1.score }, absorbedIDs)
+    }
+
+    // True when the whole query is the site's host or its name label: "x" for x.com, "github" or "github.com" for www.github.com.
+    private static func isExactSiteName(_ loweredQuery: String, for url: URL) -> Bool {
+        guard let host = url.host()?.lowercased() else { return false }
+        let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        if loweredQuery == host || loweredQuery == bare { return true }
+        let labels = bare.split(separator: ".")
+        return labels.count > 1 && labels.first.map(String.init) == loweredQuery
     }
 
     // MARK: The verbatim row
@@ -517,7 +604,8 @@ enum CommandBarEngine {
     // unrecognised TLD falls through to nil here and is left for history to
     // resolve via ordinary ranking, exactly as Chromium leaves it to the
     // HistoryURLProvider's inline-autocomplete pass rather than the
-    // what-you-typed match.
+    // what-you-typed match. Like that pass, the resolved destination is the
+    // site's root (siteRootRows), never a deeper page of it that was visited last.
     static func detectTypedURL(_ text: String) -> URL? {
         guard !text.contains(" ") else { return nil }
         if let url = URL(string: text), let scheme = url.scheme, ["http", "https", "file", "orbit", "view-source"].contains(scheme) {

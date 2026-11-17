@@ -35,6 +35,7 @@ extension AppEnvironment {
         moveMirrorMembership(id, from: source, keyPath: \.crashedTabs)
         moveMirrorMembership(id, from: source, keyPath: \.unresponsiveTabs)
         moveMirrorMembership(id, from: source, keyPath: \.dismissedMiniPlayerTabIDs)
+        moveMirrorMembership(id, from: source, keyPath: \.orbitPausedMediaTabIDs)
 
         registerExtensionTab(id)
     }
