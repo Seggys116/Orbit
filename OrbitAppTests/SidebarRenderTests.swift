@@ -479,15 +479,18 @@ final class NewTabPageTests: XCTestCase {
         XCTAssertEqual(env.listedTodayTabs(in: spaceID).count, 1)
     }
 
-    // MARK: - The page is Recently visited and a Command Bar field, nothing else
+    // MARK: - The page is Frequently visited, Recent and a Command Bar field, nothing else
 
     func test_thePageHasNoSitesSectionAndNoLogo() throws {
         let source = try sourceText("Orbit/UI/Content/NewTabPageView.swift")
         for removed in ["OrbitGlyph", "NewTabSite", "sitesRow", "func sites(", "Image(\"", "OrbitSegmentedControl"] {
             XCTAssertFalse(source.contains(removed), "NewTabPageView.swift still contains `\(removed)`.")
         }
-        XCTAssertEqual(source.components(separatedBy: "Text(\"").count - 1, 1, "Recent and frequent is the only labelled section.")
-        XCTAssertTrue(source.contains("Recent and frequent"))
+        // Titles are passed to sitesSection as arguments, so no literal Text("...") label sits in the page itself.
+        XCTAssertEqual(source.components(separatedBy: "Text(\"").count - 1, 0, "The page's only labelled sections are the two sitesSection calls.")
+        XCTAssertTrue(source.contains("sitesSection(\"Frequently visited\""))
+        XCTAssertTrue(source.contains("sitesSection(\"Recent\""))
+        XCTAssertFalse(source.contains("Recent and frequent"), "Recent and frequent are two lists, never one merged heading.")
         XCTAssertTrue(source.contains("CommandBarView("), "The page's field is the Command Bar, embedded.")
     }
 
