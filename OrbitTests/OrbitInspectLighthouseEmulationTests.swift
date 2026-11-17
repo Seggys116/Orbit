@@ -1,7 +1,6 @@
 // The device a Lighthouse run emulates, what the report says about it, and the history and comparison built on top.
 
 import XCTest
-@testable import Orbit
 
 final class OrbitInspectLighthouseEmulationTests: XCTestCase {
 

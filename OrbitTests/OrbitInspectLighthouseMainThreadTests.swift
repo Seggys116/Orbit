@@ -1,7 +1,6 @@
 // Time to Interactive, TBT's window, main-thread attribution, and the vulnerable-library matcher and its advisory table.
 
 import XCTest
-@testable import Orbit
 
 final class OrbitInspectLighthouseMainThreadTests: XCTestCase {
 
