@@ -12,6 +12,8 @@ struct CommandBarView: View {
     @State private var suggestions: [String] = []
     @State private var suggestionsTask: Task<Void, Never>?
     @State private var historySearchTask: Task<Void, Never>?
+    @State private var scoringTask: Task<Void, Never>?
+    @State private var scoring = ScoringState()
     @FocusState private var isFocused: Bool
 
     @State private var focusClaim: Task<Void, Never>?
@@ -36,11 +38,35 @@ struct CommandBarView: View {
     nonisolated(unsafe) static var testResultsObserver: ((String, [CommandResult]) -> Void)?
     #endif
 
+    /// The top row is what Return opens, so warm its connection while the user is still reading the list.
+    private func preconnectToTopResult(of list: [CommandResult]) {
+        guard let top = list.first, case .navigate(let url) = top.kind.activationIntent else { return }
+        let live = env.webContents.values.compactMap { $0 as? WebKitWebContents }.filter { !$0.isClosed && !$0.isExtensionPage }
+        // The active page, else a page on the profile a new tab uses; never a view of another profile.
+        let defaultIdentifier = (env.engine?.defaultSession as? WebKitSession)?.identifier
+        let page = (env.activeWebContents as? WebKitWebContents)
+            ?? live.first { $0.webKitSession.identifier == defaultIdentifier }
+        page?.preconnect(to: url)
+    }
+
     private func publish(_ newResults: [CommandResult], for text: String) {
         results = newResults
+        preconnectToTopResult(of: newResults)
         #if DEBUG
         Self.testResultsObserver?(text, newResults)
         #endif
+    }
+
+    /// Bookkeeping for the off-main scoring passes. A reference type so the passes can share it without invalidating the view.
+    final class ScoringState {
+        /// The scoring run in flight; the next one waits for it so at most one runs at a time.
+        var running: Task<CommandBarEngine.ScoredSources, Never>?
+        /// A keystroke whose first scored list has not landed yet; the list on screen is still the previous one.
+        var pending: (plan: CommandBarEngine.Plan, text: String)?
+        /// The newest scored list, so fetched suggestions can be merged in without scoring again.
+        var latest: (token: Int, plan: CommandBarEngine.Plan, scored: CommandBarEngine.ScoredSources)?
+        var nextSequence = 0
+        var publishedSequence = 0
     }
 
     final class QueryGeneration {
@@ -52,6 +78,8 @@ struct CommandBarView: View {
         }
 
         func isCurrent(_ token: Int) -> Bool { token == current }
+
+        var currentToken: Int { current }
     }
 
     @State private var activeSiteEngine: SiteSearchEngine?
@@ -391,7 +419,7 @@ struct CommandBarView: View {
             activeSiteEngine = initialSiteSearchScope?.engine
                 ?? (mode == .chatGPT && isChatGPTCommandBarAvailable ? ChatGPTCommandBar.virtualEngine() : nil)
             query = initialSiteSearchScope?.query ?? embedding?.seedQuery ?? mode.initialQuery
-            refreshResults(for: query, fetchSuggestions: false)
+            refreshResults(for: query, fetchSuggestions: false, synchronously: true)
         }
 
         #if DEBUG
@@ -403,45 +431,126 @@ struct CommandBarView: View {
         #endif
     }
 
-    private func refreshResults(for text: String, fetchSuggestions: Bool = true) {
+    // synchronously: scores on the main actor and publishes before returning. Only for seeding the bar as it opens, where the first list must be in place before layout; every keystroke goes through the background path.
+    private func refreshResults(for text: String, fetchSuggestions: Bool = true, synchronously: Bool = false) {
         let token = generation.begin()
         let siteSearch = siteSearchState
         let chatGPTAvailable = isChatGPTCommandBarAvailable
         let instantLinksEnabled = AssistSettings.isInstantLinksEnabled
         let mode = self.mode
-        publish(CommandBarEngine.results(
-            query: text, mode: mode, env: env, suggestions: suggestions,
-            searchEngine: env.searchEngine, siteSearch: siteSearch,
-            isChatGPTCommandBarAvailable: chatGPTAvailable, isInstantLinksEnabled: instantLinksEnabled
-        ), for: text)
-        selectedIndex = 0
-        // The two async passes below deliberately do not raise a scroll request: they only widen a list the user may already be arrowing through.
-        requestScroll(to: 0)
+        let engine = env.searchEngine
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Only a typed query outside a Site Search scope has history, tabs and favourites to score; the empty-state and Site Search lists are cheap and stay on the main actor.
+        let scoresSources = siteSearch.active == nil && !trimmed.isEmpty
+        let usesBackgroundScoring = scoresSources && !synchronously
+
+        scoringTask?.cancel()
         historySearchTask?.cancel()
+        scoring.latest = nil
+        scoring.pending = nil
+
+        func makePlan() -> CommandBarEngine.Plan {
+            let sources = env.historySources(matching: trimmed)
+            return CommandBarEngine.plan(
+                query: trimmed, mode: mode, env: env,
+                historyIndexed: sources.indexed, historyCached: sources.cached,
+                searchEngine: engine,
+                isChatGPTCommandBarAvailable: chatGPTAvailable, isInstantLinksEnabled: instantLinksEnabled,
+                now: Date()
+            )
+        }
+
+        // Taken together with the first plan, so "nothing new" below means nothing the first pass did not already see.
+        let searchEpoch = env.historySearchEpoch
+        if usesBackgroundScoring {
+            // The previous list stays on screen until this one lands: no flash of empty rows, no stalled keystroke.
+            let plan = makePlan()
+            scoring.pending = (plan, text)
+            scoringTask = Task {
+                await scoreAndPublish(plan, token: token, text: text)
+            }
+        } else {
+            publish(CommandBarEngine.results(
+                query: text, mode: mode, env: env, suggestions: suggestions,
+                searchEngine: engine, siteSearch: siteSearch,
+                isChatGPTCommandBarAvailable: chatGPTAvailable, isInstantLinksEnabled: instantLinksEnabled
+            ), for: text)
+            selectedIndex = 0
+            // The async passes below deliberately do not raise a scroll request: they only widen a list the user may already be arrowing through.
+            requestScroll(to: 0)
+        }
+
         historySearchTask = Task {
             await env.prepareHistorySearch(for: text)
             guard !Task.isCancelled, generation.isCurrent(token) else { return }
-            publish(CommandBarEngine.results(
-                query: text, mode: mode, env: env, suggestions: suggestions,
-                searchEngine: env.searchEngine, siteSearch: siteSearch,
-                isChatGPTCommandBarAvailable: chatGPTAvailable, isInstantLinksEnabled: instantLinksEnabled
-            ), for: text)
+            // A second pass only when the store's search added hits the first pass could not see.
+            guard scoresSources, env.historySearchEpoch != searchEpoch else { return }
+            await scoreAndPublish(makePlan(), token: token, text: text)
         }
 
         guard fetchSuggestions, env.includesSearchSuggestions else { return }
         suggestionsTask?.cancel()
-        let engine = env.searchEngine
         suggestionsTask = Task {
             let fetched = await SearchSuggestionsClient.shared.suggestions(for: text, engine: engine)
             guard !Task.isCancelled, generation.isCurrent(token) else { return }
             suggestions = fetched
-            publish(CommandBarEngine.results(
-                query: text, mode: mode, env: env, suggestions: fetched,
-                searchEngine: engine, siteSearch: siteSearch,
-                isChatGPTCommandBarAvailable: chatGPTAvailable, isInstantLinksEnabled: instantLinksEnabled
-            ), for: text)
+            if let latest = scoring.latest, latest.token == token {
+                // Suggestions do not change the scored rows, so merge them into the list already scored.
+                publish(CommandBarEngine.assemble(latest.plan, scored: latest.scored, suggestions: fetched), for: text)
+            } else if !usesBackgroundScoring {
+                publish(CommandBarEngine.results(
+                    query: text, mode: mode, env: env, suggestions: fetched,
+                    searchEngine: engine, siteSearch: siteSearch,
+                    isChatGPTCommandBarAvailable: chatGPTAvailable, isInstantLinksEnabled: instantLinksEnabled
+                ), for: text)
+            }
+            // Otherwise the first scored list has not landed yet and will include these suggestions when it does.
         }
+    }
+
+    // Scores off the main actor, then publishes if this keystroke is still the current one and nothing newer has landed.
+    private func scoreAndPublish(_ plan: CommandBarEngine.Plan, token: Int, text: String) async {
+        scoring.nextSequence += 1
+        let sequence = scoring.nextSequence
+        let scored = await score(plan.request)
+        guard !scored.wasCancelled, !Task.isCancelled, generation.isCurrent(token), sequence > scoring.publishedSequence else { return }
+        land(scored, for: plan, token: token, text: text, sequence: sequence)
+    }
+
+    private func land(_ scored: CommandBarEngine.ScoredSources, for plan: CommandBarEngine.Plan, token: Int, text: String, sequence: Int) {
+        scoring.publishedSequence = sequence
+        scoring.latest = (token, plan, scored)
+        publish(CommandBarEngine.assemble(plan, scored: scored, suggestions: suggestions), for: text)
+        if scoring.pending != nil {
+            scoring.pending = nil
+            selectedIndex = 0
+            requestScroll(to: 0)
+        }
+    }
+
+    // Each run first cancels, then waits for, the one it supersedes, so at most one scoring runs at a time and a stale one stops at its next checkpoint.
+    private func score(_ request: CommandBarEngine.SourceRequest) async -> CommandBarEngine.ScoredSources {
+        let prior = scoring.running
+        prior?.cancel()
+        let work = Task.detached(priority: .userInitiated) {
+            _ = await prior?.value
+            return CommandBarEngine.scoreSources(request, cancellable: true)
+        }
+        scoring.running = work
+        return await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
+        }
+    }
+
+    // Return and Tab act on the list on screen, which lags a keystroke by the scoring pass. In the rare case the key arrives first, score that keystroke here so the action sees the list the user is looking at the text of.
+    private func settlePendingResults() {
+        guard let pending = scoring.pending else { return }
+        scoring.nextSequence += 1
+        let sequence = scoring.nextSequence
+        land(CommandBarEngine.scoreSources(pending.plan.request), for: pending.plan, token: generation.currentToken, text: pending.text, sequence: sequence)
     }
 
     private func moveSelection(_ delta: Int) {
@@ -499,6 +608,7 @@ struct CommandBarView: View {
     }
 
     private func autocomplete() {
+        settlePendingResults()
         guard showsResults, let first = results.first else { return }
         switch first.kind {
         case .typedURL(let url): query = url.absoluteString
@@ -517,6 +627,7 @@ struct CommandBarView: View {
     }
 
     private func commit(instant: Bool) {
+        settlePendingResults()
         // Enter on an emptied address field leaves the page alone. With nothing typed the list is only recents and favourites, and committing the top one would navigate the tab somewhere the user never asked for.
         if mode.editsCurrentPage, activeSiteEngine == nil, query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             dismiss()
@@ -543,6 +654,8 @@ struct CommandBarView: View {
     private func dismiss() {
         suggestionsTask?.cancel()
         historySearchTask?.cancel()
+        scoringTask?.cancel()
+        scoring.pending = nil
         if embedding != nil {
             clearInput()
         } else {

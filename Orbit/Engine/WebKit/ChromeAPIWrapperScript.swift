@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Script prepended to every loaded extension. It fills chrome.* namespaces
@@ -1869,9 +1870,38 @@ enum ChromeAPIWrapperScript {
         return script
     }
 
+    static let stampFileName = "orbit-wrapper.stamp"
+
+    /// Identifies the wrapper code itself, so a new build with a changed script or modules rewrites every extension once.
+    private static let wrapperFingerprint: String = {
+        var hasher = SHA256()
+        hasher.update(data: Data(source.utf8))
+        hasher.update(data: Data(ChromeAPIWrapperModules.source.utf8))
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }()
+
+    /// Hash of everything the install's output depends on: the wrapper, the configuration and the manifest as it
+    /// stands on disk. Taken over the bytes install leaves behind, so an already-wrapped directory matches its own stamp.
+    private static func stamp(forManifest manifest: Data, configuration: Configuration) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data(wrapperFingerprint.utf8))
+        hasher.update(data: Data(configuration.grantedOptionalPermissions.joined(separator: "\u{1}").utf8))
+        hasher.update(data: Data("\(configuration.maxSessionResults)".utf8))
+        hasher.update(data: manifest)
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     static func install(in directory: URL, configuration: Configuration = Configuration()) throws {
         let manifestURL = directory.appendingPathComponent("manifest.json")
         let data = try Data(contentsOf: manifestURL)
+        // An unchanged, already-wrapped directory has nothing to rewrite; skip parsing, re-serialising and the HTML walk.
+        let stampURL = directory.appendingPathComponent(stampFileName)
+        let scriptURL = directory.appendingPathComponent(fileName)
+        if let recorded = try? String(contentsOf: stampURL, encoding: .utf8),
+           recorded == stamp(forManifest: data, configuration: configuration),
+           FileManager.default.fileExists(atPath: scriptURL.path) {
+            return
+        }
         guard var manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         if var scripts = manifest["content_scripts"] as? [[String: Any]] {
             for index in scripts.indices {
@@ -1934,11 +1964,13 @@ enum ChromeAPIWrapperScript {
             grantedLiteral: grantedLiteral,
             configJSON: String(decoding: configData, as: UTF8.self)
         )
-        let scriptURL = directory.appendingPathComponent(fileName)
         if (try? String(contentsOf: scriptURL, encoding: .utf8)) != script {
             try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         }
         try injectWrapper(intoHTMLIn: directory)
+        // Last, so an install that threw part-way is redone next launch. A failed stamp write only costs that redo.
+        try? stamp(forManifest: rewritten, configuration: configuration)
+            .write(to: stampURL, atomically: true, encoding: .utf8)
     }
 
     /// Popups are extension pages, not content scripts, so the wrapper has to be a script tag.

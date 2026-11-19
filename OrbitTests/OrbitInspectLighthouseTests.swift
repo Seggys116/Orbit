@@ -488,7 +488,8 @@ final class OrbitInspectLighthouseTests: XCTestCase {
         input.documentHeaders?["referrer-policy"] = "unsafe-url"
         let paneReport = OrbitSecurityLogic.evaluate(input)
         let lighthouse = OrbitLighthouseLogic.score(bundle: securityBundle(input))
-        for check in paneReport.checks where check.weight > 0 && check.state != .info {
+        XCTAssertNil(lighthouse.audits.first { $0.id == "security-libraries" }, "Best Practices already grades vulnerable libraries.")
+        for check in paneReport.checks where check.weight > 0 && check.state != .info && check.id != "libraries" {
             let audit = lighthouse.audits.first { $0.id == "security-\(check.id)" }
             XCTAssertNotNil(audit, check.id)
             XCTAssertEqual(audit?.weight, check.weight, check.id)

@@ -58,8 +58,13 @@ final class OrbitDevToolsStore {
         let session = ensureSession(for: contents)
         session.isPresented = true
         if session.pageURL.isEmpty, let url = contents.webView.url { session.pageURL = url.absoluteString }
+        // The closed-page stub sends no hello, so the title comes from WebKit.
+        if let title = contents.webView.title { session.pageTitle = title }
+        session.installFullAgentScript()
         session.attachAgentIfNeeded()
         session.command(["op": "present", "on": true])
+        session.attachSubframeAgents()
+        session.security.prefetchConnection()
         session.select(panel: panel)
         if panel == .console { session.console.requestInputFocus() }
         if let point {
@@ -78,6 +83,8 @@ final class OrbitDevToolsStore {
         session.device.deactivate()
         session.picking = false
         session.command(["op": "detach"])
+        session.detachSubframeAgents()
+        session.removeFullAgentScript()
         session.attachPolicy.didDetach()
         session.windowController?.relinquish()
     }
@@ -201,8 +208,51 @@ final class OrbitInspectSession {
     func documentDidCommit(url: URL?) {
         pageURL = url?.absoluteString ?? ""
         subframes.removeAll()
+        // A closed inspector's pages carry only the early-capture stub, so the next command has to inject the agent itself.
+        if !isPresented { agentReady = false }
         for module in modules { module.pageDidReset(preservingLog: preserveLog) }
         picking = false
+    }
+
+    private var userContentController: WKUserContentController? {
+        contents?.webView.configuration.userContentController
+    }
+
+    /// While open, every document in this tab gets the full agent at document start, so reloads and navigations are fully instrumented.
+    func installFullAgentScript() {
+        guard let controller = userContentController else { return }
+        OrbitInspectAgent.setFullAgentScript(true, on: controller)
+    }
+
+    func removeFullAgentScript() {
+        guard let controller = userContentController else { return }
+        OrbitInspectAgent.setFullAgentScript(false, on: controller)
+    }
+
+    /// Frames already loaded when the inspector opens only have the stub, so the agent is loaded into the ones that said hello.
+    func attachSubframeAgents() {
+        guard let webView = contents?.webView, !subframes.isEmpty else { return }
+        let frames = subframes
+        guard let attach = Self.invocation(["op": "attach"], inject: false),
+              let attachWithAgent = Self.invocation(["op": "attach"], inject: true) else { return }
+        Task { @MainActor in
+            for frame in frames {
+                let loaded = try? await webView.evaluateJavaScript("!!window.__orbitInspect", in: frame, contentWorld: .page)
+                _ = try? await webView.evaluateJavaScript((loaded as? Bool) == true ? attach : attachWithAgent, in: frame, contentWorld: .page)
+            }
+        }
+    }
+
+    /// Frames get no commands of their own, so closing detaches their agents here to stop the work in them.
+    func detachSubframeAgents() {
+        guard let webView = contents?.webView, !subframes.isEmpty,
+              let detach = Self.invocation(["op": "detach"], inject: false) else { return }
+        let frames = subframes
+        Task { @MainActor in
+            for frame in frames {
+                _ = try? await webView.evaluateJavaScript(detach, in: frame, contentWorld: .page)
+            }
+        }
     }
 
     /// Commands run in order, so the snapshot requests that follow via panelDidAppear reach a fully attached agent.

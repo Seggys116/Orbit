@@ -15,7 +15,19 @@ final class PiPController {
     // Set only from an observed MediaState.isPictureInPictureActive, never from the act of asking.
     private(set) var pipTabID: TabID?
 
-    private var pendingRequest: (tabID: TabID, ticksRemaining: Int)?
+    private struct PendingRequest {
+        let tabID: TabID
+        var ticksRemaining: Int
+        /// The user came back before the page confirmed. The request was already sent, so the window that opens late has to be closed again, not forgotten.
+        var cancelled = false
+        /// The tab was off screen at some point since the request, so being on screen again means the user returned to it.
+        var leftScreen = false
+    }
+
+    private var pendingRequest: PendingRequest?
+
+    /// Whether the floating tab has been off screen since it started floating. A window the user opened while looking at the tab is left alone until they leave and come back.
+    private var floatingLeftScreen = false
 
     // A floating tab whose window closed while the video kept playing: possibly the window's "return to tab" button, possibly a close that has not paused the video yet.
     private var returnCandidate: TabID?
@@ -30,42 +42,67 @@ final class PiPController {
 
     static let tickInterval: TimeInterval = 0.5
 
-    /// Nothing playing and nothing floating: focus cannot open or close picture-in-picture.
-    /// A pending request stays on `tickInterval`, because confirmation is counted in those ticks.
-    private static let idleTickInterval: TimeInterval = 2
+    private var isStarted = false
+    private var isObservingIdle = false
+    private var startGeneration = 0
 
     func start(env: AppEnvironment) {
-        guard timer == nil else { return }
+        guard !isStarted else { return }
+        isStarted = true
         lastActiveTabID = env.activeTabID
-        armTimer(env: env, interval: desiredTickInterval(env: env))
+        notePlaybackCadence(env: env)
     }
 
-    private func desiredTickInterval(env: AppEnvironment) -> TimeInterval {
-        let busy = pendingRequest != nil
+    /// Nothing playing, floating or pending: focus cannot open or close picture-in-picture, so no timer runs.
+    /// A pending request needs `tickInterval` because confirmation is counted in those ticks.
+    private func isBusy(env: AppEnvironment) -> Bool {
+        pendingRequest != nil
             || pipTabID != nil
+            || returnCandidate != nil
             || env.mediaStates.values.contains { $0.isPlaying || $0.isPictureInPictureActive }
-        return busy ? Self.tickInterval : Self.idleTickInterval
     }
 
-    private func armTimer(env: AppEnvironment, interval: TimeInterval) {
-        timer?.invalidate()
-        let armed = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+    private func armTimer(env: AppEnvironment) {
+        guard timer == nil else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick(env: env) }
         }
-        if interval > Self.tickInterval {
-            armed.tolerance = 0.5
+    }
+
+    /// While idle, a change to the media states or the active tab wakes the controller instead of a timer polling for it.
+    private func observeWhileIdle(env: AppEnvironment) {
+        guard !isObservingIdle else { return }
+        isObservingIdle = true
+        let generation = startGeneration
+        withObservationTracking {
+            _ = env.mediaStates
+            _ = env.activeTabID
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                // A registration left over from before stop() must not tick or clear the new one's flag.
+                guard let self, self.startGeneration == generation else { return }
+                self.isObservingIdle = false
+                guard self.isStarted else { return }
+                self.tick(env: env)
+            }
         }
-        timer = armed
     }
 
     private func notePlaybackCadence(env: AppEnvironment) {
-        guard let timer else { return }
-        let interval = desiredTickInterval(env: env)
-        guard abs(timer.timeInterval - interval) > 0.001 else { return }
-        armTimer(env: env, interval: interval)
+        guard isStarted else { return }
+        if isBusy(env: env) {
+            armTimer(env: env)
+        } else {
+            timer?.invalidate()
+            timer = nil
+            observeWhileIdle(env: env)
+        }
     }
 
     func stop() {
+        isStarted = false
+        isObservingIdle = false
+        startGeneration += 1
         timer?.invalidate()
         timer = nil
     }
@@ -73,6 +110,7 @@ final class PiPController {
     func tick(env: AppEnvironment) {
         settlePendingRequest(env: env)
         settleFloatingWindowClosed(env: env)
+        dismissIfUserReturned(env: env)
 
         let currentActive = env.activeTabID
         defer {
@@ -90,9 +128,24 @@ final class PiPController {
            env.webContents[losingFocus] != nil {
             requestPiP(for: losingFocus, env: env)
         }
+    }
 
-        if let floating = pipTabID, Self.isOnScreen(floating, env: env) {
-            dismissPiP(for: floating, env: env)
+    /// Checked every tick, not only when the active tab changes: a request confirmed after the user already came back changes nothing about the active tab, and its window would otherwise stay open over the page it came from.
+    private func dismissIfUserReturned(env: AppEnvironment) {
+        if var pending = pendingRequest, !pending.cancelled {
+            if Self.isOnScreen(pending.tabID, env: env) {
+                if pending.leftScreen { dismissPiP(for: pending.tabID, env: env) }
+            } else if !pending.leftScreen {
+                pending.leftScreen = true
+                pendingRequest = pending
+            }
+        }
+        if let floating = pipTabID {
+            if Self.isOnScreen(floating, env: env) {
+                if floatingLeftScreen { dismissPiP(for: floating, env: env) }
+            } else {
+                floatingLeftScreen = true
+            }
         }
     }
 
@@ -139,9 +192,17 @@ final class PiPController {
     private func settlePendingRequest(env: AppEnvironment) {
         guard let pending = pendingRequest else { return }
 
+        // A closed tab has no page left to answer, and nothing floats for it.
+        guard env.webContents[pending.tabID] != nil else {
+            pendingRequest = nil
+            return
+        }
+
         if env.mediaStates[pending.tabID]?.isPictureInPictureActive == true {
             pendingRequest = nil
             pipTabID = pending.tabID
+            floatingLeftScreen = pending.leftScreen || !Self.isOnScreen(pending.tabID, env: env)
+            if pending.cancelled { dismissPiP(for: pending.tabID, env: env) }
             return
         }
 
@@ -156,7 +217,9 @@ final class PiPController {
                 """
             )
         } else {
-            pendingRequest = (pending.tabID, remaining)
+            var updated = pending
+            updated.ticksRemaining = remaining
+            pendingRequest = updated
         }
     }
 
@@ -169,20 +232,29 @@ final class PiPController {
         guard let contents = env.webContents[tabID] else { return false }
         guard env.engineCapabilities.contains(.pictureInPicture) else { return false }
         contents.togglePictureInPicture()
-        pendingRequest = (tabID, Self.confirmationTicks)
+        pendingRequest = PendingRequest(
+            tabID: tabID,
+            ticksRemaining: Self.confirmationTicks,
+            leftScreen: !Self.isOnScreen(tabID, env: env)
+        )
         return true
     }
 
     func dismissPiP(for tabID: TabID, env: AppEnvironment) {
-        if pendingRequest?.tabID == tabID {
-            pendingRequest = nil
-        }
         if returnCandidate == tabID { returnCandidate = nil }
-        guard pipTabID == tabID else { return }
         if let contents = env.webContents[tabID], contents.mediaState.isPictureInPictureActive {
+            // The toggle is an exit only while the window is open; sent early it would open one.
             contents.togglePictureInPicture()
+            if pendingRequest?.tabID == tabID { pendingRequest = nil }
+        } else if var pending = pendingRequest, pending.tabID == tabID {
+            // The request is already on its way to the page; forgetting it would leave its window open with nothing tracking it.
+            pending.cancelled = true
+            pendingRequest = pending
         }
-        pipTabID = nil
+        if pipTabID == tabID {
+            pipTabID = nil
+            floatingLeftScreen = false
+        }
     }
 
     #if DEBUG
@@ -192,6 +264,7 @@ final class PiPController {
         pipTabID = nil
         pendingRequest = nil
         returnCandidate = nil
+        floatingLeftScreen = false
         presentApp = { _ in }
     }
 

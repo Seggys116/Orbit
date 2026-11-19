@@ -32,8 +32,8 @@ struct CommandResultRow: View {
             Spacer(minLength: 8)
             if let switchHintLabel {
                 Text(switchHintLabel)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(isSelected ? AnyShapeStyle(activeSiteTint?.foreground ?? Color.primary) : AnyShapeStyle(.secondary))
             } else if result.instantOpenURL != nil {
                 trailingHint(label: "Instant Open") {
                     Text("⇧↵")

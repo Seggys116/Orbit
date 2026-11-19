@@ -69,6 +69,8 @@ private final class RecordingMediaWebContents: NSObject, WebContents {
     func print() {}
     func savePage() {}
     func cancelDownload(id: UUID) {}
+    func downloadResource(_ url: URL) {}
+    func loadResourceData(_ url: URL) async -> Data? { nil }
     func showDeveloperTools(inspectAt point: CGPoint?) {}
     func closeDeveloperTools() {}
     func focus() {}

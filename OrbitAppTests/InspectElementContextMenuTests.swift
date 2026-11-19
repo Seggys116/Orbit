@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import Foundation
 import XCTest
 @testable import Orbit
@@ -275,7 +276,7 @@ final class InspectElementContextMenuTests: XCTestCase {
         }
     }
 
-    func test_imageContext_offersOpenSaveAndCopyAddress() {
+    func test_imageContext_offersOpenSaveCopyAndCopyAddress() {
         let contents = MockWebContents()
         let entries = env.buildContextMenuEntries(
             for: contents,
@@ -286,7 +287,7 @@ final class InspectElementContextMenuTests: XCTestCase {
             ),
             capabilities: inspectorCapableBackend
         )
-        for title in ["Open Image in New Tab", "Save Image", "Copy Image Address"] {
+        for title in ["Open Image in New Tab", "Save Image to Downloads", "Save Image As…", "Copy Image", "Copy Image Address"] {
             XCTAssertNotNil(item(titled: title, in: entries))
         }
     }
@@ -345,5 +346,158 @@ final class InspectElementContextMenuTests: XCTestCase {
         XCTAssertNil(entries.flattenedItems.first { $0.title == "Cut" })
         XCTAssertNil(entries.flattenedItems.first { $0.title == "Paste" })
         XCTAssertNil(entries.flattenedItems.first { $0.title == "Select All" })
+    }
+
+    // MARK: - Image, link and media actions
+
+    private func pngData(width: Int = 4, height: Int = 3) -> Data {
+        let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        )!
+        rep.setColor(.systemRed, atX: 0, y: 0)
+        return rep.representation(using: .png, properties: [:])!
+    }
+
+    private func waitUntil(_ condition: () -> Bool, timeout: TimeInterval = 5) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+    }
+
+    func test_saveImageToDownloads_sendsAWebImageThroughOrbitsDownloads() {
+        let contents = MockWebContents()
+        let source = URL(string: "https://img.example.com/a.png")!
+        let entries = env.buildContextMenuEntries(
+            for: contents,
+            context: ContextMenuContext(pageURL: URL(string: "https://example.com"), sourceURL: source, mediaKind: .image),
+            capabilities: inspectorCapableBackend
+        )
+        guard let save = item(titled: "Save Image to Downloads", in: entries) else { return }
+        save.action?()
+        XCTAssertEqual(contents.downloadedResourceURLs, [source])
+    }
+
+    func test_saveImageToDownloads_writesAPageOnlyImageStraightIntoTheDownloadsFolder() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-save-image-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        WebKitDownloads.downloadsDirectoryOverride = folder
+        defer {
+            WebKitDownloads.downloadsDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: folder)
+        }
+        let contents = MockWebContents()
+        let source = URL(string: "blob:https://example.com/5c1e")!
+        let png = pngData()
+        contents.resourceDataOverride[source] = png
+
+        OrbitContextMenuActions.saveImageToDownloads(from: source, using: contents)
+
+        var saved: [URL] = []
+        waitUntil {
+            saved = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            return !saved.isEmpty
+        }
+        XCTAssertTrue(contents.downloadedResourceURLs.isEmpty, "A blob: image cannot go through the download store.")
+        XCTAssertEqual(saved.count, 1)
+        XCTAssertEqual(saved.first?.pathExtension, "png")
+        XCTAssertEqual(saved.first.flatMap { try? Data(contentsOf: $0) }, png)
+    }
+
+    func test_copyImage_putsTheImageItselfOnThePasteboard() {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("orbit-copy-image-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let contents = MockWebContents()
+        let source = URL(string: "https://img.example.com/a.png")!
+        let png = pngData()
+        contents.resourceDataOverride[source] = png
+
+        OrbitContextMenuActions.copyImage(from: source, using: contents, to: pasteboard)
+        waitUntil { pasteboard.data(forType: .png) != nil }
+
+        XCTAssertEqual(pasteboard.data(forType: .png), png, "The original PNG must be kept, alpha and all.")
+        XCTAssertNotNil(pasteboard.data(forType: .tiff), "A TIFF must be offered for apps that only paste TIFF.")
+        let image = pasteboard.readObjects(forClasses: [NSImage.self])?.first as? NSImage
+        XCTAssertEqual(image?.representations.first?.pixelsWide, 4)
+        XCTAssertEqual(pasteboard.string(forType: .URL), source.absoluteString)
+    }
+
+    func test_copyImage_leavesThePasteboardAloneWhenTheBytesAreNotAnImage() {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("orbit-copy-image-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("kept", forType: .string)
+
+        XCTAssertFalse(OrbitContextMenuActions.writeImage(Data("<html>404</html>".utf8), sourceURL: nil, to: pasteboard))
+        XCTAssertEqual(pasteboard.string(forType: .string), "kept")
+    }
+
+    func test_suggestedImageName_followsTheRealEncodingNotTheURL() {
+        let png = pngData()
+        XCTAssertEqual(OrbitContextMenuActions.suggestedImageName(for: URL(string: "https://cdn.example.com/photo.jpg?w=200")!, data: png), "photo.png")
+        XCTAssertEqual(OrbitContextMenuActions.suggestedImageName(for: URL(string: "data:image/png;base64,AAAA")!, data: png), "image.png")
+        XCTAssertEqual(OrbitContextMenuActions.suggestedImageName(for: URL(string: "https://example.com/")!, data: png), "image.png")
+    }
+
+    func test_linkContext_offersSplitViewAndDownload_andSplitViewOpensTheLinkBesideThePage() {
+        let tab = makeTab()
+        let contents = MockWebContents()
+        env._test_attachWebContents(contents, for: tab.id)
+        let tabIDsBefore = Set(env.state.tabs.keys)
+        defer {
+            for id in Set(env.state.tabs.keys).subtracting(tabIDsBefore) { env.closeTab(id) }
+            env.state.tabs.removeValue(forKey: tab.id)
+        }
+        let linkURL = URL(string: "https://link.example.com/report.pdf")!
+        let entries = env.buildContextMenuEntries(
+            for: contents,
+            context: ContextMenuContext(pageURL: URL(string: "https://example.com"), linkURL: linkURL),
+            capabilities: inspectorCapableBackend
+        )
+
+        guard let download = item(titled: "Download Linked File", in: entries) else { return }
+        download.action?()
+        XCTAssertEqual(contents.downloadedResourceURLs, [linkURL])
+
+        guard let split = item(titled: "Open Link in Split View", in: entries) else { return }
+        split.action?()
+        let newTabIDs = Set(env.state.tabs.keys).subtracting(tabIDsBefore)
+        XCTAssertEqual(newTabIDs.count, 1)
+        guard let newTabID = newTabIDs.first else { return }
+        XCTAssertEqual(env.state.tabs[newTabID]?.url, linkURL)
+        XCTAssertEqual(env.splitGroup(for: tab.id)?.tabIDs.sorted { $0.uuidString < $1.uuidString },
+                       [tab.id, newTabID].sorted { $0.uuidString < $1.uuidString })
+    }
+
+    func test_videoContext_offersSaveCopyAddressAndPictureInPicture() {
+        let contents = MockWebContents()
+        let source = URL(string: "https://media.example.com/clip.mp4")!
+        let entries = env.buildContextMenuEntries(
+            for: contents,
+            context: ContextMenuContext(pageURL: URL(string: "https://example.com"), sourceURL: source, mediaKind: .video),
+            capabilities: inspectorCapableBackend
+        )
+        for title in ["Open Video in New Tab", "Save Video to Downloads", "Copy Video Address", "Picture in Picture"] {
+            XCTAssertNotNil(item(titled: title, in: entries))
+        }
+        item(titled: "Save Video to Downloads", in: entries)?.action?()
+        XCTAssertEqual(contents.downloadedResourceURLs, [source])
+        item(titled: "Picture in Picture", in: entries)?.action?()
+        XCTAssertEqual(contents.togglePictureInPictureCallCount, 1)
+    }
+
+    func test_streamedVideo_offersPictureInPictureButNoSaveOrAddress() {
+        let contents = MockWebContents()
+        let entries = env.buildContextMenuEntries(
+            for: contents,
+            context: ContextMenuContext(
+                pageURL: URL(string: "https://example.com"), sourceURL: URL(string: "blob:https://example.com/9a"), mediaKind: .video
+            ),
+            capabilities: inspectorCapableBackend
+        )
+        XCTAssertNil(entries.first(titled: "Save Video to Downloads"))
+        XCTAssertNil(entries.first(titled: "Copy Video Address"))
+        XCTAssertNotNil(entries.first(titled: "Picture in Picture"))
     }
 }

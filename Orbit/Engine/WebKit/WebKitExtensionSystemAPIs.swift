@@ -118,14 +118,18 @@ final class WebKitExtensionSystemAPIs {
         return seconds >= Double(threshold) ? "idle" : "active"
     }
 
-    /// Chrome's IdleManager samples the system idle time once a second; so does this, and only
+    /// Chrome's IdleManager samples once a second, but the shortest detection interval is 15 s, so a 5 s sample
+    /// reports a change at most 5 s late. Lock and unlock notifications poll immediately. Only runs
     /// while some loaded extension holds the idle permission.
+    private static let idlePollInterval: TimeInterval = 5
+
     private func updateIdlePolling() {
         let watching = services.entries.keys.contains { services.hasPermission("idle", extensionID: $0) }
         if watching, idleTimer == nil {
-            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: Self.idlePollInterval, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.pollIdleState() }
             }
+            timer.tolerance = 1
             RunLoop.main.add(timer, forMode: .common)
             idleTimer = timer
         } else if !watching {

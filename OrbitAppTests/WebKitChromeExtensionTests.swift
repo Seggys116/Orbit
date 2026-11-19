@@ -56,6 +56,40 @@ final class WebKitChromeExtensionTests: XCTestCase {
         engine.shutdown()
     }
 
+    func testUndocumentedContextErrorCodeIsNotALoadFailure() {
+        XCTAssertFalse(WebKitEngine.isBackgroundLoadFailure(NSError(domain: WKWebExtensionContext.errorDomain, code: 7)))
+        XCTAssertTrue(WebKitEngine.isBackgroundLoadFailure(NSError(
+            domain: WKWebExtensionContext.errorDomain,
+            code: WKWebExtensionContext.Error.Code.backgroundContentFailedToLoad.rawValue
+        )))
+    }
+
+    // Honey's worker rejects a promise on localStorage at startup; Chrome only logs that, so it must still load here.
+    func testWorkerRejectionDuringStartupDoesNotFailTheLoad() async throws {
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
+        let source = try makeExtension(name: "Rejecting Worker Fixture")
+        let background = source.appendingPathComponent("background.js")
+        let original = try String(contentsOf: background, encoding: .utf8)
+        try (original + "\nPromise.resolve().then(function () { localStorage.orbitProbe = \"1\"; });\n")
+            .write(to: background, atomically: true, encoding: .utf8)
+        let extensionStore = store()
+        let installed = try extensionStore.install(unpackedAt: source, publicKey: nil)
+        let runtime = ExtensionRuntime(store: extensionStore)
+        runtime.bind(to: engine)
+        let appeared = await waitLoaded(installed.id, on: engine)
+        XCTAssertTrue(appeared, runtime.lastError ?? "not loaded")
+        let settleDeadline = Date().addingTimeInterval(2)
+        while extensionStore.hasPendingChanges, Date() < settleDeadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertNil(runtime.lastError)
+        XCTAssertFalse(extensionStore.hasPendingChanges)
+        let loaded = try XCTUnwrap(engine.loadedExtensions(session: engine.defaultSession).first { $0.id == installed.id })
+        try await assertExtensionWorks(loaded, on: engine, marker: "rejecting-worker-marker")
+        runtime.unbind()
+        engine.shutdown()
+    }
+
     func testExtensionPopupURLLoadsOnWebKit() async throws {
         let engine = EngineFactory.makeEngine(storage: .ephemeral)
         let root = try makePopupExtension()
@@ -272,9 +306,32 @@ final class WebKitChromeExtensionTests: XCTestCase {
         process.standardError = FileHandle.nullDevice
         try process.run()
         servers.append(process)
-        // Give the server time to bind before the first request.
-        Thread.sleep(forTimeInterval: 0.4)
+        // A fixed sleep lost the race under load: the first load hit NSURLErrorDomain -1004 and never retried.
+        let deadline = Date().addingTimeInterval(15)
+        while !Self.acceptsConnections(port: port), Date() < deadline {
+            guard process.isRunning else { throw CocoaError(.fileReadUnknown, userInfo: [NSDebugDescriptionErrorKey: "http.server on \(port) exited"]) }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        guard Self.acceptsConnections(port: port) else {
+            throw CocoaError(.fileReadUnknown, userInfo: [NSDebugDescriptionErrorKey: "http.server on \(port) never accepted a connection"])
+        }
         return URL(string: "http://127.0.0.1:\(port)/page.html")!
+    }
+
+    private static func acceptsConnections(port: Int) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        return withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }
     }
 
     private func zipDirectory(_ directory: URL) throws -> Data {
@@ -316,6 +373,70 @@ final class WebKitChromeExtensionTests: XCTestCase {
             try await Task.sleep(nanoseconds: 150_000_000)
         }
         return latest
+    }
+}
+
+@MainActor
+final class WebKitExtensionKeepAliveTests: XCTestCase {
+
+    private final class Pings {
+        var count = 0
+    }
+
+    private func makeServices() -> WebKitExtensionServices {
+        WebKitExtensionServices(stateDirectory: nil)
+    }
+
+    func testTheKeepAliveTimerStopsWhenTheLastBackgroundPortDetaches() {
+        let services = makeServices()
+        let first = services._test_attachBackgroundPort(extensionID: "a", send: { _ in })
+        let second = services._test_attachBackgroundPort(extensionID: "b", send: { _ in })
+        XCTAssertTrue(services.isBackgroundKeepAliveRunning)
+
+        services._test_detachPort(first)
+        XCTAssertTrue(services.isBackgroundKeepAliveRunning, "One background port is still attached.")
+
+        services._test_detachPort(second)
+        XCTAssertFalse(services.isBackgroundKeepAliveRunning, "The timer kept waking the main run loop with no background port left.")
+    }
+
+    func testAPortIsPingedWhileItIsWithinTheGraceWindow() {
+        let services = makeServices()
+        let pings = Pings()
+        _ = services._test_attachBackgroundPort(extensionID: "a", send: { _ in pings.count += 1 })
+
+        services.keepAliveTick(now: Date().addingTimeInterval(WebKitExtensionServices.keepAliveGrace - 5))
+
+        XCTAssertEqual(pings.count, 1)
+        XCTAssertTrue(services.isBackgroundKeepAliveRunning)
+    }
+
+    func testAPortIsNotPingedPastTheGraceWindowAndTheTimerStops() {
+        let services = makeServices()
+        let pings = Pings()
+        _ = services._test_attachBackgroundPort(extensionID: "a", send: { _ in pings.count += 1 })
+
+        services.keepAliveTick(now: Date().addingTimeInterval(WebKitExtensionServices.keepAliveGrace + 5))
+
+        XCTAssertEqual(pings.count, 0, "An idle worker was kept alive past Chrome's idle window.")
+        XCTAssertFalse(services.isBackgroundKeepAliveRunning)
+    }
+
+    func testAMessageFromAnIdlePortRestartsThePings() {
+        let services = makeServices()
+        let pings = Pings()
+        let key = services._test_attachBackgroundPort(
+            extensionID: "a", send: { _ in pings.count += 1 },
+            lastActivity: Date().addingTimeInterval(-(WebKitExtensionServices.keepAliveGrace + 10))
+        )
+        services.keepAliveTick(now: Date())
+        XCTAssertFalse(services.isBackgroundKeepAliveRunning, "Precondition: the idle port stopped the timer.")
+
+        services._test_receivePortMessage(["anything": true], key: key)
+        services.keepAliveTick(now: Date())
+
+        XCTAssertTrue(services.isBackgroundKeepAliveRunning)
+        XCTAssertEqual(pings.count, 1)
     }
 }
 

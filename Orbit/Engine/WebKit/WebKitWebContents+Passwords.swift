@@ -9,6 +9,7 @@ enum WebKitPasswordAutofill {
     static var world: WKContentWorld { WKContentWorld.world(name: PasswordAutofillScript.worldName) }
 
     private static let instrumented = NSHashTable<WKUserContentController>.weakObjects()
+    private static let passkeyProbed = NSHashTable<WKUserContentController>.weakObjects()
 
     /// Idempotent: safe after the engine's own script reinstall, and for controllers a popup shares with its opener.
     /// Installed before the context-menu probe so its `contextmenu` listener runs first.
@@ -16,6 +17,19 @@ enum WebKitPasswordAutofill {
         if !instrumented.contains(controller) {
             controller.add(WebKitPasswordsBridge.shared, contentWorld: world, name: PasswordAutofillScript.handlerName)
             instrumented.add(controller)
+            // The probe has to see the page's own navigator.credentials, so it lives in the page world, and only until passkeys are decided.
+            if PasskeyAuthorization.wantsFirstUseProbe {
+                controller.add(WebKitPasskeyProbe.shared, contentWorld: .page, name: PasskeyAuthorization.probeHandlerName)
+                passkeyProbed.add(controller)
+            }
+        }
+        if passkeyProbed.contains(controller), !controller.userScripts.contains(where: { $0.source == PasskeyAuthorization.probeSource }) {
+            controller.addUserScript(WKUserScript(
+                source: PasskeyAuthorization.probeSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false,
+                in: .page
+            ))
         }
         let source = PasswordAutofillScript.source
         guard !controller.userScripts.contains(where: { $0.source == source }) else { return }
@@ -25,6 +39,17 @@ enum WebKitPasswordAutofill {
             forMainFrameOnly: false,
             in: world
         ))
+    }
+}
+
+/// The first WebAuthn call on any page asks macOS, once, to let Orbit use the passkeys in iCloud Keychain.
+@MainActor
+final class WebKitPasskeyProbe: NSObject, WKScriptMessageHandler {
+    static let shared = WebKitPasskeyProbe()
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.webView is OrbitWebView else { return }
+        PasskeyAuthorization.requestOnFirstUse()
     }
 }
 
@@ -369,11 +394,12 @@ extension WebKitWebContents {
         return .filled(username: result.username, password: result.password)
     }
 
-    func fillGeneratedPassword(_ password: String, into token: String) async -> PasswordFillOutcome {
-        guard let field = fillableField(token), field.kind == .newPassword,
-              password.count <= PasswordAutofillPolicy.maxPasswordLength
-        else { return .fieldUnavailable }
-        switch await runPasswordFill(field, mode: "generated", username: "", password: password) {
+    func fillOneTimeCode(_ code: String, into token: String, frameOrigin: URL) async -> PasswordFillOutcome {
+        guard let field = fillableField(token), field.kind == .oneTimeCode, PasswordAutofillPolicy.isValidOneTimeCode(code) else {
+            return .fieldUnavailable
+        }
+        guard field.origin == frameOrigin else { return .refusedSiteMismatch }
+        switch await runPasswordFill(field, mode: "otp", username: "", password: code) {
         case .filled(_, let filled): return .filled(username: false, password: filled)
         case .originChanged: return .refusedSiteMismatch
         case .unavailable: return .fieldUnavailable

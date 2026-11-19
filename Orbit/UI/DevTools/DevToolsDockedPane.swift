@@ -17,7 +17,12 @@ struct DevToolsDockedPane: View {
 
                 if !session.hidesInspectedPage {
                     let rect = DevToolsDockState.resolvedPageRect(session.inspectedPageBounds, in: proxy.size)
-                    LiveWebContentsHostView(contents: page, environment: environment, hostID: hostID)
+                    LiveWebContentsHostView(
+                        contents: page,
+                        environment: environment,
+                        hostID: hostID,
+                        presentationRequest: WebContentsPresentation.shared.presentationRequest(for: page)
+                    )
                         .frame(width: rect.width, height: rect.height)
                         .position(x: rect.midX, y: rect.midY)
                 }

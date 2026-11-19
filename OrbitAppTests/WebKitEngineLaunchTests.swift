@@ -218,9 +218,10 @@ final class WebKitEngineLaunchTests: XCTestCase {
         }
         XCTAssertEqual(agent, WebKitProduct.userAgent)
         XCTAssertFalse(agent.contains("Chrome/"))
-        let sources = contents.webView.configuration.userContentController.userScripts.map(\.source).joined(separator: "\n")
-        XCTAssertTrue(sources.contains("__orbitWebStorePrivate"))
-        XCTAssertTrue(sources.contains("__orbitOwnsAddToChromeButton"))
+        // The Web Store scripts are added only when a main-frame navigation targets the store, never to every page.
+        let ordinarySources = contents.webView.configuration.userContentController.userScripts.map(\.source).joined(separator: "\n")
+        XCTAssertFalse(ordinarySources.contains("__orbitWebStorePrivate"))
+        XCTAssertFalse(ordinarySources.contains("__orbitOwnsAddToChromeButton"))
         let recorder = PageMenuRecorder()
         contents.delegate = recorder
         contents.openContextMenu(atCSS: CGPoint(x: 8, y: 8))
@@ -243,6 +244,21 @@ final class WebKitEngineLaunchTests: XCTestCase {
         XCTAssertTrue(inspectorOpen)
         XCTAssertTrue(NSApp.windows.contains { $0.isVisible && $0.title.hasPrefix("Web Inspector") })
         XCTAssertTrue(contents.webView.isInspectable)
+        engine.shutdown()
+    }
+
+    func testWebStoreScriptsAreInstalledForAStoreNavigation() async throws {
+        let engine = EngineFactory.makeEngine(storage: .ephemeral)
+        let contents = try XCTUnwrap(try engine.makeWebContents(session: engine.defaultSession, initialURL: nil) as? WebKitWebContents)
+        host(contents)
+        contents.loadHTML(
+            "<!doctype html><html><head><title>store</title></head><body><p>store</p></body></html>",
+            baseURL: URL(string: "https://chromewebstore.google.com/detail/example/abcdefghijklmnopabcdefghijklmnop")
+        )
+        _ = try await waitForText(contents, script: "document.title", equals: "store")
+        let sources = contents.webView.configuration.userContentController.userScripts.map(\.source).joined(separator: "\n")
+        XCTAssertTrue(sources.contains("__orbitWebStorePrivate"))
+        XCTAssertTrue(sources.contains("__orbitOwnsAddToChromeButton"))
         engine.shutdown()
     }
 

@@ -23,6 +23,7 @@ final class WebKitContentsExtras {
 
     /// Awaited before each main-frame navigation decision; see `WebKitWebContents.setMainFrameNavigationHook`.
     var mainFrameNavigationHook: (@MainActor (URL) async -> Void)?
+    var closeHook: (@MainActor () -> Void)?
 
     var mainFrameNavigationType: WKNavigationType = .other
     var browserInitiatedLoad = false
@@ -34,6 +35,9 @@ final class WebKitContentsExtras {
 
     /// One answer per host for a main-frame navigation: WebKit repeats a failed trust challenge, and a refusal must not reopen the interstitial.
     var trustDecisions: [String: Task<Bool, Never>] = [:]
+
+    /// A password prompt that is on screen, keyed by protection space. A second challenge for the same space waits for it instead of stacking another prompt.
+    var credentialPrompts: [String: Task<HTTPCredentialResponse?, Never>] = [:]
 
     weak var hostContainer: NSView?
     var frameObserver: NSObjectProtocol?
@@ -78,19 +82,20 @@ final class WebKitContentsExtras {
 }
 
 extension WebKitWebContents {
-    /// True while no pane is showing this page, which is also what WebKit treats as hidden: `OrbitWebView.window`
-    /// is nil unless the view sits in a real window or a host has declared it visible via `setVisible(true)`.
-    /// Native check only, so it is safe to read on a timer.
+    /// True unless a pane in an on-screen window is showing this page. `OrbitWebView.window` cannot be used: it
+    /// reports an off-screen compositing window while `keepsCompositingWithoutWindow` is set, so a hidden tab
+    /// would look visible. Native check only, so it is safe to read on a timer.
     var isBackgrounded: Bool {
-        webView.window == nil
+        guard let orbit = webView as? OrbitWebView else { return webView.window == nil }
+        guard orbit.isInRealWindow, let window = orbit.window else { return true }
+        // A pane keeps recently shown pages warm as hidden subviews; those are in a real window but not on screen.
+        if orbit.isHiddenOrHasHiddenAncestor { return true }
+        return !window.occlusionState.contains(.visible)
     }
 
-    /// A hidden page is still probed while media is playing, audible, floating or fullscreen: the mini
-    /// player and the picture-in-picture panel read the probe. A hidden page with none of those only
-    /// needs the page script's own play/pause events, which already report without this round trip.
-    var hasLiveMediaToObserve: Bool {
-        mediaState.isPlaying || mediaState.isAudible
-            || mediaState.isPictureInPictureActive || mediaState.isFullscreen
+    /// The tab is showing in the window the user is working in.
+    var isInKeyWindow: Bool {
+        !isBackgrounded && webView.window?.isKeyWindow == true
     }
 }
 

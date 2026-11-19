@@ -198,6 +198,37 @@ final class SyncProblemTests: XCTestCase {
         XCTAssertNil(engine.lastProblem, "A stale problem outlived the error status that explained it.")
     }
 
+    func testUnreadableRecordsInICloudAskForAResetThatSurvivesALaterPush() {
+        let store = StubSyncableStore(state: OrbitState())
+        let engine = CloudSyncEngine(store: store, transport: RecordingSyncTransport(), rootDirectory: scratch)
+        let broken = CKRecord(
+            recordType: SyncRecordType.tab,
+            recordID: CloudSyncEngine.recordID(SyncRecordType.tab, name: UUID().uuidString)
+        )
+        broken["url"] = "https://example.com" as CKRecordValue
+
+        engine.absorbIncoming(modifications: [broken], deletions: [])
+
+        XCTAssertEqual(engine.lastProblem?.kind, .unreadableRemoteData(count: 1))
+        XCTAssertTrue(engine.lastProblem?.requiresICloudReset ?? false)
+        XCTAssertTrue(engine.lastProblem?.suggestsForceOverwrite ?? false)
+
+        engine.notePushSucceeded(savedRecords: [], deletedRecordIDs: [])
+
+        XCTAssertEqual(engine.lastProblem?.kind, .unreadableRemoteData(count: 1), "A push hid data iCloud still cannot read.")
+    }
+
+    func testReadableRecordsRaiseNoResetPrompt() {
+        let store = StubSyncableStore(state: OrbitState())
+        let engine = CloudSyncEngine(store: store, transport: RecordingSyncTransport(), rootDirectory: scratch)
+        let profile = Profile(name: "Work")
+        let record = SyncRecordMapping.profileRecord(from: profile, clientModifiedAt: Date(), existing: nil)
+
+        engine.absorbIncoming(modifications: [record], deletions: [])
+
+        XCTAssertNil(engine.lastProblem)
+    }
+
     func testAZoneProblemRequeuesTheZoneAndSurfacesTheRecoveryHint() {
         let transport = RecordingSyncTransport()
         let engine = CloudSyncEngine(store: StubSyncableStore(state: OrbitState()), transport: transport, rootDirectory: scratch)
@@ -252,6 +283,7 @@ final class SyncProblemTests: XCTestCase {
         XCTAssertTrue(expected.isSubset(of: engine._test_pendingPushNames))
         XCTAssertEqual(transport.deactivateCount, 1)
         XCTAssertEqual(transport.activationsHadSerialization, [false], "The engine restarted with the old saved state.")
+        engine.flushPendingCacheWrites()
         XCTAssertFalse(FileManager.default.fileExists(atPath: stateFile.path), "The persisted engine state survived.")
         XCTAssertTrue(engine.status.isSynced, "Status is \(engine.status).")
         XCTAssertFalse(engine.isRecovering)
@@ -352,6 +384,7 @@ final class SyncProblemTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(transport.fetchCount, 1, "iCloud was never re-fetched.")
         XCTAssertEqual(transport.deactivateCount, 1)
         XCTAssertEqual(transport.activationsHadSerialization, [false], "The engine restarted with the old change token.")
+        engine.flushPendingCacheWrites()
         XCTAssertFalse(FileManager.default.fileExists(atPath: stateFile.path))
         XCTAssertFalse(
             transport.sentDatabaseChangeBatches.joined().contains(where: Self.isZoneDeletion),
@@ -418,7 +451,8 @@ final class SyncProblemTests: XCTestCase {
 
     func testEveryRecoveryActionStatesWhatItDiscards() {
         let replaceICloud = SyncRecoveryAction.replaceICloudWithThisMac.confirmationMessage
-        XCTAssertTrue(replaceICloud.contains("deletes everything Orbit has stored in iCloud"))
+        XCTAssertTrue(replaceICloud.contains("deletes only the data Orbit itself keeps in your iCloud account"))
+        XCTAssertTrue(replaceICloud.contains("nothing else in iCloud is touched"))
         XCTAssertTrue(replaceICloud.contains("cannot be undone"))
 
         let replaceMac = SyncRecoveryAction.replaceThisMacWithICloud.confirmationMessage

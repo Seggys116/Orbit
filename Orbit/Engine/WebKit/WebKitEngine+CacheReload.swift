@@ -78,14 +78,7 @@ extension WebKitEngine {
 
 /// Holds a windowless web view just long enough for WebKit to run a reload.
 enum OffscreenWebViewHost {
-    static let window: NSWindow = {
-        let window = NSWindow(
-            contentRect: NSRect(x: -10000, y: -10000, width: 200, height: 200),
-            styleMask: [.borderless], backing: .buffered, defer: false
-        )
-        window.isReleasedWhenClosed = false
-        return window
-    }()
+    static let window: NSWindow = OffscreenHelperWindow(contentRect: NSRect(x: -10000, y: -10000, width: 200, height: 200))
 
     static func attach(_ view: NSView) {
         guard view.window == nil, let content = window.contentView else { return }
@@ -105,7 +98,7 @@ extension WebKitWebContents {
     /// `stopLoading()` issued just before it can cancel the navigation it starts.
     func reloadDocumentFromOrigin() {
         guard !isClosed else { return }
-        let committed = webView.url != nil
+        let committed = webView.backForwardList.currentItem != nil
         switch CacheReloadPlan.navigationAfterCacheWipe(hasCommittedDocument: committed) {
         case .fromOrigin:
             if webView.window == nil {
@@ -115,21 +108,26 @@ extension WebKitWebContents {
             extras.browserInitiatedLoad = true
             if webView.reloadFromOrigin() == nil {
                 extras.browserInitiatedLoad = false
+                loadBypassingCache()
             }
         case .unconditionalLoad:
-            guard let url = navigationState.url else { return }
-            extras.browserInitiatedLoad = true
-            if url.isFileURL {
-                load(url)
-                return
-            }
-            var request = URLRequest(
-                url: url,
-                cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
-                timeoutInterval: 60
-            )
-            webView.load(request)
+            loadBypassingCache()
         }
+    }
+
+    private func loadBypassingCache() {
+        guard let url = navigationState.url ?? extras.requestedLoadURL else { return }
+        extras.browserInitiatedLoad = true
+        if url.isFileURL {
+            load(url)
+            return
+        }
+        let request = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
+            timeoutInterval: 60
+        )
+        webView.load(request)
     }
 
     /// `reloadFromOrigin` on a view with no window returns a navigation and never fetches.

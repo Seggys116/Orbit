@@ -471,3 +471,196 @@ final class ArcFaviconReaderTests: XCTestCase {
         NSError(domain: "ArcFaviconReaderTests", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 }
+
+@MainActor
+final class FaviconCacheDiskBehaviourTests: XCTestCase {
+
+    private var directory: URL!
+
+    override func setUp() {
+        super.setUp()
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrbitTests-FaviconDisk-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        if let directory { try? FileManager.default.removeItem(at: directory) }
+        directory = nil
+        super.tearDown()
+    }
+
+    func testStoringTheSameImageTwiceWritesTheFileOnce() async {
+        let cache = FaviconCache(diskDirectory: directory)
+        let icon = FaviconCache.fallbackIcon(forHost: "same.example")
+
+        cache.cache(icon, forHost: "same.example")
+        cache.cache(icon, forHost: "same.example")
+        cache.cache(icon, forHost: "same.example")
+
+        let stats = await cache._test_diskStats()
+        XCTAssertEqual(stats.pngWrites, 1, "Identical bytes were rewritten on every page load.")
+    }
+
+    func testStoringADifferentImageForTheSameHostRewritesTheFile() async {
+        let cache = FaviconCache(diskDirectory: directory)
+
+        cache.cache(FaviconCache.fallbackIcon(forHost: "first.example"), forHost: "site.example")
+        cache.cache(FaviconCache.fallbackIcon(forHost: "second.example"), forHost: "site.example")
+
+        let stats = await cache._test_diskStats()
+        XCTAssertEqual(stats.pngWrites, 2, "A changed icon must reach the disk.")
+    }
+
+    func testAFileRemovedFromDiskIsWrittenAgainEvenWhenTheBytesMatch() async {
+        let cache = FaviconCache(diskDirectory: directory)
+        let icon = FaviconCache.fallbackIcon(forHost: "gone.example")
+        cache.cache(icon, forHost: "gone.example")
+        await cache._test_awaitPendingWrites()
+        let file = directory.appendingPathComponent("gone%2Eexample.png")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "Fixture check: the first write should have landed.")
+        try? FileManager.default.removeItem(at: file)
+
+        cache.cache(icon, forHost: "gone.example")
+
+        let stats = await cache._test_diskStats()
+        XCTAssertEqual(stats.pngWrites, 2, "The skip trusted its memory of the bytes after the file was gone.")
+    }
+
+    func testEvictionRunsAtMostOncePerIntervalAcrossManyStores() async {
+        let cache = FaviconCache(diskDirectory: directory, evictionInterval: 3600)
+
+        for host in ["a.example", "b.example", "c.example", "d.example"] {
+            cache.cache(FaviconCache.fallbackIcon(forHost: host), forHost: host)
+        }
+
+        let stats = await cache._test_diskStats()
+        XCTAssertEqual(stats.pngWrites, 4)
+        XCTAssertEqual(stats.evictionScans, 1, "Every store rescanned the whole directory.")
+    }
+
+    func testEvictionRunsOnEveryStoreWhenTheIntervalIsZero() async {
+        let cache = FaviconCache(diskDirectory: directory, evictionInterval: 0)
+
+        for host in ["a.example", "b.example", "c.example"] {
+            cache.cache(FaviconCache.fallbackIcon(forHost: host), forHost: host)
+        }
+
+        let stats = await cache._test_diskStats()
+        XCTAssertEqual(stats.evictionScans, 3)
+    }
+
+    func testAnIdenticalStoreDoesNotTriggerAnEvictionScan() async {
+        let cache = FaviconCache(diskDirectory: directory, evictionInterval: 0)
+        let icon = FaviconCache.fallbackIcon(forHost: "same.example")
+
+        cache.cache(icon, forHost: "same.example")
+        cache.cache(icon, forHost: "same.example")
+
+        let stats = await cache._test_diskStats()
+        XCTAssertEqual(stats.evictionScans, 1)
+    }
+
+    func testAHostWithNoFileIsRememberedAsMissingUntilSomethingIsStoredForIt() async {
+        let cache = FaviconCache(diskDirectory: directory)
+        XCTAssertNil(cache.cachedImage(forHost: "late.example"))
+
+        let writer = FaviconCache(diskDirectory: directory)
+        writer.cache(FaviconCache.fallbackIcon(forHost: "late.example"), forHost: "late.example")
+        await writer._test_awaitPendingWrites()
+
+        XCTAssertNil(cache.cachedImage(forHost: "late.example"), "The miss was not remembered, so every lookup hit the disk again.")
+        cache.cache(FaviconCache.fallbackIcon(forHost: "late.example"), forHost: "late.example")
+        XCTAssertNotNil(cache.cachedImage(forHost: "late.example"), "Storing an icon must lift the negative entry.")
+    }
+
+    func testMemoryLookupNeverReadsTheDisk() async {
+        let writer = FaviconCache(diskDirectory: directory)
+        writer.cache(FaviconCache.fallbackIcon(forHost: "disk.example"), forHost: "disk.example")
+        await writer._test_awaitPendingWrites()
+
+        let fresh = FaviconCache(diskDirectory: directory)
+
+        XCTAssertNil(fresh.memoryCachedImage(forHost: "disk.example"))
+        XCTAssertNotNil(fresh.memoryCachedImage(forHost: FaviconCache.newTabHost))
+    }
+
+    func testLoadImageDecodesFromDiskThenServesFromMemory() async {
+        let writer = FaviconCache(diskDirectory: directory)
+        writer.cache(FaviconCache.fallbackIcon(forHost: "disk.example"), forHost: "disk.example")
+        await writer._test_awaitPendingWrites()
+        let fresh = FaviconCache(diskDirectory: directory)
+
+        let loaded = await fresh.loadImage(forHost: "DISK.example")
+
+        XCTAssertNotNil(loaded)
+        XCTAssertNotNil(fresh.memoryCachedImage(forHost: "disk.example"), "A loaded icon must stay in memory for the synchronous path.")
+    }
+
+    func testLoadImageForAHostWithNoFileIsNilAndRemembered() async {
+        let cache = FaviconCache(diskDirectory: directory)
+
+        let first = await cache.loadImage(forHost: "nothing.example")
+        let writer = FaviconCache(diskDirectory: directory)
+        writer.cache(FaviconCache.fallbackIcon(forHost: "nothing.example"), forHost: "nothing.example")
+        await writer._test_awaitPendingWrites()
+        let second = await cache.loadImage(forHost: "nothing.example")
+
+        XCTAssertNil(first)
+        XCTAssertNil(second, "The miss was not remembered.")
+    }
+
+    func testHasImageSeesAStoredFileWithoutLoadingIt() async {
+        let writer = FaviconCache(diskDirectory: directory)
+        writer.cache(FaviconCache.fallbackIcon(forHost: "disk.example"), forHost: "disk.example")
+        await writer._test_awaitPendingWrites()
+        let fresh = FaviconCache(diskDirectory: directory)
+
+        XCTAssertTrue(fresh.hasImage(forHost: "disk.example"))
+        XCTAssertFalse(fresh.hasImage(forHost: "absent.example"))
+        XCTAssertNil(fresh.memoryCachedImage(forHost: "disk.example"))
+    }
+
+    // MARK: - Favicon refresh gate
+
+    func testGateFetchesTheFirstTime() {
+        let gate = FaviconRefreshGate()
+        XCTAssertTrue(gate.shouldFetch(key: "k", cacheHasHost: true, now: Date()))
+    }
+
+    func testGateSkipsAnUnchangedIconWhileCachedAndFresh() {
+        var gate = FaviconRefreshGate()
+        let now = Date()
+        gate.recordFetch(key: "k", now: now)
+
+        XCTAssertFalse(gate.shouldFetch(key: "k", cacheHasHost: true, now: now.addingTimeInterval(3600)))
+    }
+
+    func testGateFetchesWhenTheDeclaredIconChanged() {
+        var gate = FaviconRefreshGate()
+        let now = Date()
+        gate.recordFetch(key: FaviconRefreshGate.key(host: "a.example", hrefs: ["https://a.example/1.png"]), now: now)
+
+        XCTAssertTrue(gate.shouldFetch(
+            key: FaviconRefreshGate.key(host: "a.example", hrefs: ["https://a.example/2.png"]),
+            cacheHasHost: true, now: now
+        ))
+    }
+
+    func testGateFetchesWhenTheCacheLostTheHost() {
+        var gate = FaviconRefreshGate()
+        let now = Date()
+        gate.recordFetch(key: "k", now: now)
+
+        XCTAssertTrue(gate.shouldFetch(key: "k", cacheHasHost: false, now: now))
+    }
+
+    func testGateFetchesAgainAfterTheTimeToLive() {
+        var gate = FaviconRefreshGate()
+        let now = Date()
+        gate.recordFetch(key: "k", now: now)
+
+        XCTAssertFalse(gate.shouldFetch(key: "k", cacheHasHost: true, now: now.addingTimeInterval(FaviconRefreshGate.ttl - 1)))
+        XCTAssertTrue(gate.shouldFetch(key: "k", cacheHasHost: true, now: now.addingTimeInterval(FaviconRefreshGate.ttl)))
+    }
+}

@@ -10,6 +10,7 @@ nonisolated public final class ContentBlocker: NSObject, @unchecked Sendable {
     private var blockedCount: UInt64 = 0
     private var perHostBlockedCount: [String: UInt64] = [:]
     private var report = ContentBlockingEngineReport()
+    private var revision: UInt64 = 0
 
     public override init() {
         super.init()
@@ -17,9 +18,18 @@ nonisolated public final class ContentBlocker: NSObject, @unchecked Sendable {
 
     // MARK: - Configuration
 
+    /// Changes whenever the rule set, the allowlist or the enabled flag changes, so an engine can tell a re-push of the same
+    /// configuration from a real change without comparing rules.
+    public var configurationRevision: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return revision
+    }
+
     public func setRuleSet(_ newValue: ContentBlockerRuleSet) {
         lock.lock()
         ruleSet = newValue
+        revision &+= 1
         lock.unlock()
     }
 
@@ -37,6 +47,7 @@ nonisolated public final class ContentBlocker: NSObject, @unchecked Sendable {
         }
         set {
             lock.lock()
+            if enabled != newValue { revision &+= 1 }
             enabled = newValue
             lock.unlock()
         }
@@ -44,7 +55,9 @@ nonisolated public final class ContentBlocker: NSObject, @unchecked Sendable {
 
     public func setAllowlist(_ hosts: Set<String>) {
         lock.lock()
-        allowlist = Set(hosts.map { $0.lowercased() })
+        let lowered = Set(hosts.map { $0.lowercased() })
+        if lowered != allowlist { revision &+= 1 }
+        allowlist = lowered
         lock.unlock()
     }
 

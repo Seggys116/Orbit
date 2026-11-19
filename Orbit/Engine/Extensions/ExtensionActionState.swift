@@ -179,7 +179,7 @@ public final class ExtensionActionStateStore {
     }
 
     public func replaceAll(_ newSnapshots: [ExtensionActionSnapshot]) {
-        snapshots = Dictionary(uniqueKeysWithValues: newSnapshots.map { ($0.extensionID, $0) })
+        snapshots = Dictionary(newSnapshots.map { ($0.extensionID, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     public func remove(extensionID: String) {

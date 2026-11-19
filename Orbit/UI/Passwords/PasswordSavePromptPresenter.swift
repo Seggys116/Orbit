@@ -1,4 +1,4 @@
-//  The "Save password?" and "Update password?" prompt. Non-modal: a borderless panel pinned to the top-trailing corner of the page,
+//  The "Save to Passwords?" and "Update in Passwords?" prompt. Non-modal: a borderless panel pinned to the top-trailing corner of the page,
 //  where the address bar's own prompts sit, that leaves the page usable. It goes away when the tab does (the page view leaves its window),
 //  when its window closes, or when the user answers it.
 
@@ -12,14 +12,14 @@ struct PasswordSavePromptModel: Equatable {
     }
 
     var kind: Kind
-    /// The origin as shown to the user, such as `accounts.example.com` or `localhost:3000` (`PasswordAutofillPolicy.displayOrigin`). For an update it names the one login that will change.
+    /// The origin as shown to the user, such as `accounts.example.com` or `localhost:3000` (`PasswordAutofillPolicy.displayOrigin`).
     var site: String
     var username: String
 
     var title: String {
         switch kind {
-        case .save: return "Save password for \(site)?"
-        case .update: return "Update password for \(site)?"
+        case .save: return "Save password for \(site) to Passwords?"
+        case .update: return "Update password for \(site) in Passwords?"
         }
     }
 
@@ -31,14 +31,13 @@ struct PasswordSavePromptModel: Equatable {
         }
     }
 
-    var primaryTitle: String { kind == .save ? "Save" : "Update" }
+    var primaryTitle: String { kind == .save ? "Save to Passwords" : "Update" }
 }
 
 struct PasswordSavePromptView: View {
     var model: PasswordSavePromptModel
     var onPrimary: () -> Void
     var onNotNow: () -> Void
-    var onNever: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.orbitSpaceTheme) private var environmentTheme
@@ -79,9 +78,6 @@ struct PasswordSavePromptView: View {
                 OrbitButton(title: model.primaryTitle, kind: .primary, isCompact: true, accentColor: accent, action: onPrimary)
                 OrbitButton(title: "Not Now", kind: .secondary, isCompact: true, accentColor: accent, action: onNotNow)
                 Spacer(minLength: 0)
-                if model.kind == .save {
-                    OrbitButton(title: "Never for This Site", kind: .ghost, isCompact: true, accentColor: accent, action: onNever)
-                }
             }
         }
         .padding(14)
@@ -116,8 +112,8 @@ final class PasswordSavePromptPresenter {
     static let contentWidth: CGFloat = 340
     private static let edgeInset: CGFloat = 12
 
-    /// Set only by tests: replaces the real panel with a recorder of what would have been shown and of what its Save and Never buttons would do.
-    var presentForTesting: ((_ model: PasswordSavePromptModel, _ onPrimary: @escaping () -> Void, _ onNever: @escaping () -> Void) -> Void)?
+    /// Set only by tests: replaces the real panel with a recorder of what would have been shown and of what its primary button would do.
+    var presentForTesting: ((_ model: PasswordSavePromptModel, _ onPrimary: @escaping () -> Void) -> Void)?
 
     private(set) var presentedModel: PasswordSavePromptModel?
     var isPresented: Bool { panel != nil }
@@ -131,12 +127,11 @@ final class PasswordSavePromptPresenter {
         _ model: PasswordSavePromptModel,
         anchorView: NSView,
         onPrimary: @escaping () -> Void,
-        onNever: @escaping () -> Void,
         onNotNow: @escaping () -> Void = {}
     ) {
         if let presentForTesting {
             presentedModel = model
-            presentForTesting(model, onPrimary, onNever)
+            presentForTesting(model, onPrimary)
             return
         }
         dismiss()
@@ -151,10 +146,6 @@ final class PasswordSavePromptPresenter {
             onNotNow: { [weak self] in
                 self?.dismiss()
                 onNotNow()
-            },
-            onNever: { [weak self] in
-                self?.dismiss()
-                onNever()
             }
         )
         let hosting = OrbitFirstMouseHostingView(rootView: view)

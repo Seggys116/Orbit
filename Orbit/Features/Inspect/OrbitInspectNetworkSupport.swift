@@ -45,8 +45,21 @@ struct NetRecord: Identifiable, Sendable {
     var statusText: String = ""
     var resourceType: String = "other"
     var mimeType: String = ""
-    var requestHeaders: [OrbitHeader] = []
-    var responseHeaders: [OrbitHeader] = []
+    /// Headers from the resource-load delegate are stored as they arrive and sorted when first read, so a page load does not sort for requests nobody looks at.
+    var requestHeaderStorage: [OrbitHeader] = []
+    var requestHeadersUnsorted = false
+    var responseHeaderStorage: [OrbitHeader] = []
+    var responseHeadersUnsorted = false
+    var requestHeaders: [OrbitHeader] {
+        get { requestHeadersUnsorted ? Self.sortedByName(requestHeaderStorage) : requestHeaderStorage }
+        set { requestHeaderStorage = newValue; requestHeadersUnsorted = false }
+    }
+    var responseHeaders: [OrbitHeader] {
+        get { responseHeadersUnsorted ? Self.sortedByName(responseHeaderStorage) : responseHeaderStorage }
+        set { responseHeaderStorage = newValue; responseHeadersUnsorted = false }
+    }
+    var hasRequestHeaders: Bool { !requestHeaderStorage.isEmpty }
+    var hasResponseHeaders: Bool { !responseHeaderStorage.isEmpty }
     var transferSize: Int? = nil
     var bodySize: Int? = nil
     var startTime: Double? = nil               // performance.now() (ms) when available
@@ -82,6 +95,10 @@ struct NetRecord: Identifiable, Sendable {
     var pageTimingMerged: Bool = false
     var cookieFromStore: Bool = false
     var errorMessage: String? = nil
+
+    static func sortedByName(_ headers: [OrbitHeader]) -> [OrbitHeader] {
+        headers.sorted { $0.name.lowercased() < $1.name.lowercased() }
+    }
 
     func asPublicRecord() -> OrbitNetworkRecord {
         let canon = OrbitNetworkLogic.canonicalType(resourceType: resourceType, mimeType: mimeType)
@@ -142,13 +159,12 @@ enum OrbitInspectNativeNetwork {
         let isMain = kvcIsMain(info)
         let timestamp = kvcDouble(info, "eventTimestamp")
 
-        var headers = (request.allHTTPHeaderFields ?? [:])
-            .map { OrbitHeader(name: $0.key, value: $0.value) }
-            .sorted { $0.name.lowercased() < $1.name.lowercased() }
+        // Headers stay in arrival order here; NetRecord sorts them the first time a panel reads them.
+        let headers = (request.allHTTPHeaderFields ?? [:]).map { OrbitHeader(name: $0.key, value: $0.value) }
 
         if isMain, net.adoptNativeMainDocument(
             loadID: loadID, url: url.absoluteString, method: request.httpMethod ?? "GET",
-            headers: headers, timestamp: timestamp
+            headers: NetRecord.sortedByName(headers), timestamp: timestamp
         ) {
             supplementCookies(contents: contents, session: session, url: url, loadID: loadID, headers: headers)
             return
@@ -160,7 +176,8 @@ enum OrbitInspectNativeNetwork {
         record.resourceType = nativeType(info, isMainFrame: isMain)
         record.isMainFrame = isMain
         record.nativeEventTimestamp = timestamp
-        record.requestHeaders = headers
+        record.requestHeaderStorage = headers
+        record.requestHeadersUnsorted = true
         record.requestBody = nativeBody(request)
         record.pending = true
 
@@ -243,16 +260,15 @@ enum OrbitInspectNativeNetwork {
 
         let status = http.statusCode
         let statusText = OrbitNetworkLogic.statusText(for: status)
-        var headers = http.allHeaderFields
-            .map { OrbitHeader(name: "\($0.key)", value: "\($0.value)") }
-            .sorted { $0.name.lowercased() < $1.name.lowercased() }
+        let headers = http.allHeaderFields.map { OrbitHeader(name: "\($0.key)", value: "\($0.value)") }
         let mime = response.mimeType ?? ""
         let expectedSize = response.expectedContentLength
         session.network.nativeResponseReceived(
             id: loadID, status: status, statusText: statusText,
             headers: headers, mimeType: mime,
             url: response.url?.absoluteString, fromCache: fromCache,
-            expectedBodySize: expectedSize > 0 ? Int(expectedSize) : nil)
+            expectedBodySize: expectedSize > 0 ? Int(expectedSize) : nil,
+            headersUnsorted: true)
     }
 
     @MainActor

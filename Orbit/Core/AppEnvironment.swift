@@ -139,7 +139,9 @@ final class AppEnvironment {
 
     // MARK: - Reactive mirrors of engine-owned, non-Observable state
 
-    var navigationStates: [TabID: NavigationState] = [:]
+    // Keys change only when a renderer is adopted, released or reset; per-tab updates go through the box,
+    // so one tab's progress tick invalidates only views reading that tab. Values: navigationStates.
+    var navigationBoxes: [TabID: NavigationBox] = [:]
     var themeColors: [TabID: ThemeColor] = [:]
     // The document's own computed background, distinct from themeColors (the
     // painted top band) — a page can have a dark nav over a white document.
@@ -275,6 +277,7 @@ final class AppEnvironment {
     // MARK: - Find bar
 
     var isFindBarPresented: Bool = false
+    var findBarFocusRequest = UUID()
     var findQuery: String = ""
     var currentFindResult: FindResult = .none
 
@@ -307,13 +310,39 @@ final class AppEnvironment {
 
     // MARK: - History
 
-    private(set) var localHistoryCache: [HistoryEntry] = []
+    // The cache is held as prepared entries (search text lowercased once, here, when an entry
+    // enters it) so a keystroke never re-lowercases hundreds of titles and URLs.
+    // localHistoryCache is the plain view of it.
+    private var historyIndex: [PreparedHistoryEntry] = []
+
+    // Bumped on every change to historyIndex, so views can memoise work derived from the cache.
+    private(set) var historyCacheVersion = 0
+
+    private(set) var localHistoryCache: [HistoryEntry] {
+        get { historyIndex.map(\.entry) }
+        set { setHistoryIndex(newValue.map(PreparedHistoryEntry.init)) }
+    }
 
     // localHistoryCache alone cannot answer a typed query — it holds only
     // the 500 most recent entries, so anything older needs HistoryStore's
     // own FTS index and frecency ranking consulted directly.
     private(set) var historySearchQuery: String = ""
-    private(set) var historySearchResults: [HistoryEntry] = []
+    private var historySearchIndex: [PreparedHistoryEntry] = []
+
+    // Bumped when prepareHistorySearch changes what historyResults would return for the
+    // current query, so the Command Bar re-scores only when the search brought something new.
+    private(set) var historySearchEpoch = 0
+
+    private(set) var historySearchResults: [HistoryEntry] {
+        get { historySearchIndex.map(\.entry) }
+        set { historySearchIndex = newValue.map(PreparedHistoryEntry.init) }
+    }
+
+    // Visits folded into the cache one at a time since its last full reload; the incremental
+    // order only approximates the store's frecency order, so a full reload runs periodically.
+    @ObservationIgnored private var historyUpsertsSinceReload = 0
+    private static let historyCacheCapacity = 500
+    private static let historyUpsertsBetweenReloads = 40
 
     // MARK: - Tab census
 
@@ -407,9 +436,19 @@ final class AppEnvironment {
         if syncsWithICloud, OrbitRuntimeScope.current.isProduction {
             let engine = CloudSyncEngine(store: store)
             self.syncEngine = engine
-            engine.start()
+            // start() activates CloudKit and reconciles the whole store; neither is needed to show the first page.
+            // start() ends in a full reconcile, so edits made before it runs are still pushed.
+            Task { @MainActor in
+                await LaunchGate.shared.waitForFirstCommit(timeout: .seconds(3))
+                engine.start()
+            }
         } else {
             self.syncEngine = nil
+        }
+
+        store.onTabsAutoArchived = { [weak self] tabIDs in
+            guard let self else { return }
+            for tabID in tabIDs { self.releaseWebContents(for: tabID) }
         }
 
         Task { await refreshHistoryCache() }
@@ -532,7 +571,7 @@ final class AppEnvironment {
             resolveExtensionPermissionsConsent(for: tabID, granted: false)
         }
 
-        navigationStates.removeAll()
+        removeAllNavigationStates()
         themeColors.removeAll()
         documentColors.removeAll()
         mediaStates.removeAll()
@@ -711,6 +750,16 @@ final class AppEnvironment {
         return candidates.first { $0 !== self && $0.webContents[tabID] != nil && !$0.isDisplaying(tabID) }
     }
 
+    /// Every other environment holding the tab's live page, whether or not it shows it, so a close from any window ends it.
+    private func otherEnvironmentsHoldingPage(_ tabID: TabID) -> [AppEnvironment] {
+        var holders: [AppEnvironment] = []
+        for candidate in OrbitWindowController.openEnvironments + [rootEnvironment]
+        where candidate !== self && candidate.webContents[tabID] != nil && !holders.contains(where: { $0 === candidate }) {
+            holders.append(candidate)
+        }
+        return holders
+    }
+
     /// For an independent window about to lose its active tab, the tab beside it to move to, never one another window is showing.
     func successorBeforeClosing(_ id: TabID, in spaceID: SpaceID?) -> TabID? {
         guard isIndependentStandardWindow, let spaceID, activeTabID == id else { return nil }
@@ -816,13 +865,13 @@ final class AppEnvironment {
         animatingSpaceSwitch(animated) {
             guard isWindowScoped else {
                 store.switchToSpace(id)
-                syncExtensionActiveTab()
                 return
             }
             guard store.space(id) != nil else { return }
             windowActiveSpaceID = id
-            syncExtensionActiveTab()
         }
+        materializeActiveTabIfNeeded()
+        syncExtensionActiveTab()
     }
 
     // The one place a Space switch gets its theme crossfade; the swipe settle passes animated: false.
@@ -845,6 +894,8 @@ final class AppEnvironment {
             animatingSpaceSwitch(true) {
                 if offset > 0 { store.nextSpace() } else { store.previousSpace() }
             }
+            materializeActiveTabIfNeeded()
+            syncExtensionActiveTab()
             return
         }
         let ordered = pagerSpaces
@@ -900,7 +951,13 @@ final class AppEnvironment {
     func renameSpace(_ id: SpaceID, to name: String) { store.renameSpace(id, to: name) }
     func setSpaceIcon(_ id: SpaceID, icon: String, isEmoji: Bool) { store.setIcon(icon, isEmoji: isEmoji, forSpace: id) }
     func updateSpaceTheme(_ id: SpaceID, theme: SpaceTheme) { store.setTheme(theme, forSpace: id) }
-    func deleteSpace(_ id: SpaceID) { store.deleteSpace(id) }
+    func deleteSpace(_ id: SpaceID) {
+        guard spaces.count > 1, space(id) != nil else { return }
+        for tabID in state.tabs.values.filter({ $0.spaceID == id }).map(\.id) {
+            releaseWebContents(for: tabID)
+        }
+        store.deleteSpace(id)
+    }
     func reorderSpaces(_ ids: [SpaceID]) { store.reorderSpaces(ids) }
 
     // Sets only the switch — a name or icon the user already chose must not be reset by automatic activation.
@@ -968,10 +1025,20 @@ final class AppEnvironment {
         }
         scopingActiveSpaceToThisWindow { store.selectTab(id) }
         materializeWebContents(for: id, url: tab.url)
+        // Selecting the tab is the user asking to see it: a pane left frozen or hidden takes the page back.
+        if let contents = webContents[id] { WebContentsPresentation.shared.requestPresentation(of: contents) }
         syncExtensionActiveTab()
         // Must move AppKit's real first responder, not just the visual highlight, guarded against the Command Bar/Find bar so a tab activation racing one of them never steals focus from a live text field.
         guard !isCommandBarPresented, !isFindBarPresented else { return }
         webContents[id]?.focus()
+    }
+
+    /// Builds a released tab's renderer ahead of the click that will open it. Does nothing the click would not do: a tab with a live page, one already shown in another window, or an archived one (which selecting restores first) is left alone.
+    func prefetchRenderer(for id: TabID) {
+        guard webContents[id] == nil,
+              let tab = store.tab(id), tab.section != .archived,
+              otherEnvironmentDisplaying(id) == nil else { return }
+        materializeWebContents(for: id, url: tab.url)
     }
 
     func closeTab(_ id: TabID, destroyRenderer: Bool = true) {
@@ -1002,8 +1069,40 @@ final class AppEnvironment {
     }
 
     func reopenLastClosedTab() {
+        let reopening = store.recentlyClosedRecords.last?.tabID
         scopingActiveSpaceToThisWindow { store.reopenLastClosedTab() }
+        if let reopening, activeTabID == reopening {
+            activateTab(reopening)
+        }
         syncExtensionActiveTab()
+    }
+
+    /// A tab can reach the screen through a path that never called activateTab (a store fallback, sync, a Space switch); the pane calls this so it still gets a page.
+    func materializeDisplayedTab(_ tabID: TabID, shownInOwnWindow: Bool = false) {
+        guard webContents[tabID] == nil, shownInOwnWindow || isDisplaying(tabID), otherEnvironmentDisplaying(tabID) == nil,
+              let tab = store.tab(tabID) else { return }
+        materializeWebContents(for: tabID, url: tab.url)
+        syncExtensionActiveTab()
+    }
+
+    /// With no renderer there is nothing to reload, so the tab's own URL is loaded instead.
+    func reloadTab(_ tabID: TabID, ignoringCache: Bool) {
+        // Try Again on a failure card loads the page that failed. Reloading the web view would reload whatever it last committed, which after a failed first navigation out of a new tab is the empty new-tab document.
+        if let failedURL = tabErrors[tabID]?.url, let contents = webContents[tabID] {
+            tabErrors.removeValue(forKey: tabID)
+            crashedTabs.remove(tabID)
+            WebContentsPresentation.shared.requestPresentation(of: contents)
+            loadInTab(tabID, url: failedURL)
+            return
+        }
+        if let contents = webContents[tabID] {
+            // A reload the pane cannot show is no reload at all to the user.
+            WebContentsPresentation.shared.requestPresentation(of: contents)
+            contents.reload(ignoringCache: ignoringCache)
+            return
+        }
+        guard let tab = store.tab(tabID) else { return }
+        loadInTab(tabID, url: tab.url)
     }
 
     // MARK: - Bookmarked (pinned) rows that are also open tabs
@@ -1229,16 +1328,18 @@ final class AppEnvironment {
         // difference between a working browser and a blank window.
         let session: EngineSession
         let contents: WebContents
+        // Non-nil only while the launch-time cached rules are still loading; see loadOnceCachedRulesLand.
+        var firstLoadHold: Task<Void, Never>?
         do {
             session = try engine.session(
                 identifier: siteProfile?.sessionIdentifier ?? profile.sessionIdentifier,
                 persistent: profile.isPersistent
             )
-            // Bound before the web view exists so the rule compile is already
-            // running. It must not gate load(): a cold compile keeps the main
-            // actor busy long enough that the timeout below never gets to
-            // fire, and the tab sits blank with its address already filled.
-            _ = ContentBlockingRuntime.shared.prepareSession(session, engine: engine)
+            // Bound before the web view exists so the rule load is already running. The first launch navigation
+            // waits for it only briefly (see loadOnceCachedRulesLand): an unbounded wait would leave the tab blank
+            // behind a cold compile, so the hold is capped and the page loads without rules if the cap passes.
+            let hold = ContentBlockingRuntime.shared.prepareSession(session, engine: engine)
+            if let hold, ContentBlockingRuntime.shared.shouldHoldFirstNavigation { firstLoadHold = hold }
             // Never initialURL: navigation must not start until adoptWebContents registers the tab, or
             // WillCreateURLLoaderFactory fires first and every webRequest event reports tabId -1, which extensions drop.
             // The engine registers the tab inside makeWebContents, before this window is its delegate.
@@ -1269,7 +1370,11 @@ final class AppEnvironment {
         // document would otherwise start without them. Content blocking does not: its
         // compile keeps running and applies to requests the page makes after the rules land.
         BoostRuntime.shared.prepareSession(session, env: self)
-        contents.load(url)
+        if let hold = firstLoadHold {
+            loadOnceCachedRulesLand(contents, tabID: tabID, url: url, hold: hold)
+        } else {
+            contents.load(url)
+        }
 
         // GitHub Live Folders only read this session's cookies and poll. They never
         // touch the tab's request, so this must not sit in front of load(). Never
@@ -1290,10 +1395,28 @@ final class AppEnvironment {
         }
     }
 
+    // Holds the launch's first navigation until the cached rules are installed, so the page's first requests are
+    // already filtered, but never longer than the cap. A navigation issued meanwhile through loadInTab bumps
+    // navigationGeneration and wins; a released or replaced tab drops the load.
+    private func loadOnceCachedRulesLand(_ contents: any WebContents, tabID: TabID, url: URL, hold: Task<Void, Never>) {
+        let generation = navigationGeneration[tabID, default: 0]
+        Task { @MainActor [weak self] in
+            await ContentBlockingRuntime.shared.awaitReadiness(hold, timeout: .milliseconds(300))
+            guard let self,
+                  self.webContents[tabID] === contents,
+                  self.navigationGeneration[tabID, default: 0] == generation
+            else { return }
+            contents.load(url)
+        }
+    }
+
     // Must go through this, not webContents[tabID]?.load(url) directly: bumping navigationGeneration here lets a load that was queued before this one detect it has been superseded.
     // Also handles the no-renderer case, where a bare .load(url) would silently discard the navigation.
     func loadInTab(_ tabID: TabID, url: URL) {
         navigationGeneration[tabID, default: 0] += 1
+        // A new navigation supersedes the failure card. Left up until the new page commits, a load that ends without committing (a download, a 204, a cancel) would keep showing the old error over a working tab.
+        tabErrors.removeValue(forKey: tabID)
+        crashedTabs.remove(tabID)
 
         // Rewritten only for a blank pane or a tab with no renderer, whose
         // stored URL is stale by definition — a tab with a live renderer
@@ -1323,8 +1446,9 @@ final class AppEnvironment {
     private func adoptWebContents(_ contents: any WebContents, for tabID: TabID, url: URL) {
         contents.delegate = self
         webContents[tabID] = contents
-        inheritSiteProfile(from: contents, for: tabID)
-        navigationStates[tabID] = contents.navigationState
+        inheritSiteProfile(from: contents, for: tabID, url: url)
+        installForeignSiteCookieMirror(on: contents, tabID: tabID)
+        setNavigationState(contents.navigationState, for: tabID)
         mediaStates[tabID] = contents.mediaState
         store.setMediaState(contents.mediaState, forTab: tabID)
         applyStoredZoomFactor(to: contents, tabID: tabID, url: url)
@@ -1490,6 +1614,11 @@ final class AppEnvironment {
     // push -- true only from disposeWindowSession()'s per-tab loop, when the
     // whole window this tab lives in is going away, not merely this one tab.
     func releaseWebContents(for tabID: TabID, windowClosing: Bool = false, destroyRenderer: Bool = true) {
+        if webContents[tabID] == nil {
+            for holder in otherEnvironmentsHoldingPage(tabID) {
+                holder.releaseWebContents(for: tabID, destroyRenderer: destroyRenderer)
+            }
+        }
         // Resumed, never dropped: abandoning strands the task forever. The engine refuses its own half
         // regardless (~OrbitWebContentsHost); must run before .close(), while the decision still belongs to a live tab.
         certificateProblems.removeValue(forKey: tabID)
@@ -1502,6 +1631,8 @@ final class AppEnvironment {
         // Must run before .close() destroys the native WebContents: OrbitTabRegistry's contract
         // (orbit_tab_registry.h's OrbitTabInfo) requires OrbitTabsRemoved first, or its raw_ptr dangles.
         let wasRegistered = webContents[tabID] is WebKitWebContents
+        // Also on the path that leaves the view alive for a moment: a floating window must not wait for it.
+        (webContents[tabID] as? WebKitWebContents)?.endPictureInPictureForClose()
         if windowClosing, let contents = webContents[tabID] as? WebKitWebContents {
             (engine as? WebKitEngine)?.noteTabWillCloseWithWindow(contents)
         }
@@ -1559,12 +1690,30 @@ final class AppEnvironment {
     // and assert the behaviour that follows.
     static let defaultLiveRendererBudget = 12
 
-    // var so tests can drive the overflow path — nothing in Orbit/UI writes it, no setting exposes it.
-    var liveRendererBudget: Int = AppEnvironment.defaultLiveRendererBudget
+    // While the Mac runs hot (thermal state serious or critical) or in Low Power Mode.
+    static let constrainedLiveRendererBudget = 6
+
+    // Read through the root only: one budget for every window, not one per window.
+    @ObservationIgnored private var sharedLiveRendererBudget = AppEnvironment.defaultLiveRendererBudget
+
+    // Process-wide (the root's). Settable so tests can drive the overflow path; nothing in Orbit/UI writes it, no setting exposes it.
+    var liveRendererBudget: Int {
+        get { rootEnvironment.sharedLiveRendererBudget }
+        set { rootEnvironment.sharedLiveRendererBudget = newValue }
+    }
+
+    var effectiveLiveRendererBudget: Int {
+        let root = rootEnvironment
+        guard root.isRendererResourceConstrained else { return root.sharedLiveRendererBudget }
+        return min(root.sharedLiveRendererBudget, Self.constrainedLiveRendererBudget)
+    }
 
     static let rendererReleaseIdleThreshold: TimeInterval = 120
 
-    static let inactivitySuspendThreshold: TimeInterval = 30 * 60
+    // The budget never takes a tab used more recently than this, so flipping between a few tabs never reloads one.
+    static let rendererRecentUseFloor: TimeInterval = 30
+
+    static let inactivitySuspendThreshold: TimeInterval = 15 * 60
 
     static let inactivitySweepInterval: TimeInterval = 60
 
@@ -1572,14 +1721,32 @@ final class AppEnvironment {
 
     private var inactivitySweepTask: Task<Void, Never>?
 
+    @ObservationIgnored private var rendererResourceObservers: [NSObjectProtocol] = []
+
+    // The root's copy is the one that counts; see setRendererResourceConstrained(_:).
+    @ObservationIgnored private(set) var isRendererResourceConstrained = false
+
+    // Root's copy only. Renderers the budget has already counted; one it has not is the page adoptWebContents just
+    // installed, which must never be what its own adoption frees, whatever its tab's last-access time says.
+    @ObservationIgnored private var budgetSeenRendererIDs: Set<UUID> = []
+
+    // Root's copy only. Renderers a pane has put on screen: only those have a picture worth keeping on release.
+    @ObservationIgnored private var shownRendererIDs: Set<UUID> = []
+
+    // Each environment allocates one, but only the root's is used, so a tab moving between windows keeps its picture.
+    private let ownRendererSnapshotCache = RendererSnapshotCache()
+
+    var rendererSnapshotCache: RendererSnapshotCache { rootEnvironment.ownRendererSnapshotCache }
+
     // Engine-side state beyond what BrowserStore.isEligibleForRendererRelease checks on the Tab: media uses isMediaActive, not isAudible || isPlaying, since both go false on pause and would let a paused-but-active tab's renderer be released.
+    // Per environment; the policy unions it across every window (see releaseBackgroundRenderers).
     var rendererPolicyProtectedTabIDs: Set<TabID> {
         var protected: Set<TabID> = []
         for (tabID, media) in mediaStates
         where media.isMediaActive || media.isPictureInPictureActive || media.isFullscreen {
             protected.insert(tabID)
         }
-        for (tabID, navigation) in navigationStates where navigation.isLoading {
+        for (tabID, box) in navigationBoxes where box.isLoading {
             protected.insert(tabID)
         }
         protected.formUnion(pendingCertificateDecisions.keys)
@@ -1612,6 +1779,17 @@ final class AppEnvironment {
                 self?.runInactivitySweep()
             }
         }
+
+        // Both are posted on arbitrary threads; queue .main brings them to the main actor.
+        for name in [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
+            let token = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.refreshRendererResourceConstraint()
+                }
+            }
+            rendererResourceObservers.append(token)
+        }
+        refreshRendererResourceConstraint()
     }
 
     func stopBackgroundTabRendererPolicy() {
@@ -1619,6 +1797,26 @@ final class AppEnvironment {
         memoryPressureSource = nil
         inactivitySweepTask?.cancel()
         inactivitySweepTask = nil
+        for token in rendererResourceObservers {
+            NotificationCenter.default.removeObserver(token)
+        }
+        rendererResourceObservers.removeAll()
+    }
+
+    private func refreshRendererResourceConstraint() {
+        let info = ProcessInfo.processInfo
+        let isHot = info.thermalState == .serious || info.thermalState == .critical
+        setRendererResourceConstrained(isHot || info.isLowPowerModeEnabled)
+    }
+
+    /// Lowers the effective budget to constrainedLiveRendererBudget while true. Entering the constrained state
+    /// enforces at once; leaving it needs nothing more, since released tabs reload when shown and the full
+    /// budget applies from the next adoption.
+    func setRendererResourceConstrained(_ constrained: Bool) {
+        let root = rootEnvironment
+        guard root.isRendererResourceConstrained != constrained else { return }
+        root.isRendererResourceConstrained = constrained
+        if constrained { enforceLiveRendererBudget() }
     }
 
     @discardableResult
@@ -1629,50 +1827,312 @@ final class AppEnvironment {
         )
     }
 
+    // Snapshots go first at either level: they are the cheapest memory to give back.
     func handleMemoryPressure(_ event: DispatchSource.MemoryPressureEvent) {
         if event.contains(.critical) {
+            rendererSnapshotCache.removeAll()
             releaseBackgroundRenderers(.memoryPressureCritical)
         } else if event.contains(.warning) {
+            rendererSnapshotCache.removeAll()
             releaseBackgroundRenderers(
                 .memoryPressureWarning(idleThreshold: Self.rendererReleaseIdleThreshold)
             )
         }
     }
 
+    /// Every environment on this one's engine: the root, each open window's, and this one (a test's may be neither).
+    var rendererPolicyEnvironments: [AppEnvironment] {
+        let root = rootEnvironment
+        var group: [AppEnvironment] = [root]
+        for candidate in OrbitWindowController.openEnvironments + [self]
+        where candidate.rootEnvironment === root && !group.contains(where: { $0 === candidate }) {
+            group.append(candidate)
+        }
+        return group
+    }
+
+    /// Tabs on screen somewhere: each window's active tab in its visible Space, every pane of a split it shows,
+    /// and the tab of each Little Orbit window. Other Spaces' active tabs and off-screen splits are not included.
+    var rendererOnScreenTabIDs: Set<TabID> {
+        var onScreen = Set((NSApp?.windows ?? []).compactMap { LittleOrbitWindowController.tabID(forWindow: $0) })
+        for environment in rendererPolicyEnvironments {
+            guard let active = environment.activeTabID else { continue }
+            onScreen.insert(active)
+            if let group = environment.splitGroup(for: active) {
+                onScreen.formUnion(group.tabIDs)
+            }
+        }
+        return onScreen
+    }
+
+    // Global: candidates, protections and the on-screen set span every window on the engine, and each release
+    // runs in the environment that holds the page.
     @discardableResult
     func releaseBackgroundRenderers(
         _ policy: TabRendererReleasePolicy,
         now: Date = Date()
     ) -> [TabID] {
+        releaseBackgroundRenderers(policy, sparing: [], now: now)
+    }
+
+    private func releaseBackgroundRenderers(
+        _ policy: TabRendererReleasePolicy,
+        sparing: Set<TabID>,
+        now: Date
+    ) -> [TabID] {
+        let environments = rendererPolicyEnvironments
+        var liveTabIDs: Set<TabID> = []
+        var protected = rendererOnScreenTabIDs.union(sparing)
+        for environment in environments {
+            liveTabIDs.formUnion(environment.webContents.keys)
+            protected.formUnion(environment.rendererPolicyProtectedTabIDs)
+        }
         let released = store.tabsToReleaseRenderers(
-            liveTabIDs: Set(webContents.keys),
-            protectedTabIDs: rendererPolicyProtectedTabIDs,
+            liveTabIDs: liveTabIDs,
+            protectedTabIDs: protected,
             policy: policy,
             now: now
         )
         guard !released.isEmpty else { return [] }
 
         for tabID in released {
-            releaseWebContents(for: tabID)
+            for environment in environments where environment.webContents[tabID] != nil {
+                environment.releaseRendererForPolicy(tabID, capturingSnapshot: policy.capturesSnapshot)
+            }
             store.setRendererLive(tabID, false)
-            navigationStates.removeValue(forKey: tabID)
-            mediaStates.removeValue(forKey: tabID)
-            findResultsByTab.removeValue(forKey: tabID)
-            tabErrors.removeValue(forKey: tabID)
-            crashedTabs.remove(tabID)
-            unresponsiveTabs.remove(tabID)
-            // themeColors is deliberately kept: it's a property of the page,
-            // not the renderer — dropping it would flash the header to neutral and back on reselect.
         }
         return released
     }
 
+    private func releaseRendererForPolicy(_ tabID: TabID, capturingSnapshot: Bool) {
+        let snapshotRequest = capturingSnapshot
+            ? webContents[tabID].flatMap { rendererSnapshotRequest(for: $0, tabID: tabID) }
+            : nil
+        // With a picture to take, the page leaves the tab now but is closed only once photographed.
+        releaseWebContents(for: tabID, destroyRenderer: snapshotRequest == nil)
+        removeNavigationState(for: tabID)
+        mediaStates.removeValue(forKey: tabID)
+        findResultsByTab.removeValue(forKey: tabID)
+        tabErrors.removeValue(forKey: tabID)
+        crashedTabs.remove(tabID)
+        unresponsiveTabs.remove(tabID)
+        // themeColors is deliberately kept: it's a property of the page,
+        // not the renderer — dropping it would flash the header to neutral and back on reselect.
+        if let snapshotRequest {
+            captureRendererSnapshotThenClose(snapshotRequest)
+        }
+    }
+
     private func enforceLiveRendererBudget() {
-        let overshoot = webContents.count - liveRendererBudget
+        let root = rootEnvironment
+        var liveCount = 0
+        var liveRendererIDs: Set<UUID> = []
+        var justAdopted: Set<TabID> = []
+        for environment in rendererPolicyEnvironments {
+            for (tabID, contents) in environment.webContents {
+                liveCount += 1
+                liveRendererIDs.insert(contents.id)
+                if !root.budgetSeenRendererIDs.contains(contents.id) { justAdopted.insert(tabID) }
+            }
+        }
+        root.budgetSeenRendererIDs = liveRendererIDs
+        root.shownRendererIDs.formIntersection(liveRendererIDs)
+        pruneRendererSnapshots()
+
+        let overshoot = liveCount - effectiveLiveRendererBudget
         guard overshoot > 0 else { return }
         releaseBackgroundRenderers(
-            .budgetOvershoot(overshoot, idleThreshold: Self.rendererReleaseIdleThreshold)
+            .budgetOvershoot(overshoot, idleThreshold: Self.rendererRecentUseFloor),
+            sparing: justAdopted,
+            now: Date()
         )
+    }
+
+    // MARK: - Released-tab snapshots
+
+    private struct RendererSnapshotRequest {
+        let contents: any WebContents
+        let tabID: TabID
+        let url: URL
+        let profileID: ProfileID
+        let size: CGSize
+    }
+
+    /// Called by the pane each time it puts a renderer on screen; a page never shown has no picture worth keeping.
+    func noteRendererShown(_ contentsID: UUID) {
+        rootEnvironment.shownRendererIDs.insert(contentsID)
+    }
+
+    /// The picture of a released tab's page, only while it still shows what the tab would reload: the same URL
+    /// in the same Profile, and the tab not closed.
+    func rendererSnapshot(for tabID: TabID) -> NSImage? {
+        guard let entry = rendererSnapshotCache.entry(for: tabID), isRendererSnapshotCurrent(entry, for: tabID) else {
+            return nil
+        }
+        return entry.image
+    }
+
+    func discardRendererSnapshot(for tabID: TabID) {
+        rendererSnapshotCache.remove(tabID)
+    }
+
+    func discardAllRendererSnapshots() {
+        rendererSnapshotCache.removeAll()
+    }
+
+    private func isRendererSnapshotCurrent(_ entry: RendererSnapshotCache.Entry, for tabID: TabID) -> Bool {
+        guard let tab = store.tab(tabID), tab.section != .archived, tab.url == entry.url else { return false }
+        return profileID(for: tab.spaceID) == entry.profileID
+    }
+
+    private func pruneRendererSnapshots() {
+        rendererSnapshotCache.removeAll { tabID, entry in !isRendererSnapshotCurrent(entry, for: tabID) }
+    }
+
+    private func rendererSnapshotRequest(for contents: any WebContents, tabID: TabID) -> RendererSnapshotRequest? {
+        guard rootEnvironment.shownRendererIDs.contains(contents.id), !contents.isClosed,
+              let tab = store.tab(tabID) else { return nil }
+        // A warm page keeps its pane's size while hidden; a page with none falls back to this window's content area.
+        var size = contents.view.bounds.size
+        if size.width < 1 || size.height < 1 { size = contentAreaSize }
+        guard size.width >= 1, size.height >= 1 else { return nil }
+        return RendererSnapshotRequest(
+            contents: contents,
+            tabID: tabID,
+            url: tab.url,
+            profileID: profileID(for: tab.spaceID),
+            size: size
+        )
+    }
+
+    private func captureRendererSnapshotThenClose(_ request: RendererSnapshotRequest) {
+        let contents = request.contents
+        // A snapshot WebKit never answers must not keep the page's process alive.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(AppEnvironment.snapshotCaptureTimeout))
+            AppEnvironment.closeReleasedRenderer(contents)
+        }
+        Task { @MainActor [weak self] in
+            var captured: NSImage?
+            if !contents.isClosed {
+                captured = await contents.capturePreview(rect: nil, size: request.size)
+            }
+            AppEnvironment.closeReleasedRenderer(contents)
+            guard let captured, let cgImage = captured.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+            let width = Int(request.size.width.rounded())
+            let height = Int(request.size.height.rounded())
+            // Off the main actor: the redraw to 1x is the only real cost here and must not land on a tab switch.
+            let scaled = await Task.detached(priority: .utility) {
+                RendererSnapshotCache.downscale(cgImage, width: width, height: height)
+            }.value
+            guard let self, let scaled else { return }
+            self.storeRendererSnapshot(NSImage(cgImage: scaled, size: request.size), for: request)
+        }
+    }
+
+    // releaseWebContents already told the extension system the tab closed, so this close must not tell it again.
+    // Idempotent: the capture and its timeout both call it.
+    private static func closeReleasedRenderer(_ contents: any WebContents) {
+        guard !contents.isClosed else { return }
+        if let webKitContents = contents as? WebKitWebContents {
+            webKitContents.teardown(notifyExtensionController: false)
+        } else {
+            contents.close()
+        }
+    }
+
+    private static let snapshotCaptureTimeout: TimeInterval = 2
+
+    private func storeRendererSnapshot(_ image: NSImage, for request: RendererSnapshotRequest) {
+        // The tab came back while its picture was taken: the new page is what it shows, and a stale picture
+        // left in the cache would flash over it the next time it is selected.
+        guard !rendererPolicyEnvironments.contains(where: { $0.webContents[request.tabID] != nil }) else { return }
+        let entry = RendererSnapshotCache.Entry(image: image, url: request.url, profileID: request.profileID)
+        guard isRendererSnapshotCurrent(entry, for: request.tabID) else { return }
+        rendererSnapshotCache.insert(entry, for: request.tabID)
+    }
+
+    /// Pictures of released tabs, keyed by tab id so nothing crosses tabs or Profiles. Bounded by count and by
+    /// pixel bytes, oldest capture evicted first.
+    @MainActor
+    @Observable
+    final class RendererSnapshotCache {
+        struct Entry {
+            let image: NSImage
+            let url: URL
+            let profileID: ProfileID
+            let byteCost: Int
+
+            init(image: NSImage, url: URL, profileID: ProfileID) {
+                self.image = image
+                self.url = url
+                self.profileID = profileID
+                let pixels = image.representations.map { $0.pixelsWide * $0.pixelsHigh }.max()
+                    ?? Int(image.size.width * image.size.height)
+                byteCost = max(0, pixels) * 4
+            }
+        }
+
+        static let entryLimit = 24
+        static let byteLimit = 100 * 1024 * 1024
+
+        private var entries: [TabID: Entry] = [:]
+        @ObservationIgnored private var captureOrder: [TabID: UInt64] = [:]
+        @ObservationIgnored private var clock: UInt64 = 0
+
+        var count: Int { entries.count }
+
+        var totalByteCost: Int { entries.values.reduce(0) { $0 + $1.byteCost } }
+
+        func entry(for tabID: TabID) -> Entry? { entries[tabID] }
+
+        func insert(_ entry: Entry, for tabID: TabID) {
+            guard entry.byteCost <= Self.byteLimit else { return }
+            clock &+= 1
+            entries[tabID] = entry
+            captureOrder[tabID] = clock
+            while entries.count > Self.entryLimit || totalByteCost > Self.byteLimit,
+                  let oldest = captureOrder.min(by: { $0.value < $1.value })?.key {
+                remove(oldest)
+            }
+        }
+
+        // Guarded so a no-op never invalidates the panes that read the cache.
+        func remove(_ tabID: TabID) {
+            captureOrder.removeValue(forKey: tabID)
+            guard entries[tabID] != nil else { return }
+            entries.removeValue(forKey: tabID)
+        }
+
+        func removeAll() {
+            captureOrder.removeAll()
+            guard !entries.isEmpty else { return }
+            entries.removeAll()
+        }
+
+        func removeAll(where shouldRemove: (TabID, Entry) -> Bool) {
+            for (tabID, entry) in entries where shouldRemove(tabID, entry) {
+                remove(tabID)
+            }
+        }
+
+        /// Redrawn at one pixel per point, a quarter of a Retina capture's memory.
+        nonisolated static func downscale(_ image: CGImage, width: Int, height: Int) -> CGImage? {
+            guard width > 0, height > 0,
+                  let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(
+                      data: nil,
+                      width: width,
+                      height: height,
+                      bitsPerComponent: 8,
+                      bytesPerRow: 0,
+                      space: space,
+                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+                  ) else { return nil }
+            context.interpolationQuality = .medium
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return context.makeImage()
+        }
     }
 
     // MARK: - Restore Data
@@ -1688,7 +2148,7 @@ final class AppEnvironment {
         for tabID in Array(webContents.keys) {
             releaseWebContents(for: tabID)
         }
-        navigationStates.removeAll()
+        removeAllNavigationStates()
         mediaStates.removeAll()
         themeColors.removeAll()
         documentColors.removeAll()
@@ -1712,7 +2172,7 @@ final class AppEnvironment {
 
     func _test_attachWebContents(_ contents: WebContents, for tabID: TabID) {
         webContents[tabID] = contents
-        navigationStates[tabID] = contents.navigationState
+        setNavigationState(contents.navigationState, for: tabID)
         mediaStates[tabID] = contents.mediaState
     }
 
@@ -1743,11 +2203,10 @@ final class AppEnvironment {
         // every recorded visit passes through, so a future caller cannot forget the rule.
         guard !isPrivateBrowsingContext(spaceID: spaceID, profileID: profileID) else { return nil }
         let visit = HistoryVisit(url: url, title: title, profileID: profileID, spaceID: spaceID, wasTyped: wasTyped)
-        let recorded = (try? await historyStore.record(visit: visit)) != nil
-        await refreshHistoryCache()
-        guard recorded, let row = try? await historyStore.urlRow(forURL: url) else { return nil }
-        ChromeExtensionAPI.postVisited(row)
-        return row
+        guard let recorded = try? await historyStore.recordReportingRow(visit: visit) else { return nil }
+        upsertHistoryCache(recorded.entry, typedCount: recorded.row.typedCount)
+        ChromeExtensionAPI.postVisited(recorded.row)
+        return recorded.row
     }
 
     private func refreshHistoryCache(query: String = "") async {
@@ -1755,8 +2214,49 @@ final class AppEnvironment {
         // A failed refresh leaves the previous cache alone, not [] — stale
         // rows are strictly better than dropped ones for a Command Bar
         // reading this cache on every keystroke.
-        guard let found = try? await historyStore.search(query, limit: 500) else { return }
+        guard let found = try? await historyStore.search(query, limit: Self.historyCacheCapacity) else { return }
         localHistoryCache = found
+    }
+
+    private func setHistoryIndex(_ index: [PreparedHistoryEntry]) {
+        historyIndex = index
+        historyCacheVersion &+= 1
+    }
+
+    // Folds one recorded visit into the cache instead of re-reading and re-sorting
+    // 2000 rows after every page commit. The store orders this cache by frecency, so the
+    // visit is re-placed by the same score; existing entries only carry wasTyped, so their
+    // typed count is approximated, and a periodic full reload corrects any drift.
+    private func upsertHistoryCache(_ entry: HistoryEntry, typedCount: Int) {
+        historyUpsertsSinceReload += 1
+        if historyUpsertsSinceReload >= Self.historyUpsertsBetweenReloads {
+            historyUpsertsSinceReload = 0
+            Task { await refreshHistoryCache() }
+        }
+
+        let now = Date()
+        let newScore = HistoryStore.frecencyScore(visitCount: entry.visitCount, typedCount: typedCount, lastVisit: entry.visitedAt, now: now)
+        var index = historyIndex
+        let countBefore = index.count
+        index.removeAll { $0.entry.url == entry.url }
+        let removedExisting = index.count != countBefore
+        let position = index.firstIndex { existing in
+            HistoryStore.frecencyScore(
+                visitCount: existing.entry.visitCount,
+                typedCount: existing.entry.wasTyped ? 1 : 0,
+                lastVisit: existing.entry.visitedAt,
+                now: now
+            ) < newScore
+        } ?? index.count
+
+        // Ranked below a full cache's last entry: it would not have made the cut on a reload either.
+        guard position < Self.historyCacheCapacity else {
+            if removedExisting { setHistoryIndex(index) }
+            return
+        }
+        index.insert(PreparedHistoryEntry(entry), at: position)
+        if index.count > Self.historyCacheCapacity { index.removeLast() }
+        setHistoryIndex(index)
     }
 
     // historyStore, localHistoryCache and the search mirrors are all private to
@@ -1797,18 +2297,28 @@ final class AppEnvironment {
         guard !Task.isCancelled else { return }
         historySearchQuery = trimmed
         historySearchResults = found
+        // The query just changed, so every earlier historyResults for it used no search hits at all:
+        // any hit is new. No hits means a re-score would reproduce what is already on screen.
+        if !found.isEmpty { historySearchEpoch &+= 1 }
     }
 
     func historyResults(matching query: String, limit: Int = 50) -> [HistoryEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return Array(localHistoryCache.prefix(limit)) }
+        guard !trimmed.isEmpty else { return historyIndex.prefix(limit).map(\.entry) }
 
-        return Self.blendHistory(
-            indexed: historySearchQuery == trimmed ? historySearchResults : [],
-            cached: localHistoryCache,
-            matching: trimmed,
+        let sources = historySources(matching: trimmed)
+        return CommandBarEngine.blendHistory(
+            indexed: sources.indexed,
+            cached: sources.cached,
+            query: FuzzyMatcher.PreparedQuery(trimmed),
             limit: limit
-        )
+        ).map(\.entry)
+    }
+
+    // The two blend inputs for a typed query, copy-on-write handles that are O(1) to take on the main actor:
+    // the store's FTS hits (only while they belong to this exact query), then the recency cache.
+    func historySources(matching trimmed: String) -> (indexed: [PreparedHistoryEntry], cached: [PreparedHistoryEntry]) {
+        (historySearchQuery == trimmed ? historySearchIndex : [], historyIndex)
     }
 
     // Both sources are filtered here, not just the recency cache: a HistoryStore.search result reflects the row's state when indexed, not now, so an unmatched row must be dropped rather than ranked on stale frecency.
@@ -1818,20 +2328,12 @@ final class AppEnvironment {
         matching query: String,
         limit: Int
     ) -> [HistoryEntry] {
-        let terms = query.split(whereSeparator: \.isWhitespace).map { $0.lowercased() }
-        var seen = Set<String>()
-        var results: [HistoryEntry] = []
-
-        func take(_ entry: HistoryEntry) {
-            guard results.count < limit else { return }
-            guard historyEntryMatches(entry, terms: terms) else { return }
-            guard seen.insert(entry.url.absoluteString.lowercased()).inserted else { return }
-            results.append(entry)
-        }
-
-        indexed.forEach(take)
-        cached.forEach(take)
-        return results
+        CommandBarEngine.blendHistory(
+            indexed: indexed.map(PreparedHistoryEntry.init),
+            cached: cached.map(PreparedHistoryEntry.init),
+            query: FuzzyMatcher.PreparedQuery(query),
+            limit: limit
+        ).map(\.entry)
     }
 
     nonisolated static func historyEntryMatches(_ entry: HistoryEntry, terms: [String]) -> Bool {

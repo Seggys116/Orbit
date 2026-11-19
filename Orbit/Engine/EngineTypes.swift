@@ -453,6 +453,48 @@ nonisolated public struct JavaScriptDialogResponse: Sendable {
     }
 }
 
+// MARK: - HTTP authentication
+
+/// A server or proxy asking for a username and password (HTTP Basic, Digest or NTLM).
+nonisolated public struct HTTPCredentialRequest: Sendable, Equatable {
+    public var host: String
+    public var port: Int
+    public var realm: String?
+    public var isProxy: Bool
+    /// The credentials offered for this challenge were already refused. The prompt says so instead of asking as if for the first time.
+    public var previousAttemptFailed: Bool
+    /// Whether an answer can be kept after the session. False in a private window, where nothing may be written to disk.
+    public var canRemember: Bool
+
+    public init(
+        host: String,
+        port: Int,
+        realm: String? = nil,
+        isProxy: Bool = false,
+        previousAttemptFailed: Bool = false,
+        canRemember: Bool = true
+    ) {
+        self.host = host
+        self.port = port
+        self.realm = realm
+        self.isProxy = isProxy
+        self.previousAttemptFailed = previousAttemptFailed
+        self.canRemember = canRemember
+    }
+}
+
+nonisolated public struct HTTPCredentialResponse: Sendable, Equatable {
+    public var username: String
+    public var password: String
+    public var remember: Bool
+
+    public init(username: String, password: String, remember: Bool = false) {
+        self.username = username
+        self.password = password
+        self.remember = remember
+    }
+}
+
 // MARK: - Context menu
 
 nonisolated public struct ContextMenuContext: Sendable {

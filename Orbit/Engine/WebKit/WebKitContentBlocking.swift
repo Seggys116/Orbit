@@ -51,8 +51,41 @@ final class WebKitContentBlocking {
         objc_getAssociatedObject(controller, &associationKey) as? WebKitContentBlocking
     }
 
+    /// Which blocker configuration the last accepted apply was for. Same blocker object and revision means the same
+    /// rules, allowlist and enabled flag, so translating, planning and compiling again would rebuild identical lists.
+    private struct AppliedIdentity: Equatable {
+        var blocker: ObjectIdentifier?
+        var revision: UInt64
+    }
+
+    private var appliedIdentity: AppliedIdentity?
+    private var applyTask: Task<Void, Never>?
+
     // A disabled or absent blocker removes the lists from every web view at once.
-    func apply(_ newBlocker: ContentBlocker?) async {
+    // Returns false when the configuration was already applied (or is being applied), so the caller can skip its own follow-up work.
+    @discardableResult
+    func apply(_ newBlocker: ContentBlocker?) async -> Bool {
+        let identity = AppliedIdentity(
+            blocker: newBlocker.map(ObjectIdentifier.init),
+            revision: newBlocker?.configurationRevision ?? 0
+        )
+        if identity == appliedIdentity {
+            // An identical request that arrives mid-apply still returns only once the lists are installed.
+            await applyTask?.value
+            return false
+        }
+        appliedIdentity = identity
+        let task = Task { @MainActor in
+            await self.applyUnconditionally(newBlocker)
+            // A partial failure is retried by the next identical request instead of being remembered as done.
+            if self.lastReport.failedRuleLists > 0, self.appliedIdentity == identity { self.appliedIdentity = nil }
+        }
+        applyTask = task
+        await task.value
+        return true
+    }
+
+    private func applyUnconditionally(_ newBlocker: ContentBlocker?) async {
         blocker = newBlocker
         generation += 1
         let mine = generation

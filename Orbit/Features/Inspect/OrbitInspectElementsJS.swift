@@ -5,7 +5,8 @@ extension OrbitInspectAgent {
 
       var el_selected = null;
       var el_history = [null, null, null, null, null]; // $0..$4
-      var el_listeners = new WeakMap();
+      // Adopts the records the early-capture stub kept for listeners added before this agent loaded.
+      var el_listeners = (window.__orbitInspectEarly && window.__orbitInspectEarly.listeners) || new WeakMap();
       var el_mutationBuffer = [];
       var el_mutationTimer = null;
       var el_forceStateMap = {};

@@ -41,6 +41,29 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(store.activeTabBySpaceForTesting(space.id), tabID)
     }
 
+    func test_openTab_insertsDirectlyAfterTheActiveTabNotAtTheEnd() {
+        let store = makeStore()
+        let space = store.activeSpace!
+        let first = store.openTab(url: URL(string: "https://one.example.com")!, in: space.id)
+        let last = store.openTab(url: URL(string: "https://three.example.com")!, in: space.id, activate: false)
+        store.selectTab(first)
+
+        let inserted = store.openTab(url: URL(string: "https://two.example.com")!, in: space.id)
+
+        XCTAssertEqual(store.todayTabs(in: space.id).map(\.id).filter { [first, inserted, last].contains($0) }, [first, inserted, last])
+        XCTAssertEqual(store.activeTabBySpaceForTesting(space.id), inserted)
+    }
+
+    func test_openTab_withoutActivationStillAppendsToTheEnd() {
+        let store = makeStore()
+        let space = store.activeSpace!
+        let first = store.openTab(url: URL(string: "https://one.example.com")!, in: space.id)
+        let second = store.openTab(url: URL(string: "https://two.example.com")!, in: space.id, activate: false)
+        let third = store.openTab(url: URL(string: "https://three.example.com")!, in: space.id, activate: false)
+
+        XCTAssertEqual(store.todayTabs(in: space.id).map(\.id).suffix(3), [first, second, third])
+    }
+
     func test_pin_movesTabFromTodayToPinnedTree() {
         let store = makeStore()
         let space = store.activeSpace!

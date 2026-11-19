@@ -178,6 +178,12 @@ struct TabRowView: View {
         self.forcesHoveredAppearanceForTesting = forcesHoveredAppearanceForTesting
     }
 
+    // Only the loading fields the row draws, read through this tab's own mirror: reading the whole navigationStates dictionary made every row re-evaluate on any tab's progress tick.
+    private var loadingState: NavigationState {
+        guard let progress = env.navigationLoadingProgress(for: tab.id) else { return .empty }
+        return NavigationState(isLoading: true, progress: progress)
+    }
+
     var body: some View {
         TabRowChrome(
             presentation: TabRowPresentation(
@@ -186,7 +192,7 @@ struct TabRowView: View {
                 theme: theme,
                 isActive: env.activeTabID == tab.id,
                 isOpen: env.isTabOpen(tab.id),
-                navigationState: env.navigationStates[tab.id] ?? .empty,
+                navigationState: loadingState,
                 isAudible: env.mediaStates[tab.id]?.isAudible ?? false,
                 isPeeking: PeekState.shared.activePreview?.sourceTabID == tab.id
             ),
@@ -304,7 +310,8 @@ private struct TabRowChrome: View, Equatable {
     // Behind the close control and favicon, which keep their own clicks; the title does not hit-test, so a click on the words lands here, and the whole row pitch is the target.
     private var rowActivationCatcher: some View {
         // On release: a press that turns into a drag must not switch tabs first.
-        OrbitNSActionButton(onClickCount: { handleRowClick($0) }, firesOnRelease: true) {
+        // The page is built on the press so a released tab is already loading by the time the click lands; a press that turns into a drag simply leaves it built.
+        OrbitNSActionButton(onClickCount: { handleRowClick($0) }, onPress: { env.prefetchRenderer(for: tab.id) }, firesOnRelease: true) {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

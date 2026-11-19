@@ -39,7 +39,7 @@ enum SyncRecoveryAction: Identifiable {
     var confirmationMessage: String {
         switch self {
         case .replaceICloudWithThisMac:
-            return "This deletes everything Orbit has stored in iCloud, including Spaces, Folders, Pinned and Today tabs, Favorites, Boosts, Easels, Notes and link-routing rules that exist only on your other Macs. Orbit then uploads what is on this Mac as the only copy, and your other Macs will receive it. This cannot be undone."
+            return "This deletes only the data Orbit itself keeps in your iCloud account: nothing else in iCloud is touched, and nothing on this Mac is deleted. Spaces, Folders, Pinned and Today tabs, Favorites, Boosts, Easels, Notes and link-routing rules that exist only on your other Macs are lost. Orbit then uploads what is on this Mac as the only copy, and your other Macs will receive it. This cannot be undone."
         case .replaceThisMacWithICloud:
             return "Orbit discards its record of what this Mac has synced and downloads everything in iCloud again. Where iCloud and this Mac both have an item, iCloud's version replaces this Mac's, so edits made here that never reached iCloud are lost for those items. Items that exist only on this Mac are kept and uploaded, and items you deleted here that are still in iCloud come back. This cannot be undone."
         }
@@ -161,7 +161,20 @@ struct SyncSettingsPane: View {
                 }
             }
 
-            if let problem, !problem.isSchemaProblem {
+            if let problem, problem.requiresICloudReset {
+                OrbitSettingsActionRow {
+                    Text("iCloud's copy needs to be reset. Wipe what's there and upload this Mac's Spaces, tabs and Favorites in its place?")
+                        .font(.system(size: OrbitControlMetrics.settingsRowDescriptionFontSize, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                } trailing: {
+                    OrbitButton(title: "Yes, Wipe iCloud and Re-sync…", kind: .destructive, isCompact: true) {
+                        pendingRecovery = .replaceICloudWithThisMac
+                    }
+                    .fixedSize()
+                    .disabled(engine == nil || isBusy)
+                }
+                recoveryRow(.replaceThisMacWithICloud)
+            } else if let problem, !problem.isSchemaProblem {
                 recoveryRow(.replaceICloudWithThisMac)
                 recoveryRow(.replaceThisMacWithICloud)
             }

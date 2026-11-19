@@ -14,6 +14,10 @@ final class AppEnvironment {
 
     var webContents: [TabID: any WebContents] = [:]
     var navigationStates: [TabID: NavigationState] = [:]
+
+    func navigationLoadingProgress(for tabID: TabID) -> Double? {
+        navigationStates[tabID].flatMap { $0.isLoading ? $0.progress : nil }
+    }
     var mediaStates: [TabID: MediaState] = [:]
     var recentDownloads: [DownloadItem] = []
     let downloadStore = DownloadStore(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("orbit-test-downloads-\(UUID().uuidString).json"))
@@ -30,6 +34,8 @@ final class AppEnvironment {
 
     init() {}
 
+    // The real one builds a released tab's page; the double has no engine, so a press has nothing to prefetch.
+    func prefetchRenderer(for id: TabID) {}
 
     var spaces: [Space] { state.spaces.sorted { $0.order < $1.order } }
 

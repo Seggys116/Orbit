@@ -10,8 +10,22 @@ final class OrbitSecurityModel: OrbitInspectModule {
 
     var messageTypes: Set<String> { ["sec.page"] }
 
-    private(set) var certificates: [OrbitSecurityCertificate] = []
-    private(set) var trust: OrbitSecurityTrust = .unavailable
+    /// The commit hook only records the trust; the chain is described and evaluated off the main thread the first time these are read.
+    var certificates: [OrbitSecurityCertificate] {
+        resolveConnectionIfNeeded()
+        return resolvedCertificates
+    }
+
+    var trust: OrbitSecurityTrust {
+        resolveConnectionIfNeeded()
+        return resolvedTrust
+    }
+
+    private var resolvedCertificates: [OrbitSecurityCertificate] = []
+    private var resolvedTrust: OrbitSecurityTrust = .unavailable
+    @ObservationIgnored private var pendingConnection: (trust: OrbitSecuritySupport.TrustHandle, host: String)?
+    @ObservationIgnored private var connectionGeneration = 0
+    @ObservationIgnored private var resolvingGeneration: Int?
     private(set) var hasOnlySecureContent: Bool?
 
     private(set) var documentURL: String?
@@ -23,6 +37,9 @@ final class OrbitSecurityModel: OrbitInspectModule {
     private(set) var forms: [OrbitSecurityForm] = []
     private(set) var frames: [OrbitSecurityFrame] = []
     private(set) var domReferences: [OrbitSecurityRequest] = []
+    private(set) var scripts: [OrbitSecurityScript] = []
+    private(set) var links: [OrbitSecurityLink] = []
+    private(set) var libraries: [LHLibrary] = []
     private(set) var isSecureContext: Bool?
     private(set) var pageDataReceived = false
 
@@ -63,6 +80,9 @@ final class OrbitSecurityModel: OrbitInspectModule {
             domReferences: domReferences,
             forms: forms,
             frames: frames,
+            scripts: scripts,
+            links: links,
+            libraries: libraries,
             cookies: session?.application.cookieRecords ?? []
         )
     }
@@ -96,6 +116,30 @@ final class OrbitSecurityModel: OrbitInspectModule {
                 selector: OrbitInspectDecode.string(entry, "sel")
             )
         }
+        scripts = OrbitInspectDecode.objects(object, "scripts").map { entry in
+            OrbitSecurityScript(
+                url: OrbitInspectDecode.string(entry, "url"),
+                tag: OrbitInspectDecode.string(entry, "tag"),
+                hasIntegrity: OrbitInspectDecode.bool(entry, "sri"),
+                nodeID: OrbitInspectDecode.integer(entry, "id"),
+                selector: OrbitInspectDecode.string(entry, "sel")
+            )
+        }
+        links = OrbitInspectDecode.objects(object, "links").map { entry in
+            OrbitSecurityLink(
+                href: OrbitInspectDecode.string(entry, "href"),
+                rel: OrbitInspectDecode.string(entry, "rel"),
+                nodeID: OrbitInspectDecode.integer(entry, "id"),
+                selector: OrbitInspectDecode.string(entry, "sel")
+            )
+        }
+        libraries = OrbitInspectDecode.objects(object, "libs").map { entry in
+            LHLibrary(
+                name: OrbitInspectDecode.string(entry, "name"),
+                version: OrbitInspectDecode.optionalString(entry, "version"),
+                evidence: [OrbitInspectDecode.string(entry, "ev")].filter { !$0.isEmpty }
+            )
+        }
         domReferences = OrbitInspectDecode.objects(object, "refs").map { entry in
             OrbitSecurityRequest(
                 url: OrbitInspectDecode.string(entry, "url"),
@@ -112,6 +156,9 @@ final class OrbitSecurityModel: OrbitInspectModule {
         forms = []
         frames = []
         domReferences = []
+        scripts = []
+        links = []
+        libraries = []
         isSecureContext = nil
         pageDataReceived = false
         // The response and the TLS chain arrive before the page agent says hello. Keep them when they belong to this document.
@@ -146,20 +193,43 @@ final class OrbitSecurityModel: OrbitInspectModule {
 
     private func readConnection(from webView: WKWebView) {
         hasOnlySecureContent = webView.hasOnlySecureContent
+        connectionGeneration += 1
         guard let url = webView.url, url.scheme?.lowercased() == "https", let host = url.host,
               let serverTrust = webView.serverTrust else {
-            certificates = []
-            trust = .unavailable
+            pendingConnection = nil
+            resolvedCertificates = []
+            resolvedTrust = .unavailable
             return
         }
-        let snapshot = OrbitSecuritySupport.snapshot(trust: serverTrust, host: host)
-        certificates = snapshot.certificates
-        trust = snapshot.trust
+        pendingConnection = (OrbitSecuritySupport.TrustHandle(trust: serverTrust), host)
+    }
+
+    /// Called when the inspector opens so the chain is ready before Lighthouse or the Security pane reads it.
+    func prefetchConnection() {
+        resolveConnectionIfNeeded()
+    }
+
+    /// Starts the background snapshot for the latest recorded trust. A newer commit supersedes an in-flight result.
+    private func resolveConnectionIfNeeded() {
+        guard let pending = pendingConnection, resolvingGeneration != connectionGeneration else { return }
+        let generation = connectionGeneration
+        resolvingGeneration = generation
+        OrbitSecuritySupport.snapshotInBackground(pending.trust, host: pending.host) { [weak self] snapshot in
+            MainActor.assumeIsolated {
+                guard let self, self.connectionGeneration == generation else { return }
+                self.pendingConnection = nil
+                self.resolvingGeneration = nil
+                self.resolvedCertificates = snapshot.certificates
+                self.resolvedTrust = snapshot.trust
+            }
+        }
     }
 
     private func clearNative() {
-        certificates = []
-        trust = .unavailable
+        connectionGeneration += 1
+        pendingConnection = nil
+        resolvedCertificates = []
+        resolvedTrust = .unavailable
         hasOnlySecureContent = nil
         documentURL = nil
         documentStatus = nil

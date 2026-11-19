@@ -195,6 +195,17 @@ final class MockWebContents: NSObject, WebContents {
         cancelledDownloadIDs.append(id)
     }
 
+    private(set) var downloadedResourceURLs: [URL] = []
+    var resourceDataOverride: [URL: Data] = [:]
+
+    func downloadResource(_ url: URL) {
+        downloadedResourceURLs.append(url)
+    }
+
+    func loadResourceData(_ url: URL) async -> Data? {
+        resourceDataOverride[url]
+    }
+
     // MARK: Developer tools
 
     func showDeveloperTools(inspectAt point: CGPoint?) {

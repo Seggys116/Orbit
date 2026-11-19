@@ -1,7 +1,110 @@
 import AppKit
 import Foundation
+import Observation
 import UniformTypeIdentifiers
 import WebKit
+
+// MARK: - Per-tab navigation mirror
+
+// One per tab with live web contents. Each field is its own Observation key and update(from:) writes
+// only fields that changed, so a view reading canGoBack is not invalidated by a progress tick, and a
+// view reading one tab is not invalidated by another tab at all.
+@MainActor
+@Observable
+final class NavigationBox {
+    private(set) var url: URL?
+    private(set) var title: String
+    private(set) var canGoBack: Bool
+    private(set) var canGoForward: Bool
+    private(set) var isLoading: Bool
+    private(set) var progress: Double
+    private(set) var security: SecurityLevel
+
+    init(_ state: NavigationState) {
+        url = state.url
+        title = state.title
+        canGoBack = state.canGoBack
+        canGoForward = state.canGoForward
+        isLoading = state.isLoading
+        progress = state.progress
+        security = state.security
+    }
+
+    // Reads every field, so a view reading this depends on all of them; views should read the fields they show.
+    var state: NavigationState {
+        NavigationState(
+            url: url,
+            title: title,
+            canGoBack: canGoBack,
+            canGoForward: canGoForward,
+            isLoading: isLoading,
+            progress: progress,
+            security: security
+        )
+    }
+
+    // Observable setters notify even for an identical value, hence the comparisons.
+    func update(from state: NavigationState) {
+        if url != state.url { url = state.url }
+        if title != state.title { title = state.title }
+        if canGoBack != state.canGoBack { canGoBack = state.canGoBack }
+        if canGoForward != state.canGoForward { canGoForward = state.canGoForward }
+        if isLoading != state.isLoading { isLoading = state.isLoading }
+        if progress != state.progress { progress = state.progress }
+        if security != state.security { security = state.security }
+    }
+}
+
+extension AppEnvironment {
+
+    func navigationBox(for tabID: TabID) -> NavigationBox? {
+        navigationBoxes[tabID]
+    }
+
+    func navigationState(for tabID: TabID) -> NavigationState? {
+        navigationBoxes[tabID]?.state
+    }
+
+    /// Progress while the tab is loading, nil otherwise. Reads progress only while loading, so an idle
+    /// row is not invalidated by a progress value nobody draws.
+    func navigationLoadingProgress(for tabID: TabID) -> Double? {
+        guard let box = navigationBoxes[tabID], box.isLoading else { return nil }
+        return box.progress
+    }
+
+    func setNavigationState(_ state: NavigationState, for tabID: TabID) {
+        if let box = navigationBoxes[tabID] {
+            box.update(from: state)
+        } else {
+            navigationBoxes[tabID] = NavigationBox(state)
+        }
+    }
+
+    func removeNavigationState(for tabID: TabID) {
+        guard navigationBoxes[tabID] != nil else { return }
+        navigationBoxes.removeValue(forKey: tabID)
+    }
+
+    func removeAllNavigationStates() {
+        guard !navigationBoxes.isEmpty else { return }
+        navigationBoxes.removeAll()
+    }
+
+    /// Value snapshot for non-UI callers and tests. Reading it in a view depends on every tab's every
+    /// field; views read navigationBox(for:) instead. Assigning reconciles: boxes survive for kept keys
+    /// and are updated in place, so a whole-dictionary write still invalidates only what changed.
+    var navigationStates: [TabID: NavigationState] {
+        get { navigationBoxes.mapValues { $0.state } }
+        set {
+            for tabID in navigationBoxes.keys where newValue[tabID] == nil {
+                removeNavigationState(for: tabID)
+            }
+            for (tabID, state) in newValue {
+                setNavigationState(state, for: tabID)
+            }
+        }
+    }
+}
 
 // WebContents.id is NOT Tab.id — every callback below must resolve the
 // actual TabID via AppEnvironment.tabID(for:) instead of trusting contents.id.
@@ -11,7 +114,9 @@ extension AppEnvironment: WebContentsDelegate {
 
     func webContentsDidChangeNavigationState(_ contents: WebContents) {
         guard let tabID = tabID(for: contents) else { return }
-        navigationStates[tabID] = contents.navigationState
+        // A load in a background tab must re-apply its colour scheme when the tab is next shown.
+        if contents.navigationState.isLoading { PageColorSchemeScript.forgetSettled(for: contents.id) }
+        setNavigationState(contents.navigationState, for: tabID)
         guard let existing = state.tabs[tabID] else { return }
         var tab = existing
         if let url = contents.navigationState.url, url != tab.url {
@@ -83,6 +188,8 @@ extension AppEnvironment: WebContentsDelegate {
         // Before the tabID guard, deliberately: whether Orbit can resolve
         // this tab has no bearing on whether the page should be boosted.
         BoostRuntime.shared.pageDidCommit(url: url, contents: contents, env: self)
+        // The first committed page ends the launch window: deferred list refreshes, extensions and sync can start.
+        LaunchGate.shared.pageDidCommit()
 
         guard let tabID = tabID(for: contents) else { return }
         TidyTabTitlesCoordinator.shared.navigationDidCommit(tabID: tabID, committedURL: url, env: self)
@@ -118,15 +225,21 @@ extension AppEnvironment: WebContentsDelegate {
     // MARK: Chrome
 
     func webContents(_ contents: WebContents, didChangeTitle title: String) {
-        guard let tabID = tabID(for: contents), var tab = state.tabs[tabID] else { return }
+        guard let tabID = tabID(for: contents), var tab = state.tabs[tabID], tab.title != title else { return }
         tab.title = title
         state.tabs[tabID] = tab
     }
 
+    func webContents(_ contents: WebContents, hasCachedFaviconForHost host: String) -> Bool {
+        faviconCache.hasImage(forHost: host)
+    }
+
     func webContents(_ contents: WebContents, didChangeFavicon image: NSImage?, url: URL?) {
         guard let tabID = tabID(for: contents), var tab = state.tabs[tabID] else { return }
-        tab.faviconURL = url
-        state.tabs[tabID] = tab
+        if tab.faviconURL != url {
+            tab.faviconURL = url
+            state.tabs[tabID] = tab
+        }
 
         // Cache the already-decoded image directly rather than leaving
         // FaviconView to re-fetch url over the network a second time.
@@ -216,17 +329,14 @@ extension AppEnvironment: WebContentsDelegate {
                 return false
             }
             guard let adopted = pending.adopt() else { return false }
-            seedCrossSitePopupCookies(for: adopted, openedBy: contents, openerTabID: tabID)
             LittleOrbitWindowController.open(adopting: adopted, url: request.url)
             return true
         case .popup:
             guard let adopted = pending.adopt() else { return false }
-            seedCrossSitePopupCookies(for: adopted, openedBy: contents, openerTabID: tabID)
             LittleOrbitWindowController.open(adopting: adopted, url: request.url)
             return true
         case .currentTab, .newForegroundTab, .newBackgroundTab:
             guard let adopted = pending.adopt() else { return false }
-            seedCrossSitePopupCookies(for: adopted, openedBy: contents, openerTabID: tabID)
             let opened = adoptPageCreatedTab(
                 adopted,
                 url: request.url,
@@ -281,6 +391,46 @@ extension AppEnvironment: WebContentsDelegate {
         let response = alert.runModal()
         let accepted = response == .alertFirstButtonReturn
         return JavaScriptDialogResponse(accepted: accepted, promptText: promptField?.stringValue)
+    }
+
+    func webContents(
+        _ contents: WebContents,
+        requestsHTTPCredentials request: HTTPCredentialRequest
+    ) async -> HTTPCredentialResponse? {
+        guard !DebugFlags.isRunningUnderTests else { return nil }
+        let alert = NSAlert()
+        let subject = request.isProxy ? "the proxy \(request.host)" : request.host
+        alert.messageText = "Sign in to \(subject)"
+        var details = request.isProxy
+            ? "The proxy \(request.host) requires a username and password."
+            : "\(request.host) requires a username and password."
+        if let realm = request.realm, !realm.isEmpty { details += " Realm: \(realm)." }
+        if request.previousAttemptFailed { details += " The last username or password was not accepted." }
+        alert.informativeText = details
+        alert.addButton(withTitle: "Sign In")
+        alert.addButton(withTitle: "Cancel")
+
+        let username = NSTextField(frame: NSRect(x: 0, y: 56, width: 260, height: 22))
+        username.placeholderString = "Username"
+        let password = NSSecureTextField(frame: NSRect(x: 0, y: 28, width: 260, height: 22))
+        password.placeholderString = "Password"
+        let remember = NSButton(checkboxWithTitle: "Remember this password", target: nil, action: nil)
+        remember.frame = NSRect(x: 0, y: 0, width: 260, height: 20)
+        remember.isEnabled = request.canRemember
+        let form = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 78))
+        form.addSubview(username)
+        form.addSubview(password)
+        form.addSubview(remember)
+        username.nextKeyView = password
+        alert.accessoryView = form
+        alert.window.initialFirstResponder = username
+
+        guard alert.runModal() == .alertFirstButtonReturn, !username.stringValue.isEmpty else { return nil }
+        return HTTPCredentialResponse(
+            username: username.stringValue,
+            password: password.stringValue,
+            remember: request.canRemember && remember.state == .on
+        )
     }
 
     func webContents(

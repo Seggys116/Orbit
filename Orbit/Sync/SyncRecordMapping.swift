@@ -253,7 +253,7 @@ public enum SyncMerge {
 
 // MARK: - Tombstones
 
-public struct SyncTombstoneLog: Codable, Sendable {
+nonisolated public struct SyncTombstoneLog: Codable, Sendable {
     public private(set) var deletedAt: [String: Date] = [:]
 
     public static let retention: TimeInterval = 90 * 24 * 3600
@@ -295,9 +295,10 @@ public enum StableHash {
     }
 
     public static func contentHash(of record: CKRecord, excluding excludedKeys: Set<String> = ["clientModifiedAt", "updatedAt"]) -> String {
-        let keys = record.allKeys().filter { !excludedKeys.contains($0) }.sorted()
-        let pieces = keys.map { key -> String in
-            let value = record[key]
+        let keys = (record.allKeys() + record.encryptedValues.allKeys())
+            .map { CKRecord.isEncryptedFieldKey($0) ? String($0.dropFirst(CKRecord.encryptedFieldPrefix.count)) : $0 }
+        let pieces = Set(keys).filter { !excludedKeys.contains($0) }.sorted().map { key -> String in
+            let value = record[secure: key]
             return "\(key)=\(describeForHash(value))"
         }
         return hex(pieces.joined(separator: "\u{1F}"))
@@ -315,32 +316,58 @@ public enum StableHash {
 // MARK: - CKRecord field helpers
 
 extension CKRecord {
+    static let encryptedFieldPrefix = "e_"
+
+    static func isEncryptedFieldKey(_ storedKey: String) -> Bool {
+        storedKey.hasPrefix(encryptedFieldPrefix)
+    }
+
+    /// Content fields live in `encryptedValues`, keyed by Apple ID-held keys, so only the user's own devices can read them.
+    /// Reads fall back to the plaintext field older builds wrote; writes clear that field so the plaintext leaves iCloud.
+    subscript(secure key: String) -> CKRecordValue? {
+        get {
+            encryptedValues[Self.encryptedFieldPrefix + key] ?? self[key]
+        }
+        set {
+            encryptedValues[Self.encryptedFieldPrefix + key] = newValue
+            if self[key] != nil { self[key] = nil }
+        }
+    }
+
+    func storedValue(forKey storedKey: String) -> CKRecordValue? {
+        Self.isEncryptedFieldKey(storedKey) ? encryptedValues[storedKey] : self[storedKey]
+    }
+
+    func setStoredValue(_ value: CKRecordValue?, forKey storedKey: String) {
+        if Self.isEncryptedFieldKey(storedKey) {
+            encryptedValues[storedKey] = value
+        } else {
+            self[storedKey] = value
+        }
+    }
+
     func setOptionalString(_ value: String?, forKey key: String) {
-        self[key] = value as CKRecordValue?
+        self[secure: key] = value as CKRecordValue?
     }
 
     func setOptionalDate(_ value: Date?, forKey key: String) {
-        self[key] = value as CKRecordValue?
+        self[secure: key] = value as CKRecordValue?
     }
 
     func setOptionalDouble(_ value: Double?, forKey key: String) {
-        self[key] = value as CKRecordValue?
+        self[secure: key] = value as CKRecordValue?
     }
 
     func setOptionalBool(_ value: Bool?, forKey key: String) {
-        if let value {
-            self[key] = value as CKRecordValue
-        } else {
-            self[key] = nil
-        }
+        self[secure: key] = value.map { $0 as CKRecordValue }
     }
 
     func setOptionalThemeColor(_ value: ThemeColor?, forKey key: String) {
         guard let value, let data = try? JSONEncoder.orbitSync.encode(value) else {
-            self[key] = nil
+            self[secure: key] = nil
             return
         }
-        self[key] = data as CKRecordValue
+        self[secure: key] = data as CKRecordValue
     }
 }
 
@@ -352,31 +379,31 @@ public enum SyncRecordMapping {
 
     public static func profileRecord(from profile: Profile, clientModifiedAt: Date, existing: CKRecord?) -> CKRecord {
         let record = existing ?? CKRecord(recordType: SyncRecordType.profile, recordID: CloudSyncEngine.recordID(SyncRecordType.profile, name: profile.id.uuidString))
-        record["name"] = profile.name as CKRecordValue
-        record["symbolName"] = profile.symbolName as CKRecordValue
-        record["tintRed"] = profile.tint.red as CKRecordValue
-        record["tintGreen"] = profile.tint.green as CKRecordValue
-        record["tintBlue"] = profile.tint.blue as CKRecordValue
-        record["tintAlpha"] = profile.tint.alpha as CKRecordValue
-        record["isPersistent"] = profile.isPersistent as CKRecordValue
-        record["createdAt"] = profile.createdAt as CKRecordValue
-        record["archivePolicy"] = profile.archivePolicy.rawValue as CKRecordValue
-        record["clientModifiedAt"] = clientModifiedAt as CKRecordValue
+        record[secure: "name"] = profile.name as CKRecordValue
+        record[secure: "symbolName"] = profile.symbolName as CKRecordValue
+        record[secure: "tintRed"] = profile.tint.red as CKRecordValue
+        record[secure: "tintGreen"] = profile.tint.green as CKRecordValue
+        record[secure: "tintBlue"] = profile.tint.blue as CKRecordValue
+        record[secure: "tintAlpha"] = profile.tint.alpha as CKRecordValue
+        record[secure: "isPersistent"] = profile.isPersistent as CKRecordValue
+        record[secure: "createdAt"] = profile.createdAt as CKRecordValue
+        record[secure: "archivePolicy"] = profile.archivePolicy.rawValue as CKRecordValue
+        record[secure: "clientModifiedAt"] = clientModifiedAt as CKRecordValue
         return record
     }
 
     public static func profile(from record: CKRecord) -> Profile? {
         guard let id = UUID(uuidString: record.recordID.recordName),
-              let name = record["name"] as? String,
-              let symbolName = record["symbolName"] as? String,
-              let tintRed = record["tintRed"] as? Double,
-              let tintGreen = record["tintGreen"] as? Double,
-              let tintBlue = record["tintBlue"] as? Double,
-              let tintAlpha = record["tintAlpha"] as? Double,
-              let isPersistent = record["isPersistent"] as? Bool,
-              let createdAt = record["createdAt"] as? Date
+              let name = record[secure: "name"] as? String,
+              let symbolName = record[secure: "symbolName"] as? String,
+              let tintRed = record[secure: "tintRed"] as? Double,
+              let tintGreen = record[secure: "tintGreen"] as? Double,
+              let tintBlue = record[secure: "tintBlue"] as? Double,
+              let tintAlpha = record[secure: "tintAlpha"] as? Double,
+              let isPersistent = record[secure: "isPersistent"] as? Bool,
+              let createdAt = record[secure: "createdAt"] as? Date
         else { return nil }
-        let archivePolicy = (record["archivePolicy"] as? String)
+        let archivePolicy = (record[secure: "archivePolicy"] as? String)
             .flatMap(ArchivePolicy.init(rawValue:)) ?? .after12Hours
         return Profile(
             id: id, name: name, symbolName: symbolName,
@@ -412,33 +439,33 @@ public enum SyncRecordMapping {
     public static func spaceRecord(from fields: SpaceScalarFields, clientModifiedAt: Date, existing: CKRecord?) -> CKRecord? {
         guard let themeData = try? JSONEncoder.orbitSync.encode(fields.theme) else { return nil }
         let record = existing ?? CKRecord(recordType: SyncRecordType.space, recordID: CloudSyncEngine.recordID(SyncRecordType.space, name: fields.id.uuidString))
-        record["name"] = fields.name as CKRecordValue
-        record["icon"] = fields.icon as CKRecordValue
-        record["iconIsEmoji"] = fields.iconIsEmoji as CKRecordValue
+        record[secure: "name"] = fields.name as CKRecordValue
+        record[secure: "icon"] = fields.icon as CKRecordValue
+        record[secure: "iconIsEmoji"] = fields.iconIsEmoji as CKRecordValue
         record.setOptionalString(fields.iconKind?.rawValue, forKey: "iconKind")
         record.setOptionalString(fields.iconImageID?.uuidString, forKey: "iconImageID")
-        record["themeData"] = themeData as CKRecordValue
-        record["profileID"] = fields.profileID.uuidString as CKRecordValue
-        record["order"] = fields.order as CKRecordValue
-        record["createdAt"] = fields.createdAt as CKRecordValue
-        record["clientModifiedAt"] = clientModifiedAt as CKRecordValue
+        record[secure: "themeData"] = themeData as CKRecordValue
+        record[secure: "profileID"] = fields.profileID.uuidString as CKRecordValue
+        record[secure: "order"] = fields.order as CKRecordValue
+        record[secure: "createdAt"] = fields.createdAt as CKRecordValue
+        record[secure: "clientModifiedAt"] = clientModifiedAt as CKRecordValue
         return record
     }
 
     public static func spaceScalarFields(from record: CKRecord) -> SpaceScalarFields? {
         guard let id = UUID(uuidString: record.recordID.recordName),
-              let name = record["name"] as? String,
-              let icon = record["icon"] as? String,
-              let iconIsEmoji = record["iconIsEmoji"] as? Bool,
-              let themeData = record["themeData"] as? Data,
+              let name = record[secure: "name"] as? String,
+              let icon = record[secure: "icon"] as? String,
+              let iconIsEmoji = record[secure: "iconIsEmoji"] as? Bool,
+              let themeData = record[secure: "themeData"] as? Data,
               let theme = try? JSONDecoder.orbitSync.decode(SpaceTheme.self, from: themeData),
-              let profileIDString = record["profileID"] as? String,
+              let profileIDString = record[secure: "profileID"] as? String,
               let profileID = UUID(uuidString: profileIDString),
-              let order = record["order"] as? Int,
-              let createdAt = record["createdAt"] as? Date
+              let order = record[secure: "order"] as? Int,
+              let createdAt = record[secure: "createdAt"] as? Date
         else { return nil }
-        let iconKind = (record["iconKind"] as? String).flatMap(SpaceIconKind.init(rawValue:))
-        let iconImageID = (record["iconImageID"] as? String).flatMap(SpaceIconImageID.init(uuidString:))
+        let iconKind = (record[secure: "iconKind"] as? String).flatMap(SpaceIconKind.init(rawValue:))
+        let iconImageID = (record[secure: "iconImageID"] as? String).flatMap(SpaceIconImageID.init(uuidString:))
         return SpaceScalarFields(
             id: id, name: name, icon: icon, iconIsEmoji: iconIsEmoji,
             iconKind: iconKind, iconImageID: iconImageID, theme: theme,
@@ -451,29 +478,29 @@ public enum SyncRecordMapping {
     public static func favoriteRecord(from flat: FlatFavorite, clientModifiedAt: Date, existing: CKRecord?) -> CKRecord {
         let favorite = flat.favorite
         let record = existing ?? CKRecord(recordType: SyncRecordType.favorite, recordID: CloudSyncEngine.recordID(SyncRecordType.favorite, name: favorite.id.uuidString))
-        record["spaceID"] = flat.spaceID.uuidString as CKRecordValue
-        record["order"] = flat.order as CKRecordValue
-        record["url"] = favorite.url.absoluteString as CKRecordValue
-        record["title"] = favorite.title as CKRecordValue
+        record[secure: "spaceID"] = flat.spaceID.uuidString as CKRecordValue
+        record[secure: "order"] = flat.order as CKRecordValue
+        record[secure: "url"] = favorite.url.absoluteString as CKRecordValue
+        record[secure: "title"] = favorite.title as CKRecordValue
         record.setOptionalString(favorite.customIcon, forKey: "customIcon")
-        record["customIconIsEmoji"] = favorite.customIconIsEmoji as CKRecordValue
+        record[secure: "customIconIsEmoji"] = favorite.customIconIsEmoji as CKRecordValue
         record.setOptionalString(favorite.liveTabID?.uuidString, forKey: "liveTabID")
-        record["clientModifiedAt"] = clientModifiedAt as CKRecordValue
+        record[secure: "clientModifiedAt"] = clientModifiedAt as CKRecordValue
         return record
     }
 
     public static func favorite(from record: CKRecord) -> FlatFavorite? {
         guard let id = UUID(uuidString: record.recordID.recordName),
-              let spaceIDString = record["spaceID"] as? String,
+              let spaceIDString = record[secure: "spaceID"] as? String,
               let spaceID = UUID(uuidString: spaceIDString),
-              let order = record["order"] as? Int,
-              let urlString = record["url"] as? String,
+              let order = record[secure: "order"] as? Int,
+              let urlString = record[secure: "url"] as? String,
               let url = URL(string: urlString),
-              let title = record["title"] as? String,
-              let customIconIsEmoji = record["customIconIsEmoji"] as? Bool
+              let title = record[secure: "title"] as? String,
+              let customIconIsEmoji = record[secure: "customIconIsEmoji"] as? Bool
         else { return nil }
-        let customIcon = record["customIcon"] as? String
-        let liveTabID = (record["liveTabID"] as? String).flatMap(UUID.init(uuidString:))
+        let customIcon = record[secure: "customIcon"] as? String
+        let liveTabID = (record[secure: "liveTabID"] as? String).flatMap(UUID.init(uuidString:))
         let favorite = Favorite(
             id: id, url: url, title: title, customIcon: customIcon,
             customIconIsEmoji: customIconIsEmoji, liveTabID: liveTabID
@@ -485,33 +512,33 @@ public enum SyncRecordMapping {
 
     public static func sidebarNodeRecord(from node: FlatSidebarNode, clientModifiedAt: Date, existing: CKRecord?) -> CKRecord {
         let record = existing ?? CKRecord(recordType: SyncRecordType.sidebarNode, recordID: CloudSyncEngine.recordID(SyncRecordType.sidebarNode, name: node.id.uuidString))
-        record["spaceID"] = node.spaceID.uuidString as CKRecordValue
+        record[secure: "spaceID"] = node.spaceID.uuidString as CKRecordValue
         record.setOptionalString(node.parentID?.uuidString, forKey: "parentID")
-        record["order"] = node.order as CKRecordValue
-        record["kind"] = node.kind.rawValue as CKRecordValue
+        record[secure: "order"] = node.order as CKRecordValue
+        record[secure: "kind"] = node.kind.rawValue as CKRecordValue
         record.setOptionalString(node.name, forKey: "name")
         record.setOptionalBool(node.isExpanded, forKey: "isExpanded")
         record.setOptionalString(node.icon, forKey: "icon")
         record.setOptionalBool(node.iconIsEmoji, forKey: "iconIsEmoji")
-        record["clientModifiedAt"] = clientModifiedAt as CKRecordValue
+        record[secure: "clientModifiedAt"] = clientModifiedAt as CKRecordValue
         return record
     }
 
     public static func sidebarNode(from record: CKRecord) -> FlatSidebarNode? {
         guard let id = UUID(uuidString: record.recordID.recordName),
-              let spaceIDString = record["spaceID"] as? String,
+              let spaceIDString = record[secure: "spaceID"] as? String,
               let spaceID = UUID(uuidString: spaceIDString),
-              let order = record["order"] as? Int,
-              let kindRaw = record["kind"] as? String,
+              let order = record[secure: "order"] as? Int,
+              let kindRaw = record[secure: "kind"] as? String,
               let kind = FlatSidebarNode.Kind(rawValue: kindRaw)
         else { return nil }
-        let parentID = (record["parentID"] as? String).flatMap(UUID.init(uuidString:))
+        let parentID = (record[secure: "parentID"] as? String).flatMap(UUID.init(uuidString:))
         return FlatSidebarNode(
             id: id, spaceID: spaceID, parentID: parentID, order: order, kind: kind,
-            name: record["name"] as? String,
-            isExpanded: record["isExpanded"] as? Bool,
-            icon: record["icon"] as? String,
-            iconIsEmoji: record["iconIsEmoji"] as? Bool
+            name: record[secure: "name"] as? String,
+            isExpanded: record[secure: "isExpanded"] as? Bool,
+            icon: record[secure: "icon"] as? String,
+            iconIsEmoji: record[secure: "iconIsEmoji"] as? Bool
         )
     }
 
@@ -520,19 +547,19 @@ public enum SyncRecordMapping {
     public static func todayEntryRecord(from entry: FlatTodayEntry, clientModifiedAt: Date, existing: CKRecord?) -> CKRecord {
         let name = TodayEntryRecordName.make(spaceID: entry.spaceID, tabID: entry.tabID)
         let record = existing ?? CKRecord(recordType: SyncRecordType.todayEntry, recordID: CloudSyncEngine.recordID(SyncRecordType.todayEntry, name: name))
-        record["spaceID"] = entry.spaceID.uuidString as CKRecordValue
-        record["tabID"] = entry.tabID.uuidString as CKRecordValue
-        record["order"] = entry.order as CKRecordValue
-        record["clientModifiedAt"] = clientModifiedAt as CKRecordValue
+        record[secure: "spaceID"] = entry.spaceID.uuidString as CKRecordValue
+        record[secure: "tabID"] = entry.tabID.uuidString as CKRecordValue
+        record[secure: "order"] = entry.order as CKRecordValue
+        record[secure: "clientModifiedAt"] = clientModifiedAt as CKRecordValue
         return record
     }
 
     public static func todayEntry(from record: CKRecord) -> FlatTodayEntry? {
-        guard let spaceIDString = record["spaceID"] as? String,
+        guard let spaceIDString = record[secure: "spaceID"] as? String,
               let spaceID = UUID(uuidString: spaceIDString),
-              let tabIDString = record["tabID"] as? String,
+              let tabIDString = record[secure: "tabID"] as? String,
               let tabID = UUID(uuidString: tabIDString),
-              let order = record["order"] as? Int
+              let order = record[secure: "order"] as? Int
         else { return nil }
         return FlatTodayEntry(spaceID: spaceID, tabID: tabID, order: order)
     }
@@ -541,47 +568,47 @@ public enum SyncRecordMapping {
 
     public static func tabRecord(from tab: Tab, clientModifiedAt: Date, existing: CKRecord?) -> CKRecord {
         let record = existing ?? CKRecord(recordType: SyncRecordType.tab, recordID: CloudSyncEngine.recordID(SyncRecordType.tab, name: tab.id.uuidString))
-        record["spaceID"] = tab.spaceID.uuidString as CKRecordValue
-        record["section"] = tab.section.rawValue as CKRecordValue
-        record["url"] = tab.url.absoluteString as CKRecordValue
-        record["title"] = tab.title as CKRecordValue
+        record[secure: "spaceID"] = tab.spaceID.uuidString as CKRecordValue
+        record[secure: "section"] = tab.section.rawValue as CKRecordValue
+        record[secure: "url"] = tab.url.absoluteString as CKRecordValue
+        record[secure: "title"] = tab.title as CKRecordValue
         record.setOptionalString(tab.customTitle, forKey: "customTitle")
         record.setOptionalString(tab.faviconURL?.absoluteString, forKey: "faviconURL")
-        record["lastAccessedAt"] = tab.lastAccessedAt as CKRecordValue
-        record["createdAt"] = tab.createdAt as CKRecordValue
+        record[secure: "lastAccessedAt"] = tab.lastAccessedAt as CKRecordValue
+        record[secure: "createdAt"] = tab.createdAt as CKRecordValue
         record.setOptionalDate(tab.archivedAt, forKey: "archivedAt")
-        record["isUnloaded"] = tab.isUnloaded as CKRecordValue
-        record["isMuted"] = tab.isMuted as CKRecordValue
+        record[secure: "isUnloaded"] = tab.isUnloaded as CKRecordValue
+        record[secure: "isMuted"] = tab.isMuted as CKRecordValue
         record.setOptionalDouble(tab.zoomFactor, forKey: "zoomFactor")
         record.setOptionalString(tab.splitGroupID?.uuidString, forKey: "splitGroupID")
-        record["splitIndex"] = tab.splitIndex as CKRecordValue
-        record["clientModifiedAt"] = clientModifiedAt as CKRecordValue
+        record[secure: "splitIndex"] = tab.splitIndex as CKRecordValue
+        record[secure: "clientModifiedAt"] = clientModifiedAt as CKRecordValue
         return record
     }
 
     public static func tab(from record: CKRecord) -> Tab? {
         guard let id = UUID(uuidString: record.recordID.recordName),
-              let spaceIDString = record["spaceID"] as? String,
+              let spaceIDString = record[secure: "spaceID"] as? String,
               let spaceID = UUID(uuidString: spaceIDString),
-              let sectionRaw = record["section"] as? String,
+              let sectionRaw = record[secure: "section"] as? String,
               let section = TabSection(rawValue: sectionRaw),
-              let urlString = record["url"] as? String,
+              let urlString = record[secure: "url"] as? String,
               let url = URL(string: urlString),
-              let title = record["title"] as? String,
-              let lastAccessedAt = record["lastAccessedAt"] as? Date,
-              let createdAt = record["createdAt"] as? Date,
-              let isUnloaded = record["isUnloaded"] as? Bool,
-              let isMuted = record["isMuted"] as? Bool,
-              let splitIndex = record["splitIndex"] as? Int
+              let title = record[secure: "title"] as? String,
+              let lastAccessedAt = record[secure: "lastAccessedAt"] as? Date,
+              let createdAt = record[secure: "createdAt"] as? Date,
+              let isUnloaded = record[secure: "isUnloaded"] as? Bool,
+              let isMuted = record[secure: "isMuted"] as? Bool,
+              let splitIndex = record[secure: "splitIndex"] as? Int
         else { return nil }
-        let faviconURL = (record["faviconURL"] as? String).flatMap(URL.init(string:))
-        let splitGroupID = (record["splitGroupID"] as? String).flatMap(UUID.init(uuidString:))
+        let faviconURL = (record[secure: "faviconURL"] as? String).flatMap(URL.init(string:))
+        let splitGroupID = (record[secure: "splitGroupID"] as? String).flatMap(UUID.init(uuidString:))
         return Tab(
             id: id, spaceID: spaceID, section: section, url: url, title: title,
-            customTitle: record["customTitle"] as? String, faviconURL: faviconURL,
+            customTitle: record[secure: "customTitle"] as? String, faviconURL: faviconURL,
             lastAccessedAt: lastAccessedAt, createdAt: createdAt,
-            archivedAt: record["archivedAt"] as? Date, isUnloaded: isUnloaded, isMuted: isMuted,
-            zoomFactor: record["zoomFactor"] as? Double, splitGroupID: splitGroupID, splitIndex: splitIndex
+            archivedAt: record[secure: "archivedAt"] as? Date, isUnloaded: isUnloaded, isMuted: isMuted,
+            zoomFactor: record[secure: "zoomFactor"] as? Double, splitGroupID: splitGroupID, splitIndex: splitIndex
         )
     }
 
@@ -589,40 +616,42 @@ public enum SyncRecordMapping {
 
     public static func boostRecord(from boost: Boost, existing: CKRecord?) -> CKRecord {
         let record = existing ?? CKRecord(recordType: SyncRecordType.boost, recordID: CloudSyncEngine.recordID(SyncRecordType.boost, name: boost.id.uuidString))
-        record["name"] = boost.name as CKRecordValue
-        record["host"] = boost.host as CKRecordValue
-        record["isEnabled"] = boost.isEnabled as CKRecordValue
-        record["zappedSelectors"] = boost.zappedSelectors as CKRecordValue
-        record["customCSS"] = boost.customCSS as CKRecordValue
-        record["customJavaScript"] = boost.customJavaScript as CKRecordValue
+        record[secure: "name"] = boost.name as CKRecordValue
+        record[secure: "host"] = boost.host as CKRecordValue
+        record[secure: "isEnabled"] = boost.isEnabled as CKRecordValue
+        record[secure: "zappedSelectorsData"] = (try? JSONEncoder.orbitSync.encode(boost.zappedSelectors)) as CKRecordValue?
+        record[secure: "customCSS"] = boost.customCSS as CKRecordValue
+        record[secure: "customJavaScript"] = boost.customJavaScript as CKRecordValue
         record.setOptionalString(boost.fontFamily, forKey: "fontFamily")
         record.setOptionalThemeColor(boost.backgroundColor, forKey: "backgroundColor")
         record.setOptionalThemeColor(boost.textColor, forKey: "textColor")
         record.setOptionalThemeColor(boost.accentColor, forKey: "accentColor")
-        record["createdAt"] = boost.createdAt as CKRecordValue
-        record["updatedAt"] = boost.updatedAt as CKRecordValue
+        record[secure: "createdAt"] = boost.createdAt as CKRecordValue
+        record[secure: "updatedAt"] = boost.updatedAt as CKRecordValue
         return record
     }
 
     public static func boost(from record: CKRecord) -> Boost? {
         guard let id = UUID(uuidString: record.recordID.recordName),
-              let name = record["name"] as? String,
-              let host = record["host"] as? String,
-              let isEnabled = record["isEnabled"] as? Bool,
-              let zappedSelectors = record["zappedSelectors"] as? [String],
-              let customCSS = record["customCSS"] as? String,
-              let customJavaScript = record["customJavaScript"] as? String,
-              let createdAt = record["createdAt"] as? Date,
-              let updatedAt = record["updatedAt"] as? Date
+              let name = record[secure: "name"] as? String,
+              let host = record[secure: "host"] as? String,
+              let isEnabled = record[secure: "isEnabled"] as? Bool,
+              let zappedSelectors = (record[secure: "zappedSelectorsData"] as? Data)
+                .flatMap({ try? JSONDecoder.orbitSync.decode([String].self, from: $0) })
+                ?? (record[secure: "zappedSelectors"] as? [String]),
+              let customCSS = record[secure: "customCSS"] as? String,
+              let customJavaScript = record[secure: "customJavaScript"] as? String,
+              let createdAt = record[secure: "createdAt"] as? Date,
+              let updatedAt = record[secure: "updatedAt"] as? Date
         else { return nil }
-        let backgroundColor = (record["backgroundColor"] as? Data).flatMap { try? JSONDecoder.orbitSync.decode(ThemeColor.self, from: $0) }
-        let textColor = (record["textColor"] as? Data).flatMap { try? JSONDecoder.orbitSync.decode(ThemeColor.self, from: $0) }
-        let accentColor = (record["accentColor"] as? Data).flatMap { try? JSONDecoder.orbitSync.decode(ThemeColor.self, from: $0) }
+        let backgroundColor = (record[secure: "backgroundColor"] as? Data).flatMap { try? JSONDecoder.orbitSync.decode(ThemeColor.self, from: $0) }
+        let textColor = (record[secure: "textColor"] as? Data).flatMap { try? JSONDecoder.orbitSync.decode(ThemeColor.self, from: $0) }
+        let accentColor = (record[secure: "accentColor"] as? Data).flatMap { try? JSONDecoder.orbitSync.decode(ThemeColor.self, from: $0) }
         return Boost(
             id: id, name: name, host: host, isEnabled: isEnabled, zappedSelectors: zappedSelectors,
             customCSS: customCSS, customJavaScript: customJavaScript,
             backgroundColor: backgroundColor, textColor: textColor, accentColor: accentColor,
-            fontFamily: record["fontFamily"] as? String, createdAt: createdAt, updatedAt: updatedAt
+            fontFamily: record[secure: "fontFamily"] as? String, createdAt: createdAt, updatedAt: updatedAt
         )
     }
 
@@ -631,26 +660,26 @@ public enum SyncRecordMapping {
     public static func easelRecord(from easel: Easel, existing: CKRecord?) -> CKRecord? {
         guard let itemsData = try? JSONEncoder.orbitSync.encode(easel.items) else { return nil }
         let record = existing ?? CKRecord(recordType: SyncRecordType.easel, recordID: CloudSyncEngine.recordID(SyncRecordType.easel, name: easel.id.uuidString))
-        record["title"] = easel.title as CKRecordValue
-        record["itemsData"] = itemsData as CKRecordValue
-        record["createdAt"] = easel.createdAt as CKRecordValue
-        record["updatedAt"] = easel.updatedAt as CKRecordValue
-        record["viewportOriginX"] = Double(easel.viewportOrigin.x) as CKRecordValue
-        record["viewportOriginY"] = Double(easel.viewportOrigin.y) as CKRecordValue
-        record["viewportZoom"] = easel.viewportZoom as CKRecordValue
+        record[secure: "title"] = easel.title as CKRecordValue
+        record[secure: "itemsData"] = itemsData as CKRecordValue
+        record[secure: "createdAt"] = easel.createdAt as CKRecordValue
+        record[secure: "updatedAt"] = easel.updatedAt as CKRecordValue
+        record[secure: "viewportOriginX"] = Double(easel.viewportOrigin.x) as CKRecordValue
+        record[secure: "viewportOriginY"] = Double(easel.viewportOrigin.y) as CKRecordValue
+        record[secure: "viewportZoom"] = easel.viewportZoom as CKRecordValue
         return record
     }
 
     public static func easel(from record: CKRecord) -> Easel? {
         guard let id = UUID(uuidString: record.recordID.recordName),
-              let title = record["title"] as? String,
-              let itemsData = record["itemsData"] as? Data,
+              let title = record[secure: "title"] as? String,
+              let itemsData = record[secure: "itemsData"] as? Data,
               let items = try? JSONDecoder.orbitSync.decode([EaselItem].self, from: itemsData),
-              let createdAt = record["createdAt"] as? Date,
-              let updatedAt = record["updatedAt"] as? Date,
-              let originX = record["viewportOriginX"] as? Double,
-              let originY = record["viewportOriginY"] as? Double,
-              let zoom = record["viewportZoom"] as? Double
+              let createdAt = record[secure: "createdAt"] as? Date,
+              let updatedAt = record[secure: "updatedAt"] as? Date,
+              let originX = record[secure: "viewportOriginX"] as? Double,
+              let originY = record[secure: "viewportOriginY"] as? Double,
+              let zoom = record[secure: "viewportZoom"] as? Double
         else { return nil }
         return Easel(
             id: id, title: title, items: items, createdAt: createdAt, updatedAt: updatedAt,
@@ -670,18 +699,18 @@ public enum SyncRecordMapping {
 
     public static func noteRecord(from note: Note, assetFileURL: URL, existing: CKRecord?) -> CKRecord {
         let record = existing ?? CKRecord(recordType: SyncRecordType.note, recordID: CloudSyncEngine.recordID(SyncRecordType.note, name: note.id.uuidString))
-        record["title"] = note.title as CKRecordValue
+        record[secure: "title"] = note.title as CKRecordValue
         record["bodyAsset"] = CKAsset(fileURL: assetFileURL)
-        record["createdAt"] = note.createdAt as CKRecordValue
-        record["updatedAt"] = note.updatedAt as CKRecordValue
+        record[secure: "createdAt"] = note.createdAt as CKRecordValue
+        record[secure: "updatedAt"] = note.updatedAt as CKRecordValue
         return record
     }
 
     public static func note(from record: CKRecord) -> Note? {
         guard let id = UUID(uuidString: record.recordID.recordName),
-              let title = record["title"] as? String,
-              let createdAt = record["createdAt"] as? Date,
-              let updatedAt = record["updatedAt"] as? Date
+              let title = record[secure: "title"] as? String,
+              let createdAt = record[secure: "createdAt"] as? Date,
+              let updatedAt = record[secure: "updatedAt"] as? Date
         else { return nil }
         var bodyData = Data()
         if let asset = record["bodyAsset"] as? CKAsset, let fileURL = asset.fileURL,
@@ -695,36 +724,36 @@ public enum SyncRecordMapping {
 
     public static func routingRuleRecord(from rule: RoutingRule, clientModifiedAt: Date, existing: CKRecord?) -> CKRecord {
         let record = existing ?? CKRecord(recordType: SyncRecordType.routingRule, recordID: CloudSyncEngine.recordID(SyncRecordType.routingRule, name: rule.id.uuidString))
-        record["pattern"] = rule.pattern as CKRecordValue
-        record["isEnabled"] = rule.isEnabled as CKRecordValue
+        record[secure: "pattern"] = rule.pattern as CKRecordValue
+        record[secure: "isEnabled"] = rule.isEnabled as CKRecordValue
         switch rule.destination {
         case .space(let id):
-            record["destinationKind"] = "space" as CKRecordValue
-            record["destinationValue"] = id.uuidString as CKRecordValue
+            record[secure: "destinationKind"] = "space" as CKRecordValue
+            record[secure: "destinationValue"] = id.uuidString as CKRecordValue
         case .profile(let id):
-            record["destinationKind"] = "profile" as CKRecordValue
-            record["destinationValue"] = id.uuidString as CKRecordValue
+            record[secure: "destinationKind"] = "profile" as CKRecordValue
+            record[secure: "destinationValue"] = id.uuidString as CKRecordValue
         case .application(let bundleID):
-            record["destinationKind"] = "application" as CKRecordValue
-            record["destinationValue"] = bundleID as CKRecordValue
+            record[secure: "destinationKind"] = "application" as CKRecordValue
+            record[secure: "destinationValue"] = bundleID as CKRecordValue
         case .littleOrbit:
-            record["destinationKind"] = "littleOrbit" as CKRecordValue
-            record["destinationValue"] = nil
+            record[secure: "destinationKind"] = "littleOrbit" as CKRecordValue
+            record[secure: "destinationValue"] = nil
         case .mostRecentSpace:
-            record["destinationKind"] = "mostRecentSpace" as CKRecordValue
-            record["destinationValue"] = nil
+            record[secure: "destinationKind"] = "mostRecentSpace" as CKRecordValue
+            record[secure: "destinationValue"] = nil
         }
-        record["clientModifiedAt"] = clientModifiedAt as CKRecordValue
+        record[secure: "clientModifiedAt"] = clientModifiedAt as CKRecordValue
         return record
     }
 
     public static func routingRule(from record: CKRecord) -> RoutingRule? {
         guard let id = UUID(uuidString: record.recordID.recordName),
-              let pattern = record["pattern"] as? String,
-              let isEnabled = record["isEnabled"] as? Bool,
-              let destinationKind = record["destinationKind"] as? String
+              let pattern = record[secure: "pattern"] as? String,
+              let isEnabled = record[secure: "isEnabled"] as? Bool,
+              let destinationKind = record[secure: "destinationKind"] as? String
         else { return nil }
-        let destinationValue = record["destinationValue"] as? String
+        let destinationValue = record[secure: "destinationValue"] as? String
         let destination: RoutingRule.Destination
         switch destinationKind {
         case "space":

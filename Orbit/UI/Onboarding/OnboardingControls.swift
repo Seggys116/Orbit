@@ -99,48 +99,6 @@ private struct OnboardingButtonBody: View {
 }
 
 
-struct OnboardingKeycapView: View {
-    let cap: OnboardingKeycap
-    let isPressed: Bool
-
-    private let faceHeight: CGFloat = 30
-    private let edgeDepth: CGFloat = 3
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: OrbitRadius.md, style: .continuous)
-        ZStack(alignment: .top) {
-            shape
-                .fill(Color.black.opacity(0.35))
-                .frame(height: faceHeight)
-                .offset(y: edgeDepth)
-            shape
-                .fill(isPressed ? OrbitNeutral.chipStrong : OrbitNeutral.raised)
-                .overlay(shape.fill(OrbitNeutral.chip))
-                .overlay(
-                    shape.strokeBorder(
-                        LinearGradient(colors: [.white.opacity(0.16), .clear], startPoint: .top, endPoint: .center),
-                        lineWidth: 1
-                    )
-                )
-                .overlay(shape.strokeBorder(OrbitNeutral.line, lineWidth: 0.5))
-                .frame(height: faceHeight)
-                .overlay(
-                    Text(cap.label)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(OrbitNeutral.ink)
-                        .padding(.horizontal, 8)
-                )
-                .offset(y: isPressed ? edgeDepth - 1 : 0)
-        }
-        .frame(minWidth: 30, idealHeight: faceHeight + edgeDepth)
-        .fixedSize()
-        .orbitAnimation(OrbitMotion.quick, value: isPressed)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(cap.spokenName)
-    }
-}
-
-
 /// Falls back to a horizontal scroll when the column is too narrow for every pill, so the rail never clips.
 struct OnboardingStepRail: View {
     let state: OnboardingFlowState

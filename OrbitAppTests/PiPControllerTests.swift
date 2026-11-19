@@ -1,3 +1,4 @@
+import WebKit
 import XCTest
 @testable import Orbit
 
@@ -166,6 +167,66 @@ final class PiPControllerTests: XCTestCase {
             controller.pipTabID,
             "A cancelled request was still promoted when the page reported late."
         )
+        XCTAssertEqual(
+            tabs.contents.togglePictureInPictureCallCount, 2,
+            "The request had already reached the page, so its window opened anyway; forgetting the request left it floating with nothing tracking it."
+        )
+    }
+
+    func test_comingBackWhileTheFloatRequestIsPending_closesTheWindowThatOpensLate() throws {
+        let tabs = try videoTabAndAnother()
+
+        env.activateTab(tabs.other)
+        controller.tick(env: env)
+        XCTAssertTrue(controller._test_hasPendingRequest(for: tabs.video), "Precondition: leaving the playing tab floats it.")
+
+        env.activateTab(tabs.video)
+        controller.tick(env: env)
+        reportPictureInPicture(true, for: tabs.video, contents: tabs.contents)
+        controller.tick(env: env)
+
+        XCTAssertNil(controller.pipTabID)
+        XCTAssertEqual(
+            tabs.contents.togglePictureInPictureCallCount, 2,
+            "The user is looking at the tab again, so the window that opened after they returned must be closed, not left over the page."
+        )
+    }
+
+    func test_aWindowConfirmedAfterTheUserReturned_isDismissedWithoutAnotherTabChange() throws {
+        let tabs = try videoTabAndAnother()
+
+        env.activateTab(tabs.other)
+        controller.tick(env: env)
+        env.activateTab(tabs.video)
+        reportPictureInPicture(true, for: tabs.video, contents: tabs.contents)
+        // The page reports the window and the return in the same tick, so no later change of active tab ever arrives to dismiss it.
+        controller.tick(env: env)
+        controller.tick(env: env)
+
+        XCTAssertNil(controller.pipTabID, "The window stayed open over the tab it floated from.")
+        XCTAssertEqual(tabs.contents.togglePictureInPictureCallCount, 2)
+    }
+
+    func test_aWindowOpenedWhileLookingAtTheTab_staysUntilTheUserLeavesAndReturns() throws {
+        let tabs = try videoTabAndAnother()
+        XCTAssertTrue(controller.requestPiP(for: tabs.video, env: env))
+        reportPictureInPicture(true, for: tabs.video, contents: tabs.contents)
+
+        controller.tick(env: env)
+        controller.tick(env: env)
+
+        XCTAssertEqual(controller.pipTabID, tabs.video, "A window the user opened on purpose must not be closed under them.")
+        XCTAssertEqual(tabs.contents.togglePictureInPictureCallCount, 1)
+    }
+
+    func test_aTabClosedWhileFloating_leavesNothingTracked() throws {
+        let tabs = try videoTabAndAnother()
+        floatTheVideoTab(tabs)
+
+        env.closeTab(tabs.video)
+        controller.tick(env: env)
+
+        XCTAssertNil(controller.pipTabID, "A closed tab cannot be floating.")
     }
 
     // MARK: - The floating window's own controls
@@ -396,5 +457,19 @@ final class PictureInPictureScriptTests: XCTestCase {
             decoration in preference to the thing the user is watching.
             """
         )
+    }
+
+    func test_theCloseScriptLeavesPictureInPictureAndStopsPlayback() {
+        let source = PictureInPictureScript.closeSource
+        XCTAssertTrue(source.contains("exitPictureInPicture()"), "Closing a tab must end the standard picture-in-picture window.")
+        XCTAssertTrue(source.contains("webkitSetPresentationMode('inline')"), "WebKit's own floating window is ended through presentation mode.")
+        XCTAssertTrue(source.contains(".pause()"), "A closed tab must not keep playing.")
+    }
+
+    @MainActor
+    func test_theCloseScriptRunsCleanlyOnAPageWithNoMedia() async throws {
+        let webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let result: Any? = try await webView.evaluateJavaScript(PictureInPictureScript.closeSource)
+        XCTAssertNil(result, "The script is a statement block and must complete without throwing.")
     }
 }

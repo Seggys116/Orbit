@@ -45,13 +45,33 @@ final class OrbitNetworkModel: OrbitInspectModule {
     private(set) var summary: NetSummary = NetSummary()
 
     /// One log row: the rich record plus its public projection, kept in step so a change costs one projection.
+    /// The public projection is built the first time a panel or another tool reads it, then kept for this version of the record.
     private struct Entry: Identifiable {
-        var rich: NetRecord
-        var pub: OrbitNetworkRecord
+        private final class Projection { var value: OrbitNetworkRecord? }
+
+        let rich: NetRecord
+        private let projection = Projection()
         var id: String { rich.id }
         init(_ rich: NetRecord) {
             self.rich = rich
-            self.pub = rich.asPublicRecord()
+        }
+        var pub: OrbitNetworkRecord {
+            if let value = projection.value { return value }
+            let value = rich.asPublicRecord()
+            projection.value = value
+            return value
+        }
+    }
+
+    /// Ids of page-reported (js-) fetch and ping records still in flight, so a native request looks only at these instead of scanning the log.
+    @ObservationIgnored private var pendingPageIDs: Set<String> = []
+
+    private func trackPendingPage(_ record: NetRecord, replacing previousID: String? = nil) {
+        if let previousID, previousID != record.id { pendingPageIDs.remove(previousID) }
+        if record.id.hasPrefix("js-"), record.pending, record.resourceType == "fetch" || record.resourceType == "ping" {
+            pendingPageIDs.insert(record.id)
+        } else {
+            pendingPageIDs.remove(record.id)
         }
     }
 
@@ -132,6 +152,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
                 return page.isEmpty || Self.sameDocument(rec.url, page)
             }
             _all.removeAll()
+            pendingPageIDs.removeAll()
             for entry in kept { _all.append(entry) }
             rebuildTimingIndex()
             navigationTiming = nil
@@ -164,17 +185,17 @@ final class OrbitNetworkModel: OrbitInspectModule {
         guard isRecording else { return }
         if consumeRefetchSuppression(url: record.url) { return }
         // The page's fetch/XHR hook can report a request before WebKit does; fold that record into this one, in the page record's row.
-        if getRecord(record.id) == nil, let jsIdx = findUnmergedPageRecord(url: record.url, method: record.method) {
+        if _all.position(forID: record.id) == nil, let jsIdx = findUnmergedPageRecord(url: record.url, method: record.method) {
             let page = _all[jsIdx].rich
             var merged = record
             merged.startTime = page.startTime ?? merged.startTime
             merged.initiatorStack = page.initiatorStack
             merged.initiatorURL = page.initiatorURL
             merged.jsSource = page.jsSource
-            if merged.requestHeaders.isEmpty { merged.requestHeaders = page.requestHeaders }
+            if !merged.hasRequestHeaders { merged.requestHeaders = page.requestHeaders }
             merged.requestBody = page.requestBody ?? merged.requestBody
             if merged.status == 0 { merged.status = page.status }
-            if merged.responseHeaders.isEmpty { merged.responseHeaders = page.responseHeaders }
+            if !merged.hasResponseHeaders { merged.responseHeaders = page.responseHeaders }
             if merged.mimeType.isEmpty { merged.mimeType = page.mimeType }
             if merged.duration == nil { merged.duration = page.duration }
             merged.responseBody = page.responseBody
@@ -277,11 +298,13 @@ final class OrbitNetworkModel: OrbitInspectModule {
 
     func nativeResponseReceived(id: String, status: Int, statusText: String,
                                  headers: [OrbitHeader], mimeType: String,
-                                 url: String?, fromCache: Bool, expectedBodySize: Int?) {
+                                 url: String?, fromCache: Bool, expectedBodySize: Int?,
+                                 headersUnsorted: Bool = false) {
         guard var rec = getRecord(id) else { return }
         rec.status = status
         rec.statusText = statusText
-        rec.responseHeaders = headers
+        rec.responseHeaderStorage = headers
+        rec.responseHeadersUnsorted = headersUnsorted
         rec.nativeResponseSeen = true
         if !mimeType.isEmpty { rec.mimeType = mimeType }
         if let u = url, !u.isEmpty { rec.url = u }
@@ -547,6 +570,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
             store(record, at: idx)
         } else {
             _all.append(Entry(record))
+            trackPendingPage(record)
             indexForTiming(record)
             markDirty()
         }
@@ -555,6 +579,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
     private func store(_ record: NetRecord, at idx: Int) {
         let previous = _all[idx].rich
         _all[idx] = Entry(record)
+        trackPendingPage(record, replacing: previous.id)
         // A record already indexed under the same id and URL base needs nothing; the rest are added and the old keys are dropped lazily.
         if previous.id != record.id || (previous.url != record.url && urlBase(previous.url) != urlBase(record.url)) {
             indexForTiming(record)
@@ -607,14 +632,16 @@ final class OrbitNetworkModel: OrbitInspectModule {
     }
 
     private func findUnmergedPageRecord(url: String, method: String) -> Int? {
-        for i in stride(from: _all.count - 1, through: 0, by: -1) {
+        var best: Int?
+        for id in pendingPageIDs {
+            guard let i = _all.position(forID: id) else { pendingPageIDs.remove(id); continue }
             let rec = _all[i].rich
             // Only a load still in flight: a finished one (say, blocked before it reached the network) is not this load.
             guard rec.id.hasPrefix("js-"), rec.pending, rec.resourceType == "fetch" || rec.resourceType == "ping" else { continue }
             guard rec.url == url, rec.method.caseInsensitiveCompare(method) == .orderedSame else { continue }
-            return i
+            if best == nil || i > best! { best = i }
         }
-        return nil
+        return best
     }
 
     /// A timing entry belongs to a record of the same URL that has no timing yet; exact URLs win over ones that differ only in the query.

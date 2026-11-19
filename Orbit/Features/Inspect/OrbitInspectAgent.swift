@@ -6,14 +6,42 @@ enum OrbitInspectAgent {
     static let handlerName = "orbitInspect"
     static let version = 3
 
+    static let fullMarker = "/* orbit-inspect */"
+    static let stubMarker = "/* orbit-inspect-stub */"
+
+    /// Controllers whose inspector is open: their pages get the full agent from document start, so reloads and navigations stay instrumented.
+    private static let presentedControllers = NSHashTable<WKUserContentController>.weakObjects()
+
+    /// Every page gets only the small early-capture stub. The full agent is added while an inspector is open on that page.
     static func install(on controller: WKUserContentController) {
         OrbitInspectBridge.shared.attach(to: controller)
-        guard !controller.userScripts.contains(where: { $0.source.hasPrefix("/* orbit-inspect */") }) else { return }
-        controller.addUserScript(WKUserScript(
-            source: source,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: false
-        ))
+        let existing = controller.userScripts
+        if !existing.contains(where: { $0.source.hasPrefix(stubMarker) }) {
+            controller.addUserScript(WKUserScript(source: stubSource, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        }
+        if presentedControllers.contains(controller), !existing.contains(where: { $0.source.hasPrefix(fullMarker) }) {
+            controller.addUserScript(fullScript())
+        }
+    }
+
+    /// WKUserContentController removes every script at once, so the others are put straight back, as the device toolbar does.
+    static func setFullAgentScript(_ on: Bool, on controller: WKUserContentController) {
+        let existing = controller.userScripts
+        let hasFull = existing.contains { $0.source.hasPrefix(fullMarker) }
+        if on {
+            presentedControllers.add(controller)
+            if !hasFull { controller.addUserScript(fullScript()) }
+        } else {
+            presentedControllers.remove(controller)
+            guard hasFull else { return }
+            let kept = existing.filter { !$0.source.hasPrefix(fullMarker) }
+            controller.removeAllUserScripts()
+            for script in kept { controller.addUserScript(script) }
+        }
+    }
+
+    private static func fullScript() -> WKUserScript {
+        WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false)
     }
 
     static let source: String = [
@@ -30,6 +58,156 @@ enum OrbitInspectAgent {
         frameworksSource,
         coreTail,
     ].joined(separator: "\n")
+
+    /// What every page carries while the inspector is closed: console output, uncaught errors and event listeners are buffered cheaply so the full agent can adopt them when it loads. Nothing else runs in the page.
+    static let stubSource = ##"""
+    /* orbit-inspect-stub */
+    (function () {
+      if (window.__orbitInspectEarly || window.__orbitInspect) return;
+      var E = { paused: false, con: [], listeners: new WeakMap() };
+      try { Object.defineProperty(window, "__orbitInspectEarly", { value: E, configurable: true }); } catch (e) { return; }
+      var CAP = 1000;
+      var STACK_FREE = 200;
+      var top = true;
+      try { top = window.top === window; } catch (e) { top = false; }
+      if (!top) {
+        // Only the frame handle is wanted from a subframe, so the inspector can load its agent there on open.
+        try { window.webkit.messageHandlers.orbitInspect.postMessage(JSON.stringify({ t: "hello", href: String(location.href), title: "", version: 0, attached: false })); } catch (e) {}
+      }
+      var now = function () { return typeof performance !== "undefined" ? performance.now() : 0; };
+
+      function push(entry) {
+        E.con.push(entry);
+        if (E.con.length > CAP + 200) E.con.splice(0, E.con.length - CAP);
+      }
+
+      // Primitives are kept by value; objects weakly with a short label, so a closed page never holds a logged object alive.
+      function capture(value) {
+        var type = typeof value;
+        if (value === null || type === "undefined" || type === "boolean" || type === "number" || type === "bigint" || type === "symbol") return [0, value];
+        if (type === "string") return [0, value.length > 10000 ? value.slice(0, 10000) + "…[truncated]" : value];
+        var label;
+        try {
+          if (type === "function") label = "ƒ " + (value.name || "") + "()";
+          else if (value instanceof Error) label = (value.name || "Error") + ": " + (value.message || "");
+          else if (Array.isArray(value)) label = "Array(" + value.length + ")";
+          else label = Object.prototype.toString.call(value).slice(8, -1);
+        } catch (e) { label = "Object"; }
+        return [1, typeof WeakRef === "function" ? new WeakRef(value) : null, label];
+      }
+
+      var console_ = window.console;
+      if (console_) {
+        ["log", "info", "warn", "error", "debug", "trace", "dir", "dirxml", "assert", "clear"].forEach(function (name) {
+          var native = console_[name];
+          if (typeof native !== "function") return;
+          var wrapped = function () {
+            try { native.apply(console_, arguments); } catch (e) {}
+            if (E.paused) return;
+            try {
+              if (name === "clear") { E.con.length = 0; return; }
+              if (name === "assert" && arguments[0]) return;
+              // The stack is read only when the agent adopts the entry; after the first entries only warnings and errors pay for capturing one.
+              var cheap = E.con.length < STACK_FREE || name === "warn" || name === "error" || name === "trace" || name === "assert";
+              var error = cheap ? new Error() : null;
+              var args = [];
+              for (var i = 0; i < arguments.length && i < 20; i++) args.push(capture(arguments[i]));
+              push({ level: name, ts: now(), a: args, e: error });
+            } catch (e) {}
+          };
+          try {
+            Object.defineProperty(wrapped, "name", { value: name, configurable: true });
+            Object.defineProperty(wrapped, "length", { value: native.length, configurable: true });
+          } catch (e) {}
+          try { console_[name] = wrapped; } catch (e) {}
+        });
+      }
+
+      function exception(level, message, stack, url, line, col) {
+        push({ final: true, level: level, ts: now(), args: [{ k: "s", v: message }], stack: stack, url: url, line: line, col: col });
+      }
+
+      window.addEventListener("error", function (event) {
+        if (E.paused) return;
+        try {
+          if (typeof ErrorEvent !== "undefined" && event instanceof ErrorEvent) {
+            if (event.target && event.target !== window) return;
+            var stack = "";
+            try { if (event.error && event.error.stack) stack = String(event.error.stack); } catch (e) {}
+            exception("exception", String(event.message || ""), stack, String(event.filename || ""), event.lineno || 0, event.colno || 0);
+            return;
+          }
+          var target = event.target;
+          if (!target || target === window) return;
+          var tag = (target.tagName || "").toLowerCase();
+          if (!/^(img|script|link|video|audio|source|iframe)$/.test(tag)) return;
+          var url = target.src || target.href || target.currentSrc || "";
+          if (url) exception("resourceError", "Failed to load resource: " + String(url), "", String(url), 0, 0);
+        } catch (e) {}
+      }, true);
+
+      window.addEventListener("unhandledrejection", function (event) {
+        if (E.paused) return;
+        try {
+          var reason = event.reason;
+          var isError = reason instanceof Error;
+          exception("unhandledrejection", "Uncaught (in promise) " + (isError ? String(reason.message) : String(reason)),
+            isError && reason.stack ? String(reason.stack) : "", "", 0, 0);
+        } catch (e) {}
+      }, true);
+
+      window.addEventListener("securitypolicyviolation", function (event) {
+        if (E.paused) return;
+        try {
+          var blocked = String(event.blockedURI || "(unknown)");
+          var directive = String(event.violatedDirective || event.effectiveDirective || "");
+          exception("cspViolation", "Refused to load '" + blocked + "'" + (directive ? " because it violates the Content Security Policy directive “" + directive + "”" : ""),
+            "", String(event.sourceFile || ""), event.lineNumber || 0, event.columnNumber || 0);
+        } catch (e) {}
+      }, true);
+
+      // Same records the Elements panel makes while it is open, so listeners added before it opened can still be listed.
+      var proto = typeof EventTarget !== "undefined" ? EventTarget.prototype : null;
+      if (proto) {
+        var origAdd = proto.addEventListener;
+        var origRemove = proto.removeEventListener;
+        proto.addEventListener = function (type, handler, options) {
+          var result = origAdd.apply(this, arguments);
+          if (E.paused || typeof handler !== "function") return result;
+          try {
+            var list = E.listeners.get(this);
+            if (!list) { list = []; E.listeners.set(this, list); }
+            var object = options && typeof options === "object";
+            list.push({
+              type: type,
+              capture: typeof options === "boolean" ? options : !!(object && options.capture),
+              passive: !!(object && options.passive),
+              once: !!(object && options.once),
+              handlerSource: "", sourceURL: null, sourceLine: null, handler: handler, beforeOpen: true
+            });
+          } catch (e) {}
+          return result;
+        };
+        try { Object.defineProperty(proto.addEventListener, "length", { value: origAdd.length }); } catch (e) {}
+        proto.addEventListener.toString = function () { return origAdd.toString(); };
+        proto.removeEventListener = function (type, handler, options) {
+          if (!E.paused) {
+            try {
+              var list = E.listeners.get(this);
+              if (list) {
+                var capture = typeof options === "boolean" ? options : !!(options && options.capture);
+                for (var i = list.length - 1; i >= 0; i--) {
+                  if (list[i].type === type && list[i].handler === handler && list[i].capture === capture) { list.splice(i, 1); break; }
+                }
+              }
+            } catch (e) {}
+          }
+          return origRemove.apply(this, arguments);
+        };
+        proto.removeEventListener.toString = function () { return origRemove.toString(); };
+      }
+    })();
+    """##
 
     static let coreHead = ##"""
     /* orbit-inspect */
@@ -535,6 +713,14 @@ enum OrbitInspectAgent {
         post({ t: "el.dom", parent: parent, nodes: nodes.map(describe) });
       }
 
+
+      // The early-capture stub keeps recording underneath our wrappers only while they are off, so nothing is captured twice.
+      var early = window.__orbitInspectEarly || null;
+      inits.push(function () {
+        if (!early) return;
+        early.paused = true;
+        disposers.push(function () { early.paused = false; });
+      });
 
       inits.push(function () {
         // History wrapping and the popstate listener are permanent (they only feed navHooks), so wrap once.

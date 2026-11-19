@@ -300,7 +300,7 @@ enum WebStoreInstallVerifyProbe {
         let interval = 0.25
         var lastURL: URL?
         while waited < timeout {
-            let state = host.navigationStates[tabID]
+            let state = host.navigationState(for: tabID)
             if let url = state?.url, url != lastURL {
                 lastURL = url
                 emit("tab \(tabID) committed \(url.absoluteString)")

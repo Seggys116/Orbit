@@ -227,17 +227,18 @@ private struct LittleOrbitView: View {
     @ViewBuilder
     private func webLayer(_ tab: Tab) -> some View {
         if env.crashedTabs.contains(tab.id) {
-            CrashedTabView { env.webContents[tab.id]?.reload(ignoringCache: false) }
+            CrashedTabView { env.reloadTab(tab.id, ignoringCache: false) }
         } else if let problem = env.certificateProblems[tab.id] {
             CertificateInterstitialView(tabID: tab.id, problem: problem)
         } else if let error = env.tabErrors[tab.id] {
-            ErrorPageView(error: error) { env.webContents[tab.id]?.reload(ignoringCache: false) }
+            ErrorPageView(error: error) { env.reloadTab(tab.id, ignoringCache: false) }
         } else if let contents = env.webContents[tab.id] {
             WebContentsHostView(contents: contents, environment: env)
                 .id(tab.id)
                 .pageScrollerColorScheme(tab: tab)
         } else {
             Color(nsColor: .textBackgroundColor)
+                .task(id: tab.id) { env.materializeDisplayedTab(tab.id, shownInOwnWindow: true) }
         }
     }
 

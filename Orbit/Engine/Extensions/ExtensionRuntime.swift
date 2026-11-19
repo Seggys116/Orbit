@@ -9,7 +9,7 @@ import OSLog
 @Observable
 public final class ExtensionRuntime {
 
-    public static let shared = ExtensionRuntime()
+    public static let shared = ExtensionRuntime(defersBootstrapPastFirstPage: true)
 
     @ObservationIgnored
     private static let logger = Logger(subsystem: "com.orbit.browser", category: "ExtensionRuntime")
@@ -27,15 +27,29 @@ public final class ExtensionRuntime {
     /// ids this runtime has successfully loaded into the engine it is bound to.
     private(set) var activatedIDs: Set<String> = []
 
-    /// Last failure from a load/unload attempt, for the Extensions pane to show.
-    private(set) var lastError: String?
+    /// Failures keyed by extension id, so one extension loading cannot hide another's failure.
+    private(set) var loadFailures: [String: String] = [:]
+
+    /// A current load failure, for the Extensions pane to show.
+    var lastError: String? {
+        loadFailures.sorted { $0.key < $1.key }.first.map { "\($0.key): \($0.value)" }
+    }
 
     /// Bumped every time a load or unload finishes, so a view can refresh off
     /// the engine settling rather than polling for it.
     private(set) var settleSerial = 0
 
-    public init(store: ExtensionStore? = nil) {
+    /// How long the launch load of enabled extensions may wait for the first page to commit.
+    private static let bootstrapDeferral: Duration = .seconds(1)
+
+    @ObservationIgnored
+    private let defersBootstrapPastFirstPage: Bool
+
+    /// `defersBootstrapPastFirstPage` lets the first page start before the enabled extensions are loaded. Only the
+    /// process-wide runtime sets it; a runtime built for a test loads them straight away.
+    public init(store: ExtensionStore? = nil, defersBootstrapPastFirstPage: Bool = false) {
         self.store = store ?? AppEnvironment.processRoot.extensionStore
+        self.defersBootstrapPastFirstPage = defersBootstrapPastFirstPage
     }
 
     // MARK: - Binding
@@ -54,8 +68,29 @@ public final class ExtensionRuntime {
         let bootstrapInstallations = store.enabledInstallations()
         bootstrapTask = Task { [weak self] in
             guard let self else { return }
-            await self.loadEnabledExtensions(bootstrapInstallations)
+            var installations = bootstrapInstallations
+            if self.defersBootstrapPastFirstPage, !installations.isEmpty, !Self.firstPageIsExtensionPage() {
+                await LaunchGate.shared.waitForFirstCommit(timeout: Self.bootstrapDeferral)
+                guard !Task.isCancelled else { return }
+                // Installs, enables and disables made during the wait were handled by apply(_:); loading the
+                // snapshot as taken would load them a second time or resurrect a disabled one.
+                let stillEnabled = Set(self.store.enabledInstallations().map(\.id))
+                installations = installations.filter { stillEnabled.contains($0.id) && !self.activatedIDs.contains($0.id) }
+                guard !installations.isEmpty else {
+                    self.store.markActivated(ids: Array(self.activatedIDs))
+                    return
+                }
+            }
+            await self.loadEnabledExtensions(installations)
         }
+    }
+
+    /// An extension-served first page (its options page, a new-tab override) cannot render until that extension is loaded.
+    private static func firstPageIsExtensionPage() -> Bool {
+        let env = AppEnvironment.processRoot
+        guard let spaceID = env.activeSpace?.id, let url = env.activeTab(in: spaceID)?.url else { return false }
+        let scheme = url.scheme?.lowercased()
+        return scheme == "chrome-extension" || scheme == "webkit-extension"
     }
 
     func unbind() {
@@ -67,6 +102,7 @@ public final class ExtensionRuntime {
         observerToken = nil
         engine = nil
         activatedIDs = []
+        loadFailures = [:]
     }
 
     // MARK: - Bootstrap
@@ -132,7 +168,8 @@ public final class ExtensionRuntime {
                     at: directory, session: engine.defaultSession, reason: reason
                 )
                 activatedIDs.insert(loaded.id)
-                lastError = nil
+                loadFailures[id] = nil
+                loadFailures[loaded.id] = nil
                 settleSerial += 1
                 Self.logger.info("loaded extension \(loaded.id, privacy: .public) v\(loaded.version, privacy: .public)")
                 return
@@ -141,7 +178,7 @@ public final class ExtensionRuntime {
                 let description = (error as? EngineError)?.underlyingDescription ?? error.localizedDescription
                 guard attempt <= retries, description.contains("not ready") else {
                     activatedIDs.remove(id)
-                    lastError = "\(id): \(description)"
+                    loadFailures[id] = description
                     settleSerial += 1
                     Self.logger.error("failed to load extension \(id, privacy: .public): \(description, privacy: .public)")
                     return
@@ -156,6 +193,7 @@ public final class ExtensionRuntime {
     /// have to keep the optional permissions the user granted this extension.
     private func unload(id: String) {
         guard let engine else { return }
+        loadFailures[id] = nil
         guard engine.loadedExtensions(session: engine.defaultSession).contains(where: { $0.id == id }) else {
             activatedIDs.remove(id)
             return
@@ -169,6 +207,7 @@ public final class ExtensionRuntime {
     /// unloaded already, and its stored state still has to go.
     private func uninstall(id: String) {
         guard let engine else { return }
+        loadFailures[id] = nil
         let wasLoaded = engine.loadedExtensions(session: engine.defaultSession).contains { $0.id == id }
         engine.uninstallExtension(id: id, session: engine.defaultSession)
         activatedIDs.remove(id)

@@ -112,8 +112,8 @@ extension AppEnvironment {
 
         case .goBack: activeWebContents?.goBack()
         case .goForward: activeWebContents?.goForward()
-        case .refresh: activeWebContents?.reload(ignoringCache: false)
-        case .hardRefresh: activeWebContents?.reload(ignoringCache: true)
+        case .refresh: if let activeTabID { reloadTab(activeTabID, ignoringCache: false) }
+        case .hardRefresh: if let activeTabID { reloadTab(activeTabID, ignoringCache: true) }
         case .stopLoading: activeWebContents?.stopLoading()
         case .zoomIn: stepZoom(up: true)
         case .zoomOut: stepZoom(up: false)
@@ -121,6 +121,7 @@ extension AppEnvironment {
 
         case .findOnPage:
             withOrbitAnimation(OrbitMotion.standard) { isFindBarPresented = true }
+            findBarFocusRequest = UUID()
         case .findNext:
             activeWebContents?.find(findQuery, options: FindOptions(forward: true, findNext: true))
         case .findPrevious:

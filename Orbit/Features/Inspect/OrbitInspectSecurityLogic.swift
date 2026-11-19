@@ -92,7 +92,7 @@ struct OrbitSecurityRow: Equatable, Sendable {
     var value: String
 }
 
-struct OrbitSecurityCertificate: Equatable, Sendable {
+nonisolated struct OrbitSecurityCertificate: Equatable, Sendable {
     var subject: String
     var issuer: String
     var notBefore: Date?
@@ -104,7 +104,7 @@ struct OrbitSecurityCertificate: Equatable, Sendable {
     var signatureAlgorithm: String?
 }
 
-enum OrbitSecurityTrust: Equatable, Sendable {
+nonisolated enum OrbitSecurityTrust: Equatable, Sendable {
     case trusted
     case untrusted(String)
     /// No server trust was available: a non-TLS page, or the document has not committed yet.
@@ -134,6 +134,22 @@ struct OrbitSecurityFrame: Equatable, Sendable {
     var selector: String
 }
 
+struct OrbitSecurityScript: Equatable, Sendable {
+    var url: String
+    /// "script" or "link" (a stylesheet).
+    var tag: String
+    var hasIntegrity: Bool
+    var nodeID: Int
+    var selector: String
+}
+
+struct OrbitSecurityLink: Equatable, Sendable {
+    var href: String
+    var rel: String
+    var nodeID: Int
+    var selector: String
+}
+
 struct OrbitSecurityInput: Sendable {
     var pageURL: String = ""
     var certificates: [OrbitSecurityCertificate] = []
@@ -147,6 +163,11 @@ struct OrbitSecurityInput: Sendable {
     var domReferences: [OrbitSecurityRequest] = []
     var forms: [OrbitSecurityForm] = []
     var frames: [OrbitSecurityFrame] = []
+    /// Scripts and stylesheets from another origin than the page.
+    var scripts: [OrbitSecurityScript] = []
+    /// Links to other origins that open in a new tab.
+    var links: [OrbitSecurityLink] = []
+    var libraries: [LHLibrary] = []
     var cookies: [OrbitApplicationLogic.CookieRecord] = []
     var now: Date = Date()
 }
@@ -275,7 +296,7 @@ enum OrbitSecurityLogic {
     }
 
     /// `kSecAttrKeyType` is a CFString holding a number: "42" is RSA, "73" is elliptic curve.
-    static func keyTypeName(fromAttribute attribute: String) -> String? {
+    nonisolated static func keyTypeName(fromAttribute attribute: String) -> String? {
         switch attribute {
         case "42": return "RSA"
         case "73": return "EC"
@@ -292,7 +313,7 @@ enum OrbitSecurityLogic {
         }
     }
 
-    private static let signatureOIDs: [String: String] = [
+    private nonisolated static let signatureOIDs: [String: String] = [
         "1.2.840.113549.1.1.4": "MD5 with RSA",
         "1.2.840.113549.1.1.5": "SHA-1 with RSA",
         "1.2.840.113549.1.1.11": "SHA-256 with RSA",
@@ -307,7 +328,7 @@ enum OrbitSecurityLogic {
     ]
 
     /// Security.framework reports either a dotted OID or a readable name. Both come out readable.
-    static func signatureAlgorithmName(_ raw: String) -> String {
+    nonisolated static func signatureAlgorithmName(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if let known = signatureOIDs[trimmed] { return known }
         return trimmed.replacingOccurrences(of: " Encryption", with: "")
@@ -905,7 +926,116 @@ enum OrbitSecurityLogic {
             findings: frameFindings, weight: 3
         ))
 
+        out.append(integrityCheck(input: input, isWeb: isWeb))
+        out.append(externalLinkCheck(input: input, isWeb: isWeb))
+        out.append(libraryCheck(input: input, isWeb: isWeb))
+
         return out
+    }
+
+    private static func integrityCheck(input: OrbitSecurityInput, isWeb: Bool) -> OrbitSecurityCheck {
+        let advice = "A script or stylesheet from another origin runs with the full power of your page, and if that server is compromised so is the page. Add integrity=\"sha384-...\" and crossorigin=\"anonymous\" so the browser refuses a changed file."
+        guard isWeb else {
+            return OrbitSecurityCheck(
+                id: "sri", section: .content, title: "Subresource integrity", state: .info, value: nil,
+                summary: "Only meaningful for pages loaded over HTTP or HTTPS.", advice: advice, weight: 3
+            )
+        }
+        let missing = input.scripts.filter { !$0.hasIntegrity }
+        let scriptCount = missing.filter { $0.tag != "link" }.count
+        let findings = missing.prefix(50).map { resource in
+            OrbitSecurityFinding(
+                text: "\(resource.tag == "link" ? "stylesheet" : "script"): \(resource.url)", state: .warn,
+                nodeID: resource.nodeID, selector: resource.selector, url: resource.url
+            )
+        }
+        let summary: String
+        if input.scripts.isEmpty {
+            summary = "The page loads no scripts or stylesheets from other origins."
+        } else if missing.isEmpty {
+            summary = "All \(input.scripts.count) cross-origin scripts and stylesheets carry an integrity hash."
+        } else {
+            summary = "\(missing.count) of \(input.scripts.count) cross-origin scripts and stylesheets have no integrity hash (\(scriptCount) \(scriptCount == 1 ? "script" : "scripts"))."
+        }
+        return OrbitSecurityCheck(
+            id: "sri", section: .content, title: "Subresource integrity",
+            state: missing.isEmpty ? .pass : .warn, value: "\(missing.count) of \(input.scripts.count) unprotected",
+            summary: summary, advice: advice, findings: findings, weight: 3
+        )
+    }
+
+    private static func externalLinkCheck(input: OrbitSecurityInput, isWeb: Bool) -> OrbitSecurityCheck {
+        let advice = "A page opened with target=\"_blank\" can reach back through window.opener in browsers that predate the implied noopener. Add rel=\"noopener noreferrer\" to links that open other sites in a new tab."
+        guard isWeb else {
+            return OrbitSecurityCheck(
+                id: "noopener", section: .content, title: "External links in new tabs", state: .info, value: nil,
+                summary: "Only meaningful for pages loaded over HTTP or HTTPS.", advice: advice, weight: 2
+            )
+        }
+        let unsafe = input.links.filter { link in
+            let tokens = Set(link.rel.lowercased().split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" }).map(String.init))
+            return !tokens.contains("noopener") && !tokens.contains("noreferrer")
+        }
+        let findings = unsafe.prefix(50).map { link in
+            OrbitSecurityFinding(
+                text: "Opens \(link.href) without rel=noopener", state: .warn,
+                nodeID: link.nodeID, selector: link.selector, url: link.href
+            )
+        }
+        let summary: String
+        if input.links.isEmpty {
+            summary = "No link opens another site in a new tab."
+        } else if unsafe.isEmpty {
+            summary = "All \(input.links.count) links that open other sites in a new tab set rel=noopener or noreferrer."
+        } else {
+            summary = "\(unsafe.count) of \(input.links.count) links that open other sites in a new tab lack rel=noopener. Current browsers imply it, older ones do not."
+        }
+        return OrbitSecurityCheck(
+            id: "noopener", section: .content, title: "External links in new tabs",
+            state: unsafe.isEmpty ? .pass : .warn, value: "\(unsafe.count) of \(input.links.count) unprotected",
+            summary: summary, advice: advice, findings: findings, weight: 2
+        )
+    }
+
+    private static func libraryCheck(input: OrbitSecurityInput, isWeb: Bool) -> OrbitSecurityCheck {
+        let advice = "Upgrade each listed library to at least its fixed version, or replace it. Matching is by reported version, so a patched build that keeps the old version number can be a false positive."
+        guard isWeb else {
+            return OrbitSecurityCheck(
+                id: "libraries", section: .content, title: "Vulnerable libraries", state: .info, value: nil,
+                summary: "Only meaningful for pages loaded over HTTP or HTTPS.", advice: advice, weight: 5
+            )
+        }
+        let (matches, unversioned) = OrbitLighthouseLogic.vulnerabilities(in: input.libraries)
+        let endOfLife = input.libraries.filter { OrbitLighthouseLogic.endOfLife[$0.name] != nil }
+        var findings = matches.map { match in
+            OrbitSecurityFinding(
+                text: "\(match.library) \(match.version): \(match.advisoryID) (\(match.severity.title)). \(match.summary) "
+                    + (match.fixedIn.map { "Fixed in \($0)." } ?? "No fixed release."),
+                state: match.severity >= .high ? .fail : .warn
+            )
+        }
+        findings += endOfLife.map { library in
+            OrbitSecurityFinding(
+                text: "\(library.name) \(library.version ?? "(version not detected)"): \(OrbitLighthouseLogic.endOfLife[library.name] ?? "")",
+                state: .warn
+            )
+        }
+        let state: OrbitSecurityState = findings.isEmpty ? .pass : OrbitSecurityState.worst(findings.map(\.state))
+        let summary: String
+        if input.libraries.isEmpty {
+            summary = "No jQuery, Bootstrap, Lodash, Moment.js or AngularJS was detected on the page."
+        } else if findings.isEmpty {
+            let names = input.libraries.map { "\($0.name) \($0.version ?? "")".trimmingCharacters(in: .whitespaces) }
+            summary = "No known advisory matches \(names.joined(separator: ", "))."
+                + (unversioned.isEmpty ? "" : " \(unversioned.count) detected without a readable version was not checked.")
+        } else {
+            summary = "\(matches.count) known \(matches.count == 1 ? "advisory affects" : "advisories affect") the libraries on this page."
+        }
+        return OrbitSecurityCheck(
+            id: "libraries", section: .content, title: "Vulnerable libraries",
+            state: state, value: input.libraries.isEmpty ? nil : "\(matches.count) \(matches.count == 1 ? "advisory" : "advisories")",
+            summary: summary, advice: advice, findings: findings, weight: 5
+        )
     }
 
 

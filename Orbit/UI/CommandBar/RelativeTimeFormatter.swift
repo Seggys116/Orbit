@@ -1,6 +1,7 @@
 import Foundation
 
-enum CommandBarRelativeTime {
+// nonisolated: history rows are built by the background scoring pass.
+nonisolated enum CommandBarRelativeTime {
 
     // Negative intervals (date after now) clamp to "Just now" rather than producing a nonsensical negative duration.
     static func string(from date: Date, relativeTo now: Date = Date()) -> String {

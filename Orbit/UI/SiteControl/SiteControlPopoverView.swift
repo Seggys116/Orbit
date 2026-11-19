@@ -12,7 +12,6 @@ struct SiteControlPopoverView: View {
     @State private var developerModeEnabled = DeveloperModeSettings.isEnabled
     @State private var isAutoPeekEnabled = SiteControlPopoverView.isOpenLinksInModalEnabled
     @State private var boostsEditorSheet: BoostsEditorSheet?
-    @State private var isExtensionsSheetPresented = false
     // EngineSession is not @Observable, so a write through it would not invalidate the view; caching here and reloading explicitly avoids a stale row until reopened.
     @State private var permissionRows: [PermissionRow] = []
     @State private var extensionActionEntries: [ExtensionActionEntry] = []
@@ -86,24 +85,11 @@ struct SiteControlPopoverView: View {
         .onDisappear {
             closeExtensionPopup()
         }
-        .onChange(of: isExtensionsSheetPresented) { wasPresented, isPresented in
-            if wasPresented, !isPresented {
-                reloadExtensionActionEntries()
-            }
-        }
         .sheet(item: $boostsEditorSheet) { sheet in
             // .environment(env) here is load-bearing: this popover is an NSPopover, and a .sheet it opens is a separate SwiftUI hosting context that does not automatically inherit @Environment(AppEnvironment.self) — its absence was a real crash.
             DismissableSheetChrome {
                 sheet.view
                     .environment(env)
-            }
-        }
-        .sheet(isPresented: $isExtensionsSheetPresented) {
-            DismissableSheetChrome {
-                ExtensionsSettingsPane()
-                    .environment(env)
-                    .padding(24)
-                    .frame(width: 480, height: 420)
             }
         }
         .sheet(item: $certificateDetailSheet) { sheet in
@@ -643,7 +629,7 @@ struct SiteControlPopoverView: View {
         VStack(alignment: .leading, spacing: 8) {
             extensionActionIconGrid
             Button {
-                isExtensionsSheetPresented = true
+                openExtensionsPanel()
             } label: {
                 settingsRowContent(symbol: "puzzlepiece.extension", title: "Extensions", value: extensionsSubtitle)
             }
@@ -652,6 +638,14 @@ struct SiteControlPopoverView: View {
         }
     }
 
+
+    // A sheet on the popover sat off screen, dragged the browser window and blocked quitting, so this is its own panel.
+    private func openExtensionsPanel() {
+        let keyWindow = NSApp.keyWindow
+        let anchor = keyWindow?.parent ?? keyWindow ?? NSApp.mainWindow
+        ExtensionsPanelController.shared.show(env: env, anchorWindow: anchor)
+        env.siteControlPresentedTabID = nil
+    }
 
     private var settingsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -986,5 +980,171 @@ private struct SharePickerCatcher: NSViewRepresentable {
 
     func updateNSView(_ nsView: SharePickerClickCatchingView, context: Context) {
         nsView.urls = urls
+    }
+}
+
+final class ExtensionsPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    override func cancelOperation(_ sender: Any?) {
+        performClose(sender)
+    }
+}
+
+@MainActor
+final class ExtensionsPanelController: NSObject, NSWindowDelegate {
+    static let shared = ExtensionsPanelController()
+
+    static let contentWidth: CGFloat = 480
+    static let padding: CGFloat = SettingsMetrics.contentHorizontalPadding
+    static let preferredHeight: CGFloat = 560
+    static let screenMargin: CGFloat = 12
+
+    private(set) var panel: ExtensionsPanel?
+    private var eventMonitor: Any?
+    private var screenObserver: NSObjectProtocol?
+
+    var isPresented: Bool { panel != nil }
+
+    func show(env: AppEnvironment, anchorWindow: NSWindow?) {
+        if let panel {
+            place(panel, anchorWindow: anchorWindow)
+            panel.makeKeyAndOrderFront(nil)
+            return
+        }
+        let panel = ExtensionsPanel(
+            contentRect: NSRect(x: 0, y: 0, width: Self.contentWidth + Self.padding * 2, height: Self.preferredHeight),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Extensions"
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovableByWindowBackground = true
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = true
+        panel.isReleasedWhenClosed = false
+        panel.animationBehavior = .utilityWindow
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.backgroundColor = NSColor(SettingsPalette.contentBackground)
+        panel.delegate = self
+        panel.contentView = NSHostingView(rootView: ExtensionsPanelContent().environment(env))
+        self.panel = panel
+        place(panel, anchorWindow: anchorWindow)
+        installMonitors(for: panel)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func close() {
+        panel?.performClose(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closing = notification.object as? ExtensionsPanel, closing === panel else { return }
+        removeMonitors()
+        panel = nil
+        closing.delegate = nil
+        closing.contentView = nil
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        guard let panel, notification.object as? ExtensionsPanel === panel else { return }
+        keepOnScreen(panel)
+    }
+
+    func windowDidChangeScreen(_ notification: Notification) {
+        guard let panel, notification.object as? ExtensionsPanel === panel else { return }
+        keepOnScreen(panel)
+    }
+
+    static func frame(size: NSSize, anchor: NSRect?, visible: NSRect) -> NSRect {
+        let bounds = visible.insetBy(dx: screenMargin, dy: screenMargin)
+        let width = min(size.width, bounds.width)
+        let height = min(size.height, bounds.height)
+        let reference = anchor ?? visible
+        var origin = NSPoint(x: reference.midX - width / 2, y: reference.maxY - height - 72)
+        if anchor == nil { origin.y = reference.midY - height / 2 }
+        return clamped(NSRect(origin: origin, size: NSSize(width: width, height: height)), into: visible)
+    }
+
+    static func clamped(_ frame: NSRect, into visible: NSRect) -> NSRect {
+        let bounds = visible.insetBy(dx: screenMargin, dy: screenMargin)
+        var result = frame
+        result.size.width = min(result.width, bounds.width)
+        result.size.height = min(result.height, bounds.height)
+        result.origin.x = min(max(result.minX, bounds.minX), bounds.maxX - result.width)
+        result.origin.y = min(max(result.minY, bounds.minY), bounds.maxY - result.height)
+        return result
+    }
+
+    private func place(_ panel: NSPanel, anchorWindow: NSWindow?) {
+        let screen = anchorWindow?.screen ?? NSScreen.main ?? NSScreen.screens.first
+        guard let visible = screen?.visibleFrame else { return }
+        let size = NSSize(width: Self.contentWidth + Self.padding * 2, height: Self.preferredHeight)
+        panel.setFrame(Self.frame(size: size, anchor: anchorWindow?.frame, visible: visible), display: true)
+    }
+
+    private func keepOnScreen(_ panel: NSPanel) {
+        guard let visible = (panel.screen ?? NSScreen.main)?.visibleFrame else { return }
+        let target = Self.clamped(panel.frame, into: visible)
+        if target != panel.frame {
+            panel.setFrame(target, display: true, animate: false)
+        }
+    }
+
+    private func installMonitors(for panel: ExtensionsPanel) {
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self, weak panel] event in
+            guard let self, let panel else { return event }
+            return self.handle(event, panel: panel)
+        }
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel else { return }
+                self.keepOnScreen(panel)
+            }
+        }
+    }
+
+    private func handle(_ event: NSEvent, panel: ExtensionsPanel) -> NSEvent? {
+        let isBusy = panel.attachedSheet != nil || NSApp.modalWindow != nil
+        switch event.type {
+        case .keyDown:
+            guard event.keyCode == 53, event.window === panel, !isBusy else { return event }
+            panel.performClose(nil)
+            return nil
+        default:
+            guard !isBusy, let window = event.window else { return event }
+            if window === panel || window.sheetParent === panel || window.parent === panel { return event }
+            panel.performClose(nil)
+            return event
+        }
+    }
+
+    private func removeMonitors() {
+        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+        eventMonitor = nil
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        screenObserver = nil
+    }
+}
+
+private struct ExtensionsPanelContent: View {
+    var body: some View {
+        ScrollView {
+            ExtensionsSettingsPane()
+                .frame(width: ExtensionsPanelController.contentWidth, alignment: .leading)
+                .padding(ExtensionsPanelController.padding)
+        }
+        .frame(
+            width: ExtensionsPanelController.contentWidth + ExtensionsPanelController.padding * 2,
+            alignment: .top
+        )
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(SettingsPalette.contentBackground)
     }
 }

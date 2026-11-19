@@ -54,6 +54,8 @@ struct OrbitLighthousePane: View {
                         }
                     }
                 }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 5)
             }
 
             // Export / copy

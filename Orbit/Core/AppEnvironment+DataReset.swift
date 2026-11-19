@@ -41,7 +41,7 @@ nonisolated enum DataResetCategory: String, CaseIterable, Identifiable, Sendable
     var detail: String {
         switch self {
         case .history: return "Every recorded page visit."
-        case .cookiesAndLogins: return "Cookies and other site data. Saved keychain passwords are kept."
+        case .cookiesAndLogins: return "Cookies and other site data. Passwords in the Passwords app are kept."
         case .cache: return "Cached pages, scripts and site icons."
         case .downloads: return "The list only. Downloaded files stay on disk."
         case .spacesAndTabs: return "Every Space and tab."
@@ -151,6 +151,8 @@ extension AppEnvironment {
     @discardableResult
     func resetData(_ categories: Set<DataResetCategory>) async -> DataResetOutcome {
         var outcome = DataResetOutcome()
+        // A snapshot is a picture of a page as it was before the reset; showing one afterwards would leak it.
+        discardAllRendererSnapshots()
         for category in DataResetCategory.allCases where categories.contains(category) {
             if await clear(category) {
                 outcome.clearedCategories.insert(category)
@@ -167,9 +169,6 @@ extension AppEnvironment {
         let siteProfilesBeforeReset = state.siteProfiles
         var outcome = await resetData(Set(DataResetCategory.allCases))
         let targets = dataResetTargets
-
-        // The vault lives in the Keychain, outside every directory and store the categories above clear.
-        PasswordVaults.shared.deleteAll()
 
         await clearEverythingInEngine()
         await Self.removeSiteProfileStores(siteProfilesBeforeReset, engine: engine)
@@ -244,6 +243,7 @@ extension AppEnvironment {
     // Past what any scope names, then the persistent stores themselves. Tabs go first, since
     // WebKit will not remove a store a web view still uses; the caller rebuilds the active tab.
     func clearEverythingInEngine() async {
+        discardAllRendererSnapshots()
         // Taken before the tabs close, so a private tab's session is still in the list.
         let sessions = knownEngineSessions()
         for session in sessions {
@@ -291,7 +291,7 @@ extension AppEnvironment {
         for tabID in Array(webContents.keys) {
             releaseWebContents(for: tabID)
         }
-        navigationStates.removeAll()
+        removeAllNavigationStates()
         navigationGeneration.removeAll()
         themeColors.removeAll()
         documentColors.removeAll()

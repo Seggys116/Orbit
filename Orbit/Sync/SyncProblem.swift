@@ -9,6 +9,7 @@ nonisolated public struct SyncProblem: Equatable, Sendable {
         case network
         case notAuthenticated
         case zoneMissing
+        case unreadableRemoteData(count: Int)
         case batchTooLarge
         case permissionDenied
         case conflict
@@ -43,9 +44,14 @@ nonisolated public struct SyncProblem: Equatable, Sendable {
 
     public var suggestsForceOverwrite: Bool {
         switch kind {
-        case .conflict, .zoneMissing, .unknown: return true
+        case .conflict, .zoneMissing, .unknown, .unreadableRemoteData: return true
         default: return false
         }
+    }
+
+    public var requiresICloudReset: Bool {
+        if case .unreadableRemoteData = kind { return true }
+        return false
     }
 
     public var isSchemaProblem: Bool {
@@ -71,6 +77,16 @@ nonisolated public struct SyncProblem: Equatable, Sendable {
             return classifyPartialFailure(ckError, recordType: recordType)
         }
         return classifyCode(ckError, recordType: recordType)
+    }
+
+    nonisolated public static func unreadableRemoteData(count: Int, recordTypes: Set<String>) -> SyncProblem {
+        let items = count == 1 ? "1 item" : "\(count) items"
+        let kinds = recordTypes.sorted().joined(separator: ", ")
+        return SyncProblem(
+            kind: .unreadableRemoteData(count: count),
+            message: "\(items) Orbit has stored in iCloud (\(kinds)) can't be read, so iCloud's copy needs to be reset.",
+            recoveryHint: "Wiping Orbit's iCloud data deletes only what Orbit stores in your iCloud account and uploads what is on this Mac in its place. Nothing else in iCloud is touched, and nothing on this Mac is deleted."
+        )
     }
 
     nonisolated public static func incompleteRecovery() -> SyncProblem {
@@ -178,6 +194,7 @@ nonisolated public struct SyncProblem: Equatable, Sendable {
         case .quotaExceeded: return 2
         case .notAuthenticated: return 3
         case .zoneMissing: return 4
+        case .unreadableRemoteData: return 4
         case .batchTooLarge: return 5
         case .unknown: return 6
         case .conflict: return 7

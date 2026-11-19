@@ -59,23 +59,42 @@ struct PageScrollerColorScheme: ViewModifier {
         return PageColorSchemeScript.scheme(for: documentColor)
     }
 
+    // This tab's own mirror, so another tab's load does not re-evaluate this modifier.
+    private var isLoading: Bool { env.navigationBox(for: tab.id)?.isLoading == true }
+
     // Includes isLoading, else a reload at the same URL/colour won't resync.
     private var syncID: String {
-        let loading = env.navigationStates[tab.id]?.isLoading == true
-        return "\(tab.id.uuidString)#\(tab.url.absoluteString)#\(scheme?.rawValue ?? "unresolved")#\(loading)"
+        "\(tab.id.uuidString)#\(tab.url.absoluteString)#\(scheme?.rawValue ?? "unresolved")#\(isLoading)"
     }
 
     func body(content: Content) -> some View {
         content.task(id: syncID) { await sync() }
     }
 
+    // Reselecting a tab whose finished document already has its scheme (or was read and has no colour) runs no
+    // script: the round trip would land in the page's first frames. Any load forgets that, so the next document is done again.
     private func sync() async {
         guard let contents else { return }
+        let contentsID = contents.id
+        let url = tab.url
+        let loading = isLoading
+        if loading { PageColorSchemeScript.forgetSettled(for: contentsID) }
+        let settled = PageColorSchemeScript.SettledDocument(url: url, scheme: scheme)
+        if !loading, PageColorSchemeScript.isSettled(settled, for: contentsID) { return }
+
         guard let scheme else {
-            await PaneHeaderColorResolver.shared.sample(tab: tab.id, url: tab.url, contents: contents)
+            let resolver = PaneHeaderColorResolver.shared
+            await resolver.sample(tab: tab.id, url: url, contents: contents)
+            // A colour found here moves syncID on to the apply path; only a finished read with none is settled.
+            guard !loading, !Task.isCancelled, self.scheme == nil,
+                  resolver.hasSettledReading(forTab: tab.id, url: url) else { return }
+            PageColorSchemeScript.noteSettled(settled, for: contentsID)
             return
         }
-        await PageColorSchemeScript.apply(scheme, to: contents)
+        let outcome = await PageColorSchemeScript.apply(scheme, to: contents)
+        // Cancelled means a load or scheme change began meanwhile; recording then would mark the next document done.
+        guard !loading, !Task.isCancelled, outcome != nil else { return }
+        PageColorSchemeScript.noteSettled(settled, for: contentsID)
     }
 }
 
@@ -86,12 +105,9 @@ struct ContentCardView: View {
 
     var body: some View {
         ZStack {
-            if let activeTabID = env.activeTabID, let tab = env.tab(activeTabID) {
-                if env.splitGroup(for: activeTabID) != nil {
-                    SplitViewContainer(rootTabID: activeTabID)
-                } else {
-                    SingleTabContentView(tab: tab, isFocusedPane: true)
-                }
+            if let activeTabID = env.activeTabID, env.tab(activeTabID) != nil {
+                // One layout for a lone page and a split alike, so starting or ending a split never rebuilds the page's own view.
+                SplitViewContainer(rootTabID: activeTabID)
             } else {
                 NewTabPlaceholder()
                     .paneCardChrome(isFocused: false)
@@ -242,17 +258,30 @@ struct SingleTabContentView: View {
     @ViewBuilder
     private var webLayer: some View {
         if env.crashedTabs.contains(tab.id) {
-            CrashedTabView { env.webContents[tab.id]?.reload(ignoringCache: false) }
+            CrashedTabView { env.reloadTab(tab.id, ignoringCache: false) }
         } else if let problem = env.certificateProblems[tab.id] {
             CertificateInterstitialView(tabID: tab.id, problem: problem)
         } else if let error = env.tabErrors[tab.id] {
-            ErrorPageView(error: error) { env.webContents[tab.id]?.reload(ignoringCache: false) }
+            ErrorPageView(error: error) { env.reloadTab(tab.id, ignoringCache: false) }
         } else if let contents = env.webContents[tab.id] {
+            // No per-tab identity: the pane's host stays and swaps pages, keeping recent ones warm in its window.
             WebContentsHostView(contents: contents, environment: env)
-                .id(tab.id)
                 .pageScrollerColorScheme(tab: tab)
+                .overlay {
+                    // Per renderer, so a page swapped into this pane starts its own wait for its own load.
+                    ReleasedTabSnapshotOverlay(tabID: tab.id, contentsID: contents.id)
+                        .id(contents.id)
+                }
         } else {
-            Color(nsColor: .textBackgroundColor)
+            // A released tab shows its last picture rather than a blank pane while its page is rebuilt.
+            Group {
+                if let snapshot = env.rendererSnapshot(for: tab.id) {
+                    RendererSnapshotImage(image: snapshot)
+                } else {
+                    Color(nsColor: .textBackgroundColor)
+                }
+            }
+            .task(id: tab.id) { env.materializeDisplayedTab(tab.id) }
         }
     }
 
@@ -263,6 +292,70 @@ struct SingleTabContentView: View {
         } else {
             Color(nsColor: .textBackgroundColor)
         }
+    }
+}
+
+/// A released tab's last picture held over its new page until that page has loaded, so returning to the tab reads
+/// as the page already being there. Never takes a click: input reaches the live page underneath.
+private struct ReleasedTabSnapshotOverlay: View {
+    @Environment(AppEnvironment.self) private var env
+    var tabID: TabID
+    var contentsID: UUID
+
+    // Load end plus this lets the page put its first frame up before the picture goes.
+    private static let paintGrace: Duration = .milliseconds(80)
+    // A slow page is shown as it is after this rather than kept behind a picture nobody can use.
+    private static let longestHold: Duration = .seconds(3)
+
+    // True once this page has been seen not ready. A page already loaded when shown (rebuilt in the background)
+    // drops the picture at once instead of flashing an older frame over itself.
+    @State private var waitedForLoad = false
+
+    // A fresh renderer has no URL until its load starts, so "has a URL and is not loading" is a finished load.
+    private var isPageReady: Bool {
+        guard let box = env.navigationBox(for: tabID) else { return false }
+        return box.url != nil && !box.isLoading
+    }
+
+    var body: some View {
+        let ready = isPageReady
+        ZStack {
+            Color.clear
+            if let image = env.rendererSnapshot(for: tabID) {
+                RendererSnapshotImage(image: image)
+                    .transition(.opacity)
+                    .task(id: ready) { await dropWhenPainted(ready: ready) }
+            }
+        }
+        .allowsHitTesting(false)
+        .onAppear { env.noteRendererShown(contentsID) }
+    }
+
+    private func dropWhenPainted(ready: Bool) async {
+        if ready {
+            if waitedForLoad { try? await Task.sleep(for: Self.paintGrace) }
+        } else {
+            waitedForLoad = true
+            try? await Task.sleep(for: Self.longestHold)
+        }
+        guard !Task.isCancelled else { return }
+        withAnimation(OrbitMotion.fade) { env.discardRendererSnapshot(for: tabID) }
+    }
+}
+
+/// Top-aligned like the page it stands in for, filling the pane if its size has changed since the capture.
+private struct RendererSnapshotImage: View {
+    var image: NSImage
+
+    var body: some View {
+        Color(nsColor: .textBackgroundColor)
+            .overlay(alignment: .top) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            }
+            .clipped()
+            .allowsHitTesting(false)
     }
 }
 

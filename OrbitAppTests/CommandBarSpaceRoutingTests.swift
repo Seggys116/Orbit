@@ -145,6 +145,45 @@ final class CommandBarSpaceRoutingTests: XCTestCase {
         )
     }
 
+    private func recordVisit(url: URL, title: String) async -> Bool {
+        let profileID = env.createDefaultProfileIfNeeded()
+        env.recordVisit(url: url, title: title, profileID: profileID, spaceID: currentSpaceID)
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if env.localHistoryCache.contains(where: { $0.url == url }) { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return false
+    }
+
+    func test_historyMatchOutranksCrossSpaceRowForTheSamePage() async throws {
+        openInOtherSpace()
+        let recorded = await recordVisit(url: pageURL, title: "Reporting Dashboard")
+        XCTAssertTrue(recorded, "History never recorded the visit, so the assertion below would be vacuous.")
+
+        let rows = results("reporting")
+        let historyIndex = try XCTUnwrap(
+            rows.firstIndex { if case .history = $0.kind { return true } else { return false } },
+            "A previously visited page was hidden by the other Space's open tab:\n\(describe(rows))"
+        )
+        let crossIndex = try XCTUnwrap(rows.firstIndex { if case .tabInOtherSpace = $0.kind { return true } else { return false } })
+        XCTAssertLessThan(historyIndex, crossIndex, "History must rank above Switch to Space:\n\(describe(rows))")
+    }
+
+    func test_queryExactlyNamingTheSpace_stillLetsItsTabLeadHistory() async throws {
+        let tabID = env.openTab(url: pageURL, in: otherSpaceID, activate: false)
+        env.renameTab(tabID, to: "Other")
+        let recorded = await recordVisit(url: pageURL, title: "Other")
+        XCTAssertTrue(recorded)
+
+        let rows = results("Other")
+        let historyIndex = rows.firstIndex { if case .history = $0.kind { return true } else { return false } }
+        let crossIndex = try XCTUnwrap(rows.firstIndex { if case .tabInOtherSpace = $0.kind { return true } else { return false } })
+        if let historyIndex {
+            XCTAssertLessThan(crossIndex, historyIndex, "An exact Space name must keep the Space switch ahead:\n\(describe(rows))")
+        }
+    }
+
     func test_choosingTheCrossSpaceRow_switchesSpaceAndSelectsThatTab() throws {
         let otherTabID = openInOtherSpace()
         let row = try XCTUnwrap(crossSpaceRow(in: results("reporting")))

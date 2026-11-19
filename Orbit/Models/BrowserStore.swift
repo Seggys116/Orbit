@@ -242,9 +242,12 @@ public final class BrowserStore {
 
     // MARK: - Auto-archive sweep
 
+    public var onTabsAutoArchived: (([TabID]) -> Void)?
+
     public func runArchiveSweep(now: Date = Date()) {
         var newState = state
         var changed = false
+        var archivedIDs: [TabID] = []
 
         for space in newState.spaces {
             guard let profile = newState.profiles.first(where: { $0.id == space.profileID }),
@@ -267,12 +270,14 @@ public final class BrowserStore {
                 archived.archivedAt = now
                 archived.isUnloaded = true
                 newState.tabs[tabID] = archived
+                archivedIDs.append(tabID)
                 changed = true
             }
         }
 
         if changed {
             state = newState
+            onTabsAutoArchived?(archivedIDs)
         }
     }
 

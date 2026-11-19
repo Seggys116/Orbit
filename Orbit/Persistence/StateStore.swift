@@ -117,6 +117,11 @@ private final class WriteCoordinator: @unchecked Sendable {
     }
 }
 
+/// Decodes only the top-level version key; other keys are skipped.
+private nonisolated struct SchemaVersionProbe: Decodable, Sendable {
+    let schemaVersion: Int
+}
+
 public enum StateStoreError: Error, LocalizedError, Sendable {
     case fileMissing
     case noValidState(reason: String)
@@ -233,6 +238,19 @@ public actor StateStore {
             throw StateStoreError.ioFailed(reason: error.localizedDescription)
         }
 
+        // A current-version document needs no migration, so skip the parse + re-serialise passes (large states pay for them on every launch).
+        // Any probe failure (not an object, odd version type) falls through to the full path, which reports the same errors as before.
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let probe = try? decoder.decode(SchemaVersionProbe.self, from: data),
+           probe.schemaVersion == SchemaMigration.currentVersion {
+            do {
+                return try decoder.decode(OrbitState.self, from: data)
+            } catch {
+                throw StateStoreError.decodingFailed(reason: error.localizedDescription)
+            }
+        }
+
         let rawObject: Any
         do {
             rawObject = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
@@ -252,8 +270,6 @@ public actor StateStore {
             throw StateStoreError.decodingFailed(reason: "Migrated document could not be re-serialised: \(error.localizedDescription)")
         }
 
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
         do {
             return try decoder.decode(OrbitState.self, from: migratedData)
         } catch {
@@ -283,12 +299,27 @@ public actor StateStore {
         guard let toSave = pendingState else { return }
         pendingState = nil
         pendingDeadline = nil
-        do {
-            try writeCoordinator.writeIfNotSuperseded(scheduledAt: pendingGeneration) {
-                try Self.write(toSave, stateFileURL: stateFileURL, backupsDirectory: backupsDirectory, maxBackups: maxBackups)
+        // Encoding the whole document, copying the backup and pruning old ones took the main thread for tens of
+        // milliseconds each time, in the middle of whatever the user had just done. Samples of the running app put
+        // this path on the main thread even though this is an actor (the module's default isolation is the main
+        // actor), so the work goes to a plain background queue, which cannot inherit it.
+        let generation = pendingGeneration
+        let coordinator = writeCoordinator
+        let fileURL = stateFileURL
+        let backups = backupsDirectory
+        let keep = maxBackups
+        let onFailure = debouncedSaveFailureHandler
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    try coordinator.writeIfNotSuperseded(scheduledAt: generation) {
+                        try Self.write(toSave, stateFileURL: fileURL, backupsDirectory: backups, maxBackups: keep)
+                    }
+                } catch {
+                    onFailure?(error)
+                }
+                continuation.resume()
             }
-        } catch {
-            debouncedSaveFailureHandler?(error)
         }
     }
 

@@ -10,6 +10,14 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
     // OrbitDemoAppDelegate overrides it, and .shared would build the real environment in the demo process.
     var host: AppEnvironment { .shared }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+        if !SingleInstanceGuard.claim() {
+            Self.quitLog.log("another copy of this Orbit bundle is running; handing over to it")
+            exit(0)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Inert without ORBIT_SMOKE_PROBE=1. First and last statements of this
         // method on purpose: Scripts/app-launch-smoke tells a crash before the
@@ -219,6 +227,7 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
         try? host.downloadStore.saveNow()
         try? host.boostStore.saveNow()
         try? host.siteSearchStore.saveNow()
+        host.syncEngine?.flushPendingCacheWrites()
 
         // Safe only from this exact call site: applicationShouldTerminate
         // above replies from the main run loop, so no main-queue block is on the stack.

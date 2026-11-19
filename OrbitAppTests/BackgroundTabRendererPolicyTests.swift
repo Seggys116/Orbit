@@ -92,7 +92,7 @@ final class BackgroundTabRendererPolicyTests: XCTestCase {
 
     // MARK: - The invariants the archive sweep already honours
 
-    func testTheActiveTabOfEverySpaceIsNeverReleased() {
+    func testOnlyTheVisibleSpacesActiveTabIsSpared() {
         let (env, _) = makeEnvironment()
         let profileID = env.store.state.profiles[0].id
         let firstSpace = firstSpaceID(env)
@@ -102,30 +102,40 @@ final class BackgroundTabRendererPolicyTests: XCTestCase {
         let secondActive = makeLiveTab(env, in: secondSpace, url: "https://example.com/b", idleSeconds: 9999)
         env.store.state.activeTabBySpace[firstSpace] = firstActive
         env.store.state.activeTabBySpace[secondSpace] = secondActive
+        env.store.state.activeSpaceID = firstSpace
         // Assigning the active pointers above does not stamp `lastAccessedAt`.
         env.store.state.tabs[firstActive]?.lastAccessedAt = Date().addingTimeInterval(-9999)
         env.store.state.tabs[secondActive]?.lastAccessedAt = Date().addingTimeInterval(-9999)
 
         let released = env.releaseBackgroundRenderers(.memoryPressureCritical)
 
-        XCTAssertTrue(released.isEmpty, "critical pressure must still spare every Space's active tab")
+        XCTAssertFalse(released.contains(firstActive), "the tab on screen keeps its renderer under critical pressure")
         XCTAssertNotNil(env.webContents[firstActive])
-        XCTAssertNotNil(
-            env.webContents[secondActive],
-            "the active tab of a Space that is not frontmost is just as protected"
+        XCTAssertTrue(
+            released.contains(secondActive),
+            "a Space that is not on screen holds its active tab only by recency, like any other background tab"
         )
+        XCTAssertNil(env.webContents[secondActive])
     }
 
-    func testATabInASplitGroupIsNeverReleased() {
+    func testASplitOnScreenIsSparedAndOneOffScreenIsNot() throws {
         let (env, _) = makeEnvironment()
         let spaceID = firstSpaceID(env)
-        let splitTabID = makeLiveTab(env, in: spaceID, url: "https://example.com/split", idleSeconds: 9999)
-        env.store.state.tabs[splitTabID]?.splitGroupID = UUID()
+        let left = makeLiveTab(env, in: spaceID, url: "https://example.com/left", idleSeconds: 9999)
+        let right = makeLiveTab(env, in: spaceID, url: "https://example.com/right", idleSeconds: 9999)
+        _ = try XCTUnwrap(env.createSplit(existingTabID: left, newTabID: right, edge: .right))
+        env.store.state.activeSpaceID = spaceID
+        env.store.state.activeTabBySpace[spaceID] = left
+        let offScreen = makeLiveTab(env, in: spaceID, url: "https://example.com/elsewhere", idleSeconds: 9999)
+        env.store.state.tabs[offScreen]?.splitGroupID = UUID()
+        for id in [left, right] { env.store.state.tabs[id]?.lastAccessedAt = Date().addingTimeInterval(-9999) }
 
         let released = env.releaseBackgroundRenderers(.memoryPressureCritical)
 
-        XCTAssertFalse(released.contains(splitTabID))
-        XCTAssertNotNil(env.webContents[splitTabID])
+        XCTAssertFalse(released.contains(left))
+        XCTAssertFalse(released.contains(right), "every pane of the split on screen keeps its renderer")
+        XCTAssertNotNil(env.webContents[right])
+        XCTAssertTrue(released.contains(offScreen), "a split nobody is looking at is released like any background tab")
     }
 
     func testATabPlayingMediaIsNeverReleased() {
@@ -177,6 +187,22 @@ final class BackgroundTabRendererPolicyTests: XCTestCase {
             env.webContents[recentlyRead],
             "a tab read well inside the period has not been inactive for one"
         )
+    }
+
+    func testAutoArchivingATabClosesItsPage() throws {
+        let (env, recorder) = makeEnvironment()
+        let spaceID = firstSpaceID(env)
+        let profileID = try XCTUnwrap(env.store.state.spaces.first { $0.id == spaceID }?.profileID)
+        let profileIndex = try XCTUnwrap(env.store.state.profiles.firstIndex { $0.id == profileID })
+        env.store.state.profiles[profileIndex].archivePolicy = .after30Days
+        let staleTabID = makeLiveTab(env, in: spaceID, url: "https://example.com/stale", idleSeconds: 60 * 24 * 3600)
+        let contents = try XCTUnwrap(recorder.contentsByTab[staleTabID])
+
+        env.runArchiveSweep()
+
+        XCTAssertEqual(env.store.tab(staleTabID)?.section, .archived, "precondition: the sweep archived the tab")
+        XCTAssertNil(env.webContents[staleTabID], "an archived tab must not keep its page")
+        XCTAssertTrue(contents.isClosed, "the page must be closed, not just dropped from the map")
     }
 
     // MARK: - The other two triggers

@@ -117,6 +117,7 @@ final class WebKitExtensionServices {
         for (key, record) in ports where record.extensionID == extensionID {
             ports[key] = nil
         }
+        stopBackgroundKeepAliveIfIdle()
         resumePendingAuth(forExtensionID: extensionID)
         nativeMessaging.closeAll(forExtensionID: extensionID)
         system.extensionUnloaded(extensionID)
@@ -406,8 +407,9 @@ final class WebKitExtensionServices {
 
     private struct PortRecord {
         let extensionID: String
-        let port: WKWebExtension.MessagePort
+        let send: (Any) -> Void
         var role: PortRole?
+        var lastActivity: Date
     }
 
     private var ports: [ObjectIdentifier: PortRecord] = [:]
@@ -433,7 +435,12 @@ final class WebKitExtensionServices {
     /// The wrapper's own port; it announces whether it lives in the background or a page.
     func attachEventPort(_ port: WKWebExtension.MessagePort, extensionID: String) {
         let key = ObjectIdentifier(port)
-        ports[key] = PortRecord(extensionID: extensionID, port: port, role: nil)
+        ports[key] = PortRecord(
+            extensionID: extensionID,
+            send: { port.sendMessage($0, completionHandler: nil) },
+            role: nil,
+            lastActivity: Date()
+        )
         port.messageHandler = { [weak self] message, _ in
             Task { @MainActor in self?.receivePortMessage(message, key: key) }
         }
@@ -443,8 +450,11 @@ final class WebKitExtensionServices {
     }
 
     private func receivePortMessage(_ message: Any?, key: ObjectIdentifier) {
+        guard var record = ports[key] else { return }
+        record.lastActivity = Date()
+        ports[key] = record
+        if record.role == .background { startBackgroundKeepAlive() }
         guard let object = message as? [String: Any], object["orbitPortHello"] as? Bool == true,
-              var record = ports[key],
               let role = PortRole(rawValue: object["role"] as? String ?? "")
         else { return }
         record.role = role
@@ -453,7 +463,7 @@ final class WebKitExtensionServices {
         startBackgroundKeepAlive()
         waking.remove(record.extensionID)
         for message in queuedEvents.removeValue(forKey: record.extensionID) ?? [] {
-            record.port.sendMessage(message, completionHandler: nil)
+            record.send(message)
         }
     }
 
@@ -462,6 +472,7 @@ final class WebKitExtensionServices {
         if record.role == .background {
             resumePendingAuth(forExtensionID: record.extensionID)
         }
+        stopBackgroundKeepAliveIfIdle()
     }
 
     /// A page opened a WebSocket or WebTransport. WebKit's webRequest never reports those,
@@ -693,15 +704,18 @@ final class WebKitExtensionServices {
             "seq": nextEventSequence,
         ]
         nextEventSequence += 1
-        let extensionPorts = ports.values.filter { $0.extensionID == extensionID }
+        let extensionPorts = ports.filter { $0.value.extensionID == extensionID }
         var reachedBackground = false
-        for record in extensionPorts {
+        let now = Date()
+        for (key, record) in extensionPorts {
             switch record.role {
             case .background:
                 reachedBackground = true
-                record.port.sendMessage(message, completionHandler: nil)
+                ports[key]?.lastActivity = now
+                startBackgroundKeepAlive()
+                record.send(message)
             case .page:
-                if !backgroundOnly { record.port.sendMessage(message, completionHandler: nil) }
+                if !backgroundOnly { record.send(message) }
             case nil:
                 break
             }
@@ -720,19 +734,65 @@ final class WebKitExtensionServices {
 
     private var backgroundKeepAlive: Timer?
 
+    /// WebKit unloads an idle non-persistent background context after about 30 s without activity (the same
+    /// figure as the grace below), and any port message resets that clock. Pinging every 10 s keeps two pings
+    /// inside every window, so one late or coalesced tick cannot let the context lapse.
+    static let keepAliveInterval: TimeInterval = 10
+    static let keepAliveGrace: TimeInterval = 30
+
+    var isBackgroundKeepAliveRunning: Bool { backgroundKeepAlive != nil }
+
     /// Chrome leaves a service worker alive for a while after its last event. A port message is enough to do the same.
     private func startBackgroundKeepAlive() {
         guard backgroundKeepAlive == nil else { return }
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: Self.keepAliveInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                for record in self.ports.values where record.role == .background {
-                    record.port.sendMessage(["orbitKeepAlive": true], completionHandler: nil)
-                }
+                self?.keepAliveTick(now: Date())
             }
         }
+        timer.tolerance = 2
         RunLoop.main.add(timer, forMode: .common)
         backgroundKeepAlive = timer
+    }
+
+    /// Pings every background port that messaged within the grace window; with none left the timer stops until a port is active again.
+    func keepAliveTick(now: Date) {
+        var pinged = false
+        for record in ports.values where record.role == .background {
+            guard now.timeIntervalSince(record.lastActivity) < Self.keepAliveGrace else { continue }
+            record.send(["orbitKeepAlive": true])
+            pinged = true
+        }
+        if !pinged { stopBackgroundKeepAlive() }
+    }
+
+    private func stopBackgroundKeepAlive() {
+        backgroundKeepAlive?.invalidate()
+        backgroundKeepAlive = nil
+    }
+
+    private func stopBackgroundKeepAliveIfIdle() {
+        guard !ports.values.contains(where: { $0.role == .background }) else { return }
+        stopBackgroundKeepAlive()
+    }
+
+    private var testPortTokens: [NSObject] = []
+
+    func _test_attachBackgroundPort(extensionID: String, send: @escaping (Any) -> Void, lastActivity: Date = Date()) -> ObjectIdentifier {
+        let token = NSObject()
+        testPortTokens.append(token)
+        let key = ObjectIdentifier(token)
+        ports[key] = PortRecord(extensionID: extensionID, send: send, role: .background, lastActivity: lastActivity)
+        startBackgroundKeepAlive()
+        return key
+    }
+
+    func _test_detachPort(_ key: ObjectIdentifier) {
+        detachPort(key)
+    }
+
+    func _test_receivePortMessage(_ message: Any?, key: ObjectIdentifier) {
+        receivePortMessage(message, key: key)
     }
 
     /// A content-script match is about to run. Start the worker first so its reply is ready when the script messages it.

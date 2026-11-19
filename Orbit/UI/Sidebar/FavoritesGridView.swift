@@ -1,6 +1,12 @@
+import AppKit
 import SwiftUI
 
 let favoriteEmojiGlyphScale: CGFloat = 0.72
+
+struct FavoriteTileExpansion: Equatable {
+    let width: CGFloat
+    let growsTrailing: Bool
+}
 
 struct FavoritesGridMetrics: Equatable {
     static let fallbackAvailableWidth: CGFloat =
@@ -23,6 +29,16 @@ struct FavoritesGridMetrics: Equatable {
         self.columnCount = count
         self.tileWidth = max(resolvedWidth, 1)
         self.tileHeight = min(max(resolvedWidth, 1), OrbitMetrics.favoriteTileHeight)
+    }
+
+    func expansion(forColumn column: Int, labelWidth: CGFloat) -> FavoriteTileExpansion {
+        let clamped = min(max(column, 0), columnCount - 1)
+        let pitch = tileWidth + OrbitMetrics.favoriteGridSpacing
+        let growsTrailing = clamped * 2 < columnCount
+        let room = growsTrailing
+            ? availableWidth - CGFloat(clamped) * pitch
+            : CGFloat(clamped + 1) * pitch - OrbitMetrics.favoriteGridSpacing
+        return FavoriteTileExpansion(width: min(max(tileWidth, labelWidth), room), growsTrailing: growsTrailing)
     }
 
     var columns: [GridItem] {
@@ -82,6 +98,8 @@ struct FavoritesGridView: View {
     @State private var measuredWidth: CGFloat = 0
 
     @State private var hoveredID: UUID?
+    @State private var expandedID: UUID?
+    @State private var expansionTask: Task<Void, Never>?
 
     func metrics(for width: CGFloat) -> FavoritesGridMetrics {
         FavoritesGridMetrics(availableWidth: width)
@@ -216,6 +234,10 @@ struct FavoritesGridView: View {
                     hoveredID = nil
                 }
             }
+            updateExpansion(for: favorite.id, hovering: hovering)
+        }
+        .overlay(alignment: expansion(for: favorite, metrics: metrics).growsTrailing ? .leading : .trailing) {
+            expandedLabel(for: favorite, metrics: metrics, shape: shape)
         }
 
         // Plain .onTapGesture + .draggable, not sidebarRowDragSource: that catcher breaks both clicking and dragging here.
@@ -238,6 +260,69 @@ struct FavoritesGridView: View {
         return reorderDropDestination(interactiveTile, favorite: favorite)
             .orbitRightClickMenu { favoriteMenuEntries(for: favorite) }
             .orbitTooltip(favorite.title)
+            .zIndex(expandedID == favorite.id ? 1 : 0)
+    }
+
+    private func isExpanded(_ favorite: Favorite) -> Bool {
+        expandedID == favorite.id && draggingID == nil
+    }
+
+    private func expansion(for favorite: Favorite, metrics: FavoritesGridMetrics) -> FavoriteTileExpansion {
+        let column = (favorites.firstIndex { $0.id == favorite.id } ?? 0) % metrics.columnCount
+        let textWidth = (favorite.title as NSString).size(withAttributes: [.font: Self.expandedLabelNSFont]).width
+        let labelWidth = OrbitMetrics.favoriteIconGlyphSize + Self.expandedLabelSpacing + ceil(textWidth) + 2 * Self.expandedLabelPadding
+        return metrics.expansion(forColumn: column, labelWidth: labelWidth)
+    }
+
+    private static let expandedLabelNSFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+    private static let expandedLabelSpacing: CGFloat = 8
+    private static let expandedLabelPadding: CGFloat = 14
+    private static let expansionHoverDelay: UInt64 = 350_000_000
+
+    private func expandedLabel(for favorite: Favorite, metrics: FavoritesGridMetrics, shape: RoundedRectangle) -> some View {
+        let expanded = isExpanded(favorite)
+        let layout = expansion(for: favorite, metrics: metrics)
+        return HStack(spacing: Self.expandedLabelSpacing) {
+            faviconImage(favorite, glyphBoxSize: OrbitMetrics.favoriteIconGlyphSize)
+                .frame(width: OrbitMetrics.favoriteIconGlyphSize, height: OrbitMetrics.favoriteIconGlyphSize)
+            Text(favorite.title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.readableForeground)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .opacity(expanded ? 1 : 0)
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, expanded ? Self.expandedLabelPadding : max(0, (metrics.tileWidth - OrbitMetrics.favoriteIconGlyphSize) / 2))
+        .padding(.trailing, expanded ? Self.expandedLabelPadding : 0)
+        .frame(width: expanded ? layout.width : metrics.tileWidth, height: metrics.tileHeight, alignment: .leading)
+        .background {
+            ZStack {
+                shape.fill(.regularMaterial)
+                shape.fill(theme.readableForeground.opacity(0.16))
+            }
+        }
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(theme.readableForeground.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(expanded ? 0.22 : 0), radius: 8, y: 3)
+        .opacity(expanded ? 1 : 0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func updateExpansion(for id: UUID, hovering: Bool) {
+        expansionTask?.cancel()
+        expansionTask = nil
+        guard hovering else {
+            guard expandedID == id else { return }
+            withOrbitAnimation(OrbitMotion.standard) { expandedID = nil }
+            return
+        }
+        expansionTask = Task {
+            try? await Task.sleep(nanoseconds: Self.expansionHoverDelay)
+            guard !Task.isCancelled else { return }
+            withOrbitAnimation(OrbitMotion.standard) { expandedID = id }
+        }
     }
 
     @ViewBuilder

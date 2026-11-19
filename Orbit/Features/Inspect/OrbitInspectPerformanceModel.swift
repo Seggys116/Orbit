@@ -40,6 +40,7 @@ final class OrbitPerformanceModel: OrbitInspectModule {
 
     func pageDidReset(preservingLog: Bool) {
         if recordingState != .idle { stopRecording() }
+        live.resetPage()
         liveData = PerfRecording()
         liveData.url = session?.pageURL ?? ""
         liveData.title = session?.pageTitle ?? ""
@@ -89,11 +90,13 @@ final class OrbitPerformanceModel: OrbitInspectModule {
 
 
     enum PerfTab: String, CaseIterable, Identifiable {
-        case summary, timeline
+        case live, summary, timeline
         var id: String { rawValue }
         var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
     }
-    var activeTab: PerfTab = .summary
+    var activeTab: PerfTab = .live
+
+    @ObservationIgnored let live = OrbitPerformanceLiveModel()
 
 
     var vitals: OrbitVitals {

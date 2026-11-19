@@ -147,6 +147,7 @@ public enum MediaSessionObserverScript {
                   el.__orbitPlaybackBegun = false;
                 }
               }
+              if (eventName === 'play' || eventName === 'playing') { armPoll(); }
               reportPlaybackState();
               checkMediaSession();
             }, true);
@@ -173,22 +174,39 @@ public enum MediaSessionObserverScript {
             } catch (e) { return true; }
           }
 
+          // Polled, not watched: patching MediaSession's setters fails anti-bot scripts' native-code check.
+          // The timer only exists while the page is visible or hidden-but-playing (background audio still needs
+          // its track metadata polled for the mini player). A hidden page with nothing playing has no timer at
+          // all, so the web process can nap; play events and visibilitychange re-arm it.
+          var __orbitPollTimer = null;
+
+          function pollTick() {
+            if (document.hidden && !anyLiveMedia()) { disarmPoll(); return; }
+            document.querySelectorAll('video, audio').forEach(enforceMute);
+            reportPlaybackState();
+            checkMediaSession();
+          }
+
+          function armPoll() {
+            if (__orbitPollTimer === null) { __orbitPollTimer = setInterval(pollTick, 2000); }
+          }
+
+          function disarmPoll() {
+            if (__orbitPollTimer !== null) { clearInterval(__orbitPollTimer); __orbitPollTimer = null; }
+          }
+
           document.addEventListener('visibilitychange', function() {
-            if (document.hidden) { return; }
+            if (document.hidden) {
+              if (!anyLiveMedia()) { disarmPoll(); }
+              return;
+            }
+            armPoll();
             document.querySelectorAll('video, audio').forEach(enforceMute);
             reportPlaybackState();
             checkMediaSession();
           });
 
-          // Polled, not watched: patching MediaSession's setters fails anti-bot scripts' native-code check.
-          // A hidden page with nothing playing skips the scan so the web process can nap. Play events
-          // and visibilitychange still report, including background audio for the mini player.
-          setInterval(function() {
-            if (document.hidden && !anyLiveMedia()) { return; }
-            document.querySelectorAll('video, audio').forEach(enforceMute);
-            reportPlaybackState();
-            checkMediaSession();
-          }, 2000);
+          armPoll();
         })();
         """
     }

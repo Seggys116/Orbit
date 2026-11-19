@@ -10,8 +10,8 @@ import WebKit
 /// cannot read it. The literal stays inside the function and is evaluated only when a frame's hostname matches.
 @MainActor
 enum WebKitCosmeticScripts {
-    /// Aliases do not carry the stylesheet, but each host is still remembered. Past this many, every user script
-    /// on the controller is rebuilt and only the host being installed is kept.
+    /// Aliases do not carry the stylesheet, but each host is still remembered. Past this many, the controller is
+    /// flagged for a rebuild that runs once the navigation has finished, never while it is being decided.
     static let hostLimit = 16
 
     private static let world = WKContentWorld.world(name: "orbit-cosmetic")
@@ -21,10 +21,17 @@ enum WebKitCosmeticScripts {
         var hosts = Set<String>()
         /// SHA-256 hex of each stylesheet already published into `world`.
         var published = Set<String>()
+        var needsRebuild = false
     }
 
     static func isInstalled(_ host: String, on controller: WKUserContentController) -> Bool {
         installed.object(forKey: controller)?.hosts.contains(host) == true
+    }
+
+    /// True once more than `hostLimit` hosts have scripts on the controller. The caller reinstalls every script
+    /// from a quiet point, which calls `reset`.
+    static func needsRebuild(_ controller: WKUserContentController) -> Bool {
+        installed.object(forKey: controller)?.needsRebuild == true
     }
 
     /// Script installed for the first host of `css`. Further hosts with the same sheet use an alias.
@@ -37,15 +44,10 @@ enum WebKitCosmeticScripts {
         installed.removeObject(forKey: controller)
     }
 
-    /// `rebuild` must drop every user script and reinstall the base set, calling `reset` on the way.
-    static func install(css: String, host: String, on controller: WKUserContentController, rebuild: () -> Void) {
+    static func install(css: String, host: String, on controller: WKUserContentController) {
         guard !css.isEmpty else { return }
-        var slot = installed.object(forKey: controller)
+        let slot = installed.object(forKey: controller)
         if slot?.hosts.contains(host) == true { return }
-        if (slot?.hosts.count ?? 0) >= hostLimit {
-            rebuild()
-            slot = nil
-        }
         let record: Registry
         if let slot {
             record = slot
@@ -55,6 +57,7 @@ enum WebKitCosmeticScripts {
         }
         // Record the host before building the script so a re-entrant install of the same host does not add a second copy.
         record.hosts.insert(host)
+        if record.hosts.count > hostLimit { record.needsRebuild = true }
         let key = stylesheetKey(for: css)
         if record.published.contains(key) {
             add(aliasSource(host: host, key: key), to: controller)
@@ -120,6 +123,7 @@ enum WebKitCosmeticScripts {
 }
 
 extension WebKitWebContents {
+    /// Main-frame navigations only: a subframe navigation (ads, embeds) must not add scripts or consult the rule list.
     func installCosmeticStyleSheet(for url: URL) {
         guard !isExtensionPage, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let host = url.host(percentEncoded: false)?.lowercased(), !host.isEmpty
@@ -130,8 +134,13 @@ extension WebKitWebContents {
         WebKitCosmeticScripts.install(
             css: engine.cosmeticStyleSheet(for: url.absoluteString),
             host: host,
-            on: controller,
-            rebuild: { reinstallScripts() }
+            on: controller
         )
+    }
+
+    /// Past the host limit the scripts are rebuilt here, after a load finished, not in the middle of a navigation.
+    func rebuildCosmeticScriptsIfNeeded() {
+        guard WebKitCosmeticScripts.needsRebuild(webView.configuration.userContentController) else { return }
+        reinstallScripts()
     }
 }

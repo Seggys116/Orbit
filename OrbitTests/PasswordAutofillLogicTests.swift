@@ -6,20 +6,6 @@ import XCTest
 
 nonisolated private func url(_ string: String) -> URL { URL(string: string)! }
 
-nonisolated private func login(
-    _ origin: String,
-    _ username: String,
-    _ password: String = "pw-1",
-    siteKey: String? = nil
-) -> SavedLogin {
-    SavedLogin(
-        origin: origin,
-        siteKey: siteKey ?? PasswordOrigin(origin: origin)?.siteKey ?? "",
-        username: username,
-        password: password
-    )
-}
-
 final class PasswordAutofillOriginTests: XCTestCase {
 
     func testOriginKeepsTheSchemeHostAndNonDefaultPort() {
@@ -66,8 +52,19 @@ final class PasswordAutofillOriginTests: XCTestCase {
         XCTAssertEqual(PasswordAutofillPolicy.kind(from: "username"), .username)
         XCTAssertEqual(PasswordAutofillPolicy.kind(from: "currentPassword"), .currentPassword)
         XCTAssertEqual(PasswordAutofillPolicy.kind(from: "newPassword"), .newPassword)
+        XCTAssertEqual(PasswordAutofillPolicy.kind(from: "oneTimeCode"), .oneTimeCode)
         XCTAssertNil(PasswordAutofillPolicy.kind(from: "otp"))
         XCTAssertNil(PasswordAutofillPolicy.kind(from: nil))
+    }
+
+    func testAOneTimeCodeIsShortAndOnlyLettersAndDigits() {
+        XCTAssertTrue(PasswordAutofillPolicy.isValidOneTimeCode("123456"))
+        XCTAssertTrue(PasswordAutofillPolicy.isValidOneTimeCode("AB12CD"))
+        XCTAssertFalse(PasswordAutofillPolicy.isValidOneTimeCode(""))
+        XCTAssertFalse(PasswordAutofillPolicy.isValidOneTimeCode("12 34"))
+        XCTAssertFalse(PasswordAutofillPolicy.isValidOneTimeCode("1234'; alert(1)"))
+        XCTAssertFalse(PasswordAutofillPolicy.isValidOneTimeCode("\u{0661}\u{0662}\u{0663}"), "digits outside ASCII are refused")
+        XCTAssertFalse(PasswordAutofillPolicy.isValidOneTimeCode(String(repeating: "1", count: PasswordAutofillPolicy.maxOneTimeCodeLength + 1)))
     }
 }
 
@@ -155,20 +152,6 @@ final class PasswordAutofillFillPolicyTests: XCTestCase {
         )
     }
 
-    func testOfferableKeepsOnlyWhatARefusalWouldLetThrough() {
-        let https = login("https://example.com", "alice")
-        let http = login("http://example.com", "bob")
-        let other = login("https://other.test", "carol")
-        XCTAssertEqual(
-            PasswordAutofillPolicy.offerable([https, http, other], frameOrigin: url("http://example.com")).map(\.username), ["bob"],
-            "on an http page only a login saved from an http origin is offered"
-        )
-        XCTAssertEqual(
-            PasswordAutofillPolicy.offerable([https, http, other], frameOrigin: url("https://example.com")).map(\.username), ["alice", "bob"]
-        )
-        XCTAssertTrue(PasswordAutofillPolicy.offerable([https], frameOrigin: url("http://localhost:3000")).isEmpty)
-    }
-
     func testCredentialsDeriveTheirSiteKeyFromTheirOrigin() {
         XCTAssertEqual(PasswordFillCredentials(origin: url("https://accounts.example.co.uk"), username: "a", password: "b").siteKey, "example.co.uk")
         XCTAssertEqual(PasswordFillCredentials(origin: url("http://127.0.0.1:8080"), username: "a", password: "b").siteKey, "127.0.0.1")
@@ -185,90 +168,20 @@ final class PasswordAutofillFillPolicyTests: XCTestCase {
 
 final class PasswordAutofillOfferTests: XCTestCase {
 
-    private let secure = url("https://example.com")
-    private let plain = url("http://example.com")
-    private let local = url("http://localhost:3000")
-
-    private func httpsLogins(_ count: Int) -> [SavedLogin] {
-        (0..<count).map { login("https://example.com", "user\($0)") }
-    }
-
-    func testSavedLoginsAreOfferedOnASecureSignInField() {
+    func testLoginsAreOfferedOnlyOnSignInFieldsOfASecureFrame() {
         for kind in [PasswordFieldKind.username, .currentPassword] {
-            XCTAssertEqual(
-                PasswordAutofillPolicy.offer(kind: kind, logins: httpsLogins(2), frameOrigin: secure, offersAutofill: true),
-                .suggestions(showsLogins: true, showsStrongPassword: false)
-            )
+            XCTAssertTrue(PasswordAutofillPolicy.offersLogins(kind: kind, frameOrigin: url("https://example.com")))
+            XCTAssertTrue(PasswordAutofillPolicy.offersLogins(kind: kind, frameOrigin: url("http://localhost:3000")), "http on this Mac is secure")
+            XCTAssertFalse(PasswordAutofillPolicy.offersLogins(kind: kind, frameOrigin: url("http://example.com")), "never on a plain http page")
         }
+        XCTAssertFalse(PasswordAutofillPolicy.offersLogins(kind: .newPassword, frameOrigin: url("https://example.com")))
+        XCTAssertFalse(PasswordAutofillPolicy.offersLogins(kind: .oneTimeCode, frameOrigin: url("https://example.com")))
     }
 
-    func testNothingIsOfferedWithoutALoginOnASignInField() {
-        XCTAssertEqual(PasswordAutofillPolicy.offer(kind: .username, logins: [], frameOrigin: secure, offersAutofill: true), .none)
-        XCTAssertEqual(PasswordAutofillPolicy.offer(kind: .currentPassword, logins: [], frameOrigin: secure, offersAutofill: true), .none)
-    }
-
-    func testANewPasswordFieldOffersAStrongPasswordWithOrWithoutLogins() {
-        for count in [0, 3] {
-            XCTAssertEqual(
-                PasswordAutofillPolicy.offer(kind: .newPassword, logins: httpsLogins(count), frameOrigin: secure, offersAutofill: true),
-                .suggestions(showsLogins: false, showsStrongPassword: true)
-            )
-        }
-    }
-
-    func testTheSwitchTurnsEverythingOff() {
-        for kind in [PasswordFieldKind.username, .currentPassword, .newPassword] {
-            XCTAssertEqual(PasswordAutofillPolicy.offer(kind: kind, logins: httpsLogins(4), frameOrigin: secure, offersAutofill: false), .none)
-        }
-    }
-
-    func testAnHTTPPageOffersOnlyTheWarningRowForLoginsSavedOverHTTP() {
-        let saved = [login("http://example.com", "carol")]
-        XCTAssertEqual(PasswordAutofillPolicy.offer(kind: .currentPassword, logins: saved, frameOrigin: plain, offersAutofill: true), .insecureWarning)
-        XCTAssertEqual(PasswordAutofillPolicy.offer(kind: .username, logins: saved, frameOrigin: plain, offersAutofill: true), .insecureWarning)
-        XCTAssertEqual(PasswordAutofillPolicy.offer(kind: .currentPassword, logins: [], frameOrigin: plain, offersAutofill: true), .none)
-        XCTAssertEqual(PasswordAutofillPolicy.offer(kind: .newPassword, logins: saved, frameOrigin: plain, offersAutofill: true), .none)
-    }
-
-    func testAnHTTPSLoginIsNeverOfferedOnAnHTTPPageEvenIfTheVaultReturnedIt() {
-        let saved = [login("https://example.com", "alice")]
-        for kind in [PasswordFieldKind.username, .currentPassword] {
-            XCTAssertEqual(PasswordAutofillPolicy.offer(kind: kind, logins: saved, frameOrigin: plain, offersAutofill: true), .none)
-        }
-        let mixed = saved + [login("http://example.com", "bob")]
-        XCTAssertEqual(PasswordAutofillPolicy.offer(kind: .currentPassword, logins: mixed, frameOrigin: plain, offersAutofill: true), .insecureWarning)
-    }
-
-    func testLocalhostIsASecurePageButStillNeverGetsAnHTTPSLogin() {
-        let http = [login("http://localhost:4000", "dev")]
-        XCTAssertEqual(
-            PasswordAutofillPolicy.offer(kind: .currentPassword, logins: http, frameOrigin: local, offersAutofill: true),
-            .suggestions(showsLogins: true, showsStrongPassword: false),
-            "a local page is not shown under the insecure-page warning"
-        )
-        XCTAssertEqual(
-            PasswordAutofillPolicy.offer(kind: .currentPassword, logins: [login("https://localhost:8443", "dev")], frameOrigin: local, offersAutofill: true),
-            .none
-        )
-    }
-
-    func testLoginsOfAnotherSiteAreNotCountedAsOffers() {
-        XCTAssertEqual(
-            PasswordAutofillPolicy.offer(kind: .currentPassword, logins: [login("https://other.test", "eve")], frameOrigin: secure, offersAutofill: true),
-            .none
-        )
-    }
-
-    func testThePreviousStepsUsernameIsListedFirst() {
-        let first = login("https://example.com", "alice")
-        let second = login("https://example.com", "bob")
-        let third = login("https://example.com", "carol")
-        XCTAssertEqual(
-            PasswordAutofillPolicy.ordered([first, second, third], preferredUsername: "carol").map(\.username),
-            ["carol", "alice", "bob"]
-        )
-        XCTAssertEqual(PasswordAutofillPolicy.ordered([first, second, third], preferredUsername: nil).map(\.username), ["alice", "bob", "carol"])
-        XCTAssertEqual(PasswordAutofillPolicy.ordered([first, second, third], preferredUsername: "nobody").map(\.username), ["alice", "bob", "carol"])
+    func testOneTimeCodesAreOfferedOnlyOnACodeFieldOfASecureFrame() {
+        XCTAssertTrue(PasswordAutofillPolicy.offersOneTimeCodes(kind: .oneTimeCode, frameOrigin: url("https://example.com")))
+        XCTAssertFalse(PasswordAutofillPolicy.offersOneTimeCodes(kind: .oneTimeCode, frameOrigin: url("http://example.com")))
+        XCTAssertFalse(PasswordAutofillPolicy.offersOneTimeCodes(kind: .username, frameOrigin: url("https://example.com")))
     }
 }
 
@@ -333,132 +246,7 @@ final class PasswordAutofillMultiStepTests: XCTestCase {
     }
 }
 
-final class PasswordAutofillPromptDecisionTests: XCTestCase {
-
-    private let origin = url("https://example.com")
-
-    private func submission(_ username: String, _ password: String, isNew: Bool = false) -> PasswordSubmission {
-        PasswordSubmission(origin: origin, username: username, password: password, isNewPassword: isNew)
-    }
-
-    func testANewUsernameIsOfferedForSaving() {
-        let decision = PasswordAutofillPolicy.promptDecision(
-            submission: submission("alice", "pw-1"), existing: [login("https://example.com", "bob")],
-            isNeverSave: false, offersToSave: true
-        )
-        XCTAssertEqual(decision, .save(username: "alice", password: "pw-1"))
-    }
-
-    func testTheFirstLoginForASiteIsOfferedForSaving() {
-        let decision = PasswordAutofillPolicy.promptDecision(
-            submission: submission("alice", "pw-1"), existing: [], isNeverSave: false, offersToSave: true
-        )
-        XCTAssertEqual(decision, .save(username: "alice", password: "pw-1"))
-    }
-
-    func testTheSameUsernameWithADifferentPasswordIsOfferedAsAnUpdate() {
-        let stored = login("https://example.com", "alice", "old")
-        let decision = PasswordAutofillPolicy.promptDecision(
-            submission: submission("alice", "new"), existing: [stored], isNeverSave: false, offersToSave: true
-        )
-        XCTAssertEqual(decision, .update(existing: stored, password: "new"))
-    }
-
-    func testAnIdenticalLoginLeadsToNothing() {
-        let decision = PasswordAutofillPolicy.promptDecision(
-            submission: submission("alice", "same"), existing: [login("https://example.com", "alice", "same")],
-            isNeverSave: false, offersToSave: true
-        )
-        XCTAssertEqual(decision, .nothing)
-    }
-
-    func testANeverSaveSiteLeadsToNothing() {
-        let decision = PasswordAutofillPolicy.promptDecision(
-            submission: submission("alice", "pw"), existing: [], isNeverSave: true, offersToSave: true
-        )
-        XCTAssertEqual(decision, .nothing)
-    }
-
-    func testTheSwitchOffLeadsToNothing() {
-        let decision = PasswordAutofillPolicy.promptDecision(
-            submission: submission("alice", "pw"), existing: [], isNeverSave: false, offersToSave: false
-        )
-        XCTAssertEqual(decision, .nothing)
-    }
-
-    func testAnEmptyPasswordLeadsToNothing() {
-        let decision = PasswordAutofillPolicy.promptDecision(
-            submission: submission("alice", ""), existing: [], isNeverSave: false, offersToSave: true
-        )
-        XCTAssertEqual(decision, .nothing)
-    }
-
-    func testAnUpdateNeverCrossesOrigins() {
-        // The username exists only under another origin of the site: that login must not be changed, so the sign-in is offered as a new entry.
-        let stored = login("https://accounts.example.com", "alice", "old")
-        for password in ["old", "new"] {
-            XCTAssertEqual(
-                PasswordAutofillPolicy.promptDecision(
-                    submission: submission("alice", password), existing: [stored], isNeverSave: false, offersToSave: true
-                ),
-                .save(username: "alice", password: password)
-            )
-        }
-    }
-
-    func testAnUpdateNeverCrossesFromHTTPToHTTPS() {
-        let stored = login("http://example.com", "alice", "old")
-        XCTAssertEqual(
-            PasswordAutofillPolicy.promptDecision(
-                submission: submission("alice", "new"), existing: [stored], isNeverSave: false, offersToSave: true
-            ),
-            .save(username: "alice", password: "new")
-        )
-    }
-
-    func testTheSameOriginsEntryIsTheOnlyOneUpdated() {
-        let elsewhere = login("https://accounts.example.com", "alice", "other")
-        let here = login("https://example.com", "alice", "here")
-        XCTAssertEqual(
-            PasswordAutofillPolicy.promptDecision(
-                submission: submission("alice", "changed"), existing: [elsewhere, here], isNeverSave: false, offersToSave: true
-            ),
-            .update(existing: here, password: "changed")
-        )
-        XCTAssertEqual(
-            PasswordAutofillPolicy.promptDecision(
-                submission: submission("alice", "here"), existing: [elsewhere, here], isNeverSave: false, offersToSave: true
-            ),
-            .nothing,
-            "the password for this origin is already what was typed"
-        )
-    }
-
-    func testAChangePasswordPageWithNoUsernameUpdatesTheOnlyLoginOfItsOrigin() {
-        let stored = login("https://example.com", "alice", "old")
-        let decision = PasswordAutofillPolicy.promptDecision(
-            submission: submission("", "new", isNew: true), existing: [stored], isNeverSave: false, offersToSave: true
-        )
-        XCTAssertEqual(decision, .update(existing: stored, password: "new"))
-    }
-
-    func testAChangePasswordPageWithNoUsernameDoesNotGuessFromAnotherOrigin() {
-        let elsewhere = login("https://accounts.example.com", "alice", "old")
-        XCTAssertEqual(
-            PasswordAutofillPolicy.promptDecision(
-                submission: submission("", "new", isNew: true), existing: [elsewhere], isNeverSave: false, offersToSave: true
-            ),
-            .nothing
-        )
-        let here = login("https://example.com", "bob", "old")
-        XCTAssertEqual(
-            PasswordAutofillPolicy.promptDecision(
-                submission: submission("", "new", isNew: true), existing: [elsewhere, here], isNeverSave: false, offersToSave: true
-            ),
-            .update(existing: here, password: "new"),
-            "only this origin's one login counts, not the site's logins"
-        )
-    }
+final class PasswordAutofillPromptWordingTests: XCTestCase {
 
     func testThePromptNamesTheOriginItIsAbout() {
         XCTAssertEqual(PasswordAutofillPolicy.displayOrigin("https://example.com"), "example.com")
@@ -469,65 +257,11 @@ final class PasswordAutofillPromptDecisionTests: XCTestCase {
         XCTAssertEqual(PasswordAutofillPolicy.displayOrigin("not an origin"), "not an origin")
     }
 
-    func testAMissingUsernameIsNotGuessedWhenThereIsMoreThanOneLoginOrItIsNotANewPassword() {
-        let two = [login("https://example.com", "alice"), login("https://example.com", "bob")]
-        XCTAssertEqual(
-            PasswordAutofillPolicy.promptDecision(
-                submission: submission("", "new", isNew: true), existing: two, isNeverSave: false, offersToSave: true
-            ),
-            .nothing
-        )
-        XCTAssertEqual(
-            PasswordAutofillPolicy.promptDecision(
-                submission: submission("", "new", isNew: false), existing: [two[0]], isNeverSave: false, offersToSave: true
-            ),
-            .nothing
-        )
-    }
-
     func testASubmissionNeverDescribesItsPassword() {
-        let text = String(describing: submission("alice", "hunter2-secret"))
-        XCTAssertFalse(text.contains("hunter2-secret"))
+        let submission = PasswordSubmission(origin: url("https://example.com"), username: "alice", password: "hunter2-secret", isNewPassword: false)
+        XCTAssertFalse(String(describing: submission).contains("hunter2-secret"))
         let credentials = PasswordFillCredentials(origin: url("https://example.com"), username: "alice", password: "hunter2-secret")
         XCTAssertFalse(String(describing: credentials).contains("hunter2-secret"))
-    }
-}
-
-final class PasswordAutofillListingTests: XCTestCase {
-
-    func testWebsiteTextBecomesAnHTTPSOriginUnlessItNamesAScheme() {
-        XCTAssertEqual(PasswordAutofillPolicy.parseWebsite("example.com")?.origin, "https://example.com")
-        XCTAssertEqual(PasswordAutofillPolicy.parseWebsite("  Example.com/login?next=1 ")?.origin, "https://example.com")
-        XCTAssertEqual(PasswordAutofillPolicy.parseWebsite("http://localhost:3000/x")?.origin, "http://localhost:3000")
-        XCTAssertEqual(PasswordAutofillPolicy.parseWebsite("example.co.uk")?.siteKey, "example.co.uk")
-    }
-
-    func testWebsiteTextThatIsNotAWebSiteIsRefused() {
-        XCTAssertNil(PasswordAutofillPolicy.parseWebsite(""))
-        XCTAssertNil(PasswordAutofillPolicy.parseWebsite("   "))
-        XCTAssertNil(PasswordAutofillPolicy.parseWebsite("ftp://example.com"))
-        XCTAssertNil(PasswordAutofillPolicy.parseWebsite("android://hash@com.example.app"))
-    }
-
-    func testTheDisplayHostDropsWWW() {
-        XCTAssertEqual(PasswordAutofillPolicy.displayHost(ofOrigin: "https://www.Example.com"), "example.com")
-        XCTAssertEqual(PasswordAutofillPolicy.displayHost(ofOrigin: "https://accounts.example.com:8443"), "accounts.example.com")
-    }
-
-    func testFilteringMatchesEveryWordInTheSiteOrUsernameAndSortsBySiteThenUsername() {
-        let logins = [
-            login("https://zeta.test", "carol"),
-            login("https://example.com", "bob"),
-            login("https://example.com", "alice"),
-            login("https://accounts.example.com", "alice"),
-        ]
-        XCTAssertEqual(
-            PasswordAutofillPolicy.filter(logins, query: "").map { PasswordAutofillPolicy.displayHost(ofOrigin: $0.origin) + "/" + $0.username },
-            ["accounts.example.com/alice", "example.com/alice", "example.com/bob", "zeta.test/carol"]
-        )
-        XCTAssertEqual(PasswordAutofillPolicy.filter(logins, query: "example alice").count, 2)
-        XCTAssertEqual(PasswordAutofillPolicy.filter(logins, query: "CAROL").map(\.username), ["carol"])
-        XCTAssertTrue(PasswordAutofillPolicy.filter(logins, query: "nothing like this").isEmpty)
     }
 }
 

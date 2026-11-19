@@ -358,3 +358,104 @@ extension WebKitWebContents {
         return (misspelled, guesses)
     }
 }
+
+// MARK: - Resources under the page
+
+extension WebKitWebContents {
+
+    func downloadResource(_ url: URL) {
+        guard !isClosed else { return }
+        let request = Self.resourceRequest(for: url, referrer: navigationState.url ?? webView.url)
+        Task { @MainActor [weak self] in
+            guard let self, !self.isClosed else { return }
+            let download = await self.webView.startDownload(using: request)
+            WebKitDownloads.shared.adopt(download, owner: self, sourceURL: url)
+        }
+    }
+
+    /// Fetched through the page's own data store, so cookies, partitioning and blob: URLs behave as the page sees them.
+    func loadResourceData(_ url: URL) async -> Data? {
+        guard !isClosed else { return nil }
+        if url.scheme?.lowercased() == "data" {
+            return try? Data(contentsOf: url)
+        }
+        let request = Self.resourceRequest(for: url, referrer: navigationState.url ?? webView.url)
+        let download = await webView.startDownload(using: request)
+        return await ResourceFetch(download: download).data()
+    }
+
+    static func resourceRequest(for url: URL, referrer: URL?) -> URLRequest {
+        var request = URLRequest(url: url)
+        if let referrer, let scheme = referrer.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            request.setValue(referrer.absoluteString, forHTTPHeaderField: "Referer")
+        }
+        return request
+    }
+}
+
+@MainActor
+private final class ResourceFetch: NSObject, WKDownloadDelegate {
+    private static let maximumBytes: Int64 = 256 * 1024 * 1024
+    private var retained: ResourceFetch?
+    private let download: WKDownload
+    private let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("orbit-resource-\(UUID().uuidString)", isDirectory: true)
+    private var destination: URL?
+    private var continuation: CheckedContinuation<Data?, Never>?
+
+    init(download: WKDownload) {
+        self.download = download
+        super.init()
+    }
+
+    func data() async -> Data? {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            self.retained = self
+            download.delegate = self
+        }
+    }
+
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String,
+        completionHandler: @escaping (URL?) -> Void
+    ) {
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            completionHandler(nil)
+            finish(nil)
+            return
+        }
+        if response.expectedContentLength > Self.maximumBytes {
+            completionHandler(nil)
+            finish(nil)
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            completionHandler(nil)
+            finish(nil)
+            return
+        }
+        let target = directory.appendingPathComponent("resource")
+        destination = target
+        completionHandler(target)
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        finish(destination.flatMap { try? Data(contentsOf: $0) })
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        finish(nil)
+    }
+
+    private func finish(_ data: Data?) {
+        try? FileManager.default.removeItem(at: directory)
+        continuation?.resume(returning: data)
+        continuation = nil
+        retained = nil
+    }
+}

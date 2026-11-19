@@ -7,17 +7,29 @@ public struct BrowserImportSummary: Sendable, Hashable {
     public var foldersCreated: Int
     public var bookmarksImported: Int
     public var historyEntriesImported: Int
+    public var spacesCreated: Int
+    public var pinnedTabsImported: Int
+    public var todayTabsImported: Int
+    public var favoritesImported: Int
 
     public init(
         browser: ImportableBrowser,
         foldersCreated: Int,
         bookmarksImported: Int,
-        historyEntriesImported: Int
+        historyEntriesImported: Int,
+        spacesCreated: Int = 0,
+        pinnedTabsImported: Int = 0,
+        todayTabsImported: Int = 0,
+        favoritesImported: Int = 0
     ) {
         self.browser = browser
         self.foldersCreated = foldersCreated
         self.bookmarksImported = bookmarksImported
         self.historyEntriesImported = historyEntriesImported
+        self.spacesCreated = spacesCreated
+        self.pinnedTabsImported = pinnedTabsImported
+        self.todayTabsImported = todayTabsImported
+        self.favoritesImported = favoritesImported
     }
 }
 
@@ -52,11 +64,24 @@ public enum BrowserImportCoordinator {
         )
         progress?(.finished(.history, completed: recorded))
 
+        var zenResult = ZenApplyResult()
+        if let zen = payload.zen {
+            progress?(.planned(.spaces, total: zen.workspaces.count))
+            progress?(.planned(.tabs, total: zen.tabs.count))
+            zenResult = ZenImportCoordinator.apply(zen, fallbackSpaceID: spaceID, env: env)
+            progress?(.finished(.spaces, completed: zenResult.spacesCreated))
+            progress?(.finished(.tabs, completed: zenResult.pinnedTabsImported + zenResult.todayTabsImported + zenResult.favoritesImported))
+        }
+
         return BrowserImportSummary(
             browser: browser,
-            foldersCreated: bookmarkResult.foldersCreated,
+            foldersCreated: bookmarkResult.foldersCreated + zenResult.foldersCreated,
             bookmarksImported: bookmarkResult.bookmarksImported,
-            historyEntriesImported: recorded
+            historyEntriesImported: recorded,
+            spacesCreated: zenResult.spacesCreated,
+            pinnedTabsImported: zenResult.pinnedTabsImported,
+            todayTabsImported: zenResult.todayTabsImported,
+            favoritesImported: zenResult.favoritesImported
         )
     }
 

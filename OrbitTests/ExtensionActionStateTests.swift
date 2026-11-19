@@ -160,6 +160,17 @@ final class ExtensionActionStateTests: XCTestCase {
         XCTAssertEqual(store.state(extensionID: extensionID, tabID: nil).badgeText, "")
     }
 
+    func test_store_replaceAllWithARepeatedExtensionIDKeepsTheFirstInsteadOfTrapping() {
+        let store = ExtensionActionStateStore()
+        let first = ExtensionActionSnapshot(extensionID: "dup", defaults: ExtensionActionState(badgeText: "1"))
+        let second = ExtensionActionSnapshot(extensionID: "dup", defaults: ExtensionActionState(badgeText: "2"))
+
+        store.replaceAll([first, second])
+
+        XCTAssertEqual(store.snapshots.count, 1)
+        XCTAssertEqual(store.state(extensionID: "dup", tabID: nil).badgeText, "1")
+    }
+
     // MARK: - Badge text shaping
 
     func test_displayBadgeText_isNilWhenThereIsNothingToDraw() {

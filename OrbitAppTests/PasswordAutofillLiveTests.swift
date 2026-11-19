@@ -12,6 +12,31 @@ import WebKit
 import XCTest
 @testable import Orbit
 
+/// Stands in for Passwords: hands over one password for any login and records what it was asked for.
+@MainActor
+private final class LivePasswordsStub: SystemPasswordsProviding {
+    let password: String
+    private(set) var requests: [String] = []
+
+    init(password: String) { self.password = password }
+
+    var state: SystemPasswordsState { .paired }
+    var canFillOneTimeCodes: Bool { false }
+    func cachedLogins(forHost host: String) -> [SystemPasswordLogin]? { nil }
+    func logins(forHost host: String) async throws -> [SystemPasswordLogin] { [] }
+
+    func password(forUsername username: String, host: String) async throws -> String {
+        requests.append("\(username)@\(host)")
+        return password
+    }
+
+    func save(username: String, password: String, host: String) async throws -> SystemPasswordsSaveOutcome { .saved }
+    func oneTimeCodes(pageURL: URL, username: String?) async throws -> [SystemPasswordOneTimeCode] { [] }
+    func didFillOneTimeCode(pageURL: URL, username: String) async {}
+    func requestPairing(over window: NSWindow?) {}
+    func openPasswordsApp() {}
+}
+
 @MainActor
 // Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 final class PasswordAutofillLiveTests: XCTestCase {
@@ -49,20 +74,6 @@ final class PasswordAutofillLiveTests: XCTestCase {
             window.orderOut(nil)
             contents.close()
         }
-    }
-
-    private var vault: InMemoryPasswordVault!
-
-    override func setUp() {
-        super.setUp()
-        vault = InMemoryPasswordVault()
-        PasswordVaults.shared = vault
-    }
-
-    override func tearDown() {
-        PasswordVaults.resetShared()
-        vault = nil
-        super.tearDown()
     }
 
     private static let secureBase = "https://login.example.test/"
@@ -285,8 +296,9 @@ final class PasswordAutofillLiveTests: XCTestCase {
         XCTAssertEqual(kinds["regConfirm"], "newPassword")
         XCTAssertEqual(kinds["bareUser"], "username", "fields outside any form are found too")
         XCTAssertEqual(kinds["barePass"], "currentPassword")
-        for ignored in ["hp1", "hp2", "hp3", "hp4", "hp5", "hp6", "search", "otp"] {
-            XCTAssertEqual(kinds[ignored], "", "\(ignored) is hidden, zero-size, off-page, disabled, read-only, a honeypot, a search box or a one-time code")
+        XCTAssertEqual(kinds["otp"], "oneTimeCode", "a one-time code field is its own kind, offered codes from Passwords")
+        for ignored in ["hp1", "hp2", "hp3", "hp4", "hp5", "hp6", "search"] {
+            XCTAssertEqual(kinds[ignored], "", "\(ignored) is hidden, zero-size, off-page, disabled, read-only, a honeypot or a search box")
         }
     }
 
@@ -559,17 +571,10 @@ final class PasswordAutofillLiveTests: XCTestCase {
 
             try await self.focus("u", in: page)
             let field = try XCTUnwrap(page.recorder.focuses.first)
-            let saved = try XCTUnwrap(self.vault.save(
-                origin: URL(string: "https://login.example.test")!, username: "alice@example.test", password: "hunter2-correct"
-            ))
-            guard case .added(let login) = saved else {
-                XCTFail("expected a new login")
-                return ""
-            }
 
             let outcome = await page.contents.fillPassword(
                 into: field.token,
-                credentials: self.credentials(login.origin, login.username, login.password)
+                credentials: self.credentials("https://login.example.test", "alice@example.test", "hunter2-correct")
             )
             XCTAssertEqual(outcome, .filled(username: true, password: true))
             return try await self.pageString("JSON.stringify(window.__state)", in: page.contents)
@@ -743,25 +748,28 @@ final class PasswordAutofillLiveTests: XCTestCase {
         }
     }
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testChoosingARowFillsTheFieldAndMarksTheLoginUsed
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testChoosingARowFillsThePasswordPasswordsHandsOver
 
-    func testChoosingARowFillsTheFieldAndMarksTheLoginUsed() throws {
+    func testChoosingARowFillsThePasswordPasswordsHandsOver() throws {
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             let page = try await self.openPage(Self.controlledForm)
             defer { page.close() }
-            let saved = try XCTUnwrap(self.vault.save(
-                origin: URL(string: "https://login.example.test")!, username: "fran@example.test", password: "fran-pw-9"
-            ))
-            guard case .added(let login) = saved else { return XCTFail("expected a new login") }
-            XCTAssertNil(login.lastUsedAt)
+            let passwords = LivePasswordsStub(password: "fran-pw-9")
+            let ui = PasswordAutofillUI.shared
+            ui.passwords = passwords
+            defer { ui.passwords = SystemPasswords.shared }
 
             try await self.focus("u", in: page)
             let field = try XCTUnwrap(page.recorder.focuses.first)
-            PasswordAutofillUI.shared.fill(login, into: field, contents: page.contents)
+            ui.fill(SystemPasswordLogin(username: "fran@example.test"), into: field, contents: page.contents)
 
-            try await self.waitFor("the login was never marked used") { self.vault.login(id: login.id)?.lastUsedAt != nil }
-            let filled = try await self.pageString("document.getElementById('u').value + '|' + document.getElementById('p').value", in: page.contents)
+            var filled = ""
+            for _ in 0..<80 where filled != "fran@example.test|fran-pw-9" {
+                try await Task.sleep(for: .milliseconds(50))
+                filled = try await self.pageString("document.getElementById('u').value + '|' + document.getElementById('p').value", in: page.contents)
+            }
             XCTAssertEqual(filled, "fran@example.test|fran-pw-9")
+            XCTAssertEqual(passwords.requests, ["fran@example.test@login.example.test"], "Passwords is asked for the frame's own host")
         }
     }
 
@@ -805,47 +813,49 @@ final class PasswordAutofillLiveTests: XCTestCase {
         }
     }
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAGeneratedPasswordFillsTheNewPasswordAndItsConfirmationAndIsCapturedAsNew
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAOneTimeCodeFillsASingleFieldOrARowOfBoxes
 
-    func testAGeneratedPasswordFillsTheNewPasswordAndItsConfirmationAndIsCapturedAsNew() throws {
+    func testAOneTimeCodeFillsASingleFieldOrARowOfBoxes() throws {
         let html = """
         <html><body style="margin:0;font:14px sans-serif">
-        <form id="signup" action="/register">
-          <input id="email" type="email" name="email" autocomplete="username">
-          <input id="p1" type="password" name="pw1" autocomplete="new-password">
-          <input id="p2" type="password" name="pw2" autocomplete="new-password">
+        <form id="single"><input id="code" type="text" name="code" autocomplete="one-time-code"></form>
+        <form id="boxes">
+          <input id="b1" type="text" maxlength="1"><input id="b2" type="text" maxlength="1"><input id="b3" type="text" maxlength="1">
+          <input id="b4" type="text" maxlength="1"><input id="b5" type="text" maxlength="1"><input id="b6" type="text" maxlength="1">
         </form>
-        <script>
-        document.getElementById('signup').addEventListener('submit', function (event) {
-          event.preventDefault();
-          document.getElementById('p1').remove();
-          document.getElementById('p2').remove();
-        });
-        </script></body></html>
+        <form id="login"><input id="user" type="email" autocomplete="username"></form>
+        </body></html>
         """
         try WebKitLiveEngineHost.runLive(timeout: 90) {
             let page = try await self.openPage(html)
             defer { page.close() }
-            try await self.focus("p1", in: page)
-            let field = try XCTUnwrap(page.recorder.focuses.first)
-            XCTAssertEqual(field.kind, .newPassword)
 
-            let generated = "Gen-Passw0rd-xyz"
-            let outcome = await page.contents.fillGeneratedPassword(generated, into: field.token)
-            XCTAssertEqual(outcome, .filled(username: false, password: true))
+            try await self.focus("code", in: page)
+            let single = try XCTUnwrap(page.recorder.focuses.last)
+            XCTAssertEqual(single.kind, .oneTimeCode)
+            let filled = await page.contents.fillOneTimeCode("482913", into: single.token, frameOrigin: single.frameOrigin)
+            XCTAssertEqual(filled, .filled(username: false, password: true))
+
+            try await self.focus("b1", in: page)
+            let box = try XCTUnwrap(page.recorder.focuses.last)
+            XCTAssertEqual(box.kind, .oneTimeCode)
+            _ = await page.contents.fillOneTimeCode("739105", into: box.token, frameOrigin: box.frameOrigin)
+
             let values = try await self.pageString(
-                "[document.getElementById('email').value, document.getElementById('p1').value, document.getElementById('p2').value].join('|')",
+                "document.getElementById('code').value + '|' + ['b1','b2','b3','b4','b5','b6'].map(function (id) { return document.getElementById(id).value; }).join('')",
                 in: page.contents
             )
-            XCTAssertEqual(values, "|\(generated)|\(generated)", "the new password and its confirmation get the same value; the username is left alone")
+            XCTAssertEqual(values, "482913|739105")
 
-            _ = try await page.contents.evaluateJavaScript(
-                "document.getElementById('email').value = 'erin@example.test'; document.getElementById('signup').requestSubmit(); true"
-            )
-            try await self.waitFor("the sign-in was never captured") { !page.recorder.submissions.isEmpty }
-            let submission = try XCTUnwrap(page.recorder.submissions.first)
-            XCTAssertEqual(submission.password, generated)
-            XCTAssertTrue(submission.isNewPassword)
+            let refused = await page.contents.fillOneTimeCode("<b>1</b>", into: single.token, frameOrigin: single.frameOrigin)
+            XCTAssertEqual(refused, .fieldUnavailable, "only letters and digits ever reach a code field")
+            let elsewhere = await page.contents.fillOneTimeCode("123456", into: single.token, frameOrigin: URL(string: "https://other.test")!)
+            XCTAssertEqual(elsewhere, .refusedSiteMismatch)
+
+            try await self.focus("user", in: page)
+            let user = try XCTUnwrap(page.recorder.focuses.last)
+            let notACodeField = await page.contents.fillOneTimeCode("123456", into: user.token, frameOrigin: user.frameOrigin)
+            XCTAssertEqual(notACodeField, .fieldUnavailable)
         }
     }
 

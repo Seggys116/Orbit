@@ -61,7 +61,7 @@ extension AppEnvironment {
 
         navigationGeneration[tabID, default: 0] += 1
         releaseWebContents(for: tabID)
-        navigationStates.removeValue(forKey: tabID)
+        removeNavigationState(for: tabID)
         mediaStates.removeValue(forKey: tabID)
         findResultsByTab.removeValue(forKey: tabID)
         tabErrors.removeValue(forKey: tabID)
@@ -75,27 +75,32 @@ extension AppEnvironment {
         }
     }
 
-    // A page-created tab (window.open, target=_blank) is built on its opener's data store; recording that keeps a later renderer release or relaunch on the same identity.
-    func inheritSiteProfile(from contents: any WebContents, for tabID: TabID) {
+    // A page-created tab (window.open, target=_blank) on its opener's own site is built on the opener's data store; recording that keeps a later renderer release or relaunch on the same identity. One opened onto another site belongs to the Space, as the user never chose a profile for it.
+    func inheritSiteProfile(from contents: any WebContents, for tabID: TabID, url: URL) {
         let identifier = contents.session.identifier
-        guard let profile = store.siteProfiles.first(where: { $0.sessionIdentifier == identifier }) else { return }
+        guard store.tab(tabID)?.siteProfileID == nil,
+              let profile = store.siteProfiles.first(where: { $0.sessionIdentifier == identifier })
+        else { return }
+        if let site = SiteProfile.siteKey(for: url), site != profile.siteKey { return }
         store.setSiteProfile(profile.id, forTab: tabID)
     }
 
-    // A popup shares its opener's cookie store, so a popup from a Site Profile tab to another site (a Google sign-in) would meet that site with no account in it. Before such a popup's navigation leaves, the destination site's cookies are copied in from the Space's own store, only when the profile's store holds none for it.
-    func seedCrossSitePopupCookies(for popup: any WebContents, openedBy opener: any WebContents, openerTabID: TabID) {
-        guard let popup = popup as? WebKitWebContents,
-              let openerSession = opener.session as? WebKitSession,
-              let siteProfile = store.siteProfiles.first(where: { $0.sessionIdentifier == openerSession.identifier }),
-              let spaceID = state.tabs[openerTabID]?.spaceID,
+    // A page on a Site Profile store that visits another site (a Google sign-in popup or redirect) sees that site exactly as the Space does, and the visit's changes go back to the Space.
+    func installForeignSiteCookieMirror(on contents: any WebContents, tabID: TabID) {
+        guard let page = contents as? WebKitWebContents,
+              let pageStore = page.session as? WebKitSession,
+              let siteProfile = store.siteProfiles.first(where: { $0.sessionIdentifier == pageStore.identifier }),
+              let spaceID = state.tabs[tabID]?.spaceID,
               let spaceProfile = state.profiles.first(where: { $0.id == profileID(for: spaceID) }),
-              let source = try? engine?.session(identifier: spaceProfile.sessionIdentifier, persistent: spaceProfile.isPersistent) as? WebKitSession
+              let spaceStore = try? engine?.session(identifier: spaceProfile.sessionIdentifier, persistent: spaceProfile.isPersistent) as? WebKitSession,
+              spaceStore !== pageStore
         else { return }
-        let ownSite = siteProfile.siteKey
-        var handled: Set<String> = []
-        popup.setMainFrameNavigationHook { url in
-            guard let site = SiteProfile.siteKey(for: url), site != ownSite, handled.insert(site).inserted else { return }
-            await openerSession.seedCookies(forSite: site, from: source)
+        let mirror = ForeignSiteCookieMirror(pageStore: pageStore, spaceStore: spaceStore, ownSite: siteProfile.siteKey)
+        page.setMainFrameNavigationHook { url in
+            await mirror.willNavigate(to: url)
+        }
+        page.setCloseHook {
+            Task { @MainActor in await mirror.finish() }
         }
     }
 

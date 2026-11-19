@@ -150,14 +150,24 @@ public enum PageColorObserverScript {
           window.addEventListener('popstate', schedule);
           window.addEventListener('hashchange', schedule);
 
+          // The safety-net timer runs only while the page is visible: a hidden page has no chrome to colour, and even
+          // a no-op timer wakes its web process. Becoming visible re-reads at once and re-arms it.
+          var idleTimer = null;
+
+          function armIdleTimer() {
+            if (idleTimer === null) { idleTimer = setInterval(schedule, IDLE_RE_READ_MS); }
+          }
+
           document.addEventListener('visibilitychange', function() {
-            if (!document.hidden) { schedule(); }
+            if (document.hidden) {
+              if (idleTimer !== null) { clearInterval(idleTimer); idleTimer = null; }
+              return;
+            }
+            armIdleTimer();
+            schedule();
           });
 
-          setInterval(function() {
-            if (document.hidden) { return; }
-            schedule();
-          }, IDLE_RE_READ_MS);
+          if (!document.hidden) { armIdleTimer(); }
 
           resubscribe();
         })();

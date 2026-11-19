@@ -53,6 +53,7 @@ struct TodaySectionView: View {
                             onDrop: handleInsertion
                         ) {
                             TabRowView(tab: tab, theme: theme)
+                                .sidebarRowProbe(id: "single-\(tab.id)", tabs: [tab.id])
                         }
                     case .rows(.split(let group, let members)):
                         SidebarDropTarget(
@@ -70,10 +71,13 @@ struct TodaySectionView: View {
                                 tabs: members,
                                 theme: theme
                             )
+                            .sidebarRowProbe(id: "split-\(group.id)", tabs: members.map(\.id))
                         }
                     }
                 }
+                .transition(.opacity)
             }
+            .orbitAnimation(OrbitMotion.standard, value: listedTabs.map(\.id))
         }
         .orbitRightClickMenu {
             [.item(OrbitContextMenuItem(title: "Clear All Today Tabs", systemImage: "trash") {
@@ -81,6 +85,7 @@ struct TodaySectionView: View {
             })]
         }
         .onAppear { env.sweepAbandonedNewTabPages(in: spaceID) }
+        .sidebarLinkDropDestination(environment: env, spaceID: spaceID)
     }
 
     private func tidyErrorRow(_ message: String) -> some View {

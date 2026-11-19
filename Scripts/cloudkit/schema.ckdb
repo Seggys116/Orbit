@@ -1,0 +1,217 @@
+DEFINE SCHEMA
+
+    RECORD TYPE Users (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE,
+        roles           LIST<INT64>,
+        GRANT WRITE TO "_creator",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Profile (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE QUERYABLE,
+        e_archivePolicy     ENCRYPTED STRING,
+        e_clientModifiedAt  ENCRYPTED TIMESTAMP,
+        e_createdAt         ENCRYPTED TIMESTAMP,
+        e_isPersistent      ENCRYPTED INT64,
+        e_name              ENCRYPTED STRING,
+        e_symbolName        ENCRYPTED STRING,
+        e_tintAlpha         ENCRYPTED DOUBLE,
+        e_tintBlue          ENCRYPTED DOUBLE,
+        e_tintGreen         ENCRYPTED DOUBLE,
+        e_tintRed           ENCRYPTED DOUBLE,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Space (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE QUERYABLE,
+        e_clientModifiedAt  ENCRYPTED TIMESTAMP,
+        e_createdAt         ENCRYPTED TIMESTAMP,
+        e_icon              ENCRYPTED STRING,
+        e_iconImageID       ENCRYPTED STRING,
+        e_iconIsEmoji       ENCRYPTED INT64,
+        e_iconKind          ENCRYPTED STRING,
+        e_name              ENCRYPTED STRING,
+        e_order             ENCRYPTED INT64,
+        e_profileID         ENCRYPTED STRING,
+        e_themeData         ENCRYPTED BYTES,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Favorite (
+        "___createTime"    TIMESTAMP,
+        "___createdBy"     REFERENCE,
+        "___etag"          STRING,
+        "___modTime"       TIMESTAMP,
+        "___modifiedBy"    REFERENCE,
+        "___recordID"      REFERENCE QUERYABLE,
+        e_clientModifiedAt   ENCRYPTED TIMESTAMP,
+        e_customIcon         ENCRYPTED STRING,
+        e_customIconIsEmoji  ENCRYPTED INT64,
+        e_liveTabID          ENCRYPTED STRING,
+        e_order              ENCRYPTED INT64,
+        e_spaceID            ENCRYPTED STRING,
+        e_title              ENCRYPTED STRING,
+        e_url                ENCRYPTED STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE SidebarNode (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE QUERYABLE,
+        e_clientModifiedAt  ENCRYPTED TIMESTAMP,
+        e_icon              ENCRYPTED STRING,
+        e_iconIsEmoji       ENCRYPTED INT64,
+        e_isExpanded        ENCRYPTED INT64,
+        e_kind              ENCRYPTED STRING,
+        e_name              ENCRYPTED STRING,
+        e_order             ENCRYPTED INT64,
+        e_parentID          ENCRYPTED STRING,
+        e_spaceID           ENCRYPTED STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE TodayEntry (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE QUERYABLE,
+        e_clientModifiedAt  ENCRYPTED TIMESTAMP,
+        e_order             ENCRYPTED INT64,
+        e_spaceID           ENCRYPTED STRING,
+        e_tabID             ENCRYPTED STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Tab (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE QUERYABLE,
+        e_archivedAt        ENCRYPTED TIMESTAMP,
+        e_clientModifiedAt  ENCRYPTED TIMESTAMP,
+        e_createdAt         ENCRYPTED TIMESTAMP,
+        e_customTitle       ENCRYPTED STRING,
+        e_faviconURL        ENCRYPTED STRING,
+        e_isMuted           ENCRYPTED INT64,
+        e_isUnloaded        ENCRYPTED INT64,
+        e_lastAccessedAt    ENCRYPTED TIMESTAMP,
+        e_section           ENCRYPTED STRING,
+        e_spaceID           ENCRYPTED STRING,
+        e_splitGroupID      ENCRYPTED STRING,
+        e_splitIndex        ENCRYPTED INT64,
+        e_title             ENCRYPTED STRING,
+        e_url               ENCRYPTED STRING,
+        e_zoomFactor        ENCRYPTED DOUBLE,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Boost (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE QUERYABLE,
+        e_accentColor       ENCRYPTED BYTES,
+        e_backgroundColor   ENCRYPTED BYTES,
+        e_createdAt         ENCRYPTED TIMESTAMP,
+        e_customCSS         ENCRYPTED STRING,
+        e_customJavaScript  ENCRYPTED STRING,
+        e_fontFamily        ENCRYPTED STRING,
+        e_host              ENCRYPTED STRING,
+        e_isEnabled         ENCRYPTED INT64,
+        e_name              ENCRYPTED STRING,
+        e_textColor         ENCRYPTED BYTES,
+        e_updatedAt         ENCRYPTED TIMESTAMP,
+        e_zappedSelectorsData ENCRYPTED BYTES,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Easel (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE QUERYABLE,
+        e_createdAt         ENCRYPTED TIMESTAMP,
+        e_itemsData         ENCRYPTED BYTES,
+        e_title             ENCRYPTED STRING,
+        e_updatedAt         ENCRYPTED TIMESTAMP,
+        e_viewportOriginX   ENCRYPTED DOUBLE,
+        e_viewportOriginY   ENCRYPTED DOUBLE,
+        e_viewportZoom      ENCRYPTED DOUBLE,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Note (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE QUERYABLE,
+        bodyAsset         ASSET,
+        e_createdAt         ENCRYPTED TIMESTAMP,
+        e_title             ENCRYPTED STRING,
+        e_updatedAt         ENCRYPTED TIMESTAMP,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE RoutingRule (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE QUERYABLE,
+        e_clientModifiedAt  ENCRYPTED TIMESTAMP,
+        e_destinationKind   ENCRYPTED STRING,
+        e_destinationValue  ENCRYPTED STRING,
+        e_isEnabled         ENCRYPTED INT64,
+        e_pattern           ENCRYPTED STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );

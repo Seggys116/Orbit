@@ -38,7 +38,9 @@ final class ImportFlowRunner {
                     let summary = try await BrowserImportCoordinator.performImport(browser, into: spaceID, env: env)
                     present(
                         title: "Imported from \(summary.browser.displayName)",
-                        message: "\(summary.bookmarksImported) bookmark\(summary.bookmarksImported == 1 ? "" : "s") in \(summary.foldersCreated) folder\(summary.foldersCreated == 1 ? "" : "s"), and \(summary.historyEntriesImported) history entr\(summary.historyEntriesImported == 1 ? "y" : "ies")."
+                        message: summary.browser.importsWorkspaces
+                            ? OnboardingImportStep.zenSummaryLine(summary)
+                            : "\(summary.bookmarksImported) bookmark\(summary.bookmarksImported == 1 ? "" : "s") in \(summary.foldersCreated) folder\(summary.foldersCreated == 1 ? "" : "s"), and \(summary.historyEntriesImported) history entr\(summary.historyEntriesImported == 1 ? "y" : "ies")."
                     )
                 }
             } catch {

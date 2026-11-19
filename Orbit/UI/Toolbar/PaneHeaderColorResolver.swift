@@ -51,6 +51,11 @@ final class PaneHeaderColorResolver {
 
     func cachedColor(for url: URL) -> ThemeColor? { hintByURL[url] }
 
+    /// A read of this tab at this URL finished, with or without a colour. A failed or unfinished read leaves this false.
+    func hasSettledReading(forTab tab: TabID, url: URL) -> Bool {
+        liveByTab[tab]?.url == url
+    }
+
     static func foreground(for background: ThemeColor) -> PaneHeaderForeground {
         background.luminance > 0.5 ? .dark : .light
     }
@@ -125,7 +130,13 @@ final class PaneHeaderColorResolver {
             }
 
             guard sampleGeneration[tab] == generation, !Task.isCancelled else { return nil }
-            documentByTab[tab] = reading.documentColor.map(ThemeColor.init)
+            // Same reason as record(): documentByTab is observed by the toolbar and the content card, so rewriting an unchanged colour re-renders both while the page is still painting its first frames.
+            let documentColor = reading.documentColor.map(ThemeColor.init)
+            if let known = documentByTab[tab], known == documentColor {
+                // Unchanged.
+            } else {
+                documentByTab[tab] = documentColor
+            }
 
             if let color = reading.color {
                 let resolved = ThemeColor(color)

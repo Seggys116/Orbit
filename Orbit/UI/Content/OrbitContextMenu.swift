@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // NSMenu.autoenablesItems defaults true and silently re-enables items without validateMenuItem(_:); used by the main menu and its Import submenu.
 final class ClosureMenuItem: NSMenuItem, NSMenuItemValidation {
@@ -52,12 +53,25 @@ extension AppEnvironment {
                 guard let self, let tabID = self.tabID(for: contents), let tab = self.state.tabs[tabID] else { return }
                 self.openTab(url: linkURL, in: tab.spaceID, section: .today, activate: false)
             }))
+            if let tabID = tabID(for: contents), LinkDropLogic.splitAllowed(paneCountInGroup: splitGroup(for: tabID)?.tabIDs.count) {
+                entries.append(.item(OrbitContextMenuItem(title: "Open Link in Split View", systemImage: "rectangle.split.2x1") { [weak self] in
+                    guard let self, let tab = self.state.tabs[tabID] else { return }
+                    let newTabID = self.openTab(url: linkURL, in: tab.spaceID, section: .today, activate: false)
+                    self.createSplit(existingTabID: tabID, newTabID: newTabID, edge: self.preferredSplitEdge())
+                    self.activateTab(newTabID)
+                }))
+            }
             entries.append(.item(OrbitContextMenuItem(title: "Open Link in Little Orbit", systemImage: "rectangle.inset.filled") {
                 LittleOrbitWindowController.open(url: linkURL)
             }))
+            entries.append(.divider())
+            if OrbitContextMenuActions.isDownloadable(linkURL) {
+                entries.append(.item(OrbitContextMenuItem(title: "Download Linked File", systemImage: "arrow.down.circle") { [weak contents] in
+                    contents?.downloadResource(linkURL)
+                }))
+            }
             entries.append(.item(OrbitContextMenuItem(title: "Copy Link", systemImage: "link") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(linkURL.absoluteString, forType: .string)
+                OrbitContextMenuActions.copy(linkURL)
             }))
             entries.append(.divider())
         }
@@ -65,15 +79,46 @@ extension AppEnvironment {
         if context.mediaKind == .image, let sourceURL = context.sourceURL {
             entries.append(.item(OrbitContextMenuItem(title: "Open Image in New Tab", systemImage: "photo") { [weak self] in
                 guard let self, let tabID = self.tabID(for: contents), let tab = self.state.tabs[tabID] else { return }
-                self.openTab(url: sourceURL, in: tab.spaceID)
+                self.openTab(url: sourceURL, in: tab.spaceID, section: .today, activate: false)
             }))
-            entries.append(.item(OrbitContextMenuItem(title: "Save Image", systemImage: "square.and.arrow.down") {
-                OrbitContextMenuActions.saveImage(from: sourceURL)
+            entries.append(.divider())
+            entries.append(.item(OrbitContextMenuItem(title: "Save Image to Downloads", systemImage: "square.and.arrow.down") { [weak contents] in
+                guard let contents else { return }
+                OrbitContextMenuActions.saveImageToDownloads(from: sourceURL, using: contents)
+            }))
+            entries.append(.item(OrbitContextMenuItem(title: "Save Image As…", systemImage: "square.and.arrow.down.on.square") { [weak contents] in
+                guard let contents else { return }
+                OrbitContextMenuActions.saveImage(from: sourceURL, using: contents)
+            }))
+            entries.append(.item(OrbitContextMenuItem(title: "Copy Image", systemImage: "doc.on.doc") { [weak contents] in
+                guard let contents else { return }
+                OrbitContextMenuActions.copyImage(from: sourceURL, using: contents)
             }))
             entries.append(.item(OrbitContextMenuItem(title: "Copy Image Address", systemImage: "doc.on.clipboard") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(sourceURL.absoluteString, forType: .string)
+                OrbitContextMenuActions.copy(sourceURL)
             }))
+            entries.append(.divider())
+        }
+
+        if context.mediaKind == .video || context.mediaKind == .audio {
+            let noun = context.mediaKind == .video ? "Video" : "Audio"
+            if let sourceURL = context.sourceURL, OrbitContextMenuActions.isDownloadable(sourceURL) {
+                entries.append(.item(OrbitContextMenuItem(title: "Open \(noun) in New Tab", systemImage: context.mediaKind == .video ? "play.rectangle" : "waveform") { [weak self] in
+                    guard let self, let tabID = self.tabID(for: contents), let tab = self.state.tabs[tabID] else { return }
+                    self.openTab(url: sourceURL, in: tab.spaceID, section: .today, activate: false)
+                }))
+                entries.append(.item(OrbitContextMenuItem(title: "Save \(noun) to Downloads", systemImage: "square.and.arrow.down") { [weak contents] in
+                    contents?.downloadResource(sourceURL)
+                }))
+                entries.append(.item(OrbitContextMenuItem(title: "Copy \(noun) Address", systemImage: "doc.on.clipboard") {
+                    OrbitContextMenuActions.copy(sourceURL)
+                }))
+            }
+            if context.mediaKind == .video {
+                entries.append(.item(OrbitContextMenuItem(title: "Picture in Picture", systemImage: "pip.enter") { [weak contents] in
+                    contents?.togglePictureInPicture()
+                }))
+            }
             entries.append(.divider())
         }
 
@@ -220,21 +265,82 @@ extension AppEnvironment {
     }
 }
 
-// Kept free of AppEnvironment: a one-shot fetch-and-save no test needs to intercept via the environment.
+// Kept free of AppEnvironment: one-shot fetch, copy and save actions no test needs to intercept via the environment.
+@MainActor
 enum OrbitContextMenuActions {
+    /// blob: and data: sources only exist inside the page; Orbit's download store cannot resume or name them.
+    static func isDownloadable(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https" || scheme == "ftp" || scheme == "file"
+    }
+
+    static func copy(_ url: URL, to pasteboard: NSPasteboard = .general) {
+        pasteboard.clearContents()
+        pasteboard.writeObjects([url as NSURL])
+        pasteboard.setString(url.absoluteString, forType: .string)
+    }
+
+    static func copyImage(from url: URL, using contents: WebContents, to pasteboard: NSPasteboard = .general) {
+        Task { @MainActor in
+            guard let data = await contents.loadResourceData(url) else { return }
+            writeImage(data, sourceURL: url, to: pasteboard)
+        }
+    }
+
+    /// Keeps the original encoding (a GIF stays animated, a PNG keeps its alpha) alongside a TIFF every app can paste.
+    @discardableResult
+    static func writeImage(_ data: Data, sourceURL: URL?, to pasteboard: NSPasteboard) -> Bool {
+        guard let image = NSImage(data: data), image.isValid else { return false }
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+        if let type = imageType(of: data), type != .tiff {
+            pasteboard.setData(data, forType: NSPasteboard.PasteboardType(type.identifier))
+        }
+        if let sourceURL, isDownloadable(sourceURL) {
+            pasteboard.setString(sourceURL.absoluteString, forType: .URL)
+        }
+        return true
+    }
+
+    static func imageType(of data: Data) -> UTType? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let identifier = CGImageSourceGetType(source) as String? else { return nil }
+        return UTType(identifier)
+    }
+
+    /// Web images go through Orbit's downloads so they show in the Downloads list; page-only data and blob images are written straight to the folder.
+    static func saveImageToDownloads(from url: URL, using contents: WebContents) {
+        if isDownloadable(url) {
+            contents.downloadResource(url)
+            return
+        }
+        Task { @MainActor in
+            guard let data = await contents.loadResourceData(url) else { return }
+            let target = DownloadStore.uniqueDestination(
+                in: WebKitDownloads.downloadsDirectory, suggestedName: suggestedImageName(for: url, data: data)
+            )
+            try? data.write(to: target, options: .withoutOverwriting)
+        }
+    }
+
     // NSSavePanel.begin(completionHandler:) returns immediately; never .runModal(), which would enter a nested run loop.
-    static func saveImage(from url: URL, session: URLSession = .shared, fileManager: FileManager = .default) {
-        Task {
-            guard let (data, response) = try? await session.data(from: url) else { return }
-            let suggested = response.suggestedFilename ?? url.lastPathComponent
-            await MainActor.run {
-                let panel = NSSavePanel()
-                panel.nameFieldStringValue = suggested.isEmpty ? "image" : suggested
-                panel.begin { result in
-                    guard result == .OK, let targetURL = panel.url else { return }
-                    try? data.write(to: targetURL)
-                }
+    static func saveImage(from url: URL, using contents: WebContents) {
+        Task { @MainActor in
+            guard let data = await contents.loadResourceData(url) else { return }
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = suggestedImageName(for: url, data: data)
+            panel.directoryURL = WebKitDownloads.downloadsDirectory
+            panel.begin { result in
+                guard result == .OK, let targetURL = panel.url else { return }
+                try? data.write(to: targetURL)
             }
         }
+    }
+
+    static func suggestedImageName(for url: URL, data: Data) -> String {
+        let last = url.scheme?.lowercased() == "data" ? "" : url.deletingPathExtension().lastPathComponent
+        let base = last.isEmpty || last == "/" ? "image" : last
+        let ext = imageType(of: data)?.preferredFilenameExtension ?? (url.pathExtension.isEmpty ? "png" : url.pathExtension)
+        return base + "." + ext
     }
 }

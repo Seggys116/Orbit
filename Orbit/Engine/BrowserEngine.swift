@@ -200,6 +200,12 @@ public protocol WebContents: AnyObject {
 
     func cancelDownload(id: UUID)
 
+    /// Downloads with the page's own session and referrer, into Orbit's downloads.
+    func downloadResource(_ url: URL)
+
+    /// The bytes behind `url` as this page would load them, or nil if it cannot be fetched.
+    func loadResourceData(_ url: URL) async -> Data?
+
     func extensionContextMenuGroups() -> [ExtensionContextMenuGroup]
 
     func performExtensionContextMenuItem(_ id: ExtensionContextMenuItemID)
@@ -218,15 +224,16 @@ public protocol WebContents: AnyObject {
     /// (same site; an https login never goes into an http frame) and against the frame's live origin, and refuses a mismatch.
     func fillPassword(into token: String, credentials: PasswordFillCredentials) async -> PasswordFillOutcome
 
-    /// Fills a generated password into the new-password field `token` and the confirmation field beside it.
-    func fillGeneratedPassword(_ password: String, into token: String) async -> PasswordFillOutcome
+    /// Puts a one-time code into the one-time-code field `token`, spreading it over a row of one-character boxes. Refused unless the
+    /// frame's live origin is still `frameOrigin`.
+    func fillOneTimeCode(_ code: String, into token: String, frameOrigin: URL) async -> PasswordFillOutcome
 
     func close()
 }
 
 public extension WebContents {
     func fillPassword(into token: String, credentials: PasswordFillCredentials) async -> PasswordFillOutcome { .unsupported }
-    func fillGeneratedPassword(_ password: String, into token: String) async -> PasswordFillOutcome { .unsupported }
+    func fillOneTimeCode(_ code: String, into token: String, frameOrigin: URL) async -> PasswordFillOutcome { .unsupported }
 
     func enableContentSizing(minimum: CGSize, maximum: CGSize) {}
 
@@ -274,6 +281,7 @@ public protocol WebContentsDelegate: AnyObject {
 
     func webContents(_ contents: WebContents, didChangeTitle title: String)
     func webContents(_ contents: WebContents, didChangeFavicon image: NSImage?, url: URL?)
+    func webContents(_ contents: WebContents, hasCachedFaviconForHost host: String) -> Bool
     func webContents(_ contents: WebContents, didHoverLink url: URL?)
     func webContents(_ contents: WebContents, didChangeStatusText text: String?)
     func webContents(_ contents: WebContents, didChangeThemeColor color: NSColor?)
@@ -301,6 +309,9 @@ public protocol WebContentsDelegate: AnyObject {
     ) async -> PermissionDecision
 
     func webContents(_ contents: WebContents, allowCertificateProblem problem: CertificateProblem) async -> Bool
+
+    /// The credentials for a server or proxy that answered 401 or 407. `nil` cancels the challenge, so the page shows the server's own refusal.
+    func webContents(_ contents: WebContents, requestsHTTPCredentials request: HTTPCredentialRequest) async -> HTTPCredentialResponse?
 
     func webContents(
         _ contents: WebContents,
@@ -400,6 +411,7 @@ public extension WebContentsDelegate {
     func webContents(_ contents: WebContents, didFailLoading error: EngineError) {}
     func webContents(_ contents: WebContents, didChangeTitle title: String) {}
     func webContents(_ contents: WebContents, didChangeFavicon image: NSImage?, url: URL?) {}
+    func webContents(_ contents: WebContents, hasCachedFaviconForHost host: String) -> Bool { false }
     func webContents(_ contents: WebContents, didHoverLink url: URL?) {}
     func webContents(_ contents: WebContents, didChangeStatusText text: String?) {}
     func webContents(_ contents: WebContents, didChangeThemeColor color: NSColor?) {}
@@ -425,6 +437,11 @@ public extension WebContentsDelegate {
         _ contents: WebContents,
         allowCertificateProblem problem: CertificateProblem
     ) async -> Bool { false }
+
+    func webContents(
+        _ contents: WebContents,
+        requestsHTTPCredentials request: HTTPCredentialRequest
+    ) async -> HTTPCredentialResponse? { nil }
 
     func webContents(
         _ contents: WebContents,

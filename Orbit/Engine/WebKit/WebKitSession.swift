@@ -126,17 +126,6 @@ final class WebKitSession: EngineSession {
         }
     }
 
-    /// Copies `site`'s cookies from `source` into this store, only when this store holds none for the site, so an account already signed in here is never replaced. Returns how many were copied.
-    @discardableResult
-    func seedCookies(forSite site: String, from source: WebKitSession) async -> Int {
-        guard source !== self, await cookies(forSite: site).isEmpty else { return 0 }
-        let copied = await source.cookies(forSite: site)
-        for cookie in copied {
-            await dataStore.httpCookieStore.setCookie(cookie)
-        }
-        return copied.count
-    }
-
     func deleteCookies(for url: URL) async {
         let matching = await cookies(for: url)
         for cookie in matching {

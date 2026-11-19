@@ -163,8 +163,29 @@ struct NewTabPageView: View {
         space.map { env.isIncognito($0) } ?? true
     }
 
-    private var history: [HistoryEntry] {
-        isPrivate ? [] : env.historyResults(matching: "", limit: 300)
+    /// Remembers the last grouping and what it was computed from, so evaluating the body again (typing in the embedded bar, hover, theme changes) does not regroup 300 history entries.
+    private final class SiteGroupingMemo {
+        var historyVersion: Int?
+        var wasPrivate = false
+        var frequent: [NewTabPageModel.SiteTile] = []
+        var recent: [NewTabPageModel.SiteTile] = []
+    }
+
+    @State private var groupingMemo = SiteGroupingMemo()
+
+    // Keyed on the history cache's version: a visit or reload bumps it, nothing else changes the groups.
+    private func siteGroups() -> (frequent: [NewTabPageModel.SiteTile], recent: [NewTabPageModel.SiteTile]) {
+        let incognito = isPrivate
+        let version = env.historyCacheVersion
+        let memo = groupingMemo
+        if memo.historyVersion != version || memo.wasPrivate != incognito {
+            let entries = incognito ? [] : env.historyResults(matching: "", limit: 300)
+            memo.frequent = NewTabPageModel.frequentSites(from: entries)
+            memo.recent = NewTabPageModel.recentSites(from: entries)
+            memo.historyVersion = version
+            memo.wasPrivate = incognito
+        }
+        return (memo.frequent, memo.recent)
     }
 
     private var themeTint: Color {
@@ -173,9 +194,7 @@ struct NewTabPageView: View {
     }
 
     var body: some View {
-        let entries = history
-        let frequent = NewTabPageModel.frequentSites(from: entries)
-        let recent = NewTabPageModel.recentSites(from: entries)
+        let (frequent, recent) = siteGroups()
 
         GeometryReader { proxy in
             ScrollView {

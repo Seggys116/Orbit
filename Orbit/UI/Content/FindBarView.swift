@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct FindBarView: View {
@@ -8,16 +9,18 @@ struct FindBarView: View {
     private var result: FindResult { env.currentFindResult }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 14)
 
             TextField("Find or Ask", text: findQueryBinding)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($isFocused)
                 .onSubmit { commitFind(forward: true) }
+                .background(FindFieldFocusAnchor(request: env.findBarFocusRequest))
 
             if !env.findQuery.isEmpty {
                 Text(matchLabel)
@@ -57,13 +60,15 @@ struct FindBarView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 10)
+        .padding(.trailing, 12)
         .frame(height: 34)
         .frame(width: 320)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OrbitRadius.row))
         .overlay(RoundedRectangle(cornerRadius: OrbitRadius.row).strokeBorder(.white.opacity(0.08)))
         .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
         .onAppear { isFocused = true }
+        .onChange(of: env.findBarFocusRequest) { isFocused = true }
         .onExitCommand { dismiss() }
     }
 
@@ -89,5 +94,49 @@ struct FindBarView: View {
 
     private func dismiss() {
         env.dismissFindBar()
+    }
+}
+
+/// Pulls the keyboard out of the web view and into the find field, selecting any previous query, on every Cmd-F.
+private struct FindFieldFocusAnchor: NSViewRepresentable {
+    let request: UUID
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard context.coordinator.handledRequest != request else { return }
+        context.coordinator.handledRequest = request
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.makeKey()
+            guard let field = Self.textField(near: view) else { return }
+            if window.firstResponder !== field.currentEditor() {
+                window.makeFirstResponder(field)
+            }
+            field.currentEditor()?.selectAll(nil)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var handledRequest: UUID?
+    }
+
+    private static func textField(near anchor: NSView) -> NSTextField? {
+        var container = anchor.superview
+        while let current = container {
+            if let field = firstTextField(in: current) { return field }
+            container = current.superview
+        }
+        return nil
+    }
+
+    private static func firstTextField(in view: NSView) -> NSTextField? {
+        if let field = view as? NSTextField, field.isEditable { return field }
+        for subview in view.subviews {
+            if let field = firstTextField(in: subview) { return field }
+        }
+        return nil
     }
 }

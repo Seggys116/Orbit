@@ -1315,6 +1315,17 @@ public extension OrbitState {
             changed = true
         }
 
+        // Groups made before the model kept their panes adjacent render as two separate rows.
+        var gathered = repaired
+        gathered.gatherAllSplitMembers()
+        for index in repaired.spaces.indices
+        where gathered.spaces[index].today != repaired.spaces[index].today
+            || gathered.spaces[index].pinned != repaired.spaces[index].pinned {
+            repaired.spaces[index].today = gathered.spaces[index].today
+            repaired.spaces[index].pinned = gathered.spaces[index].pinned
+            changed = true
+        }
+
         return changed ? repaired : nil
     }
 }

@@ -206,7 +206,9 @@ private struct ElTreeScroll: View {
                     }
                 }
                 .padding(.vertical, Self.verticalPadding)
+                .frame(minWidth: geo.size.width, minHeight: geo.size.height, alignment: .topLeading)
             }
+            .defaultScrollAnchor(.topLeading)
             .scrollPosition($position)
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, offset in
                 scrollOffset.y = offset

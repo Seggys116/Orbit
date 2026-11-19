@@ -20,7 +20,8 @@ extension AppEnvironment {
         // Must run before the mirror moves below — closes a race with source's stale deferred load.
         invalidateNavigationGeneration(for: id, in: source)
 
-        moveMirrorEntry(id, from: source, keyPath: \.navigationStates)
+        // The box itself moves, so its observers carry over rather than seeing a fresh copy.
+        moveMirrorEntry(id, from: source, keyPath: \.navigationBoxes)
         moveMirrorEntry(id, from: source, keyPath: \.themeColors)
         moveMirrorEntry(id, from: source, keyPath: \.documentColors)
         moveMirrorEntry(id, from: source, keyPath: \.mediaStates)

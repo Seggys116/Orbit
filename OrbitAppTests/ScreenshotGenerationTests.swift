@@ -639,6 +639,32 @@ final class ScreenshotGenerationTests: XCTestCase {
         )
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsPasswords
+
+    func test_settingsPasswords() async {
+        OrbitScreenshotFixtures.configure(env)
+        SettingsRouter.shared.selectedPane = .passwords
+        let view = ScreenshotSettingsComposition(pane: .passwords)
+            .environment(env)
+            .orbitScreenshotModeDragDisabledForTests()
+        await renderAndSave(
+            view,
+            name: "settings-passwords",
+            size: CGSize(width: SettingsMetrics.windowDefaultWidth, height: SettingsMetrics.windowDefaultHeight)
+        )
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_findBar
+
+    func test_findBar() async {
+        OrbitScreenshotFixtures.configure(env)
+        env.findQuery = "Pass"
+        let view = FindBarView()
+            .environment(env)
+            .padding(24)
+        await renderAndSave(view, name: "find-bar", size: CGSize(width: 368, height: 82))
+    }
+
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_settingsWindow
     func test_settingsWindow() async {
         OrbitScreenshotFixtures.configure(env)

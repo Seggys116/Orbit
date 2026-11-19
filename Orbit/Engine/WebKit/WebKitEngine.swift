@@ -44,6 +44,20 @@ final class WebKitEngine: NSObject, BrowserEngine {
     )
     private lazy var navigationUserScript = WebKitNavigationEventBridge.userScript
     private lazy var webRequestSocketUserScript = WebKitWebRequestSocketProbe.userScript
+    /// Whether the scripts last installed on a tab carried the WebSocket probe, so a change can be detected.
+    private var webRequestSocketProbeInstalled = false
+    private var scriptReinstallScheduled = false
+    /// Marks the Web Store scripts on a controller so a repeat navigation to the store does not add them again.
+    private static let webStoreMarker = "/* orbit-webstore */\n"
+    private lazy var webStoreUserScripts: [WKUserScript] = [
+        WebStorePrivateBridgeScript.userScript,
+        WebStoreAddToChromeButtonScript.userScript,
+    ].map { Self.userScript($0, marker: Self.webStoreMarker) }
+    /// WKProcessPool is deprecated, so it is created and assigned by name. One pool lets WebKit reuse and prewarm
+    /// WebContent processes across tabs; a pool per configuration copy gave every tab a cold start.
+    private lazy var sharedProcessPool: NSObject? = (NSClassFromString("WKProcessPool") as? NSObject.Type)?.init()
+    private var preconnectTimes: [String: Date] = [:]
+    private static let preconnectInterval: TimeInterval = 10
     private var loaded: [String: LoadedExtensionRecord] = [:]
     private var extensionLoadOrder: [String] = []
     /// Permissions known before `loadBackground` returns. The service worker calls
@@ -327,6 +341,9 @@ final class WebKitEngine: NSObject, BrowserEngine {
     }
 
     func start() throws {
+        prewarmProcessPool()
+        // Built a turn after launch, so the first tab to close finds it ready instead of paying for it.
+        DispatchQueue.main.async { _ = WebKitWebContents.inertWebView }
         scheduleChromiumProfileMigrationIfNeeded()
         if let directory = EngineStorageDirectory.directory(for: storage) {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -585,24 +602,89 @@ final class WebKitEngine: NSObject, BrowserEngine {
         } else {
             userScripts.append(script)
         }
-        for tab in openTabs { tab.reinstallScripts() }
+        scheduleScriptReinstall()
     }
 
     func removeUserScript(id: UUID, session: EngineSession) {
         userScripts.removeAll { $0.id == id }
         compiledUserScripts[id] = nil
-        for tab in openTabs { tab.reinstallScripts() }
+        scheduleScriptReinstall()
     }
 
     func applyContentBlocker(_ blocker: ContentBlocker?, session: EngineSession) async {
         contentBlocker = blocker
-        await contentBlocking.apply(blocker)
+        // False means this exact rule set, allowlist and enabled state is already in place: no recompile and no
+        // script reinstall on every tab (a refresh that found nothing new used to cost both).
+        guard await contentBlocking.apply(blocker) else { return }
         // Reinstalling scripts on the turn that just mutated the content controllers can
         // drop a web view that is mid-callback. The next turn is after WebKit has finished.
-        let tabs = openTabs
-        Task { @MainActor in
-            for tab in tabs { tab.reinstallScripts() }
+        scheduleScriptReinstall()
+    }
+
+    /// Every change used to reinstall every script on every tab at once; changes made in one run loop turn now
+    /// share one reinstall per tab on the next turn.
+    private func scheduleScriptReinstall() {
+        guard !scriptReinstallScheduled else { return }
+        scriptReinstallScheduled = true
+        Task { @MainActor [weak self] in self?.flushPendingScriptReinstall() }
+    }
+
+    /// Runs a pending reinstall now. A browser-initiated load calls this so it never starts on stale scripts.
+    func flushPendingScriptReinstall() {
+        guard scriptReinstallScheduled else { return }
+        scriptReinstallScheduled = false
+        for tab in openTabs where !tab.isClosed { tab.reinstallScripts() }
+    }
+
+    /// The WebSocket probe only matters to an extension that can use webRequest. Tabs are reinstalled when that changes.
+    private func refreshWebRequestSocketProbe() {
+        if services.anyExtensionMayUseWebRequest != webRequestSocketProbeInstalled { scheduleScriptReinstall() }
+    }
+
+    // MARK: - Shared process pool, prewarm and preconnect
+
+    /// Assigns the app's one process pool. The setter is looked up first: a missing selector would raise through KVC.
+    private func shareProcessPool(with configuration: WKWebViewConfiguration) {
+        guard let pool = sharedProcessPool, configuration.responds(to: NSSelectorFromString("setProcessPool:")) else { return }
+        configuration.setValue(pool, forKey: "processPool")
+    }
+
+    /// Starts one WebContent process ahead of the first page; WebKit bounds how many it keeps warm.
+    private func prewarmProcessPool() {
+        guard !DebugFlags.isRunningUnderTests, let pool = sharedProcessPool else { return }
+        let selector = NSSelectorFromString("_warmInitialProcess")
+        guard pool.responds(to: selector) else { return }
+        _ = pool.perform(selector)
+    }
+
+    /// True when `url`'s origin has not been preconnected for this profile within the last few seconds.
+    func claimPreconnect(to url: URL, session: WebKitSession) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), let host = url.host(percentEncoded: false)?.lowercased() else { return false }
+        let now = Date()
+        let key = "\(session.identifier)|\(scheme)://\(host):\(url.port ?? 0)"
+        if let last = preconnectTimes[key], now.timeIntervalSince(last) < Self.preconnectInterval { return false }
+        if preconnectTimes.count > 128 {
+            preconnectTimes = preconnectTimes.filter { now.timeIntervalSince($0.value) < Self.preconnectInterval }
         }
+        preconnectTimes[key] = now
+        return true
+    }
+
+    // MARK: - Web Store scripts
+
+    static func isWebStoreURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", let host = url.host(percentEncoded: false)?.lowercased() else { return false }
+        if host == "chromewebstore.google.com" { return true }
+        return host == "chrome.google.com" && url.path.hasPrefix("/webstore")
+    }
+
+    /// The store scripts act only on the store, so they join a controller when a main frame navigates there instead of
+    /// being parsed on every page.
+    func installWebStoreScriptsIfNeeded(for url: URL, on controller: WKUserContentController) {
+        guard Self.isWebStoreURL(url),
+              !controller.userScripts.contains(where: { $0.source.hasPrefix(Self.webStoreMarker) })
+        else { return }
+        for script in webStoreUserScripts { controller.addUserScript(script) }
     }
 
     func blockerDecision(url: String, documentURL: String, resourceType: ContentBlockingResourceType) -> Bool {
@@ -652,6 +734,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
             id: id, context: context, webExtension: webExtension, directory: directory,
             manifest: manifest, session: webKitSession, reason: reason
         )
+        refreshWebRequestSocketProbe()
         do {
             try extensionController.load(context)
             if webExtension.hasBackgroundContent {
@@ -660,6 +743,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
         } catch {
             declaredPermissionsByExtension[id] = nil
             services.unregister(id, uninstalled: false)
+            refreshWebRequestSocketProbe()
             try? extensionController.unload(context)
             if let engineError = error as? EngineError { throw engineError }
             throw EngineError(code: .unknown, underlyingDescription: Self.loadFailureDescription(error))
@@ -710,13 +794,24 @@ final class WebKitEngine: NSObject, BrowserEngine {
     /// `context.errors` collects page runtime failures for the life of the context. Only the
     /// documented load codes mean the background did not start.
     private static func loadFailureDescription(of context: WKWebExtensionContext) -> String {
-        context.errors.filter { error in
-            let ns = error as NSError
-            let isLoadFailure = ns.domain == WKWebExtensionContext.errorDomain
-                && WKWebExtensionContext.Error.Code(rawValue: ns.code) != nil
-            return isLoadFailure || ns.domain != WKWebExtensionContext.errorDomain
-        }
-        .map(\.localizedDescription).joined(separator: " | ")
+        context.errors.filter { isBackgroundLoadFailure($0 as NSError) }
+            .map(\.localizedDescription).joined(separator: " | ")
+    }
+
+    // Code(rawValue:) accepts any Int for an imported NS_ERROR_ENUM, so it cannot tell a load code
+    // from WebKit's runtime-error codes (an uncaught rejection in a running worker is code 7).
+    private static let documentedContextErrorCodes: Set<Int> = Set([
+        WKWebExtensionContext.Error.Code.unknown,
+        .alreadyLoaded,
+        .notLoaded,
+        .baseURLAlreadyInUse,
+        .noBackgroundContent,
+        .backgroundContentFailedToLoad,
+    ].map(\.rawValue))
+
+    static func isBackgroundLoadFailure(_ error: NSError) -> Bool {
+        guard error.domain == WKWebExtensionContext.errorDomain else { return true }
+        return documentedContextErrorCodes.contains(error.code)
     }
 
     func unloadExtension(id: String, session: EngineSession) {
@@ -725,6 +820,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
         extensionLoadOrder.removeAll { $0 == id }
         declaredPermissionsByExtension[id] = nil
         services.unregister(id, uninstalled: false)
+        refreshWebRequestSocketProbe()
         let context = record.context
         try? extensionController.unload(context)
         // Unload finishes on a later turn. Reloading before that injects into the context that is leaving.
@@ -739,6 +835,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
     func uninstallExtension(id: String, session: EngineSession) {
         unloadExtension(id: id, session: session)
         services.unregister(id, uninstalled: true)
+        refreshWebRequestSocketProbe()
     }
 
     private static func loadFailureDescription(_ error: Error) -> String {
@@ -822,6 +919,8 @@ final class WebKitEngine: NSObject, BrowserEngine {
               copy !== template,
               copy.preferences !== template.preferences
         else { return makeConfigurationTemplate() }
+        // The copy would otherwise lazily create a pool of its own on first use.
+        shareProcessPool(with: copy)
         if copy.urlSchemeHandler(forURLScheme: "orbit") == nil {
             copy.setURLSchemeHandler(schemeHandler, forURLScheme: "orbit")
         }
@@ -838,6 +937,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
 
     private func makeConfigurationTemplate() -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
+        shareProcessPool(with: configuration)
         configuration.applicationNameForUserAgent = WebKitProduct.applicationNameForUserAgent
         configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
         WebKitMediaPreferences.enable(configuration)
@@ -852,7 +952,9 @@ final class WebKitEngine: NSObject, BrowserEngine {
         content.removeAllUserScripts()
         content.addUserScript(bootstrapUserScript)
         content.addUserScript(navigationUserScript)
-        content.addUserScript(webRequestSocketUserScript)
+        // Every frame pays for this script, so it is installed only while an extension could consume its reports.
+        webRequestSocketProbeInstalled = services.anyExtensionMayUseWebRequest
+        if webRequestSocketProbeInstalled { content.addUserScript(webRequestSocketUserScript) }
         for script in userScripts {
             content.addUserScript(compiledUserScript(for: script))
         }
@@ -1371,7 +1473,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
         return rep.representation(using: .png, properties: [:])
     }
 
-    private static func userScript(_ script: UserScript) -> WKUserScript {
+    private static func userScript(_ script: UserScript, marker: String = "") -> WKUserScript {
         let source: String
         if script.kind == .stylesheet {
             let encoded = JavaScriptLiteral.string(script.source)
@@ -1381,7 +1483,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
             source = Self.scoped(script.source, patterns: script.matchPatterns)
         }
         return WKUserScript(
-            source: source,
+            source: marker + source,
             injectionTime: script.injectionTime == .documentStart ? .atDocumentStart : .atDocumentEnd,
             forMainFrameOnly: !script.allFrames
         )

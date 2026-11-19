@@ -21,6 +21,7 @@ public struct BrowserDataReader: Sendable {
 
         let folders: [ImportedBookmarkFolder]
         let visits: [ImportedVisit]
+        var zen: ZenStructure?
 
         switch browser {
         case .safari:
@@ -37,8 +38,8 @@ public struct BrowserDataReader: Sendable {
             )
             folders = ArcImportReader.flattenedBookmarkFolders(payload.sidebar)
             visits = payload.visits
-        case .firefox:
-            (folders, visits) = try readFirefox(browser, historyLimit: historyLimit)
+        case .firefox, .zen:
+            (folders, visits, zen) = try readFirefox(browser, historyLimit: historyLimit)
         case .chrome, .brave, .edge, .opera:
             (folders, visits) = try readChromium(browser, historyLimit: historyLimit)
         }
@@ -46,7 +47,8 @@ public struct BrowserDataReader: Sendable {
         return BrowserImportPayload(
             browser: browser,
             bookmarkRoot: ImportedBookmarkFolder(name: browser.importedFolderName, subfolders: folders),
-            visits: visits
+            visits: visits,
+            zen: zen
         )
     }
 
@@ -70,20 +72,27 @@ public struct BrowserDataReader: Sendable {
         try ArcAppPreferencesReader.read(homeDirectory: homeDirectory)
     }
 
-    // MARK: - Firefox
+    // MARK: - Firefox and Zen
 
     private func readFirefox(
         _ browser: ImportableBrowser,
         historyLimit: Int
-    ) throws -> ([ImportedBookmarkFolder], [ImportedVisit]) {
-        let root = FirefoxProfileLocator.rootDirectory(homeDirectory: homeDirectory)
+    ) throws -> ([ImportedBookmarkFolder], [ImportedVisit], ZenStructure?) {
+        guard let root = browser.firefoxFamilyRoot(homeDirectory: homeDirectory) else {
+            throw BrowserImportError.notInstalled(browser)
+        }
         let profiles = FirefoxProfileLocator.profiles(in: root)
         guard !profiles.isEmpty else { throw BrowserImportError.notInstalled(browser) }
 
         var folders: [ImportedBookmarkFolder] = []
         var visits: [ImportedVisit] = []
+        var zen: ZenStructure?
 
         for profile in profiles {
+            if browser.importsWorkspaces {
+                let profileZen = try ZenImportReader.read(profile: profile)
+                zen = zen.map { $0.appending(profileZen) } ?? profileZen
+            }
             let profileFolders = try FirefoxImportReader.readBookmarks(browser: browser, profile: profile)
             if profiles.count > 1 {
                 let wrapped = ImportedBookmarkFolder(name: profile.displayName, subfolders: profileFolders)
@@ -103,7 +112,7 @@ public struct BrowserDataReader: Sendable {
             visits = Array(visits.prefix(max(historyLimit, 0)))
         }
 
-        return (folders, visits)
+        return (folders, visits, zen.flatMap { $0.isEmpty ? nil : $0 })
     }
 
     // MARK: - Chromium family

@@ -30,7 +30,8 @@ enum CommandBarMode: Equatable {
     }
 }
 
-enum CommandResultKind {
+// The result types below are nonisolated because the scoring pass builds rows off the main actor.
+nonisolated enum CommandResultKind {
     case typedURL(URL)
     case searchSuggestion(String)
     case openTab(TabID)
@@ -44,8 +45,8 @@ enum CommandResultKind {
     case chatGPTAsk(query: String, url: URL)
 }
 
-extension CommandResultKind {
-    enum ActivationIntent {
+nonisolated extension CommandResultKind {
+    nonisolated enum ActivationIntent {
         case navigate(URL)
         case searchGoogle(String)
         case switchToTab(TabID)
@@ -78,7 +79,7 @@ extension CommandResultKind {
     }
 }
 
-struct CommandResult: Identifiable {
+nonisolated struct CommandResult: Identifiable {
     var id: String
     var kind: CommandResultKind
     var title: String
@@ -90,7 +91,7 @@ struct CommandResult: Identifiable {
     var instantOpenURL: URL? = nil
 }
 
-struct CommandAction: Identifiable {
+nonisolated struct CommandAction: Identifiable {
     var id: String
     var title: String
     var subtitle: String
@@ -99,10 +100,12 @@ struct CommandAction: Identifiable {
     var perform: (AppEnvironment) -> Void
 }
 
-enum CommandBarEngine {
+// nonisolated so the history/tab/favourite scoring can run on a background task. Everything that touches the environment or builds an action stays @MainActor.
+nonisolated enum CommandBarEngine {
 
     // MARK: Actions
 
+    @MainActor
     static func allActions() -> [CommandAction] {
         [
             CommandAction(id: "new-space", title: "New Space", subtitle: "Create a themed workspace", symbolName: "plus.square.on.square") { _ in
@@ -208,7 +211,7 @@ enum CommandBarEngine {
     // MARK: Ranking
 
     // Calibrated against FuzzyMatcher.match's actual output range so a clearly-matching open tab can outrank the generic search fallback. Regression guard: CommandBarRankingTests.test_results_matchingOpenTab_surfacesAsOpenTabKind_endToEnd.
-    private enum PriorityScore {
+    private nonisolated enum PriorityScore {
         static let typedURL: Double = 200
         static let compoundSyntax: Double = 180
         static let literalSearchFallback: Double = 15
@@ -253,6 +256,12 @@ enum CommandBarEngine {
         return fields
     }
 
+    // The prepared (lowercased once) equivalent of [title] + searchFields(for: url); `host` is the hostFields subset, shared with `search`.
+    static func preparedFields(title: String, url: URL) -> (search: [FuzzyMatcher.PreparedText], host: [FuzzyMatcher.PreparedText]) {
+        let host = hostFields(for: url).map(FuzzyMatcher.PreparedText.init)
+        return ([FuzzyMatcher.PreparedText(title), FuzzyMatcher.PreparedText(url.absoluteString)] + host, host)
+    }
+
     // Scheme, host and port only. Port is kept because localhost:3000 and localhost:8080 are different sites. Nil for schemes with no meaningful root (file, orbit, view-source).
     static func siteRootURL(for url: URL) -> URL? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", let host = url.host() else { return nil }
@@ -276,6 +285,7 @@ enum CommandBarEngine {
     }
 
     // searchEngine/isChatGPTCommandBarAvailable/isInstantLinksEnabled are passed in, not read off env: this file also compiles into the host-less OrbitTests target, where AppEnvironment resolves to a hand-written double.
+    @MainActor
     static func results(
         query: String,
         mode: CommandBarMode,
@@ -288,7 +298,6 @@ enum CommandBarEngine {
         now: Date = Date()
     ) -> [CommandResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        var items: [CommandResult] = []
 
         // Returning early, not filtering at the end, makes the scoping invariant structural: a live Site Search chip means the list contains only rows that search the scoped site.
         if let engine = siteSearch.active {
@@ -296,24 +305,96 @@ enum CommandBarEngine {
         }
 
         if trimmed.isEmpty {
-            items.append(contentsOf: emptyStateResults(env: env))
-            return items
+            return emptyStateResults(env: env)
         }
 
+        // The synchronous entry point: env.historyResults has already blended and capped the candidates, so they go in as the pre-ranked "indexed" list.
+        let sourcePlan = plan(
+            query: trimmed, mode: mode, env: env,
+            historyIndexed: env.historyResults(matching: trimmed, limit: historyCandidateLimit).map(PreparedHistoryEntry.init),
+            historyCached: [],
+            searchEngine: searchEngine,
+            isChatGPTCommandBarAvailable: isChatGPTCommandBarAvailable,
+            isInstantLinksEnabled: isInstantLinksEnabled,
+            now: now
+        )
+        return assemble(sourcePlan, scored: scoreSources(sourcePlan.request), suggestions: suggestions)
+    }
+
+    // MARK: Plan, score, assemble
+
+    // Store is asked for a wide net (40) so entries rank against each other, but only historyRowBudget reach the list, or a query like "wikipedia" fills the list with near-identical rows.
+    static let historyCandidateLimit = 40
+
+    /// One favourite with the one piece of its row that needs the live environment.
+    nonisolated struct FavoriteSource: Sendable {
+        var favorite: Favorite
+        var liveFaviconURL: URL?
+    }
+
+    /// Everything the scoring pass reads, copied out of the environment so it can run off the main actor.
+    nonisolated struct SourceRequest: Sendable {
+        /// The trimmed query, lowercased once.
+        var query: FuzzyMatcher.PreparedQuery
+        var typedURL: URL?
+        var excludedTabID: TabID?
+        var currentSpaceID: SpaceID?
+        /// A copy-on-write handle on the environment's tab table: O(1) to take, filtered by the scoring pass.
+        var tabs: [TabID: Tab]
+        var spaceNames: [SpaceID: String]
+        /// Every Space's favourites, active Space first; de-duplicated by the scoring pass.
+        var favorites: [FavoriteSource]
+        /// History in blend order: `historyIndexed` (the store's FTS hits for this query) then `historyCached` (the recency cache).
+        var historyIndexed: [PreparedHistoryEntry]
+        var historyCached: [PreparedHistoryEntry]
+        var now: Date
+    }
+
+    /// The tab, favourite and history rows, ranked and capped, with the cross-Space clamp applied.
+    // @unchecked: CommandResult can carry a CommandAction closure, but no row built here ever does (actions are added by `assemble` on the main actor).
+    nonisolated struct ScoredSources: @unchecked Sendable {
+        var rows: [CommandResult]
+        /// True when a cancelled task stopped scoring early; `rows` is then incomplete and must be dropped.
+        var wasCancelled = false
+    }
+
+    /// The main-actor half of a results call: the rows that carry closures or need main-actor services, plus the copied scoring inputs.
+    nonisolated struct Plan {
+        var request: SourceRequest
+        var head: [CommandResult]
+        var searchEngine: SearchEngine
+        var editsCurrentPage: Bool
+    }
+
+    // Precondition: trimmed is non-empty and no Site Search chip is active (results(...) and the view route those cases elsewhere).
+    @MainActor
+    static func plan(
+        query trimmed: String,
+        mode: CommandBarMode,
+        env: AppEnvironment,
+        historyIndexed: [PreparedHistoryEntry],
+        historyCached: [PreparedHistoryEntry],
+        searchEngine: SearchEngine,
+        isChatGPTCommandBarAvailable: Bool,
+        isInstantLinksEnabled: Bool,
+        now: Date
+    ) -> Plan {
+        var head: [CommandResult] = []
+
         if let compound = compoundSyntaxResult(for: trimmed, searchEngine: searchEngine) {
-            items.append(compound)
+            head.append(compound)
         }
 
         let typedURL = Self.detectTypedURL(trimmed)
         if let url = typedURL {
-            items.append(CommandResult(id: "typed-url", kind: .typedURL(url), title: url.absoluteString, subtitle: "Go to this address", symbolName: "arrow.right", score: PriorityScore.typedURL, faviconURL: faviconGuessURL(for: url), faviconHost: url.host()))
+            head.append(CommandResult(id: "typed-url", kind: .typedURL(url), title: url.absoluteString, subtitle: "Go to this address", symbolName: "arrow.right", score: PriorityScore.typedURL, faviconURL: faviconGuessURL(for: url), faviconHost: url.host()))
         } else {
             let instantURL = isInstantLinksEnabled ? InstantLinkResolver.instantURL(for: trimmed, engine: searchEngine) : nil
-            items.append(CommandResult(id: "search-\(trimmed)", kind: .searchSuggestion(trimmed), title: trimmed, subtitle: "Search \(searchEngine.displayName)", symbolName: "magnifyingglass", score: PriorityScore.literalSearchFallback, faviconURL: nil, faviconHost: nil, instantOpenURL: instantURL))
+            head.append(CommandResult(id: "search-\(trimmed)", kind: .searchSuggestion(trimmed), title: trimmed, subtitle: "Search \(searchEngine.displayName)", symbolName: "magnifyingglass", score: PriorityScore.literalSearchFallback, faviconURL: nil, faviconHost: nil, instantOpenURL: instantURL))
         }
 
         if isChatGPTCommandBarAvailable, let chatGPTURL = ChatGPTCommandBar.url(for: trimmed) {
-            items.append(CommandResult(
+            head.append(CommandResult(
                 id: "chatgpt-ask-\(trimmed)",
                 kind: .chatGPTAsk(query: trimmed, url: chatGPTURL),
                 title: trimmed,
@@ -330,24 +411,63 @@ enum CommandBarEngine {
             if case .editURL = mode { return env.activeTabID }
             return mode.targetTabID
         }()
-        var claimedDestinations = Set<String>()
 
-        let currentSpaceID = env.activeSpace?.id
-        for tab in env.state.tabs.values where tab.section != .archived && tab.id != excludedTabID {
-            let fields = [tab.displayTitle] + searchFields(for: tab.url)
-            guard let score = FuzzyMatcher.matchQuery(trimmed, in: fields, strictness: .substring) else { continue }
-            claimedDestinations.insert(dedupeKey(for: tab.url))
+        let activeSpaceID = env.activeSpace?.id
+        let spaces = env.spaces
+        var spaceNames: [SpaceID: String] = [:]
+        for space in spaces where spaceNames[space.id] == nil { spaceNames[space.id] = space.name }
+
+        // The active Space's favourites lead, so the mirror of a favourite that lives in every Space is kept from the Space the user is in.
+        var favorites: [FavoriteSource] = []
+        for space in spaces.sorted(by: { lhs, _ in lhs.id == activeSpaceID }) {
+            for favorite in space.favorites {
+                favorites.append(FavoriteSource(favorite: favorite, liveFaviconURL: liveFaviconURL(for: favorite, env: env)))
+            }
+        }
+
+        let request = SourceRequest(
+            query: FuzzyMatcher.PreparedQuery(trimmed),
+            typedURL: typedURL,
+            excludedTabID: excludedTabID,
+            currentSpaceID: activeSpaceID,
+            tabs: env.state.tabs,
+            spaceNames: spaceNames,
+            favorites: favorites,
+            historyIndexed: historyIndexed,
+            historyCached: historyCached,
+            now: now
+        )
+        return Plan(request: request, head: head, searchEngine: searchEngine, editsCurrentPage: mode.editsCurrentPage)
+    }
+
+    /// Scores open tabs, favourites and history. Pure over `request`, so it can run on any thread; `cancellable` makes it stop early when the surrounding task is cancelled.
+    static func scoreSources(_ request: SourceRequest, cancellable: Bool = false) -> ScoredSources {
+        let query = request.query
+        let loweredQuery = query.phrase
+        var items: [CommandResult] = []
+        var claimedDestinations = Set<String>()
+        var crossSpaceTabIDs = Set<String>()
+
+        for tab in request.tabs.values where tab.section != .archived && tab.id != request.excludedTabID {
+            if cancellable && Task.isCancelled { return ScoredSources(rows: [], wasCancelled: true) }
+            let title = tab.displayTitle
+            let fields = preparedFields(title: title, url: tab.url).search
+            guard let score = FuzzyMatcher.matchQuery(query, in: fields, strictness: .substring) else { continue }
+            let isElsewhere = request.currentSpaceID != nil && tab.spaceID != request.currentSpaceID
+            // Another Space's tab must not claim its address, or the history row for a page visited before is dropped in favour of a Space switch.
+            if !isElsewhere { claimedDestinations.insert(dedupeKey(for: tab.url)) }
             let host = tab.url.host() ?? tab.url.absoluteString
-            let isElsewhere = currentSpaceID != nil && tab.spaceID != currentSpaceID
-            let spaceName = isElsewhere ? env.spaces.first(where: { $0.id == tab.spaceID })?.name : nil
+            let spaceName = isElsewhere ? request.spaceNames[tab.spaceID] : nil
+            let namesSpaceExactly = spaceName.map { $0.lowercased() == loweredQuery } ?? false
+            if isElsewhere && !namesSpaceExactly { crossSpaceTabIDs.insert("tab-\(tab.id)") }
             items.append(CommandResult(
                 id: "tab-\(tab.id)",
                 kind: isElsewhere ? .tabInOtherSpace(tab.id, spaceID: tab.spaceID) : .openTab(tab.id),
-                title: tab.displayTitle,
+                title: title,
                 subtitle: spaceName.map { "\($0) · \(host)" } ?? host,
                 symbolName: "square.on.square",
-                // +30 lets an open tab outrank equivalent history/suggestions; another Space's tab does not earn it.
-                score: isElsewhere ? score : score + 30,
+                // +30 lets an open tab outrank equivalent history/suggestions; another Space's tab earns it only when the query is exactly that Space's name.
+                score: !isElsewhere || namesSpaceExactly ? score + 30 : score,
                 faviconURL: tab.faviconURL ?? faviconGuessURL(for: tab.url),
                 faviconHost: host
             ))
@@ -355,70 +475,141 @@ enum CommandBarEngine {
 
         // De-duplicated by destination, not by id: favourites are mirrored across every Space of a Profile, each mirror with its own fresh id, so an id-only check let one favourite appear as several identical rows.
         var seenFavoriteIDs = Set<UUID>()
-        let favoriteSpaces = env.spaces.sorted { lhs, _ in lhs.id == env.activeSpace?.id }
-        for space in favoriteSpaces {
-            for favorite in space.favorites {
-                guard seenFavoriteIDs.insert(favorite.id).inserted else { continue }
-                guard !claimedDestinations.contains(dedupeKey(for: favorite.url)) else { continue }
-                let fields = [favorite.title] + searchFields(for: favorite.url)
-                guard let score = FuzzyMatcher.matchQuery(trimmed, in: fields, strictness: .substring) else { continue }
-                claimedDestinations.insert(dedupeKey(for: favorite.url))
-                items.append(CommandResult(
-                    id: "fav-\(favorite.id)",
-                    kind: .favorite(favorite),
-                    title: favorite.title,
-                    subtitle: favorite.url.host(),
-                    symbolName: "star.fill",
-                    score: score + 20,
-                    faviconURL: liveFaviconURL(for: favorite, env: env) ?? faviconGuessURL(for: favorite.url),
-                    faviconHost: favorite.url.host() ?? favorite.url.absoluteString
-                ))
-            }
+        for source in request.favorites {
+            if cancellable && Task.isCancelled { return ScoredSources(rows: [], wasCancelled: true) }
+            let favorite = source.favorite
+            guard seenFavoriteIDs.insert(favorite.id).inserted else { continue }
+            let key = dedupeKey(for: favorite.url)
+            guard !claimedDestinations.contains(key) else { continue }
+            let fields = preparedFields(title: favorite.title, url: favorite.url).search
+            guard let score = FuzzyMatcher.matchQuery(query, in: fields, strictness: .substring) else { continue }
+            claimedDestinations.insert(key)
+            items.append(CommandResult(
+                id: "fav-\(favorite.id)",
+                kind: .favorite(favorite),
+                title: favorite.title,
+                subtitle: favorite.url.host(),
+                symbolName: "star.fill",
+                score: score + 20,
+                faviconURL: source.liveFaviconURL ?? faviconGuessURL(for: favorite.url),
+                faviconHost: favorite.url.host() ?? favorite.url.absoluteString
+            ))
         }
 
         // now is a parameter, not read directly: frecency makes this function's output time-dependent, and two calls microseconds apart can break a test comparing two result lists for equality.
-        // Store is asked for a wide net (40) so entries rank against each other, but only historyRowBudget reach the list, or a query like "wikipedia" fills the list with near-identical rows.
         // Taken before the history loop adds its own keys: a site root already offered as an open tab, a favourite or the typed address must not be offered again as a synthesised row.
         var siteRootClaims = claimedDestinations
-        if let typedURL { siteRootClaims.insert(dedupeKey(for: typedURL)) }
-        var historyItems: [CommandResult] = []
-        for entry in env.historyResults(matching: trimmed, limit: 40) {
-            let key = dedupeKey(for: entry.url)
+        if let typedURL = request.typedURL { siteRootClaims.insert(dedupeKey(for: typedURL)) }
+
+        if cancellable && Task.isCancelled { return ScoredSources(rows: [], wasCancelled: true) }
+        var rankedHistory: [ScoredHistory] = []
+        for entry in blendHistory(indexed: request.historyIndexed, cached: request.historyCached, query: query, limit: historyCandidateLimit) {
+            let key = entry.dedupeKey
             guard !claimedDestinations.contains(key) else { continue }
             claimedDestinations.insert(key)
             // Dropped, not admitted at zero: a row with no text score still carries frecencyBoost, which for a recently-visited page can outscore most genuine matches, so an unmatched row would rank first rather than last.
-            guard let textScore = FuzzyMatcher.matchQuery(trimmed, in: [entry.title] + searchFields(for: entry.url), strictness: .substring) else { continue }
-            historyItems.append(CommandResult(
-                id: "hist-\(entry.id)",
-                kind: .history(entry),
-                title: entry.title.isEmpty ? entry.url.absoluteString : entry.title,
-                subtitle: CommandBarRelativeTime.string(from: entry.visitedAt),
-                symbolName: "clock",
-                score: textScore + frecencyBoost(for: entry, now: now),
-                faviconURL: faviconGuessURL(for: entry.url),
-                faviconHost: entry.url.host() ?? entry.url.absoluteString
-            ))
+            guard let textScore = FuzzyMatcher.matchQuery(query, in: entry.searchFields, strictness: .substring) else { continue }
+            rankedHistory.append(ScoredHistory(entry: entry, score: textScore + frecencyBoost(for: entry.entry, now: request.now)))
         }
         // A site the text names gets its root URL (no path, query or fragment) ranked above every history row of that site, so Enter on "x" opens x.com instead of the last post visited there. Roots count against historyRowBudget.
-        let rankedHistory = historyItems.sorted { $0.score > $1.score }
-        let siteRoots = siteRootRows(query: trimmed, rankedHistory: rankedHistory, claimed: siteRootClaims)
+        rankedHistory.sort { $0.score > $1.score }
+        let siteRoots = siteRootRows(query: query, rankedHistory: rankedHistory, claimed: siteRootClaims)
         items.append(contentsOf: siteRoots.rows)
-        items.append(contentsOf: rankedHistory.filter { !siteRoots.absorbedIDs.contains($0.id) }.prefix(max(historyRowBudget - siteRoots.rows.count, 0)))
+        // Row construction (relative time, favicon guess) is deferred to here, so only the rows that survive the budget pay for it.
+        let keptHistory = rankedHistory.filter { !siteRoots.absorbedIDs.contains($0.entry.entry.id) }.prefix(max(historyRowBudget - siteRoots.rows.count, 0))
+        items.append(contentsOf: keptHistory.map { historyRow($0.entry, score: $0.score) })
 
-        for action in allActions() {
-            let haystacks = [action.title] + action.keywords
-            guard let score = FuzzyMatcher.matchQuery(trimmed, in: haystacks) else { continue }
+        let lowestHistoryScore = items.filter { if case .history = $0.kind { return true } else { return false } }.map(\.score).min()
+        if let lowestHistoryScore {
+            for index in items.indices where crossSpaceTabIDs.contains(items[index].id) {
+                items[index].score = min(items[index].score, lowestHistoryScore - 0.001)
+            }
+        }
+
+        return ScoredSources(rows: items)
+    }
+
+    /// Adds the rows that need the main actor (actions, fetched suggestions) to the scored sources and produces the final list.
+    @MainActor
+    static func assemble(_ plan: Plan, scored: ScoredSources, suggestions: [String]) -> [CommandResult] {
+        let query = plan.request.query
+        let trimmed = query.text
+        var items = plan.head + scored.rows
+
+        for entry in preparedActions {
+            guard let score = FuzzyMatcher.matchQuery(query, in: entry.fields) else { continue }
+            let action = entry.action
             items.append(CommandResult(id: "action-\(action.id)", kind: .action(action), title: action.title, subtitle: action.subtitle, symbolName: action.symbolName, score: score + 4))
         }
 
         var claimedTitles = Set(items.map { $0.title.lowercased() })
-        claimedTitles.insert(trimmed.lowercased())
+        claimedTitles.insert(query.phrase)
         for suggestion in suggestions {
             guard claimedTitles.insert(suggestion.lowercased()).inserted else { continue }
-            items.append(CommandResult(id: "suggest-\(suggestion)", kind: .searchSuggestion(suggestion), title: suggestion, subtitle: "Search \(searchEngine.displayName)", symbolName: "magnifyingglass", score: PriorityScore.networkSuggestion))
+            items.append(CommandResult(id: "suggest-\(suggestion)", kind: .searchSuggestion(suggestion), title: suggestion, subtitle: "Search \(plan.searchEngine.displayName)", symbolName: "magnifyingglass", score: PriorityScore.networkSuggestion))
         }
 
-        return pinningVerbatimRows(in: limitingRepeatedPages(in: items.sorted { $0.score > $1.score }), query: trimmed, atTop: mode.editsCurrentPage)
+        return pinningVerbatimRows(in: limitingRepeatedPages(in: items.sorted { $0.score > $1.score }), query: trimmed, atTop: plan.editsCurrentPage)
+    }
+
+    // Actions never change at runtime, so their lowercased search text is built once instead of on every keystroke.
+    private struct PreparedAction {
+        var action: CommandAction
+        var fields: [FuzzyMatcher.PreparedText]
+    }
+
+    @MainActor
+    private static let preparedActions: [PreparedAction] = allActions().map {
+        PreparedAction(action: $0, fields: ([$0.title] + $0.keywords).map(FuzzyMatcher.PreparedText.init))
+    }
+
+    private nonisolated struct ScoredHistory {
+        var entry: PreparedHistoryEntry
+        var score: Double
+    }
+
+    // MARK: History blending
+
+    // Both sources are filtered here, not just the recency cache: a HistoryStore.search result reflects the row's state when indexed, not now, so an unmatched row must be dropped rather than ranked on stale frecency.
+    // Every term must appear in the title or the URL; an empty query admits everything. Deduplicated by lowercased URL, indexed hits first.
+    static func blendHistory(
+        indexed: [PreparedHistoryEntry],
+        cached: [PreparedHistoryEntry],
+        query: FuzzyMatcher.PreparedQuery,
+        limit: Int
+    ) -> [PreparedHistoryEntry] {
+        var seen = Set<String>()
+        var results: [PreparedHistoryEntry] = []
+
+        func take(_ entry: PreparedHistoryEntry) {
+            guard results.count < limit else { return }
+            guard query.terms.allSatisfy({ entry.title.containsLowered($0) || entry.urlText.containsLowered($0) }) else { return }
+            guard seen.insert(entry.urlText.lowered).inserted else { return }
+            results.append(entry)
+        }
+
+        for entry in indexed {
+            take(entry)
+        }
+        for entry in cached {
+            if results.count >= limit { break }
+            take(entry)
+        }
+        return results
+    }
+
+    private static func historyRow(_ prepared: PreparedHistoryEntry, score: Double) -> CommandResult {
+        let entry = prepared.entry
+        return CommandResult(
+            id: "hist-\(entry.id)",
+            kind: .history(entry),
+            title: entry.title.isEmpty ? entry.url.absoluteString : entry.title,
+            subtitle: CommandBarRelativeTime.string(from: entry.visitedAt),
+            symbolName: "clock",
+            score: score,
+            faviconURL: faviconGuessURL(for: entry.url),
+            faviconHost: entry.url.host() ?? entry.url.absoluteString
+        )
     }
 
     // MARK: One site, not a flood
@@ -472,34 +663,31 @@ enum CommandBarEngine {
 
     // Walks history best-first and, for each of the first few sites whose host the query names, produces one root row. A history row that already is the root is promoted (re-scored, absorbed) rather than copied; otherwise a row is synthesised from the site's best history entry. Roots are only offered for sites with history behind them, and never for a root already claimed elsewhere in the list.
     private static func siteRootRows(
-        query: String,
-        rankedHistory: [CommandResult],
+        query: FuzzyMatcher.PreparedQuery,
+        rankedHistory: [ScoredHistory],
         claimed: Set<String>
-    ) -> (rows: [CommandResult], absorbedIDs: Set<String>) {
+    ) -> (rows: [CommandResult], absorbedIDs: Set<UUID>) {
         var rows: [CommandResult] = []
-        var absorbedIDs = Set<String>()
+        var absorbedIDs = Set<UUID>()
         var visitedSites = Set<String>()
-        let loweredQuery = query.lowercased()
+        let loweredQuery = query.phrase
 
         for row in rankedHistory {
             guard rows.count < siteRootRowLimit else { break }
-            guard case .history(let entry) = row.kind, let root = siteRootURL(for: entry.url) else { continue }
+            let entry = row.entry.entry
+            guard let root = siteRootURL(for: entry.url) else { continue }
             let siteKey = dedupeKey(for: root)
             // rankedHistory is best-first, so the first row seen for a site is that site's best one.
             guard visitedSites.insert(siteKey).inserted, !claimed.contains(siteKey) else { continue }
-            guard FuzzyMatcher.matchQuery(query, in: hostFields(for: entry.url), strictness: .substring) != nil else { continue }
+            guard FuzzyMatcher.matchQuery(query, in: row.entry.hostFields, strictness: .substring) != nil else { continue }
 
             var score = row.score + PriorityScore.siteRootMargin
             if isExactSiteName(loweredQuery, for: entry.url) { score += PriorityScore.exactSiteBonus }
 
-            let existingRoot = rankedHistory.first { candidate in
-                if case .history(let other) = candidate.kind { return dedupeKey(for: other.url) == siteKey }
-                return false
-            }
-            if var promoted = existingRoot {
-                promoted.score = score
-                rows.append(promoted)
-                absorbedIDs.insert(promoted.id)
+            let existingRoot = rankedHistory.first { $0.entry.dedupeKey == siteKey }
+            if let existingRoot {
+                rows.append(historyRow(existingRoot.entry, score: score))
+                absorbedIDs.insert(existingRoot.entry.entry.id)
             } else {
                 let host = root.host() ?? root.absoluteString
                 let rootEntry = HistoryEntry(url: root, title: host, visitedAt: entry.visitedAt, visitCount: entry.visitCount, profileID: entry.profileID, spaceID: entry.spaceID)
@@ -552,12 +740,25 @@ enum CommandBarEngine {
         }
         // A cross-Space row must never hold the default selection, or Enter on typed text would move the user Spaces.
         let leadsWithCrossSpaceRow = remaining.first.map { if case .tabInOtherSpace = $0.kind { return true } else { return false } } ?? false
-        remaining.insert(contentsOf: block, at: atTop || leadsWithCrossSpaceRow ? 0 : min(verbatimIndex, 1))
+        // A page that matched only because the text appears somewhere in its address ("x" in github.com/x/a) is not what the user named, so Enter on typed text must not open it.
+        let leadsWithPathOnlyMatch = remaining.first.map { first in
+            if case .history(let entry) = first.kind { return !namesTheEntry(entry, query: query) }
+            return false
+        } ?? false
+        remaining.insert(contentsOf: block, at: atTop || leadsWithCrossSpaceRow || leadsWithPathOnlyMatch ? 0 : min(verbatimIndex, 1))
         return remaining
+    }
+
+    /// Whether the text is in the entry's title or names its site, as opposed to turning up only in the path or query.
+    private static func namesTheEntry(_ entry: HistoryEntry, query: String) -> Bool {
+        let prepared = FuzzyMatcher.PreparedQuery(query)
+        let fields = ([entry.title] + hostFields(for: entry.url)).map(FuzzyMatcher.PreparedText.init)
+        return FuzzyMatcher.matchQuery(prepared, in: fields, strictness: .substring) != nil
     }
 
     // MARK: Site Search
 
+    @MainActor
     private static func siteSearchResults(
         query: String,
         engine: SiteSearchEngine,
@@ -596,6 +797,7 @@ enum CommandBarEngine {
         return items.sorted { $0.score > $1.score }
     }
 
+    @MainActor
     private static func liveFaviconURL(for favorite: Favorite, env: AppEnvironment) -> URL? {
         guard let liveTabID = favorite.liveTabID else { return nil }
         return env.tab(liveTabID)?.faviconURL
@@ -611,6 +813,7 @@ enum CommandBarEngine {
         return components.url
     }
 
+    @MainActor
     private static func emptyStateResults(env: AppEnvironment) -> [CommandResult] {
         var items: [CommandResult] = []
         for entry in env.historyResults(matching: "", limit: 6) {
@@ -654,6 +857,7 @@ enum CommandBarEngine {
     // HistoryURLProvider's inline-autocomplete pass rather than the
     // what-you-typed match. Like that pass, the resolved destination is the
     // site's root (siteRootRows), never a deeper page of it that was visited last.
+    @MainActor
     static func detectTypedURL(_ text: String) -> URL? {
         guard !text.contains(" ") else { return nil }
         if let url = URL(string: text), let scheme = url.scheme, ["http", "https", "file", "orbit", "view-source"].contains(scheme) {
@@ -676,6 +880,7 @@ enum CommandBarEngine {
 
     // MARK: Compound syntax (spec §3.4)
 
+    @MainActor
     private static func compoundSyntaxResult(for text: String, searchEngine: SearchEngine) -> CommandResult? {
         let lowered = text.lowercased()
         if lowered.hasPrefix("video of ") {
@@ -715,5 +920,28 @@ enum CommandBarEngine {
             let tabID = env.openTab(url: url, in: spaceID, section: .pinned, activate: false)
             env.moveNode(tabID, toParent: folderID, atIndex: .max, in: spaceID)
         }
+    }
+}
+
+/// A history entry with its search text lowercased once, when it enters the history cache, instead of on every keystroke.
+/// A class so that copying the cache into a scoring request moves references, not the prepared strings.
+nonisolated final class PreparedHistoryEntry: Sendable {
+    let entry: HistoryEntry
+    let title: FuzzyMatcher.PreparedText
+    let urlText: FuzzyMatcher.PreparedText
+    /// What the Command Bar fuzzy-matches: [title] + CommandBarEngine.searchFields(for: url).
+    let searchFields: [FuzzyMatcher.PreparedText]
+    /// The host-derived subset of `searchFields`.
+    let hostFields: [FuzzyMatcher.PreparedText]
+    let dedupeKey: String
+
+    init(_ entry: HistoryEntry) {
+        self.entry = entry
+        let fields = CommandBarEngine.preparedFields(title: entry.title, url: entry.url)
+        title = fields.search[0]
+        urlText = fields.search[1]
+        searchFields = fields.search
+        hostFields = fields.host
+        dedupeKey = CommandBarEngine.dedupeKey(for: entry.url)
     }
 }

@@ -209,6 +209,17 @@ enum PasswordAutofillScript {
         return '';
       }
 
+      function codeBoxes(fields) {
+        return fields.filter(function (field) { return !isPasswordInput(field) && field.maxLength === 1; });
+      }
+
+      // A one-time code field by name or autocomplete, or one box of a row of at least four one-character boxes.
+      function isCodeField(el, fields) {
+        if (autocompleteTokens(el).indexOf('one-time-code') >= 0) { return true; }
+        if (OTP.test(lower(hintText(el)))) { return true; }
+        return el.maxLength === 1 && codeBoxes(fields).length >= 4;
+      }
+
       function isConfirmField(el) { return CONFIRM.test(lower(hintText(el))); }
 
       function passwordKind(el, passwords, scope) {
@@ -234,7 +245,10 @@ enum PasswordAutofillScript {
         if (fields.indexOf(el) < 0) { fields = [el]; }
         var passwords = fields.filter(isPasswordInput);
         if (isPasswordInput(el)) { return { kind: passwordKind(el, passwords, scope), scope: scope, fields: fields }; }
-        return textRole(el, fields, passwords, scope) === 'username' ? { kind: 'username', scope: scope, fields: fields } : null;
+        var role = textRole(el, fields, passwords, scope);
+        if (role === 'username') { return { kind: 'username', scope: scope, fields: fields }; }
+        if (role === 'otp' && isCodeField(el, fields)) { return { kind: 'oneTimeCode', scope: scope, fields: fields }; }
+        return null;
       }
 
       function rectOf(el) {
@@ -464,7 +478,7 @@ enum PasswordAutofillScript {
         var target = eventTarget(event);
         if (!isCandidate(target)) { return; }
         var info = classify(target);
-        if (info) { startWatch(info, target); }
+        if (info && info.kind !== 'oneTimeCode') { startWatch(info, target); }
       }
 
       function scheduleWatchCheck() {
@@ -682,12 +696,19 @@ enum PasswordAutofillScript {
         var result = { ok: true, username: false, password: false, confirm: false };
         filling = true;
         try {
-          if (mode === 'generated') {
-            var targets = passwords.filter(function (field) { return passwordKind(field, passwords, info.scope) === 'newPassword'; });
-            targets.forEach(function (field) { setValue(field, password); });
-            result.password = targets.length > 0;
-            result.confirm = targets.length > 1;
+          if (mode === 'otp') {
+            if (info.kind !== 'oneTimeCode') { return { ok: false, reason: 'unclassified' }; }
+            var boxes = el.maxLength === 1 ? codeBoxes(info.fields) : [el];
+            if (boxes.length > 1) {
+              var chars = String(password).split('');
+              for (var b = 0; b < boxes.length && b < chars.length; b++) { setValue(boxes[b], chars[b]); }
+            } else {
+              setValue(el, password);
+            }
+            result.password = true;
+            return result;
           } else {
+            if (info.kind === 'oneTimeCode') { return { ok: false, reason: 'unclassified' }; }
             var userField = info.kind === 'username' ? el : null;
             if (!userField) {
               var named = info.fields.filter(function (field) {
@@ -702,7 +723,7 @@ enum PasswordAutofillScript {
         } finally {
           filling = false;
         }
-        // Choosing a login or a strong password is the person acting, so a sign-in that follows counts as one with real input.
+        // Choosing a login is the person acting, so a sign-in that follows counts as one with real input.
         var filledForm = formOf(el);
         if (filledForm) { formInput.set(filledForm, Date.now()); }
         startWatch(info, el);

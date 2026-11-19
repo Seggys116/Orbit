@@ -86,4 +86,50 @@ public enum PageColorSchemeScript {
         let raw = try? await contents.evaluateJavaScript(source(applying: scheme))
         return decode(raw)
     }
+
+    // MARK: - Settled documents
+
+    /// What a finished document already has: the scheme applied to it, or nil when it was read and has no colour to
+    /// derive one from. Lets reselecting a tab skip a script round trip that would compete with the page's first paint.
+    public struct SettledDocument: Equatable, Sendable {
+        public var url: URL
+        public var scheme: Scheme?
+
+        public init(url: URL, scheme: Scheme?) {
+            self.url = url
+            self.scheme = scheme
+        }
+    }
+
+    // Keyed by WebContents.id: a re-materialised page behind the same tab is a new document.
+    @MainActor private static var settledByContents: [UUID: SettledDocument] = [:]
+
+    // Closed pages are never reported, so the cache is bounded instead; a dropped entry only costs one re-apply.
+    static let settledDocumentLimit = 512
+
+    @MainActor
+    public static func isSettled(_ document: SettledDocument, for contentsID: UUID) -> Bool {
+        settledByContents[contentsID] == document
+    }
+
+    @MainActor
+    public static func noteSettled(_ document: SettledDocument, for contentsID: UUID) {
+        if settledByContents[contentsID] == nil, settledByContents.count >= settledDocumentLimit {
+            settledByContents.removeAll()
+        }
+        settledByContents[contentsID] = document
+    }
+
+    /// Call when the page starts a navigation or reload: the next document has not had the scheme applied.
+    @MainActor
+    public static func forgetSettled(for contentsID: UUID) {
+        settledByContents.removeValue(forKey: contentsID)
+    }
+
+    #if DEBUG
+    @MainActor
+    static func _test_resetSettled() {
+        settledByContents.removeAll()
+    }
+    #endif
 }

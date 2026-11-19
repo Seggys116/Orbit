@@ -61,8 +61,63 @@ extension OrbitInspectAgent {
           } catch (e) {}
         }
 
+        var scripts = [];
+        try {
+          Array.prototype.forEach.call(document.querySelectorAll("script[src],link[rel~='stylesheet'][href]"), function (el) {
+            if (scripts.length >= 200 || isOurs(el)) { return; }
+            var url = String(el.src || el.href || "");
+            if (!/^https?:/i.test(url)) { return; }
+            var cross = false;
+            try { cross = new URL(url, location.href).origin !== location.origin; } catch (e) {}
+            if (!cross) { return; }
+            scripts.push({
+              url: url.slice(0, 400), tag: el.tagName.toLowerCase(), sri: !!el.getAttribute("integrity"),
+              id: idOf(el), sel: nodeLabel(el)
+            });
+          });
+        } catch (e) {}
+
+        var links = [];
+        try {
+          Array.prototype.forEach.call(document.querySelectorAll("a[target='_blank'],area[target='_blank']"), function (el) {
+            if (links.length >= 200 || isOurs(el)) { return; }
+            var href = String(el.href || "");
+            var cross = false;
+            try {
+              var parsed = new URL(href, location.href);
+              cross = /^https?:$/.test(parsed.protocol) && parsed.origin !== location.origin;
+            } catch (e) {}
+            if (!cross) { return; }
+            links.push({
+              href: href.slice(0, 400), rel: String(el.getAttribute("rel") || "").slice(0, 200),
+              id: idOf(el), sel: nodeLabel(el)
+            });
+          });
+        } catch (e) {}
+
+        var libs = [];
+        function sec_lib(name, evidence, read) {
+          try {
+            var version = read();
+            if (typeof version === "string" && version) { libs.push({ name: name, version: version.slice(0, 40), ev: evidence }); }
+          } catch (e) {}
+        }
+        sec_lib("jQuery", "window.jQuery.fn.jquery", function () { return window.jQuery && window.jQuery.fn && window.jQuery.fn.jquery; });
+        sec_lib("Bootstrap", "window.bootstrap.Tooltip.VERSION", function () { return window.bootstrap && window.bootstrap.Tooltip && window.bootstrap.Tooltip.VERSION; });
+        if (!libs.some(function (l) { return l.name === "Bootstrap"; })) {
+          sec_lib("Bootstrap", "jQuery.fn.tooltip.Constructor.VERSION", function () {
+            return window.jQuery && window.jQuery.fn.tooltip && window.jQuery.fn.tooltip.Constructor && window.jQuery.fn.tooltip.Constructor.VERSION;
+          });
+        }
+        sec_lib("Lodash", "window._.VERSION", function () { return window._ && window._.templateSettings && window._.VERSION; });
+        sec_lib("Moment.js", "window.moment.version", function () { return window.moment && window.moment.version; });
+        sec_lib("AngularJS", "window.angular.version.full", function () { return window.angular && window.angular.version && window.angular.version.full; });
+
         post({
           t: "sec.page",
+          scripts: scripts,
+          links: links,
+          libs: libs,
           href: String(location.href),
           secureContext: !!window.isSecureContext,
           metaCSP: metaCSP,

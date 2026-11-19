@@ -38,6 +38,7 @@ public final class CloudSyncEngine {
     public private(set) var isRecovering = false
 
     private var storedProblem: SyncProblem?
+    private var unreadableRemoteRecordCount = 0
     private var needsReconcileAfterRecovery = false
 
     public var lastProblem: SyncProblem? {
@@ -52,6 +53,7 @@ public final class CloudSyncEngine {
     private weak var store: (any SyncableStore)?
     private let transport: any SyncTransport
     private let rootDirectory: URL
+    private let cacheWriter = SyncCacheWriter()
 
     private var recordCache: [String: CachedRecord] = [:]
     private var tombstones = SyncTombstoneLog()
@@ -376,6 +378,7 @@ public final class CloudSyncEngine {
 
     private func loadCaches() {
         try? FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+        cacheWriter.flush()
         if let data = try? Data(contentsOf: recordCacheURL),
            let decoded = try? JSONDecoder.orbitSync.decode([String: CachedRecord].self, from: data) {
             recordCache = decoded
@@ -388,22 +391,26 @@ public final class CloudSyncEngine {
 
     private func persistCaches() {
         tombstones.prune()
-        if let data = try? JSONEncoder.orbitSync.encode(recordCache) {
-            try? data.write(to: recordCacheURL, options: .atomic)
-        }
-        if let data = try? JSONEncoder.orbitSync.encode(tombstones) {
-            try? data.write(to: tombstoneLogURL, options: .atomic)
-        }
+        let records = recordCache
+        let log = tombstones
+        cacheWriter.write(to: recordCacheURL) { SyncCacheWriter.encode(records) }
+        cacheWriter.write(to: tombstoneLogURL) { SyncCacheWriter.encode(log) }
+    }
+
+    /// Blocks until every queued cache write and delete has reached disk.
+    public func flushPendingCacheWrites() {
+        cacheWriter.flush()
     }
 
     private func loadStateSerialization() -> CKSyncEngine.State.Serialization? {
+        cacheWriter.flush()
         guard let data = try? Data(contentsOf: stateSerializationURL) else { return nil }
         return try? JSONDecoder().decode(CKSyncEngine.State.Serialization.self, from: data)
     }
 
     private func persistStateSerialization(_ serialization: CKSyncEngine.State.Serialization) {
         guard let data = try? JSONEncoder().encode(serialization) else { return }
-        try? data.write(to: stateSerializationURL, options: .atomic)
+        cacheWriter.write(to: stateSerializationURL) { data }
     }
 
     // MARK: CKRecord <-> system-fields archive helpers
@@ -423,13 +430,13 @@ public final class CloudSyncEngine {
     }
 
     private func extractClock(_ record: CKRecord) -> Date {
-        if let updatedAt = record["updatedAt"] as? Date { return updatedAt }
-        if let clientModifiedAt = record["clientModifiedAt"] as? Date { return clientModifiedAt }
+        if let updatedAt = record[secure: "updatedAt"] as? Date { return updatedAt }
+        if let clientModifiedAt = record[secure: "clientModifiedAt"] as? Date { return clientModifiedAt }
         return record.modificationDate ?? .distantPast
     }
 
     private func groupingKey(for record: CKRecord) -> String? {
-        record["spaceID"] as? String
+        record[secure: "spaceID"] as? String
     }
 
     static func recordID(_ recordType: String, name: String) -> CKRecord.ID {
@@ -439,7 +446,7 @@ public final class CloudSyncEngine {
 
     // MARK: Record identity
 
-    private struct CachedRecord: Codable {
+    private nonisolated struct CachedRecord: Codable, Sendable {
         var recordType: String
         var systemFieldsData: Data
         var contentHash: String
@@ -610,9 +617,11 @@ public final class CloudSyncEngine {
     // MARK: Absorbing incoming changes (pull, and the "server wins" half of conflict resolution)
 
     private static func reorderedList<ID: Hashable>(existing: [ID], pulledOrder: [(id: ID, order: Int)], deleted: Set<ID>) -> [ID] {
-        let filtered = existing.filter { !deleted.contains($0) }
+        var seen = Set<ID>()
+        let filtered = existing.filter { !deleted.contains($0) && seen.insert($0).inserted }
+        let arrived = pulledOrder.map(\.id).filter { !deleted.contains($0) && seen.insert($0).inserted }
         let pulledByID = Dictionary(pulledOrder, uniquingKeysWith: { _, new in new })
-        let indexed = filtered.enumerated().map { (index: $0.offset, id: $0.element) }
+        let indexed = (filtered + arrived).enumerated().map { (index: $0.offset, id: $0.element) }
         return indexed.sorted { lhs, rhs in
             let lhsKey = pulledByID[lhs.id].map(Double.init) ?? Double(lhs.index) + 1_000_000
             let rhsKey = pulledByID[rhs.id].map(Double.init) ?? Double(rhs.index) + 1_000_000
@@ -620,10 +629,11 @@ public final class CloudSyncEngine {
         }.map(\.id)
     }
 
-    private static func mergeFavorites(into space: inout Space, pulled: [FlatFavorite], deletedIDs: Set<UUID>, tombstoned: Set<UUID>) {
+    static func mergeFavorites(into space: inout Space, pulled: [FlatFavorite], deletedIDs: Set<UUID>, tombstoned: Set<UUID>) {
         guard !pulled.isEmpty || !deletedIDs.isEmpty else { return }
-        var byID = Dictionary(uniqueKeysWithValues: space.favorites.map { ($0.id, $0) })
-        let originalOrder = space.favorites.map(\.id)
+        var byID = Dictionary(space.favorites.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen = Set<UUID>()
+        let originalOrder = space.favorites.map(\.id).filter { seen.insert($0).inserted }
         for flat in pulled { byID[flat.favorite.id] = flat.favorite }
         for id in deletedIDs { byID.removeValue(forKey: id) }
         let patched = reorderedList(existing: originalOrder, pulledOrder: pulled.map { ($0.favorite.id, $0.order) }, deleted: deletedIDs)
@@ -637,11 +647,11 @@ public final class CloudSyncEngine {
         space.today = SyncMerge.mergeOrderedIDs(remoteOrder: patched, localOrder: space.today, tombstoned: tombstoned)
     }
 
-    private static func mergePinnedTree(into space: inout Space, pulledNodes: [FlatSidebarNode], deletedIDs: Set<UUID>, tombstoned: Set<UUID>) {
+    static func mergePinnedTree(into space: inout Space, pulledNodes: [FlatSidebarNode], deletedIDs: Set<UUID>, tombstoned: Set<UUID>) {
         guard !pulledNodes.isEmpty || !deletedIDs.isEmpty else { return }
 
         let originalFlat = SidebarTreeFlattening.flatten(space.pinned, spaceID: space.id)
-        var originalByID = Dictionary(uniqueKeysWithValues: originalFlat.map { ($0.id, $0) })
+        var originalByID = Dictionary(originalFlat.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var patchedByID = originalByID
         for node in pulledNodes { patchedByID[node.id] = node }
         for id in deletedIDs {
@@ -697,31 +707,43 @@ public final class CloudSyncEngine {
                 || !sidebarDeletionsBySpace.isEmpty || !todayDeletionsBySpace.isEmpty
         }
 
-        mutating func absorb(_ record: CKRecord) {
+        @discardableResult
+        mutating func absorb(_ record: CKRecord) -> Bool {
             switch record.recordType {
             case SyncRecordType.profile:
-                if let m = SyncRecordMapping.profile(from: record), SyncScope.isSyncable(m) { profiles.append(m) }
+                guard let m = SyncRecordMapping.profile(from: record) else { return false }
+                if SyncScope.isSyncable(m) { profiles.append(m) }
             case SyncRecordType.space:
-                if let m = SyncRecordMapping.spaceScalarFields(from: record) { spaceFields.append(m) }
+                guard let m = SyncRecordMapping.spaceScalarFields(from: record) else { return false }
+                spaceFields.append(m)
             case SyncRecordType.favorite:
-                if let m = SyncRecordMapping.favorite(from: record) { favorites.append(m) }
+                guard let m = SyncRecordMapping.favorite(from: record) else { return false }
+                favorites.append(m)
             case SyncRecordType.sidebarNode:
-                if let m = SyncRecordMapping.sidebarNode(from: record) { sidebarNodes.append(m) }
+                guard let m = SyncRecordMapping.sidebarNode(from: record) else { return false }
+                sidebarNodes.append(m)
             case SyncRecordType.todayEntry:
-                if let m = SyncRecordMapping.todayEntry(from: record) { todayEntries.append(m) }
+                guard let m = SyncRecordMapping.todayEntry(from: record) else { return false }
+                todayEntries.append(m)
             case SyncRecordType.tab:
-                if let m = SyncRecordMapping.tab(from: record) { tabs.append(m) }
+                guard let m = SyncRecordMapping.tab(from: record) else { return false }
+                tabs.append(m)
             case SyncRecordType.boost:
-                if let m = SyncRecordMapping.boost(from: record) { boosts.append(m) }
+                guard let m = SyncRecordMapping.boost(from: record) else { return false }
+                boosts.append(m)
             case SyncRecordType.easel:
-                if let m = SyncRecordMapping.easel(from: record) { easels.append(m) }
+                guard let m = SyncRecordMapping.easel(from: record) else { return false }
+                easels.append(m)
             case SyncRecordType.note:
-                if let m = SyncRecordMapping.note(from: record) { notes.append(m) }
+                guard let m = SyncRecordMapping.note(from: record) else { return false }
+                notes.append(m)
             case SyncRecordType.routingRule:
-                if let m = SyncRecordMapping.routingRule(from: record) { routingRules.append(m) }
+                guard let m = SyncRecordMapping.routingRule(from: record) else { return false }
+                routingRules.append(m)
             default:
                 break
             }
+            return true
         }
 
         mutating func absorbDeletion(id: CKRecord.ID, type: String, groupingKey: String?) {
@@ -839,6 +861,7 @@ public final class CloudSyncEngine {
     func absorbIncoming(modifications: [CKRecord], deletions: [(id: CKRecord.ID, type: String)]) {
         guard let store else { return }
         var buckets = IncomingBuckets()
+        var unreadable: [String] = []
 
         for record in modifications {
             let name = record.recordID.recordName
@@ -870,7 +893,12 @@ public final class CloudSyncEngine {
                 clientModifiedAt: extractClock(record),
                 groupingKey: groupingKey(for: record)
             )
-            buckets.absorb(record)
+            if !buckets.absorb(record) { unreadable.append(record.recordType) }
+        }
+
+        if !unreadable.isEmpty {
+            unreadableRemoteRecordCount += unreadable.count
+            surface(.unreadableRemoteData(count: unreadableRemoteRecordCount, recordTypes: Set(unreadable)))
         }
 
         for (id, type) in deletions {
@@ -902,8 +930,8 @@ public final class CloudSyncEngine {
         let serverClock = extractClock(serverRecord)
 
         if clientClock >= serverClock {
-            for key in clientRecord.allKeys() {
-                serverRecord[key] = clientRecord[key]
+            for key in clientRecord.allKeys() + clientRecord.encryptedValues.allKeys() {
+                serverRecord.setStoredValue(clientRecord.storedValue(forKey: key), forKey: key)
             }
             recordCache[name] = CachedRecord(
                 recordType: serverRecord.recordType,
@@ -1008,7 +1036,7 @@ public final class CloudSyncEngine {
         }
         pendingNoteAssetFiles.removeAll()
         persistCaches()
-        if pendingPush.isEmpty, transport.pendingRecordZoneChanges.isEmpty, !isRecovering {
+        if pendingPush.isEmpty, transport.pendingRecordZoneChanges.isEmpty, !isRecovering, unreadableRemoteRecordCount == 0 {
             status = .idle(lastSyncedAt: Date())
         }
     }
@@ -1185,7 +1213,7 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
             status = .syncing
 
         case .didSendChanges:
-            if status.isActivelyWorking, !isRecovering {
+            if status.isActivelyWorking, !isRecovering, unreadableRemoteRecordCount == 0 {
                 status = .idle(lastSyncedAt: Date())
             }
 
@@ -1198,12 +1226,11 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
     // serialised state. Nothing is deleted from iCloud.
     public func clearLocalCaches() {
         resetForAccountSwitch()
-        for url in [recordCacheURL, tombstoneLogURL, stateSerializationURL] {
-            try? FileManager.default.removeItem(at: url)
-        }
+        cacheWriter.remove([recordCacheURL, tombstoneLogURL, stateSerializationURL])
     }
 
     func resetForAccountSwitch() {
+        unreadableRemoteRecordCount = 0
         recordCache.removeAll()
         tombstones = SyncTombstoneLog()
         pendingPush.removeAll()
@@ -1218,5 +1245,86 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { [weak self] recordID in
             await self?.buildRecordForSave(recordID: recordID)
         }
+    }
+}
+
+/// Encodes and writes files on one serial queue, in the order they were requested. A newer write to a file replaces an older one still waiting, unless a delete of that file sits between them, so a delete is never overtaken by an earlier write.
+nonisolated final class SyncCacheWriter: @unchecked Sendable {
+
+    private enum Operation {
+        case write(url: URL, encode: @Sendable () -> Data?)
+        case remove([URL])
+    }
+
+    private let queue = DispatchQueue(label: "com.orbit.sync-cache-writer", qos: .utility)
+    private let lock = NSLock()
+    private var pending: [Operation] = []
+    private var drainScheduled = false
+
+    static func encode<Value: Encodable>(_ value: Value) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        return try? encoder.encode(value)
+    }
+
+    func write(to url: URL, encode: @escaping @Sendable () -> Data?) {
+        lock.lock()
+        defer { lock.unlock() }
+        for index in pending.indices.reversed() {
+            switch pending[index] {
+            case .remove(let urls) where urls.contains(url):
+                pending.append(.write(url: url, encode: encode))
+                scheduleDrainLocked()
+                return
+            case .write(let queuedURL, _) where queuedURL == url:
+                pending[index] = .write(url: url, encode: encode)
+                return
+            default:
+                continue
+            }
+        }
+        pending.append(.write(url: url, encode: encode))
+        scheduleDrainLocked()
+    }
+
+    func remove(_ urls: [URL]) {
+        lock.lock()
+        defer { lock.unlock() }
+        pending.append(.remove(urls))
+        scheduleDrainLocked()
+    }
+
+    /// Returns once everything requested before the call has been written. Never call it from the writer's own queue.
+    func flush() {
+        queue.sync {}
+    }
+
+    private func scheduleDrainLocked() {
+        guard !drainScheduled else { return }
+        drainScheduled = true
+        queue.async { [self] in drain() }
+    }
+
+    private func drain() {
+        while let operation = nextOperation() {
+            switch operation {
+            case .write(let url, let encode):
+                guard let data = encode() else { continue }
+                try? data.write(to: url, options: .atomic)
+            case .remove(let urls):
+                for url in urls { try? FileManager.default.removeItem(at: url) }
+            }
+        }
+    }
+
+    private func nextOperation() -> Operation? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !pending.isEmpty else {
+            drainScheduled = false
+            return nil
+        }
+        return pending.removeFirst()
     }
 }

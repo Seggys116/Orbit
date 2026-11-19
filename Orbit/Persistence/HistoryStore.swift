@@ -156,8 +156,19 @@ public actor HistoryStore {
 
     // MARK: - Recording visits
 
+    /// A just-recorded visit as both views of its `urls` row, read in one query.
+    public struct RecordedVisit: Sendable {
+        public var entry: HistoryEntry
+        public var row: HistoryURLRow
+    }
+
     @discardableResult
     public func record(visit: HistoryVisit) throws -> HistoryEntry {
+        try recordReportingRow(visit: visit).entry
+    }
+
+    /// `record(visit:)` that also returns the chrome.history row, so a caller that needs both does not query the row a second time.
+    public func recordReportingRow(visit: HistoryVisit) throws -> RecordedVisit {
         let urlString = visit.url.absoluteString
         let host = visit.url.host() ?? ""
         let time = visit.visitedAt.timeIntervalSince1970
@@ -232,10 +243,10 @@ public actor HistoryStore {
         }
         checkpointPassive()
 
-        guard let entry = try entry(forURL: urlString) else {
+        guard let recorded = try recordedVisit(forURL: urlString) else {
             throw HistoryStoreError.invalidRow(reason: "Row for \(urlString) vanished immediately after upsert.")
         }
-        return entry
+        return recorded
     }
 
     // MARK: - Frecency-ranked search
@@ -673,16 +684,43 @@ public actor HistoryStore {
 
     // MARK: - Lookup helpers
 
-    private func entry(forURL urlString: String) throws -> HistoryEntry? {
+    private func recordedVisit(forURL urlString: String) throws -> RecordedVisit? {
         let stmt = try statement("""
-        SELECT url, title, visit_count, typed_count, last_visit_time, profile_id, space_id, host
+        SELECT id, url, title, last_visit_time, visit_count, typed_count, profile_id, space_id
         FROM urls WHERE url = ? LIMIT 1;
         """)
         sqlite3_reset(stmt)
         sqlite3_clear_bindings(stmt)
         try bindText(stmt, 1, urlString)
-        let rows = try readCandidates(stmt)
-        return rows.first?.entry
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            sqlite3_reset(stmt)
+            return nil
+        }
+        defer { sqlite3_reset(stmt) }
+        guard let storedURL = columnText(stmt, 1), let url = URL(string: storedURL),
+              let profileID = UUID(uuidString: columnText(stmt, 6) ?? "") else { return nil }
+        let title = columnText(stmt, 2) ?? ""
+        let lastVisit = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
+        let visitCount = Int(sqlite3_column_int64(stmt, 4))
+        let typedCount = Int(sqlite3_column_int64(stmt, 5))
+        let entry = HistoryEntry(
+            url: url,
+            title: title,
+            visitedAt: lastVisit,
+            visitCount: visitCount,
+            profileID: profileID,
+            spaceID: columnText(stmt, 7).flatMap(UUID.init(uuidString:)),
+            wasTyped: typedCount > 0
+        )
+        let row = HistoryURLRow(
+            id: sqlite3_column_int64(stmt, 0),
+            url: url,
+            title: title,
+            lastVisit: lastVisit,
+            visitCount: visitCount,
+            typedCount: typedCount
+        )
+        return RecordedVisit(entry: entry, row: row)
     }
 
     private func rowID(forURL urlString: String) throws -> Int64 {

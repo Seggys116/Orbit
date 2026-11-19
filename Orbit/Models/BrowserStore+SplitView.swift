@@ -123,6 +123,7 @@ public extension BrowserStore {
             newState.tabs[tabID]?.splitGroupID = group.id
             newState.tabs[tabID]?.splitIndex = index
         }
+        newState.gatherSplitMembers(of: group.id)
     }
 
     private static func removingDuplicates(_ ids: [TabID]) -> [TabID] {

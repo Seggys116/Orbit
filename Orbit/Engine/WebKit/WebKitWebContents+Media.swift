@@ -30,49 +30,59 @@ extension WebKitWebContents {
                 guard let self else { return }
                 if self.isClosed {
                     PaneFrameRestore.stop(self)
+                    MediaSurfaceWatch.sleepers[key] = nil
+                    MediaSurfaceWatch.waitingInterval[key] = nil
                     return
                 }
-                await self.refreshObservedMedia()
-                await self.pauseBeforeNextMediaProbe()
+                if let interval = self.mediaProbeInterval {
+                    await self.refreshObservedMedia()
+                    await self.pauseBeforeNextMediaProbe(interval)
+                } else {
+                    await self.pauseBeforeNextMediaProbe(Self.idleRecheckInterval)
+                }
             }
         }
     }
 
-    /// A quiet page does not need a script round trip every fifth of a second.
-    /// The page script still reports play and picture-in-picture as they happen,
-    /// and this wait ends early when that report arrives.
-    private func pauseBeforeNextMediaProbe() async {
-        let playing = mediaState.isPlaying
-        let floating = mediaState.isPictureInPictureActive
-        // A hidden tab nobody is watching: the page script reports play and pause as they happen, and a
-        // frame-accurate probe only matters for a floating window or the visible tab. Wake once a second instead of five times.
-        let hidden = isBackgrounded
-        if playing || floating {
-            try? await Task.sleep(for: .milliseconds(hidden && !floating ? 1_000 : 200))
-            return
+    /// Without live media the page script's own play, pause and picture-in-picture events are the whole story, so
+    /// no script round trip is made at all. An audible tab that is not playing is not probed either: the probe
+    /// only reads media elements, so it could not report anything the page events have not.
+    private static let idleRecheckInterval = Duration.seconds(10)
+
+    /// How often to probe, or nil for not at all. 200 ms only where frame accuracy matters: the floating window,
+    /// and the visible tab in the window the user is working in. A hidden tab relies on page events plus a slow safety probe.
+    private var mediaProbeInterval: Duration? {
+        let state = mediaState
+        if state.isPictureInPictureActive { return .milliseconds(200) }
+        if state.isPlaying {
+            if isBackgrounded { return .seconds(5) }
+            return isInKeyWindow ? .milliseconds(200) : .seconds(1)
         }
-        var remaining = Duration.milliseconds(2_000)
-        let slice = Duration.milliseconds(hidden ? 1_000 : 200)
-        while remaining > .zero {
-            if Task.isCancelled || isClosed { return }
-            let step = min(slice, remaining)
-            do {
-                try await Task.sleep(for: step)
-            } catch {
-                return
-            }
-            remaining -= step
-            // Also ends when the tab is shown or hidden, so the probe cadence follows the pane at once.
-            if isClosed || mediaState.isPlaying || mediaState.isPictureInPictureActive || isBackgrounded != hidden {
-                return
-            }
+        if state.isFullscreen { return .seconds(2) }
+        return nil
+    }
+
+    /// Ends the current probe wait early when playing, floating, fullscreen or visibility changed, so the cadence
+    /// follows the tab at once. Called from those state changes; a missed call only delays the new cadence by `idleRecheckInterval`.
+    func mediaProbeCadenceMayHaveChanged() {
+        let key = ObjectIdentifier(self)
+        guard MediaSurfaceWatch.waitingInterval[key] != mediaProbeInterval else { return }
+        MediaSurfaceWatch.sleepers[key]?.cancel()
+    }
+
+    private func pauseBeforeNextMediaProbe(_ interval: Duration) async {
+        let key = ObjectIdentifier(self)
+        let sleeper = Task { _ = try? await Task.sleep(for: interval) }
+        MediaSurfaceWatch.sleepers[key] = sleeper
+        MediaSurfaceWatch.waitingInterval[key] = mediaProbeInterval
+        await withTaskCancellationHandler {
+            await sleeper.value
+        } onCancel: {
+            sleeper.cancel()
         }
     }
 
     private func refreshObservedMedia() async {
-        // Skipped for a hidden tab with nothing playing: each probe is a script round trip that wakes
-        // an otherwise idle WebContent process, which is what lets WebKit throttle and nap it.
-        if isBackgrounded, !hasLiveMediaToObserve { return }
         guard !isClosed, let probe = await Self.probeMediaSurface(in: webView), !isClosed else { return }
         var changed = false
         if mediaState.isPlaying != probe.playing {
@@ -136,6 +146,9 @@ extension WebKitWebContents {
 @MainActor
 private enum MediaSurfaceWatch {
     static var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    static var sleepers: [ObjectIdentifier: Task<Void, Never>] = [:]
+    /// The cadence the loop is currently waiting out, so an unchanged cadence does not cut the wait short.
+    static var waitingInterval: [ObjectIdentifier: Duration?] = [:]
     private static var generations: [ObjectIdentifier: Int] = [:]
 
     static func bump(_ key: ObjectIdentifier) -> Int {

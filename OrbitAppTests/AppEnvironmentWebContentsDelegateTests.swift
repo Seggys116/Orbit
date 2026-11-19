@@ -69,6 +69,61 @@ final class AppEnvironmentWebContentsDelegateTests: XCTestCase {
         XCTAssertEqual(env.store.tab(tabID)?.faviconURL, faviconURL, "didChangeFavicon did not persist faviconURL to BrowserStore.")
     }
 
+    // BrowserStore.state's didSet clears archivedTabsCache on every write, so a surviving sentinel proves no write happened.
+    private func primeWriteSentinel() {
+        env.store.archivedTabsCache = [nil: []]
+    }
+
+    private var writeSentinelSurvived: Bool { env.store.archivedTabsCache[nil] != nil }
+
+    func testDidChangeTitleWithTheSameTitleDoesNotWriteState() {
+        let (tabID, mock) = makeAttachedTab()
+        defer { detach(tabID) }
+        env.webContents(mock, didChangeTitle: "Google")
+        primeWriteSentinel()
+
+        env.webContents(mock, didChangeTitle: "Google")
+
+        XCTAssertTrue(writeSentinelSurvived, "An unchanged title still wrote state.tabs, which autosaves and invalidates the sidebar.")
+    }
+
+    func testDidChangeTitleWithANewTitleStillWritesState() {
+        let (tabID, mock) = makeAttachedTab()
+        defer { detach(tabID) }
+        env.webContents(mock, didChangeTitle: "Google")
+        primeWriteSentinel()
+
+        env.webContents(mock, didChangeTitle: "Google Search")
+
+        XCTAssertFalse(writeSentinelSurvived)
+        XCTAssertEqual(env.store.tab(tabID)?.title, "Google Search")
+    }
+
+    func testDidChangeFaviconWithTheSameURLDoesNotWriteState() {
+        let (tabID, mock) = makeAttachedTab()
+        defer { detach(tabID) }
+        let faviconURL = URL(string: "https://www.google.com/favicon.ico")!
+        env.webContents(mock, didChangeFavicon: nil, url: faviconURL)
+        primeWriteSentinel()
+
+        env.webContents(mock, didChangeFavicon: nil, url: faviconURL)
+
+        XCTAssertTrue(writeSentinelSurvived, "An unchanged favicon URL still wrote state.tabs.")
+    }
+
+    func testDidChangeFaviconWithANewURLStillWritesState() {
+        let (tabID, mock) = makeAttachedTab()
+        defer { detach(tabID) }
+        env.webContents(mock, didChangeFavicon: nil, url: URL(string: "https://www.google.com/favicon.ico")!)
+        primeWriteSentinel()
+        let replacement = URL(string: "https://www.google.com/icon.png")!
+
+        env.webContents(mock, didChangeFavicon: nil, url: replacement)
+
+        XCTAssertFalse(writeSentinelSurvived)
+        XCTAssertEqual(env.store.tab(tabID)?.faviconURL, replacement)
+    }
+
     func testNavigationStateChangeUpdatesURLInTheStore() {
         let (tabID, mock) = makeAttachedTab()
         defer { detach(tabID) }

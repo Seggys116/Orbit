@@ -729,6 +729,26 @@ final class CommandBarRankingTests: XCTestCase {
         XCTAssertEqual(urls, ["https://news.example.org/topics/orbits"], "No host named \"explained\", so no root row may be invented; got \(urls)")
     }
 
+    func test_results_aPageThatOnlyMatchesThroughItsURLPathNeverLeadsOverWhatWasTyped() {
+        let env = makeEnvironment { profileID in
+            [
+                // "x" appears only in the path. Neither the title nor the host has anything to do with it.
+                HistoryEntry(
+                    url: URL(string: "https://github.com/x/a")!, title: "GitHub",
+                    visitedAt: Date().addingTimeInterval(-60), visitCount: 30, profileID: profileID, wasTyped: true
+                ),
+            ]
+        }
+
+        let results = CommandBarEngine.results(query: "x", mode: .newTab, env: env, suggestions: [])
+
+        guard case .searchSuggestion(let text)? = results.first?.kind else {
+            return XCTFail("The first row must be what was typed, got \(String(describing: results.first?.kind)); rows: \(results.map(\.title))")
+        }
+        XCTAssertEqual(text, "x")
+        XCTAssertTrue(historyURLs(in: results).contains("https://github.com/x/a"), "The page is still offered, just not first.")
+    }
+
     func test_siteRootURL_dropsPathQueryAndFragmentButKeepsSchemeAndPort() {
         XCTAssertEqual(CommandBarEngine.siteRootURL(for: URL(string: "https://x.com/a/b?c=d#e")!)?.absoluteString, "https://x.com")
         XCTAssertEqual(CommandBarEngine.siteRootURL(for: URL(string: "http://localhost:3000/app?x=1")!)?.absoluteString, "http://localhost:3000")

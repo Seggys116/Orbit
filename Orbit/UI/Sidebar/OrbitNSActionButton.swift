@@ -6,6 +6,9 @@ class OrbitActionButtonClickCatchingView: NSView, OrbitClickCatching {
 
     var clickCountAction: ((Int) -> Void)?
 
+    // Runs the moment the button goes down, even when the click itself waits for the release. For work that only has to be ready by the time the click lands, such as building the page a row will open.
+    var pressAction: (() -> Void)?
+
     // Nil claims this view's bounds. A custom region is how a content-sized catcher can answer for a larger drawn pill; click recovery calls hitTest directly, so the region may extend past the view's frame.
     var hitContains: ((CGRect, CGPoint) -> Bool)?
 
@@ -18,6 +21,7 @@ class OrbitActionButtonClickCatchingView: NSView, OrbitClickCatching {
     private var pressOrigin: NSPoint?
 
     override func mouseDown(with event: NSEvent) {
+        pressAction?()
         if firesOnRelease {
             pressOrigin = event.locationInWindow
             return
@@ -60,6 +64,7 @@ class OrbitActionButtonClickCatchingView: NSView, OrbitClickCatching {
 private struct OrbitNSActionButtonCatcher: NSViewRepresentable {
     var action: (() -> Void)?
     var clickCountAction: ((Int) -> Void)?
+    var pressAction: (() -> Void)?
     var hitContains: ((CGRect, CGPoint) -> Bool)?
     var firesOnRelease = false
 
@@ -67,6 +72,7 @@ private struct OrbitNSActionButtonCatcher: NSViewRepresentable {
         let view = OrbitActionButtonClickCatchingView()
         view.action = action
         view.clickCountAction = clickCountAction
+        view.pressAction = pressAction
         view.hitContains = hitContains
         view.firesOnRelease = firesOnRelease
         return view
@@ -75,6 +81,7 @@ private struct OrbitNSActionButtonCatcher: NSViewRepresentable {
     func updateNSView(_ nsView: OrbitActionButtonClickCatchingView, context: Context) {
         nsView.action = action
         nsView.clickCountAction = clickCountAction
+        nsView.pressAction = pressAction
         nsView.hitContains = hitContains
         nsView.firesOnRelease = firesOnRelease
     }
@@ -83,6 +90,7 @@ private struct OrbitNSActionButtonCatcher: NSViewRepresentable {
 struct OrbitNSActionButton<Label: View>: View {
     private var action: (() -> Void)?
     private var clickCountAction: ((Int) -> Void)?
+    private var pressAction: (() -> Void)?
     private var hitContains: ((CGRect, CGPoint) -> Bool)?
     private var firesOnRelease = false
     @ViewBuilder var label: () -> Label
@@ -100,9 +108,15 @@ struct OrbitNSActionButton<Label: View>: View {
         self.label = label
     }
 
-    init(onClickCount: @escaping (Int) -> Void, firesOnRelease: Bool = false, @ViewBuilder label: @escaping () -> Label) {
+    init(
+        onClickCount: @escaping (Int) -> Void,
+        onPress: (() -> Void)? = nil,
+        firesOnRelease: Bool = false,
+        @ViewBuilder label: @escaping () -> Label
+    ) {
         self.action = nil
         self.clickCountAction = onClickCount
+        self.pressAction = onPress
         self.hitContains = nil
         self.firesOnRelease = firesOnRelease
         self.label = label
@@ -121,10 +135,10 @@ struct OrbitNSActionButton<Label: View>: View {
     private var clickCatcher: some View {
         #if DEBUG
         if !screenshotModeRepresentableDisabled {
-            OrbitNSActionButtonCatcher(action: action, clickCountAction: clickCountAction, hitContains: hitContains, firesOnRelease: firesOnRelease)
+            OrbitNSActionButtonCatcher(action: action, clickCountAction: clickCountAction, pressAction: pressAction, hitContains: hitContains, firesOnRelease: firesOnRelease)
         }
         #else
-        OrbitNSActionButtonCatcher(action: action, clickCountAction: clickCountAction, hitContains: hitContains, firesOnRelease: firesOnRelease)
+        OrbitNSActionButtonCatcher(action: action, clickCountAction: clickCountAction, pressAction: pressAction, hitContains: hitContains, firesOnRelease: firesOnRelease)
         #endif
     }
 }

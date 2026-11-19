@@ -181,4 +181,34 @@ final class FavoritesGridColumnsTests: XCTestCase {
             )
         }
     }
+
+    // MARK: Hover expansion stays inside the grid
+
+    func test_expansion_neverExceedsTheGridEdgeItGrowsToward_atEveryColumnAndWidth() {
+        for width in contentWidths {
+            let metrics = FavoritesGridMetrics(availableWidth: width)
+            let pitch = metrics.tileWidth + OrbitMetrics.favoriteGridSpacing
+            for column in 0..<metrics.columnCount {
+                let expansion = metrics.expansion(forColumn: column, labelWidth: 10_000)
+                let tileLeading = CGFloat(column) * pitch
+                let tileTrailing = tileLeading + metrics.tileWidth
+                let leading = expansion.growsTrailing ? tileLeading : tileTrailing - expansion.width
+                let trailing = leading + expansion.width
+                XCTAssertGreaterThanOrEqual(leading, -0.01, "Column \(column) of \(metrics.columnCount) at \(width)pt expands past the grid's leading edge.")
+                XCTAssertLessThanOrEqual(trailing, width + 0.01, "Column \(column) of \(metrics.columnCount) at \(width)pt expands past the grid's trailing edge.")
+            }
+        }
+    }
+
+    func test_expansion_isNeverNarrowerThanTheTile_andFitsShortLabelsExactly() {
+        let metrics = FavoritesGridMetrics(availableWidth: 300)
+        XCTAssertEqual(metrics.expansion(forColumn: 0, labelWidth: 1).width, metrics.tileWidth, accuracy: 0.01)
+        XCTAssertEqual(metrics.expansion(forColumn: 0, labelWidth: metrics.tileWidth + 20).width, metrics.tileWidth + 20, accuracy: 0.01)
+    }
+
+    func test_expansion_growsTowardTheSideWithRoom() {
+        let metrics = FavoritesGridMetrics(availableWidth: 300)
+        XCTAssertTrue(metrics.expansion(forColumn: 0, labelWidth: 100).growsTrailing)
+        XCTAssertFalse(metrics.expansion(forColumn: metrics.columnCount - 1, labelWidth: 100).growsTrailing)
+    }
 }

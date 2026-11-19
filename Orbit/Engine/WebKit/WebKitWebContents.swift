@@ -33,6 +33,26 @@ final class PictureInPictureHostWindow: NSWindow {
     override var canBecomeMain: Bool { false }
 }
 
+/// Off-screen window WebKit needs for compositing. Never visible to the user: not in Mission Control, the
+/// window cycle or the Windows menu, and it can never take key or main status.
+@MainActor
+final class OffscreenHelperWindow: NSWindow {
+    init(contentRect: NSRect) {
+        super.init(contentRect: contentRect, styleMask: [.borderless], backing: .buffered, defer: false)
+        isReleasedWhenClosed = false
+        ignoresMouseEvents = true
+        hasShadow = false
+        canHide = false
+        hidesOnDeactivate = false
+        animationBehavior = .none
+        isExcludedFromWindowsMenu = true
+        collectionBehavior = [.transient, .ignoresCycle, .stationary, .fullScreenAuxiliary]
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 enum WebKitMediaPreferences {
     // Picture-in-picture's public flag is iOS-only. WebGL stays explicitly on.
     static func enable(_ configuration: WKWebViewConfiguration) {
@@ -60,13 +80,7 @@ final class OrbitWebView: WKWebView {
     fileprivate var snapshotIsStale = false
 
     private static let compositingWindow: NSWindow = {
-        let window = NSWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 800, height: 600),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.isReleasedWhenClosed = false
+        let window = OffscreenHelperWindow(contentRect: NSRect(x: -20000, y: -20000, width: 800, height: 600))
         window.setFrame(NSRect(x: -20000, y: -20000, width: 800, height: 600), display: false)
         window.orderFrontRegardless()
         return window
@@ -305,6 +319,8 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     var navigationState = NavigationState()
     var mediaState = MediaState.idle {
         didSet {
+            // Play, pause and PiP change how often the media probe runs; a long idle wait must not delay that.
+            mediaProbeCadenceMayHaveChanged()
             guard oldValue.isPictureInPictureActive != mediaState.isPictureInPictureActive else { return }
             (webView as? OrbitWebView)?.setFloatingInPictureInPicture(mediaState.isPictureInPictureActive)
         }
@@ -322,6 +338,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     var isExtensionPage: Bool { extensionPageHost != nil }
     private let scriptBridge: WebKitScriptBridge
     private var lastStatusCode = 0
+    private var faviconGate = FaviconRefreshGate()
     private var preferredScheme: ContentColorScheme?
     private lazy var webStorePrivateBridge = WebStorePrivateBridge()
     var chromeIdentityMatcher: (URL?) -> Bool = { WebKitProduct.usesChromeIdentity(for: $0) }
@@ -400,8 +417,24 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         OrbitDevToolsStore.shared.session(for: self)?.device.reinstallUserScript()
     }
 
+    /// Opens a connection (DNS, TCP, TLS) to an http(s) origin the user is likely to open next. At most once per
+    /// origin and profile every few seconds; `fromPage` skips the page's own origin, which is already connected.
+    func preconnect(to url: URL, fromPage page: URL? = nil) {
+        guard !isClosed, !isExtensionPage,
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host(percentEncoded: false), !host.isEmpty
+        else { return }
+        if let page, page.scheme?.lowercased() == scheme, page.host(percentEncoded: false)?.lowercased() == host.lowercased(),
+           page.port == url.port { return }
+        let selector = NSSelectorFromString("_preconnectToServer:")
+        guard webView.responds(to: selector), engine.claimPreconnect(to: url, session: webKitSession) else { return }
+        _ = webView.perform(selector, with: url as NSURL)
+    }
+
     func load(_ url: URL) {
         guard !isClosed else { return }
+        // Scripts changed earlier in this turn are coalesced; they must be in place before this navigation starts.
+        engine.flushPendingScriptReinstall()
         let resolved = engine.resolvedExtensionURL(url)
         extras.browserInitiatedLoad = true
         extras.navigationFailureReported = false
@@ -414,7 +447,8 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         publishNavigation()
         if resolved.isFileURL {
             webView.loadFileURL(resolved, allowingReadAccessTo: resolved.deletingLastPathComponent())
-        } else if let current = webView.url, Self.sameNavigationURL(current, resolved), webView.reload() != nil {
+        } else if webView.backForwardList.currentItem != nil, let current = webView.url,
+                  Self.sameNavigationURL(current, resolved), webView.reload() != nil {
             // load() of the committed URL stays the same document, so nothing is requested again.
         } else {
             webView.load(URLRequest(url: resolved))
@@ -524,10 +558,22 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             return
         }
         extras.browserInitiatedLoad = true
+        // Until a document commits, WKWebView.reload() returns a navigation that never fetches anything.
+        if webView.backForwardList.currentItem == nil, let url = navigationState.url ?? extras.requestedLoadURL {
+            load(url)
+            return
+        }
         webView.reload()
     }
 
-    func stopLoading() { webView.stopLoading() }
+    func stopLoading() {
+        webView.stopLoading()
+        // With nothing actually in flight WebKit reports nothing back, so a load Orbit marked as started
+        // stayed "loading" for good: the toolbar kept its Stop button and pressing it did nothing.
+        guard navigationState.isLoading else { return }
+        navigationState.isLoading = false
+        publishNavigation()
+    }
     func goBack() {
         extras.browserInitiatedLoad = true
         webView.goBack()
@@ -646,12 +692,30 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     func setVisible(_ visible: Bool) {
         (webView as? OrbitWebView)?.declareVisible(visible)
+        mediaProbeCadenceMayHaveChanged()
     }
 
     func togglePictureInPicture() {
+        pictureInPictureRequestedAt = Date()
         Task { [weak self] in
             _ = try? await self?.webView.evaluateJavaScript(PictureInPictureScript.source, withUserGesture: true)
         }
+    }
+
+    /// When the page was last asked to enter or leave picture-in-picture. The media report can lag the window, so a request this recent counts as a window that may be open.
+    private var pictureInPictureRequestedAt: Date?
+
+    private var mayBeFloating: Bool {
+        if mediaState.isPictureInPictureActive { return true }
+        guard let requestedAt = pictureInPictureRequestedAt else { return false }
+        return Date().timeIntervalSince(requestedAt) < 10
+    }
+
+    /// A floating window belongs to its page's web process, not to the pane, so it does not close when the tab does. Leaving it and stopping the media has to happen before the page goes.
+    func endPictureInPictureForClose() {
+        guard mayBeFloating else { return }
+        pictureInPictureRequestedAt = nil
+        webView.evaluateJavaScript(PictureInPictureScript.closeSource, completionHandler: nil)
     }
 
     func capturePreview(rect: CGRect?, size: CGSize) async -> NSImage? {
@@ -963,7 +1027,12 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     func teardown(notifyExtensionController: Bool) {
         guard !isClosed else { return }
+        endPictureInPictureForClose()
         isClosed = true
+        let closeHook = extras.closeHook
+        extras.closeHook = nil
+        extras.mainFrameNavigationHook = nil
+        closeHook?()
         (webView as? OrbitWebView)?.setFloatingInPictureInPicture(false)
         OrbitDevToolsStore.shared.pageClosed(self)
         extras.tearDown()
@@ -992,14 +1061,17 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     private func releaseWebView() {
         guard !webViewReleased else { return }
         webViewReleased = true
-        let frame = webView.frame
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let configuration = WKWebViewConfiguration()
-            configuration.websiteDataStore = .nonPersistent()
-            self.webView = OrbitWebView(frame: frame, configuration: configuration)
+            self?.webView = Self.inertWebView
         }
     }
+
+    /// Every closed page points at this one view. A view and data store of its own per page cost 7ms at the median and 88ms at the worst on the main thread, in the middle of whatever the user did next, to hold nothing.
+    static let inertWebView: OrbitWebView = {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        return OrbitWebView(frame: .zero, configuration: configuration)
+    }()
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any],
@@ -1015,7 +1087,9 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             delegate?.webContents(self, didChangeThemeColor: reading.color)
             delegate?.webContents(self, didChangeDocumentColor: reading.documentColor)
         case LinkHoverObserverScript.channelName:
-            delegate?.webContents(self, didHoverLink: LinkHoverObserverScript.decode(payloadJSON: json))
+            let hovered = LinkHoverObserverScript.decode(payloadJSON: json)
+            delegate?.webContents(self, didHoverLink: hovered)
+            if let hovered { preconnect(to: hovered, fromPage: webView.url) }
         case "cookie":
             guard let data = json.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -1060,6 +1134,8 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         let inspectSession = OrbitDevToolsStore.shared.ensureSession(for: self)
         inspectSession.documentDidCommit(url: webView.url)
         inspectSession.security.documentDidCommit(webView: webView)
+        // The requested address is now the document's own. Held past the commit, it made the app ignore every address the page changed to afterwards until the page finished loading, which a page with one hanging request never does.
+        extras.requestedLoadURL = nil
         if let url = webView.url {
             navigationState.url = url
             navigationState.security = Self.security(for: url, mixedContent: !webView.hasOnlySecureContent)
@@ -1078,6 +1154,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         passwordNavigationFinished()
+        rebuildCosmeticScriptsIfNeeded()
         extras.requestedLoadURL = nil
         navigationState.isLoading = false
         navigationState.progress = 1
@@ -1201,6 +1278,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     // A navigation that became a download never commits, so nothing else clears the loading state.
     private func settleAfterDownloadHandoff() {
+        extras.requestedLoadURL = nil
         navigationState.isLoading = false
         navigationState.progress = 1
         if let url = webView.url { navigationState.url = url }
@@ -1235,6 +1313,11 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         extras.mainFrameNavigationHook = hook
     }
 
+    /// Runs once as the page closes, before its web view is torn down.
+    func setCloseHook(_ hook: (@MainActor () -> Void)?) {
+        extras.closeHook = hook
+    }
+
     private func decideAfterHook(
         _ webView: WKWebView,
         _ navigationAction: WKNavigationAction,
@@ -1261,8 +1344,11 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             decisionHandler(.download)
             return
         }
-        installCosmeticStyleSheet(for: url)
-        if navigationAction.targetFrame?.isMainFrame ?? true { extras.trustDecisions.removeAll() }
+        if navigationAction.targetFrame?.isMainFrame ?? true {
+            installCosmeticStyleSheet(for: url)
+            engine.installWebStoreScriptsIfNeeded(for: url, on: webView.configuration.userContentController)
+            extras.trustDecisions.removeAll()
+        }
         // Cmd-click, middle-click and Shift-click arrive as a plain link navigation. Nothing is built yet, so the delegate opens the tab.
         if navigationAction.navigationType == .linkActivated, url.scheme?.lowercased() != "javascript",
            let disposition = NewContentDisposition.forLinkClick(
@@ -1359,31 +1445,52 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             Task { @MainActor in
                 if let decision = await self.engine.extensionAuthenticationDecision(for: challenge, in: self) {
                     completionHandler(decision.0, decision.1)
+                } else if Self.asksForPassword(challenge.protectionSpace) {
+                    let decision = await self.httpCredentialDecision(for: challenge)
+                    completionHandler(decision.0, decision.1)
                 } else {
                     completionHandler(.performDefaultHandling, nil)
                 }
             }
             return
         }
-        let documentURLs = [navigationState.url, inFlightURL(), privateWebViewURL("_provisionalURL")]
-        if let problem = Self.certificateProblem(from: challenge) {
-            guard Self.challengeIsForMainDocument(challenge.protectionSpace, documentURLs: documentURLs) else {
-                // An untrusted stylesheet or script fails on its own. It does not replace the page with an interstitial.
-                completionHandler(.performDefaultHandling, nil)
-                return
-            }
+        // Read now, while the URLs still describe the navigation that raised the challenge.
+        let isMainDocument = Self.challengeIsForMainDocument(
+            challenge.protectionSpace,
+            documentURLs: [navigationState.url, inFlightURL(), privateWebViewURL("_provisionalURL")]
+        )
+        // Every TLS connection the page opens lands here. Trust evaluation can block on revocation and
+        // intermediate-certificate fetches, so it runs off the main thread, where it stalled every tab and the UI.
+        let pendingChallenge = challenge
+        nonisolated(unsafe) let pendingTrust = trust
+        Self.trustEvaluationQueue.async {
+            let problem = Self.certificateProblem(from: pendingChallenge)
             Task { @MainActor in
-                let allow = await self.trustDecision(for: challenge.protectionSpace, problem: problem)
+                guard let problem else {
+                    completionHandler(Self.untroubledServerTrustDisposition, URLCredential(trust: pendingTrust))
+                    return
+                }
+                guard isMainDocument, !self.isClosed else {
+                    // An untrusted stylesheet or script fails on its own. It does not replace the page with an interstitial.
+                    completionHandler(.performDefaultHandling, nil)
+                    return
+                }
+                let allow = await self.trustDecision(for: pendingChallenge.protectionSpace, problem: problem)
                 if allow {
-                    completionHandler(.useCredential, URLCredential(trust: trust))
+                    completionHandler(.useCredential, URLCredential(trust: pendingTrust))
                 } else {
                     completionHandler(.cancelAuthenticationChallenge, nil)
                 }
             }
-            return
         }
-        completionHandler(Self.untroubledServerTrustDisposition, URLCredential(trust: trust))
     }
+
+    /// Concurrent: one slow revocation check must not hold up every other connection's evaluation behind it.
+    nonisolated private static let trustEvaluationQueue = DispatchQueue(
+        label: "com.orbit.browser.server-trust",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
 
     func webView(for context: WKWebExtensionContext) -> WKWebView? { webView }
     func title(for context: WKWebExtensionContext) -> String? {
@@ -1416,16 +1523,32 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     private func fetchFirstDecodableFavicon(_ hrefs: [String], pageURL: URL?) {
+        let host = pageURL?.host()?.lowercased() ?? ""
+        let key = FaviconRefreshGate.key(host: host, hrefs: hrefs)
+        let allowsNetwork = session.isPersistent
+        let cached = !host.isEmpty && (delegate?.webContents(self, hasCachedFaviconForHost: host) ?? false)
+        guard faviconGate.shouldFetch(key: key, cacheHasHost: cached, now: Date()) else { return }
         Task { @MainActor in
             for href in hrefs {
                 guard let url = URL(string: href, relativeTo: pageURL)?.absoluteURL,
+                      allowsNetwork || url.scheme?.lowercased() == "data",
                       let image = await Self.faviconImage(at: url)
                 else { continue }
+                faviconGate.recordFetch(key: key, now: Date())
                 delegate?.webContents(self, didChangeFavicon: image, url: url)
                 return
             }
         }
     }
+
+    private static let faviconSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
 
     private static let faviconDiscoverySource = """
     (function() {
@@ -1445,14 +1568,14 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             guard let comma = url.absoluteString.firstIndex(of: ",") else { return nil }
             data = Data(base64Encoded: String(url.absoluteString[url.absoluteString.index(after: comma)...]))
         } else {
-            data = try? await URLSession.shared.data(from: url).0
+            data = try? await faviconSession.data(from: url).0
         }
         guard let data else { return nil }
         if let image = NSImage(data: data), image.size.width > 0, image.size.height > 0 { return image }
         return SVGFaviconRasterizer.image(from: data)
     }
 
-    static let untroubledServerTrustDisposition = URLSession.AuthChallengeDisposition.useCredential
+    nonisolated static let untroubledServerTrustDisposition = URLSession.AuthChallengeDisposition.useCredential
 
     static func challengeIsForMainDocument(_ space: URLProtectionSpace, documentURLs: [URL?]) -> Bool {
         documentURLs.contains { candidate in
@@ -1461,7 +1584,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         }
     }
 
-    private static func certificateProblem(from challenge: URLAuthenticationChallenge) -> CertificateProblem? {
+    nonisolated private static func certificateProblem(from challenge: URLAuthenticationChallenge) -> CertificateProblem? {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust
         else { return nil }
@@ -1487,7 +1610,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         )
     }
 
-    static func distinguishedName(_ certificate: SecCertificate, oid: CFString) -> String? {
+    nonisolated static func distinguishedName(_ certificate: SecCertificate, oid: CFString) -> String? {
         guard let values = SecCertificateCopyValues(certificate, [oid] as CFArray, nil) as? [String: Any],
               let entry = values[oid as String] as? [String: Any],
               let parts = entry[kSecPropertyKeyValue as String] as? [[String: Any]]
@@ -1501,7 +1624,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         return nil
     }
 
-    static func validityDates(_ certificate: SecCertificate) -> (from: Date?, until: Date?)? {
+    nonisolated static func validityDates(_ certificate: SecCertificate) -> (from: Date?, until: Date?)? {
         let oids = [kSecOIDX509V1ValidityNotBefore, kSecOIDX509V1ValidityNotAfter] as CFArray
         guard let values = SecCertificateCopyValues(certificate, oids, nil) as? [String: Any] else { return nil }
         return (
@@ -1510,7 +1633,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         )
     }
 
-    private static func dateValue(_ entry: Any?) -> Date? {
+    nonisolated private static func dateValue(_ entry: Any?) -> Date? {
         guard let entry = entry as? [String: Any] else { return nil }
         let value = entry[kSecPropertyKeyValue as String]
         if let date = value as? Date { return date }
@@ -1523,9 +1646,27 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         delegate?.webContentsDidChangeNavigationState(self)
     }
 
+    /// A cancelled navigation is usually replaced by the next one, which keeps the page loading, so the state is left
+    /// alone at first. When nothing replaced it, nothing else ever reports that the load is over: WebKit's own
+    /// isLoading may never have changed, so the page sat "loading" on a blank pane with a Stop button that did nothing.
+    private func settleAfterCancelledNavigation() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !self.isClosed, self.navigationState.isLoading, !self.webView.isLoading else { return }
+            self.navigationState.isLoading = false
+            self.publishNavigation()
+        }
+    }
+
     private func fail(_ error: Error) {
         let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            // Also what a newer load does to the one it replaced, so the request it set stays.
+            settleAfterCancelledNavigation()
+            return
+        }
+        // The load that was requested has ended without a document.
+        extras.requestedLoadURL = nil
         // WebKitErrorFrameLoadInterruptedByPolicyChange: the load became a download.
         if nsError.domain == "WebKitErrorDomain" && nsError.code == 102 {
             navigationState.isLoading = false

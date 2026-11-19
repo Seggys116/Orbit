@@ -2,9 +2,8 @@ import CoreGraphics
 import Foundation
 
 // Foundation-only decisions behind password autofill: what a field message may claim, whether a frame may be
-// filled, what the suggestion panel offers, what a captured sign-in leads to, and where a field sits on screen.
-// Compiled into OrbitTests, so nothing here may reach AppKit, WebKit or the app's models beyond SavedLogin,
-// PasswordOrigin and PublicSuffixList (the one definition of "same site" for passwords).
+// filled, what a captured sign-in leads to, and where a field sits on screen. Compiled into OrbitTests, so nothing
+// here may reach AppKit, WebKit or the app's models beyond PublicSuffixList (the one definition of "same site").
 
 // MARK: - Values shared by the engine and the app
 
@@ -12,6 +11,7 @@ nonisolated public enum PasswordFieldKind: String, Sendable, Equatable {
     case username
     case currentPassword
     case newPassword
+    case oneTimeCode
 }
 
 /// What made the page report the field: gaining focus, or a click on a field that already had it.
@@ -77,9 +77,8 @@ nonisolated public struct PasswordSubmission: Sendable, Equatable, CustomStringC
     public var description: String { "PasswordSubmission(\(origin.absoluteString), <password withheld>)" }
 }
 
-/// The login to put into a page. The engine checks the frame against the origin the login was saved for: its site and its scheme.
+/// The login to put into a page. The engine checks the frame against the origin the login belongs to: its site and its scheme.
 nonisolated public struct PasswordFillCredentials: Sendable, Equatable, CustomStringConvertible {
-    /// `SavedLogin.origin`: where the login was saved.
     public var origin: URL
     public var username: String
     public var password: String
@@ -97,9 +96,9 @@ nonisolated public struct PasswordFillCredentials: Sendable, Equatable, CustomSt
 
 nonisolated public enum PasswordFillOutcome: Equatable, Sendable {
     case filled(username: Bool, password: Bool)
-    /// The frame's own registrable domain is not the one the login was saved for, or the frame is no longer on the origin that reported the field (it navigated after the field was reported).
+    /// The frame's own registrable domain is not the one the login belongs to, or the frame is no longer on the origin that reported the field (it navigated after the field was reported).
     case refusedSiteMismatch
-    /// The login was saved on https and the frame is plain http.
+    /// The login belongs to https and the frame is plain http.
     case refusedInsecure
     /// The field is gone or was never reported by this page.
     case fieldUnavailable
@@ -111,20 +110,39 @@ nonisolated public enum PasswordFillOutcome: Equatable, Sendable {
     }
 }
 
+/// An origin as `scheme://host[:port]` in lower case, with no path, credentials, or default port.
+nonisolated struct PasswordOrigin: Equatable, Sendable {
+    let origin: String
+    /// The registrable domain of the host by the Public Suffix List, so tenants of a shared suffix such as github.io are separate sites.
+    let siteKey: String
+
+    var isHTTPS: Bool { origin.hasPrefix("https://") }
+
+    /// Nil unless `url` is http or https and has a usable host.
+    init?(url: URL) {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              var host = url.host()?.lowercased()
+        else { return nil }
+        if host.hasPrefix("["), host.hasSuffix("]") { host = String(host.dropFirst().dropLast()) }
+        // A rooted name and its unrooted form are the same site.
+        if host.hasSuffix(".") { host.removeLast() }
+        guard !host.isEmpty,
+              !host.unicodeScalars.contains(where: { $0.properties.isWhitespace || $0 == "%" || CharacterSet.controlCharacters.contains($0) })
+        else { return nil }
+
+        var origin = "\(scheme)://" + (host.contains(":") ? "[\(host)]" : host)
+        if let port = url.port, port != (scheme == "https" ? 443 : 80) { origin += ":\(port)" }
+        self.origin = origin
+        self.siteKey = PublicSuffixList.registrableDomain(ofHost: host)
+    }
+
+    init?(origin string: String) {
+        guard let url = URL(string: string) else { return nil }
+        self.init(url: url)
+    }
+}
+
 // MARK: - Policy
-
-nonisolated enum PasswordOffer: Equatable {
-    case none
-    case suggestions(showsLogins: Bool, showsStrongPassword: Bool)
-    /// A plain-http page with saved logins: only an explicit choice, under a warning.
-    case insecureWarning
-}
-
-nonisolated enum PasswordPromptDecision: Equatable {
-    case nothing
-    case save(username: String, password: String)
-    case update(existing: SavedLogin, password: String)
-}
 
 nonisolated enum PasswordSubmissionStep: String, Equatable {
     /// A username and a password, or a password the page needs no username for.
@@ -147,6 +165,7 @@ nonisolated enum PasswordAutofillPolicy {
     static let maxUsernameLength = 512
     static let maxPasswordLength = 4096
     static let maxTokenLength = 64
+    static let maxOneTimeCodeLength = 32
     /// A captured sign-in older than this is not offered for saving.
     static let submissionLifetime: TimeInterval = 30
     /// How long a username entered in one step is remembered for the password step.
@@ -198,6 +217,12 @@ nonisolated enum PasswordAutofillPolicy {
         return text
     }
 
+    /// Letters and digits only, and short: a code from Passwords is never anything else, and nothing else may reach a page through this path.
+    static func isValidOneTimeCode(_ code: String) -> Bool {
+        guard !code.isEmpty, code.count <= maxOneTimeCodeLength else { return false }
+        return code.unicodeScalars.allSatisfy { $0.isASCII && CharacterSet.alphanumerics.contains($0) }
+    }
+
     // MARK: Filling
 
     static func isSecureForFill(origin: URL) -> Bool {
@@ -212,9 +237,8 @@ nonisolated enum PasswordAutofillPolicy {
         return PublicSuffixList.registrableDomain(ofHost: host)
     }
 
-    /// Nil when the login saved for `credentialOrigin` may be put into a field of a frame with this origin: the same registrable domain, and
-    /// never an https login into an http frame (even localhost). An http login in an http frame is allowed because the person chose its row
-    /// under the insecure-page warning; no caller flag can widen this.
+    /// Nil when a login that belongs to `credentialOrigin` may be put into a field of a frame with this origin: the same registrable domain, and
+    /// never an https login into an http frame (even localhost). No caller flag can widen this.
     static func refusal(credentialOrigin: URL, frameOrigin: URL) -> PasswordFillOutcome? {
         guard let credentialSite = siteKey(of: credentialOrigin), let frameSite = siteKey(of: frameOrigin), credentialSite == frameSite else {
             return .refusedSiteMismatch
@@ -228,29 +252,13 @@ nonisolated enum PasswordAutofillPolicy {
 
     // MARK: Offering
 
-    /// The logins that may be offered in a frame: those `refusal` would let through. Applied again here so the list shown never depends on the vault alone.
-    static func offerable(_ logins: [SavedLogin], frameOrigin: URL) -> [SavedLogin] {
-        logins.filter { login in
-            guard let origin = URL(string: login.origin) else { return false }
-            return refusal(credentialOrigin: origin, frameOrigin: frameOrigin) == nil
-        }
+    /// Logins from Passwords are offered only in a secure frame (https, or http on this Mac), and only on a sign-in field.
+    static func offersLogins(kind: PasswordFieldKind, frameOrigin: URL) -> Bool {
+        (kind == .username || kind == .currentPassword) && isSecureForFill(origin: frameOrigin)
     }
 
-    static func offer(kind: PasswordFieldKind, logins: [SavedLogin], frameOrigin: URL, offersAutofill: Bool) -> PasswordOffer {
-        guard offersAutofill else { return .none }
-        let loginCount = offerable(logins, frameOrigin: frameOrigin).count
-        guard isSecureForFill(origin: frameOrigin) else {
-            return kind != .newPassword && loginCount > 0 ? .insecureWarning : .none
-        }
-        if kind == .newPassword { return .suggestions(showsLogins: false, showsStrongPassword: true) }
-        return loginCount > 0 ? .suggestions(showsLogins: true, showsStrongPassword: false) : .none
-    }
-
-    /// The login for the username the previous step filled comes first; the rest keep the vault's order.
-    static func ordered(_ logins: [SavedLogin], preferredUsername: String?) -> [SavedLogin] {
-        guard let preferredUsername, !preferredUsername.isEmpty else { return logins }
-        let preferred = logins.filter { $0.username == preferredUsername }
-        return preferred + logins.filter { $0.username != preferredUsername }
+    static func offersOneTimeCodes(kind: PasswordFieldKind, frameOrigin: URL) -> Bool {
+        kind == .oneTimeCode && isSecureForFill(origin: frameOrigin)
     }
 
     /// The remembered username applies to a password step on the same site shortly after it was entered.
@@ -293,70 +301,12 @@ nonisolated enum PasswordAutofillPolicy {
         return PasswordStepMemory(siteKey: site, username: trimmed, date: now)
     }
 
-    /// `existing` is what the vault holds for the submission's origin (`logins(matching:)`), which can include other origins of the same site.
-    /// An update is only ever for the login saved for this exact origin and username: a login of another origin of the site is never changed
-    /// by a sign-in on this one, so a username that exists only elsewhere is offered as a new entry for this origin.
-    static func promptDecision(
-        submission: PasswordSubmission,
-        existing: [SavedLogin],
-        isNeverSave: Bool,
-        offersToSave: Bool
-    ) -> PasswordPromptDecision {
-        guard offersToSave, !isNeverSave, !submission.password.isEmpty else { return .nothing }
-        let origin = submission.origin.absoluteString
-        let sameOrigin = existing.filter { $0.origin == origin }
-        var username = submission.username.trimmingCharacters(in: .whitespacesAndNewlines)
-        if username.isEmpty {
-            // A change-password page has no username field: it can only mean the one login this origin has.
-            guard submission.isNewPassword, sameOrigin.count == 1, let only = sameOrigin.first else { return .nothing }
-            username = only.username
-        }
-        guard let match = sameOrigin.first(where: { $0.username == username }) else {
-            return .save(username: username, password: submission.password)
-        }
-        return match.password == submission.password ? .nothing : .update(existing: match, password: submission.password)
-    }
-
-    /// The origin as the save prompt names it: the full host (a "www." or "accounts." login is another login than the bare domain's) and any non-default port.
+    /// The origin as a prompt names it: the full host and any non-default port.
     static func displayOrigin(_ origin: String) -> String {
         guard let parsed = PasswordOrigin(origin: origin), let url = URL(string: parsed.origin), var host = url.host() else { return origin }
         if host.contains(":"), !host.hasPrefix("[") { host = "[\(host)]" }
         if let port = url.port { return "\(host):\(port)" }
         return host
-    }
-
-    // MARK: Editing
-
-    /// The origin a login typed into the settings pane is saved for: "example.com" means https://example.com. Nil for anything that is not an http(s) site.
-    static func parseWebsite(_ text: String) -> PasswordOrigin? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let candidate = trimmed.contains("://") ? trimmed : "https://" + trimmed
-        guard let url = URL(string: candidate) else { return nil }
-        return PasswordOrigin(url: url)
-    }
-
-    // MARK: Listing
-
-    /// Host as shown in the settings list: lower case, without a leading "www.".
-    static func displayHost(ofOrigin origin: String) -> String {
-        guard let host = URL(string: origin)?.host()?.lowercased() else { return origin }
-        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-    }
-
-    /// Logins whose site or username contains every word of `query`, ordered by site then username.
-    static func filter(_ logins: [SavedLogin], query: String) -> [SavedLogin] {
-        let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
-        let matching = words.isEmpty ? logins : logins.filter { login in
-            let haystack = (login.origin + " " + login.username).lowercased()
-            return words.allSatisfy { haystack.contains($0) }
-        }
-        return matching.sorted { lhs, rhs in
-            let left = displayHost(ofOrigin: lhs.origin)
-            let right = displayHost(ofOrigin: rhs.origin)
-            if left != right { return left < right }
-            return lhs.username.localizedCaseInsensitiveCompare(rhs.username) == .orderedAscending
-        }
     }
 }
 

@@ -180,10 +180,15 @@ struct ToolbarView: View {
         env.webContents[tab.id]
     }
 
-    // Reads env.navigationStates[tab.id], never env.navigationStates[env.activeTabID], so a two-pane split can show back enabled in one pane and disabled in the other.
-    private var navigationState: NavigationState {
-        env.navigationStates[tab.id] ?? .empty
+    // Reads tab.id's mirror, never env.activeTabID's, so a two-pane split can show back enabled in one pane and disabled in the other. Field by field rather than a whole NavigationState, so a progress tick or title change does not re-run this body.
+    private var navigation: NavigationBox? {
+        env.navigationBox(for: tab.id)
     }
+
+    private var isLoading: Bool { navigation?.isLoading ?? false }
+    private var canGoBack: Bool { navigation?.canGoBack ?? false }
+    private var canGoForward: Bool { navigation?.canGoForward ?? false }
+    private var security: SecurityLevel { navigation?.security ?? NavigationState.empty.security }
 
 
     // Resolution order: document surface colour, env.themeColors, PaneHeaderColorResolver's pulled colour, env.documentColors, neutralBackground; the document colour is first because env.themeColors is never cleared on navigation and would leave a stale pushed colour.
@@ -300,8 +305,7 @@ struct ToolbarView: View {
 
     // isLoading matters because a reload keeps the same URL and engine; attached/detached matters because a pane can lay out before materializeWebContents registers its WebContents, so a .task that saw nil would never re-run.
     private var sampleTaskID: String {
-        let isLoading = navigationState.isLoading
-        return "\(tab.id.uuidString)#\(tab.url.absoluteString)#\(contents == nil ? "detached" : "attached")#\(isLoading)"
+        "\(tab.id.uuidString)#\(tab.url.absoluteString)#\(contents == nil ? "detached" : "attached")#\(isLoading)"
     }
 
     private func sampleHeaderColorIfNeeded() async {
@@ -328,11 +332,11 @@ struct ToolbarView: View {
             if showsSidebarToggle {
                 sidebarToggleButton
             }
-            navButton("chevron.left", direction: .back, enabled: navigationState.canGoBack)
-            navButton("chevron.right", direction: .forward, enabled: navigationState.canGoForward)
-            iconButton(navigationState.isLoading ? "xmark" : "arrow.clockwise") {
+            navButton("chevron.left", direction: .back, enabled: canGoBack)
+            navButton("chevron.right", direction: .forward, enabled: canGoForward)
+            ToolbarReloadButton(isLoading: isLoading, foreground: headerForeground, hoverFill: headerHoverFill) {
                 focusPaneIfNeeded()
-                if navigationState.isLoading { contents?.stopLoading() } else { contents?.reload(ignoringCache: false) }
+                if isLoading { contents?.stopLoading() } else { env.reloadTab(tab.id, ignoringCache: false) }
             }
         }
     }
@@ -480,7 +484,7 @@ struct ToolbarView: View {
 
     private var addressLeadingControl: some View {
         ToolbarAddressCopyControl(
-            security: navigationState.security,
+            security: security,
             url: tab.url,
             foreground: headerForeground
         )
@@ -493,7 +497,7 @@ struct ToolbarView: View {
     }
 
     private var hasSecurityGlyph: Bool {
-        ToolbarSecurityGlyph.symbol(for: navigationState.security) != nil
+        ToolbarSecurityGlyph.symbol(for: security) != nil
     }
 
     private var addressField: some View {

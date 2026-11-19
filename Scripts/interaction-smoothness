@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# How the running app feels: frame timing and real window pixels while tabs are switched, a split is entered and
+# left, and tabs are closed. Manual tool: nothing here runs in CI. It launches a built Orbit.app on a scratch profile.
+#
+#   Scripts/interaction-smoothness                       build Release, run every scenario
+#   Scripts/interaction-smoothness --skip-build --scenarios enterSplitLoaded,closeTab
+#   Scripts/interaction-smoothness --configuration Debug --iterations 8
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON=python3
+elif [ -x /usr/bin/python3 ]; then
+  PYTHON=/usr/bin/python3
+else
+  echo "error: python3 is required. Install the Xcode Command Line Tools with 'xcode-select --install'." >&2
+  exit 1
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/interaction_smoothness.py" "$@"

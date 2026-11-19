@@ -63,4 +63,24 @@ public enum PictureInPictureScript {
       }
     })();
     """
+
+    /// Run as a tab closes. Leaves picture-in-picture and stops playback, so no floating window outlives its page. Needs no user gesture.
+    public static let closeSource = """
+    (function() {
+      try {
+        Array.prototype.slice.call(document.querySelectorAll('video, audio')).forEach(function(media) {
+          try {
+            if (media.webkitPresentationMode === 'picture-in-picture' && media.webkitSetPresentationMode) {
+              media.webkitSetPresentationMode('inline');
+            }
+          } catch (e) {}
+          try { media.pause(); } catch (e) {}
+        });
+        if (document.pictureInPictureElement) {
+          var exiting = document.exitPictureInPicture();
+          if (exiting && exiting.catch) { exiting.catch(function() {}); }
+        }
+      } catch (e) {}
+    })();
+    """
 }

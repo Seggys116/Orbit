@@ -37,6 +37,9 @@ public final class ContentBlockingController: ObservableObject {
 
     public private(set) var hasCompletedInitialCacheLoad = false
 
+    // Content hashes of the lists behind the rule set currently on the blocker; nil until the first compile.
+    private var lastRuleSetSignature: String?
+
     // MARK: - Capability
 
     public private(set) var engineCanCountBlockedRequests = false
@@ -247,6 +250,14 @@ public final class ContentBlockingController: ObservableObject {
         await compile()
     }
 
+    /// True when an enabled list has never been fetched, so there is nothing cached to block with until refresh() runs.
+    var hasMissingEnabledList: Bool {
+        enabledListIDs.contains { id in
+            if case .neverFetched = listStates[id] ?? .neverFetched { return true }
+            return false
+        }
+    }
+
     @discardableResult
     public func beginInitialCacheLoad() -> Task<Void, Never> {
         if let initialCacheLoadTask { return initialCacheLoadTask }
@@ -269,7 +280,15 @@ public final class ContentBlockingController: ObservableObject {
         let ids = enabledListIDs
         let store = self.store
 
-        let (built, perListStats) = await Self.buildRuleSet(ids: ids, store: store)
+        let (built, perListStats, signature) = await Self.buildRuleSet(ids: ids, store: store)
+
+        // Same list contents as the rule set already installed: keep it, so the engine sees no change and does not
+        // translate, plan and recompile the whole set again (a refresh that downloaded nothing new lands here).
+        if signature == lastRuleSetSignature {
+            await pushToEngine()
+            return
+        }
+        lastRuleSetSignature = signature
 
         blocker.setRuleSet(built)
         compiledRuleCount = built.networkRuleCount
@@ -295,41 +314,47 @@ public final class ContentBlockingController: ObservableObject {
     private nonisolated static func buildRuleSet(
         ids: Set<String>,
         store: FilterListStore
-    ) async -> (ContentBlockerRuleSet, [String: ContentBlockingCompileStats]) {
+    ) async -> (ContentBlockerRuleSet, [String: ContentBlockingCompileStats], String) {
         let descriptors = FilterListCatalog.all.filter { ids.contains($0.id) }
 
-        var outputs: [String: FilterListParser.Output] = await withTaskGroup(
-            of: (String, FilterListParser.Output?).self
+        var outputs: [String: FilterListParser.Output] = [:]
+        var hashes: [String: String] = [:]
+        await withTaskGroup(
+            of: (String, FilterListParser.Output?, String).self
         ) { group in
             for descriptor in descriptors {
                 group.addTask {
-                    (descriptor.id, await Self.loadOrParseList(descriptor.id, store: store))
+                    let loaded = await Self.loadOrParseList(descriptor.id, store: store)
+                    return (descriptor.id, loaded?.output, loaded?.contentHash ?? "")
                 }
             }
-            var result: [String: FilterListParser.Output] = [:]
-            for await (id, output) in group {
-                if let output { result[id] = output }
+            for await (id, output, hash) in group {
+                if let output {
+                    outputs[id] = output
+                    hashes[id] = hash
+                }
             }
-            return result
         }
 
         var ruleSet = ContentBlockerRuleSet()
         var perListStats: [String: ContentBlockingCompileStats] = [:]
         perListStats.reserveCapacity(descriptors.count)
+        var signatureParts: [String] = []
         for descriptor in descriptors {
             // Drop each parsed list once it has been copied into the rule set.
             guard let output = outputs.removeValue(forKey: descriptor.id) else { continue }
             perListStats[descriptor.id] = output.stats
             ruleSet.add(parsed: output, listID: descriptor.id)
+            signatureParts.append("\(descriptor.id):\(hashes[descriptor.id] ?? "")")
         }
-        return (ruleSet, perListStats)
+        return (ruleSet, perListStats, signatureParts.joined(separator: "|"))
     }
 
     @concurrent
     private nonisolated static func loadOrParseList(
         _ listID: String,
         store: FilterListStore
-    ) async -> FilterListParser.Output? {
+    ) async -> (output: FilterListParser.Output, contentHash: String)? {
         guard let entry = await store.cacheEntry(for: listID) else { return nil }
 
         if let cached = await store.compiledCacheData(for: listID),
@@ -338,7 +363,7 @@ public final class ContentBlockingController: ObservableObject {
                expectedContentHash: entry.contentHash,
                listID: listID
            ) {
-            return output
+            return (output, entry.contentHash)
         }
 
         guard let text = await store.cachedText(for: listID) else { return nil }
@@ -350,6 +375,6 @@ public final class ContentBlockingController: ObservableObject {
             await store.storeCompiledCache(data, for: listID)
         }
 
-        return output
+        return (output, contentHash)
     }
 }

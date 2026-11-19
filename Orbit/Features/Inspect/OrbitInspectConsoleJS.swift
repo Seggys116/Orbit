@@ -384,6 +384,41 @@ extension OrbitInspectAgent {
       }
 
 
+      // Takes what the early-capture stub buffered before this agent loaded. Objects the page has since released show as their label.
+      function con_adoptEarly() {
+        var early = window.__orbitInspectEarly;
+        if (!early || !early.con || !early.con.length) return;
+        var items = early.con.splice(0, early.con.length);
+        items.forEach(function (item) {
+          try {
+            if (item.final) {
+              item.seq = String(++con_seq);
+              con_addEntry(item);
+              return;
+            }
+            var args = item.a.map(function (captured) {
+              if (captured[0] === 0) return con_serialize(captured[1], 2);
+              var live = captured[1] ? captured[1].deref() : undefined;
+              return live !== undefined ? con_serialize(live, 2) : { k: "s", v: captured[2] };
+            });
+            var entry = { seq: String(++con_seq), level: item.level, ts: item.ts, args: args, stack: "" };
+            if (item.e) {
+              try { entry.stack = (item.e.stack || "").split("\n").slice(1).join("\n"); } catch (e) {}
+            }
+            if (item.level === "assert") {
+              var detail = typeof item.a[1] !== "undefined" && item.a[1][0] === 0 && typeof item.a[1][1] === "string" ? item.a[1][1] : "Assertion failed";
+              entry.args = [{ k: "s", v: "Assertion failed: " + detail }].concat(args.slice(2));
+            } else if (item.level === "trace" && args.length === 0) {
+              entry.args = [{ k: "s", v: "console.trace()" }];
+            } else if ((item.level === "log" || item.level === "info" || item.level === "warn" || item.level === "error" || item.level === "debug")
+                       && args.length > 1 && item.a[0][0] === 0 && typeof item.a[0][1] === "string" && /%[sdifocO]/.test(item.a[0][1])) {
+              entry.fmt = item.a[0][1];
+            }
+            con_addEntry(entry);
+          } catch (e) {}
+        });
+      }
+
       ops["con.clear"] = function () {
         con_batch = [];
         con_seq = 0;
@@ -542,6 +577,7 @@ extension OrbitInspectAgent {
             oi._con_reg = con_reg;
           }
         } catch (ie) {}
+        con_adoptEarly();
       });
 
 

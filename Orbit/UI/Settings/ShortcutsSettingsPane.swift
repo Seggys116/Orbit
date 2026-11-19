@@ -6,6 +6,14 @@ struct ShortcutsSettingsPane: View {
     @State private var selectedCategory: ShortcutCategory?
     @State private var recordingCommandID: ShortcutCommandID?
     @State private var recordingConflictNotice: String?
+    @State private var visualizer = ShortcutVisualizerState()
+    @State private var highlightedCommandID: ShortcutCommandID?
+    @State private var highlightGeneration = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    #if DEBUG
+    @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeRepresentableDisabled
+    #endif
 
     private enum Group: String {
         case customized = "Customized Shortcuts"
@@ -61,6 +69,115 @@ struct ShortcutsSettingsPane: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
+            content
+                .background(keyCapture)
+                .onChange(of: recordingCommandID) { _, newValue in
+                    if newValue != nil { clearVisualizer() }
+                }
+                .onChange(of: visualizer.matchedCommand) { _, matched in
+                    matchedCommandChanged(matched, proxy: proxy)
+                }
+                .onDisappear { clearVisualizer() }
+        }
+    }
+
+    @ViewBuilder
+    private var keyCapture: some View {
+        let capture = ShortcutVisualizerKeyCapture(isActive: recordingCommandID == nil, handler: handleKeyEvent)
+        #if DEBUG
+        if !screenshotModeRepresentableDisabled { capture }
+        #else
+        capture
+        #endif
+    }
+
+    private func clearVisualizer() {
+        visualizer.reset()
+        highlightedCommandID = nil
+        highlightGeneration += 1
+    }
+
+    private func matchedCommandChanged(_ matched: ShortcutCommandID?, proxy: ScrollViewProxy) {
+        highlightGeneration += 1
+        if let matched {
+            highlightedCommandID = matched
+            guard groupedCommands.contains(where: { $0.1.contains { $0.id == matched } }) else { return }
+            withAnimation(OrbitMotion.resolved(OrbitMotion.quick, reduceMotion: reduceMotion)) {
+                proxy.scrollTo(matched, anchor: .center)
+            }
+        } else {
+            let generation = highlightGeneration
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1200))
+                if highlightGeneration == generation { highlightedCommandID = nil }
+            }
+        }
+    }
+
+    private func handleKeyEvent(_ event: NSEvent) {
+        switch event.type {
+        case .flagsChanged:
+            visualizer.flagsChanged(modifiers: event.modifierFlags.rawValue)
+        case .keyDown:
+            let modifiers = event.modifierFlags.intersection(KeyBinding.significantModifiers)
+            if modifiers.isEmpty, event.window?.firstResponder is NSText { return }
+            guard let key = ShortcutRegistry.symbolicKey(for: event) ?? event.charactersIgnoringModifiers?.lowercased(),
+                  !key.isEmpty else { return }
+            visualizer.keyDown(
+                key: key,
+                keyCode: event.keyCode,
+                modifiers: modifiers.rawValue,
+                matched: registry.command(matching: event)
+            )
+        case .keyUp:
+            visualizer.keyUp(keyCode: event.keyCode)
+        default:
+            break
+        }
+    }
+
+    private var visualizerPanel: some View {
+        let matchedTitle = visualizer.matchedCommand.flatMap { registry.command(for: $0)?.title }
+        return HStack(spacing: 12) {
+            if visualizer.isIdle {
+                Text("Press any keys to see them here.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(SettingsPalette.textSecondary)
+            } else {
+                HStack(spacing: 4) {
+                    ForEach(visualizer.caps, id: \.self) { cap in
+                        OnboardingKeycapView(cap: cap, isPressed: visualizer.isPressed(cap))
+                    }
+                }
+                if let matchedTitle {
+                    Text(matchedTitle)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(SettingsPalette.textPrimary)
+                } else if visualizer.hasChord {
+                    Text("No shortcut uses this combination.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(SettingsPalette.textSecondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: OrbitControlMetrics.sectionCornerRadius, style: .continuous)
+                .fill(LibraryPalette.cardFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: OrbitControlMetrics.sectionCornerRadius, style: .continuous)
+                .strokeBorder(LibraryPalette.cardBorder)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Key visualiser")
+        .accessibilityValue(matchedTitle ?? (visualizer.isIdle ? "Press any keys" : visualizer.caps.map(\.spokenName).joined(separator: " ")))
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: SettingsMetrics.sectionStackSpacing) {
             HStack {
                 Text("Keybinds").font(.system(size: 20, weight: .bold))
@@ -71,6 +188,8 @@ struct ShortcutsSettingsPane: View {
                     recordingConflictNotice = nil
                 }
             }
+
+            visualizerPanel
 
             HStack(spacing: 8) {
                 OrbitTextField(
@@ -106,7 +225,9 @@ struct ShortcutsSettingsPane: View {
                                 recordingCommandID: $recordingCommandID,
                                 recordingConflictNotice: $recordingConflictNotice,
                                 accentColor: SettingsPalette.accent,
-                                conflictingCommands: conflictsByID[command.id] ?? []
+                                conflictingCommands: conflictsByID[command.id] ?? [],
+                                visualizer: visualizer,
+                                isHighlighted: highlightedCommandID == command.id
                             )
                         }
                     }
@@ -171,6 +292,8 @@ private struct KeybindRow: View {
     @Binding var recordingConflictNotice: String?
     var accentColor: Color
     var conflictingCommands: [ShortcutCommand]
+    var visualizer: ShortcutVisualizerState
+    var isHighlighted = false
 
     @State private var registry = ShortcutRegistry.shared
     @State private var isHovering = false
@@ -211,7 +334,7 @@ private struct KeybindRow: View {
             }
             .layoutPriority(1)
             Spacer(minLength: OrbitControlMetrics.settingsRowContentSpacing)
-            keyCell(hasConflict: hasConflict)
+            keyCell
         }
         .padding(.horizontal, Self.rowHorizontalPadding)
         .padding(.vertical, OrbitControlMetrics.settingsRowVerticalPadding)
@@ -221,6 +344,7 @@ private struct KeybindRow: View {
         .contentShape(RoundedRectangle(cornerRadius: Self.rowCornerRadius, style: .continuous))
         .onHover { isHovering = $0 }
         .orbitAnimation(OrbitMotion.quick, value: isHovering)
+        .orbitAnimation(OrbitMotion.quick, value: isHighlighted)
         .onTapGesture {
             recordingCommandID = command.id
             recordingConflictNotice = nil
@@ -255,6 +379,7 @@ private struct KeybindRow: View {
         RoundedRectangle(cornerRadius: Self.rowCornerRadius, style: .continuous)
             .fill(
                 isRecording ? accentColor.opacity(0.16)
+                    : isHighlighted ? accentColor.opacity(0.12)
                     : hasConflict ? LibraryPalette.destructive.opacity(0.08)
                     : (isHovering ? LibraryPalette.cardFillHover : LibraryPalette.cardFill)
             )
@@ -263,10 +388,10 @@ private struct KeybindRow: View {
     private func cardBorder(hasConflict: Bool) -> some View {
         RoundedRectangle(cornerRadius: Self.rowCornerRadius, style: .continuous)
             .strokeBorder(
-                isRecording ? accentColor
+                isRecording || isHighlighted ? accentColor
                     : hasConflict ? LibraryPalette.destructive.opacity(0.55)
                     : LibraryPalette.cardBorder,
-                lineWidth: isRecording ? OrbitControlMetrics.textFieldFocusRingWidth : 1
+                lineWidth: isRecording || isHighlighted ? OrbitControlMetrics.textFieldFocusRingWidth : 1
             )
     }
 
@@ -294,23 +419,82 @@ private struct KeybindRow: View {
         #endif
     }
 
-    private func keyCell(hasConflict: Bool) -> some View {
-        Text(binding?.displayString ?? "- - -")
-            .font(.system(size: 11.5, weight: .medium, design: .monospaced))
-            .foregroundStyle(SettingsPalette.textPrimary)
-            .padding(.horizontal, 10)
-            .frame(minWidth: 62, minHeight: OrbitControlMetrics.buttonCompactHeight)
-            .background(
-                RoundedRectangle(cornerRadius: OrbitControlMetrics.segmentedCornerRadius, style: .continuous)
-                    .fill(hasConflict && !isRecording ? LibraryPalette.destructive.opacity(0.12) : OrbitControlColor.fill(for: colorScheme))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: OrbitControlMetrics.segmentedCornerRadius, style: .continuous)
-                    .strokeBorder(
-                        isRecording ? accentColor : (hasConflict ? LibraryPalette.destructive : OrbitControlColor.border(for: colorScheme)),
-                        lineWidth: isRecording ? OrbitControlMetrics.textFieldFocusRingWidth : 1
+    private var keyCell: some View {
+        Group {
+            if isRecording {
+                Text("Press new shortcut")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(SettingsPalette.textPrimary)
+                    .padding(.horizontal, 10)
+                    .frame(minWidth: 62, minHeight: OrbitControlMetrics.buttonCompactHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: OrbitControlMetrics.segmentedCornerRadius, style: .continuous)
+                            .fill(OrbitControlColor.fill(for: colorScheme))
                     )
-            )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: OrbitControlMetrics.segmentedCornerRadius, style: .continuous)
+                            .strokeBorder(accentColor, lineWidth: OrbitControlMetrics.textFieldFocusRingWidth)
+                    )
+            } else if let binding {
+                HStack(spacing: 4) {
+                    ForEach(OnboardingKeycaps.caps(for: binding), id: \.self) { cap in
+                        OnboardingKeycapView(cap: cap, isPressed: visualizer.isPressed(cap, inRowFor: command.id))
+                    }
+                }
+            } else {
+                OnboardingKeycapPlaceholderView()
+            }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ShortcutVisualizerKeyCapture: NSViewRepresentable {
+    var isActive: Bool
+    var handler: (NSEvent) -> Void
+
+    func makeNSView(context: Context) -> ShortcutVisualizerKeyCaptureView {
+        let view = ShortcutVisualizerKeyCaptureView()
+        view.handler = handler
+        view.isActive = isActive
+        return view
+    }
+
+    func updateNSView(_ nsView: ShortcutVisualizerKeyCaptureView, context: Context) {
+        nsView.handler = handler
+        nsView.isActive = isActive
+    }
+}
+
+private final class ShortcutVisualizerKeyCaptureView: NSView {
+    var handler: (NSEvent) -> Void = { _ in }
+    private var monitor: Any?
+
+    var isActive = true {
+        didSet {
+            guard isActive != oldValue else { return }
+            installMonitor()
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installMonitor()
+    }
+
+    private func installMonitor() {
+        removeMonitor()
+        guard window != nil, isActive else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            MainActor.assumeIsolated { self.handler(event) }
+            return event
+        }
+    }
+
+    private func removeMonitor() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
     }
 }
 

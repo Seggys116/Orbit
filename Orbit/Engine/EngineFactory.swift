@@ -40,6 +40,7 @@ enum EngineFactory {
 
     // Every one of these is load-bearing for chrome UI (media session, pane
     // header colour, link hover). BoostRuntime installs user scripts separately.
+    // The Chrome Web Store scripts are not here: WebKitEngine injects them only on navigations to the store.
     private static func installBuiltInUserScripts(on engine: BrowserEngine) {
         let session = engine.defaultSession
         for script in [
@@ -48,8 +49,6 @@ enum EngineFactory {
             LinkHoverObserverScript.userScript,
             MediaTransportScript.userScript,
             PageScrollbarStyleScript.userScript,
-            WebStorePrivateBridgeScript.userScript,
-            WebStoreAddToChromeButtonScript.userScript,
         ] {
             engine.addUserScript(script, session: session)
         }

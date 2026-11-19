@@ -56,7 +56,8 @@ public extension BrowserStore {
             switch section {
             case .today:
                 var today = newState.spaces[spaceIndex].today
-                let clamped = index.map { max(0, min($0, today.count)) } ?? today.count
+                let afterActive = activate ? newState.activeTabBySpace[spaceID].flatMap { today.firstIndex(of: $0) }.map { $0 + 1 } : nil
+                let clamped = (index ?? afterActive).map { max(0, min($0, today.count)) } ?? today.count
                 today.insert(tab.id, at: clamped)
                 newState.spaces[spaceIndex].today = today
             case .pinned:
@@ -94,9 +95,17 @@ public extension BrowserStore {
 
     /// Selecting a tab was the only thing that ever moved `lastAccessedAt`, so a tab navigated in all day still read as idle to the archive sweep the moment it stopped being active.
     func noteTabAccessed(_ id: TabID, at date: Date = Date()) {
-        guard let tab = state.tabs[id], tab.lastAccessedAt < date else { return }
+        guard let tab = state.tabs[id],
+              date.timeIntervalSince(tab.lastAccessedAt) >= Self.tabAccessedStampInterval
+        else { return }
         state.tabs[id]?.lastAccessedAt = date
     }
+
+    /// Every navigation commit used to stamp the tab, and each stamp is a whole-state write that reschedules
+    /// autosave and a CloudKit reconcile. The finest idle policy reading lastAccessedAt is the 120 s
+    /// renderer-release threshold; a 30 s stamp keeps its worst-case error to a quarter of that, and the
+    /// archive sweep's shortest interval is 12 hours.
+    static let tabAccessedStampInterval: TimeInterval = 30
 
     // MARK: - Closing
 

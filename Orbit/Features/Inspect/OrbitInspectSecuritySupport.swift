@@ -3,11 +3,29 @@
 import Foundation
 import Security
 
-enum OrbitSecuritySupport {
+// Nonisolated so the chain evaluation can run off the main thread.
+nonisolated enum OrbitSecuritySupport {
 
-    struct ConnectionSnapshot {
+    nonisolated struct ConnectionSnapshot: Sendable {
         var certificates: [OrbitSecurityCertificate]
         var trust: OrbitSecurityTrust
+    }
+
+    /// SecTrust is an immutable, thread-safe CF object once WebKit has handed it over.
+    nonisolated struct TrustHandle: @unchecked Sendable {
+        let trust: SecTrust
+    }
+
+    /// Runs the snapshot on a background queue and calls `completion` on the main queue.
+    static func snapshotInBackground(
+        _ handle: TrustHandle,
+        host: String,
+        completion: @escaping @Sendable (ConnectionSnapshot) -> Void
+    ) {
+        DispatchQueue.global(qos: .utility).async {
+            let result = snapshot(trust: handle.trust, host: host)
+            DispatchQueue.main.async { completion(result) }
+        }
     }
 
     /// Network fetches are switched off on the policy copy so the call cannot block on OCSP or AIA lookups.

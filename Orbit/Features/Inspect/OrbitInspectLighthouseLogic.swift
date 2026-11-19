@@ -2909,6 +2909,8 @@ enum OrbitLighthouseLogic {
         return OrbitSecurityLogic.evaluate(input).checks.compactMap { check in
             // Rows that only say "not exposed by WebKit" are not audits.
             if check.state == .info && check.weight == 0 { return nil }
+            // Best practices already carries the vulnerable-library audit, from fuller evidence.
+            if check.id == "libraries" { return nil }
             let status: LHAuditStatus
             let score: Double?
             switch check.state {

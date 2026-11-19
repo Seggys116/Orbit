@@ -10,6 +10,7 @@ public enum ImportableBrowser: String, CaseIterable, Identifiable, Sendable {
     case opera
     case firefox
     case arc
+    case zen
 
     public var id: String { rawValue }
 
@@ -22,10 +23,14 @@ public enum ImportableBrowser: String, CaseIterable, Identifiable, Sendable {
         case .opera: return "Opera"
         case .firefox: return "Firefox"
         case .arc: return "Arc"
+        case .zen: return "Zen Browser"
         }
     }
 
     public var importsNativeStructure: Bool { self == .arc }
+
+    /// Zen keeps its workspaces, pinned and essential tabs in the profile; BrowserImportCoordinator maps them onto Spaces, Pinned and Favorites on top of the bookmark and history import.
+    public var importsWorkspaces: Bool { self == .zen }
 
     /// Only Arc: Chromium browsers each encrypt cookies with an AES key under their own Keychain "Safe Storage" item; Safari and Firefox use different mechanisms `ArcCookieDecryptor` doesn't cover.
     public var importsLoginSessions: Bool { self == .arc }
@@ -36,8 +41,18 @@ public enum ImportableBrowser: String, CaseIterable, Identifiable, Sendable {
     var isChromium: Bool {
         switch self {
         case .chrome, .brave, .edge, .opera, .arc: return true
-        case .safari, .firefox: return false
+        case .safari, .firefox, .zen: return false
         }
+    }
+
+    func firefoxFamilyRoot(homeDirectory: URL) -> URL? {
+        let relative: String
+        switch self {
+        case .firefox: relative = "Library/Application Support/Firefox"
+        case .zen: relative = "Library/Application Support/zen"
+        case .safari, .chrome, .brave, .edge, .opera, .arc: return nil
+        }
+        return homeDirectory.appendingPathComponent(relative, isDirectory: true)
     }
 
     // MARK: File layout
@@ -50,7 +65,7 @@ public enum ImportableBrowser: String, CaseIterable, Identifiable, Sendable {
     func userDataDirectory(homeDirectory: URL) -> URL? {
         let relative: String
         switch self {
-        case .safari, .firefox: return nil
+        case .safari, .firefox, .zen: return nil
         // ChromiumProfileLocator requires a Bookmarks file to recognize a profile; Arc has none, so ArcImportReader names its Default directory directly instead of routing through here.
         case .arc: relative = "Library/Application Support/Arc/User Data"
         case .chrome: relative = "Library/Application Support/Google/Chrome"
@@ -75,11 +90,10 @@ public enum ImportableBrowser: String, CaseIterable, Identifiable, Sendable {
             return fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
         case .arc:
             return ArcImportReader.isPresent(homeDirectory: homeDirectory)
-        case .firefox:
+        case .firefox, .zen:
             // Not decided from profiles.ini alone: a removed profile is still listed there.
-            return !FirefoxProfileLocator.profiles(
-                in: FirefoxProfileLocator.rootDirectory(homeDirectory: homeDirectory)
-            ).isEmpty
+            guard let root = firefoxFamilyRoot(homeDirectory: homeDirectory) else { return false }
+            return !FirefoxProfileLocator.profiles(in: root).isEmpty
         case .chrome, .brave, .edge, .opera:
             guard let root = userDataDirectory(homeDirectory: homeDirectory) else { return false }
             return !ChromiumProfileLocator.profiles(in: root).isEmpty
@@ -155,11 +169,18 @@ public struct BrowserImportPayload: Sendable {
     public var browser: ImportableBrowser
     public var bookmarkRoot: ImportedBookmarkFolder
     public var visits: [ImportedVisit]
+    public var zen: ZenStructure?
 
-    public init(browser: ImportableBrowser, bookmarkRoot: ImportedBookmarkFolder, visits: [ImportedVisit]) {
+    public init(
+        browser: ImportableBrowser,
+        bookmarkRoot: ImportedBookmarkFolder,
+        visits: [ImportedVisit],
+        zen: ZenStructure? = nil
+    ) {
         self.browser = browser
         self.bookmarkRoot = bookmarkRoot
         self.visits = visits
+        self.zen = zen
     }
 }
 

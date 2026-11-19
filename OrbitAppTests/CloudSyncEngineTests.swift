@@ -103,6 +103,38 @@ final class CloudSyncEngineTests: XCTestCase {
 
     // MARK: - THE PRIVACY GUARANTEE
 
+    func testSyncedContentIsWrittenOnlyToEncryptedFields() {
+        let profile = Profile(name: "Work", createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let record = SyncRecordMapping.profileRecord(from: profile, clientModifiedAt: Date(), existing: nil)
+
+        let plaintextKeys = record.allKeys().filter { !CKRecord.isEncryptedFieldKey($0) }
+        XCTAssertEqual(plaintextKeys, [], "Content left in plaintext: \(plaintextKeys)")
+        XCTAssertEqual(record.encryptedValues["e_name"] as? String, "Work")
+        XCTAssertEqual(SyncRecordMapping.profile(from: record)?.name, "Work")
+    }
+
+    func testARecordWrittenByAnOlderBuildInPlaintextStillDecodesAndLosesItsPlaintextOnRewrite() {
+        let profile = Profile(name: "Legacy", createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let legacy = CKRecord(
+            recordType: SyncRecordType.profile,
+            recordID: CloudSyncEngine.recordID(SyncRecordType.profile, name: profile.id.uuidString)
+        )
+        legacy["name"] = "Legacy" as CKRecordValue
+        legacy["symbolName"] = profile.symbolName as CKRecordValue
+        legacy["tintRed"] = profile.tint.red as CKRecordValue
+        legacy["tintGreen"] = profile.tint.green as CKRecordValue
+        legacy["tintBlue"] = profile.tint.blue as CKRecordValue
+        legacy["tintAlpha"] = profile.tint.alpha as CKRecordValue
+        legacy["isPersistent"] = true as CKRecordValue
+        legacy["createdAt"] = profile.createdAt as CKRecordValue
+
+        XCTAssertEqual(SyncRecordMapping.profile(from: legacy)?.name, "Legacy")
+
+        let rewritten = SyncRecordMapping.profileRecord(from: profile, clientModifiedAt: Date(), existing: legacy)
+        XCTAssertNil(rewritten["name"], "The plaintext copy would stay in iCloud.")
+        XCTAssertEqual(rewritten.encryptedValues["e_name"] as? String, "Legacy")
+    }
+
     func testIncognitoEntitiesAreNeverQueuedForPushWhileRealOnesAre() {
         let fixture = makeFixture()
         let store = StubSyncableStore(state: fixture.state)
@@ -753,6 +785,45 @@ final class CloudSyncEngineTests: XCTestCase {
         XCTAssertFalse(engine.status.isSynced, "Orbit kept claiming to be synced after losing the iCloud account.")
     }
 
+    func testClearingLocalCachesLeavesNoCacheFileEvenAfterEarlierQueuedWrites() {
+        let fixture = makeFixture(includeIncognito: false)
+        let store = StubSyncableStore(state: fixture.state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(store: store, transport: transport)
+        engine.reconcile()
+        acceptQueuedSaves(engine: engine, transport: transport)
+        engine.flushPendingCacheWrites()
+        let recordCache = scratch.appendingPathComponent("record-cache.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recordCache.path), "Fixture check: the cache must have reached disk.")
+
+        engine.reconcile()
+        acceptQueuedSaves(engine: engine, transport: transport)
+        engine.clearLocalCaches()
+        engine.flushPendingCacheWrites()
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: recordCache.path),
+            "An older queued cache write landed after the delete and brought the cache back."
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scratch.appendingPathComponent("tombstones.json").path))
+    }
+
+    func testAFreshEngineReadsTheCachesAnEarlierEngineQueuedBeforeItWasDropped() {
+        let fixture = makeFixture(includeIncognito: false)
+        let store = StubSyncableStore(state: fixture.state)
+        let transport = RecordingSyncTransport()
+        let first = makeEngine(store: store, transport: transport)
+        first.reconcile()
+        acceptQueuedSaves(engine: first, transport: transport)
+        let cached = first._test_cachedRecordNames
+        XCTAssertFalse(cached.isEmpty)
+        first.flushPendingCacheWrites()
+
+        let second = makeEngine(store: store, transport: RecordingSyncTransport())
+
+        XCTAssertEqual(second._test_cachedRecordNames, cached)
+    }
+
     func testSwitchingICloudAccountsClearsWhatThisDeviceThoughtItHadAlreadyPushed() {
         let fixture = makeFixture(includeIncognito: false)
         let store = StubSyncableStore(state: fixture.state)
@@ -881,6 +952,135 @@ final class CloudSyncEngineTests: XCTestCase {
 
     private func settle(milliseconds: Int) async throws {
         try await Task.sleep(for: .milliseconds(milliseconds))
+    }
+}
+
+@MainActor
+final class SyncDuplicateIDMergeTests: XCTestCase {
+
+    func testMergingFavoritesWithARepeatedIDDoesNotTrapAndKeepsTheFirst() {
+        let spaceID = UUID()
+        let repeated = UUID()
+        let url = URL(string: "https://example.com")!
+        var space = Space(
+            id: spaceID, name: "S", profileID: UUID(),
+            favorites: [Favorite(id: repeated, url: url, title: "first"), Favorite(id: repeated, url: url, title: "second")]
+        )
+        let pulled = FlatFavorite(favorite: Favorite(id: UUID(), url: url, title: "new"), spaceID: spaceID, order: 0)
+
+        CloudSyncEngine.mergeFavorites(into: &space, pulled: [pulled], deletedIDs: [], tombstoned: [])
+
+        XCTAssertTrue(space.favorites.contains { $0.title == "new" })
+        XCTAssertTrue(space.favorites.filter { $0.id == repeated }.allSatisfy { $0.title == "first" })
+    }
+
+    func testMergingThePinnedTreeWithARepeatedIDDoesNotTrap() {
+        let spaceID = UUID()
+        let repeated = UUID()
+        let incoming = UUID()
+        var space = Space(id: spaceID, name: "S", profileID: UUID(), pinned: [.tab(repeated), .tab(repeated)])
+        let node = FlatSidebarNode(id: incoming, spaceID: spaceID, parentID: nil, order: 0, kind: .tab)
+
+        CloudSyncEngine.mergePinnedTree(into: &space, pulledNodes: [node], deletedIDs: [], tombstoned: [])
+
+        XCTAssertTrue(space.pinned.contains { $0.id == incoming })
+    }
+}
+
+final class SyncCacheWriterTests: XCTestCase {
+
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func increment() { lock.lock(); value += 1; lock.unlock() }
+        var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    }
+
+    private var directory: URL!
+
+    override func setUp() {
+        super.setUp()
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrbitAppTests-SyncCacheWriter-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        if let directory { try? FileManager.default.removeItem(at: directory) }
+        directory = nil
+        super.tearDown()
+    }
+
+    /// Occupies the writer's queue until `release()` so later requests pile up behind it.
+    private func blockWriter(_ writer: SyncCacheWriter) -> () -> Void {
+        let started = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
+        writer.write(to: directory.appendingPathComponent("blocker.json")) {
+            started.signal()
+            gate.wait()
+            return Data("blocker".utf8)
+        }
+        started.wait()
+        return { gate.signal() }
+    }
+
+    func testAnOlderWriteNeverOvertakesALaterDelete() {
+        let writer = SyncCacheWriter()
+        let target = directory.appendingPathComponent("record-cache.json")
+        let release = blockWriter(writer)
+
+        writer.write(to: target) { Data("old".utf8) }
+        writer.remove([target])
+        release()
+        writer.flush()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+    }
+
+    func testAWriteRequestedAfterADeleteSurvivesIt() throws {
+        let writer = SyncCacheWriter()
+        let target = directory.appendingPathComponent("record-cache.json")
+        let release = blockWriter(writer)
+
+        writer.write(to: target) { Data("old".utf8) }
+        writer.remove([target])
+        writer.write(to: target) { Data("new".utf8) }
+        release()
+        writer.flush()
+
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "new")
+    }
+
+    func testQueuedWritesToOneFileCoalesceToTheNewestSnapshot() throws {
+        let writer = SyncCacheWriter()
+        let target = directory.appendingPathComponent("record-cache.json")
+        let encoded = Counter()
+        let release = blockWriter(writer)
+
+        for generation in 1...5 {
+            writer.write(to: target) {
+                encoded.increment()
+                return Data("\(generation)".utf8)
+            }
+        }
+        release()
+        writer.flush()
+
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "5")
+        XCTAssertEqual(encoded.count, 1, "Superseded snapshots were still encoded and written.")
+    }
+
+    func testWritesToDifferentFilesAreAllPerformed() throws {
+        let writer = SyncCacheWriter()
+        let first = directory.appendingPathComponent("a.json")
+        let second = directory.appendingPathComponent("b.json")
+
+        writer.write(to: first) { Data("a".utf8) }
+        writer.write(to: second) { Data("b".utf8) }
+        writer.flush()
+
+        XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), "a")
+        XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "b")
     }
 }
 

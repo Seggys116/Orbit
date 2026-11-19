@@ -45,6 +45,7 @@ enum AppSmokeProbe {
         case openTabs
         case closeOpenedTabs
         case status
+        case interact
         case quit
     }
 
@@ -292,17 +293,17 @@ enum AppSmokeProbe {
 
         var waited = 0.0
         while waited < 60.0 {
-            let state = host.navigationStates[tabID]
+            let state = host.navigationState(for: tabID)
             if state?.isLoading == false, isTarget(state?.url, url) { break }
             await settle(0.25)
             waited += 0.25
         }
-        guard let committed = host.navigationStates[tabID]?.url, isTarget(committed, url),
-              host.navigationStates[tabID]?.isLoading == false else {
+        guard let committed = host.navigationState(for: tabID)?.url, isTarget(committed, url),
+              host.navigationState(for: tabID)?.isLoading == false else {
             let engineError = host.tabErrors[tabID].map { "\($0.code) \($0.underlyingDescription)" } ?? "none"
             failRemainingPageChecks(
-                "after 60s the tab reports url=\(String(describing: host.navigationStates[tabID]?.url)) "
-                + "isLoading=\(String(describing: host.navigationStates[tabID]?.isLoading)) engineError=\(engineError)"
+                "after 60s the tab reports url=\(String(describing: host.navigationState(for: tabID)?.url)) "
+                + "isLoading=\(String(describing: host.navigationState(for: tabID)?.isLoading)) engineError=\(engineError)"
             )
             return tabID
         }
@@ -614,7 +615,9 @@ enum AppSmokeProbe {
             guard let data = try? Data(contentsOf: commandURL) else { return }
             benchNextSequence += 1
             let request = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-            var response = executeBench(request, host: host)
+            var response = executeBench(request, host: host, sequence: sequence, directory: directory)
+            // An interaction takes seconds. Its own task writes the answer, so the commands behind it are not held up.
+            if response["deferred"] as? Bool == true { continue }
             response["seq"] = sequence
             writeBenchJSON(response, named: "bench-response-\(sequence).json", in: directory)
             if response["quit"] as? Bool == true {
@@ -624,7 +627,7 @@ enum AppSmokeProbe {
         }
     }
 
-    private static func executeBench(_ request: [String: Any], host: AppEnvironment) -> [String: Any] {
+    private static func executeBench(_ request: [String: Any], host: AppEnvironment, sequence: Int, directory: URL) -> [String: Any] {
         guard let name = request["command"] as? String, let command = BenchCommand(rawValue: name) else {
             return ["ok": false, "error": "unknown command \(String(describing: request["command"]))"]
         }
@@ -632,8 +635,22 @@ enum AppSmokeProbe {
         case .openTabs: return benchOpenTabs(request, host: host)
         case .closeOpenedTabs: return benchCloseOpenedTabs(host: host)
         case .status: return benchStatus(host: host)
+        case .interact: return benchInteract(request, host: host, sequence: sequence, directory: directory)
         case .quit: return ["ok": true, "quit": true]
         }
+    }
+
+    private static func benchInteract(_ request: [String: Any], host: AppEnvironment, sequence: Int, directory: URL) -> [String: Any] {
+        guard let window = AppInteractionProbe.browserWindow() else {
+            return ["ok": false, "error": "no browser window to measure"]
+        }
+        let tabs = benchOpenedTabs
+        Task { @MainActor in
+            var response = await AppInteractionProbe.run(request: request, host: host, tabs: tabs, window: window)
+            response["seq"] = sequence
+            writeBenchJSON(response, named: "bench-response-\(sequence).json", in: directory)
+        }
+        return ["deferred": true]
     }
 
     private static func benchOpenTabs(_ request: [String: Any], host: AppEnvironment) -> [String: Any] {
@@ -691,7 +708,7 @@ enum AppSmokeProbe {
             response["warning"] = "the engine is not WebKitEngine, so no helper processes are attributed"
         }
         response["tabs"] = benchOpenedTabs.map { (tabID: TabID) -> [String: Any] in
-            let state = host.navigationStates[tabID]
+            let state = host.navigationState(for: tabID)
             return [
                 "url": state?.url?.absoluteString ?? "",
                 "isLoading": state?.isLoading ?? false,

@@ -55,8 +55,12 @@ private struct ResolvedFaviconView: View, Equatable {
             }
         }
         .task(id: FaviconRequestKey(url: url, host: host)) {
-            if let cached = faviconCache.cachedImage(forHost: host) {
+            if let cached = faviconCache.memoryCachedImage(forHost: host) {
                 assign(PreparedFavicon.prepare(cached))
+                return
+            }
+            if let stored = await faviconCache.loadImage(forHost: host) {
+                assign(PreparedFavicon.prepare(stored))
                 return
             }
             assign(PreparedFavicon.prepare(await faviconCache.image(for: url, host: host)))

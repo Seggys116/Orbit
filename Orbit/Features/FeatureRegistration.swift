@@ -13,6 +13,14 @@ enum FeatureRegistration {
         installMedia(env)
         installCapture(env)
         installAssist(env)
+        installPasswords()
+    }
+
+    // MARK: - Passwords
+
+    private static func installPasswords() {
+        LegacyPasswordVaultCleanup.runIfNeeded()
+        SystemPasswords.shared.start()
     }
 
     // MARK: - Boosts (spec §6.1)

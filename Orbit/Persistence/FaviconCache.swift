@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 #if DEBUG
 import OSLog
@@ -16,13 +17,20 @@ public final class FaviconCache {
     private let diskStore: FaviconDiskStore
     private var pendingDiskWork: Task<Void, Never>?
 
+    private var negativeHosts: Set<String> = []
+    private var diskLoads: [String: Task<NSImage?, Never>] = [:]
+    private var storeGeneration = 0
+
     public init(
         diskDirectory: URL = FaviconCache.defaultDiskDirectory,
         memoryCountLimit: Int = 300,
-        diskCapBytes: Int64 = 25 * 1024 * 1024
+        diskCapBytes: Int64 = 25 * 1024 * 1024,
+        evictionInterval: TimeInterval = 60
     ) {
         self.diskDirectory = diskDirectory
-        self.diskStore = FaviconDiskStore(diskDirectory: diskDirectory, diskCapBytes: diskCapBytes)
+        self.diskStore = FaviconDiskStore(
+            diskDirectory: diskDirectory, diskCapBytes: diskCapBytes, evictionInterval: evictionInterval
+        )
         memoryCache.countLimit = memoryCountLimit
         try? FileManager.default.createDirectory(at: diskDirectory, withIntermediateDirectories: true)
     }
@@ -36,18 +44,66 @@ public final class FaviconCache {
 
     // MARK: - Synchronous lookup
 
+    /// Memory only: never touches the disk, so it is safe on every keystroke and every row render.
+    public func memoryCachedImage(forHost host: String) -> NSImage? {
+        let key = host.lowercased()
+        if key == FaviconCache.newTabHost { return FaviconCache.newTabIcon }
+        return memoryCache.object(forKey: key as NSString)
+    }
+
+    /// Falls back to a synchronous disk read on a memory miss. UI code uses memoryCachedImage and loadImage instead.
     public func cachedImage(forHost host: String) -> NSImage? {
-        if host.lowercased() == FaviconCache.newTabHost { return FaviconCache.newTabIcon }
-        let key = host.lowercased() as NSString
-        if let cached = memoryCache.object(forKey: key) {
-            return cached
-        }
-        let url = diskURL(forHost: host)
+        if let cached = memoryCachedImage(forHost: host) { return cached }
+        let key = host.lowercased()
+        guard !negativeHosts.contains(key) else { return nil }
+        let url = diskURL(forHost: key)
         guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) else {
+            negativeHosts.insert(key)
             return nil
         }
-        memoryCache.setObject(image, forKey: key)
+        memoryCache.setObject(image, forKey: key as NSString)
         return image
+    }
+
+    /// Reads and decodes the stored icon off the main actor, then keeps it in memory. A host with no file is remembered until something stores one.
+    public func loadImage(forHost host: String) async -> NSImage? {
+        if let cached = memoryCachedImage(forHost: host) { return cached }
+        let key = host.lowercased()
+        guard !negativeHosts.contains(key) else { return nil }
+        if let existing = diskLoads[key] { return await existing.value }
+        let url = diskURL(forHost: key)
+        let generation = storeGeneration
+        let task = Task.detached(priority: .userInitiated) { () -> NSImage? in
+            guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) else { return nil }
+            image.cacheMode = .always
+            _ = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            return image
+        }
+        diskLoads[key] = task
+        let loaded = await task.value
+        diskLoads[key] = nil
+        if let current = memoryCache.object(forKey: key as NSString) { return current }
+        guard let loaded else {
+            if generation == storeGeneration { negativeHosts.insert(key) }
+            return nil
+        }
+        memoryCache.setObject(loaded, forKey: key as NSString)
+        return loaded
+    }
+
+    /// Whether an icon for the host is held in memory or on disk, without decoding it.
+    public func hasImage(forHost host: String) -> Bool {
+        if memoryCachedImage(forHost: host) != nil { return true }
+        let key = host.lowercased()
+        guard !negativeHosts.contains(key) else { return false }
+        if FileManager.default.fileExists(atPath: diskURL(forHost: key).path) { return true }
+        negativeHosts.insert(key)
+        return false
+    }
+
+    private func noteStored(_ key: String) {
+        negativeHosts.remove(key)
+        storeGeneration += 1
     }
 
     // MARK: - Direct caching (engine-provided images)
@@ -79,6 +135,7 @@ public final class FaviconCache {
             guard let image = FaviconCache.decodedImage(data) else { continue }
             let key = host.lowercased()
             memoryCache.setObject(image, forKey: key as NSString)
+            noteStored(key)
             toWrite.append((key, image))
         }
         if !toWrite.isEmpty {
@@ -103,6 +160,7 @@ public final class FaviconCache {
             guard let image = FaviconCache.decodedImage(data) else { continue }
             let key = host.lowercased()
             memoryCache.setObject(image, forKey: key as NSString)
+            noteStored(key)
             toWrite.append((key, image))
         }
 
@@ -140,8 +198,17 @@ public final class FaviconCache {
 
     // MARK: - Async fetch
 
+    nonisolated static let networkSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
+
     public func image(for faviconURL: URL?, host: String) async -> NSImage {
-        if let cached = cachedImage(forHost: host) {
+        if let cached = await loadImage(forHost: host) {
             return cached
         }
 
@@ -212,7 +279,7 @@ public final class FaviconCache {
         do {
             var request = URLRequest(url: url)
             request.timeoutInterval = FaviconCache.downloadTimeout
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await FaviconCache.networkSession.data(for: request)
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                 return nil
             }
@@ -234,7 +301,7 @@ public final class FaviconCache {
         request.timeoutInterval = downloadTimeout
         request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
         do {
-            let (stream, response) = try await URLSession.shared.bytes(for: request)
+            let (stream, response) = try await FaviconCache.networkSession.bytes(for: request)
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                 return nil
             }
@@ -353,10 +420,12 @@ public final class FaviconCache {
     private func store(_ image: NSImage, forHost host: String) {
         let key = host.lowercased()
         memoryCache.setObject(image, forKey: key as NSString)
+        noteStored(key)
         let store = diskStore
         enqueueDiskWork {
-            await store.write(image, forHost: key)
-            await store.evictIfNeeded()
+            if await store.write(image, forHost: key) {
+                await store.evictIfNeeded()
+            }
         }
     }
 
@@ -371,7 +440,7 @@ public final class FaviconCache {
             for item in items {
                 await store.write(item.image, forHost: item.host)
             }
-            await store.evictIfNeeded()
+            await store.evictIfNeeded(force: true)
         }
     }
 
@@ -389,6 +458,11 @@ public final class FaviconCache {
     /// Awaits every disk write, remove and eviction scan queued so far. Production code never needs this — the memory cache is always current — but a test that reopens the same directory in a fresh FaviconCache has no memory cache to fall back on and needs the background write to have actually landed.
     func _test_awaitPendingWrites() async {
         await pendingDiskWork?.value
+    }
+
+    func _test_diskStats() async -> (pngWrites: Int, evictionScans: Int) {
+        await pendingDiskWork?.value
+        return await diskStore.stats
     }
 
     // MARK: - Bulk clear
@@ -477,6 +551,28 @@ public final class FaviconCache {
     }
 }
 
+/// Decides whether a finished page load should fetch its favicon again: not while the declared icons are unchanged, the cache still holds the host and the last fetch is under the TTL.
+struct FaviconRefreshGate {
+    static let ttl: TimeInterval = 7 * 24 * 60 * 60
+
+    private var lastKey: String?
+    private var lastFetch: Date?
+
+    static func key(host: String, hrefs: [String]) -> String {
+        ([host] + hrefs).joined(separator: "\n")
+    }
+
+    func shouldFetch(key: String, cacheHasHost: Bool, now: Date) -> Bool {
+        guard key == lastKey, cacheHasHost, let lastFetch else { return true }
+        return now.timeIntervalSince(lastFetch) >= Self.ttl
+    }
+
+    mutating func recordFetch(key: String, now: Date) {
+        lastKey = key
+        lastFetch = now
+    }
+}
+
 /// The disk side of FaviconCache: PNG encoding, atomic writes, removes and the
 /// eviction scan, all off the main actor. Every FaviconCache instance owns
 /// exactly one of these, and FaviconCache serialises access to it through
@@ -484,11 +580,19 @@ public final class FaviconCache {
 private actor FaviconDiskStore {
     private let diskDirectory: URL
     private let diskCapBytes: Int64
+    private let evictionInterval: TimeInterval
+    private var writtenDigests: [String: SHA256.Digest] = [:]
+    private var lastEviction: Date?
+    private var pngWrites = 0
+    private var evictionScans = 0
 
-    init(diskDirectory: URL, diskCapBytes: Int64) {
+    init(diskDirectory: URL, diskCapBytes: Int64, evictionInterval: TimeInterval) {
         self.diskDirectory = diskDirectory
         self.diskCapBytes = diskCapBytes
+        self.evictionInterval = evictionInterval
     }
+
+    var stats: (pngWrites: Int, evictionScans: Int) { (pngWrites, evictionScans) }
 
     nonisolated static func diskURL(forHost host: String, in directory: URL) -> URL {
         let safeName = host.lowercased()
@@ -496,25 +600,39 @@ private actor FaviconDiskStore {
         return directory.appendingPathComponent("\(safeName).png", isDirectory: false)
     }
 
-    func write(_ image: NSImage, forHost host: String) {
+    /// Returns whether a file was written; identical bytes already on disk are left alone.
+    @discardableResult
+    func write(_ image: NSImage, forHost host: String) -> Bool {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else { return }
-        try? png.write(to: FaviconDiskStore.diskURL(forHost: host, in: diskDirectory), options: .atomic)
+              let png = rep.representation(using: .png, properties: [:]) else { return false }
+        let url = FaviconDiskStore.diskURL(forHost: host, in: diskDirectory)
+        let digest = SHA256.hash(data: png)
+        if writtenDigests[host] == digest, FileManager.default.fileExists(atPath: url.path) { return false }
+        guard (try? png.write(to: url, options: .atomic)) != nil else { return false }
+        writtenDigests[host] = digest
+        pngWrites += 1
+        return true
     }
 
     func remove(host: String) {
+        writtenDigests[host] = nil
         try? FileManager.default.removeItem(at: FaviconDiskStore.diskURL(forHost: host, in: diskDirectory))
     }
 
     func removeAllPNGs() {
+        writtenDigests.removeAll()
         guard let urls = try? FileManager.default.contentsOfDirectory(at: diskDirectory, includingPropertiesForKeys: nil) else { return }
         for url in urls where url.pathExtension == "png" {
             try? FileManager.default.removeItem(at: url)
         }
     }
 
-    func evictIfNeeded() {
+    func evictIfNeeded(force: Bool = false) {
+        let now = Date()
+        if !force, let lastEviction, now.timeIntervalSince(lastEviction) < evictionInterval { return }
+        lastEviction = now
+        evictionScans += 1
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: diskDirectory,
             includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]

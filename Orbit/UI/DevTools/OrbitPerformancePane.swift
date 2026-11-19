@@ -156,6 +156,8 @@ struct OrbitPerformancePane: View {
     @ViewBuilder
     private var tabContent: some View {
         switch model.activeTab {
+        case .live:
+            PerfLiveTab(session: session)
         case .summary:
             PerfSummaryTab(session: session)
         case .timeline:

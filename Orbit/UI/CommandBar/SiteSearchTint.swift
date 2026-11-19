@@ -16,12 +16,14 @@ enum SiteSearchTintResolver {
         let key = host.lowercased()
         if let entry = cache[key], entry.fromFavicon { return entry.tint }
 
-        if let favicon = AppEnvironment.processRoot.faviconCache.cachedImage(forHost: host),
+        let faviconCache = AppEnvironment.processRoot.faviconCache
+        if let favicon = faviconCache.memoryCachedImage(forHost: host),
            let color = dominantColor(of: favicon) {
             let tint = makeTint(from: color)
             cache[key] = Entry(tint: tint, fromFavicon: true)
             return tint
         }
+        warm(key, in: faviconCache)
 
         if let entry = cache[key] { return entry.tint }
 
@@ -30,6 +32,17 @@ enum SiteSearchTintResolver {
         let tint = makeTint(from: color)
         cache[key] = Entry(tint: tint, fromFavicon: false)
         return tint
+    }
+
+    private static var warming: Set<String> = []
+
+    // Loads the stored icon off the main actor so a later call finds it in memory; the first call answers with the generated tint.
+    private static func warm(_ key: String, in faviconCache: FaviconCache) {
+        guard warming.insert(key).inserted else { return }
+        Task { @MainActor in
+            _ = await faviconCache.loadImage(forHost: key)
+            warming.remove(key)
+        }
     }
 
     private static func makeTint(from color: NSColor) -> CommandRowTint {

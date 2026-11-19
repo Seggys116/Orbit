@@ -217,6 +217,23 @@ final class SiteProfileSwitchingTests: XCTestCase {
         XCTAssertNil(opened.first { $0.url.host() == "example.org" }?.siteProfileID, "A link to another site must never carry the opener's login identity.")
     }
 
+    func testAPopupFromAProfiledTabToAnotherSiteIsNotPutOnTheProfile() throws {
+        let work = try makeProfile()
+        let opener = env.openTab(url: githubURL, in: spaceID)
+        env.switchSiteProfile(tabID: opener, to: work.id)
+        let workSession = MockEngineSession(identifier: work.sessionIdentifier, isPersistent: true)
+
+        let signIn = MockWebContents(session: workSession)
+        let signInTab = env.adoptPageCreatedDetachedTab(signIn, url: URL(string: "https://accounts.google.com/o/oauth2/auth")!)
+        defer { env.closeTab(signInTab) }
+        XCTAssertNil(env.tab(signInTab)?.siteProfileID, "Google has no profile, so its sign-in window must not be given GitHub's.")
+
+        let sameSite = MockWebContents(session: workSession)
+        let sameSiteTab = env.adoptPageCreatedTab(sameSite, url: URL(string: "https://gist.github.com/x")!, in: spaceID, activate: false)
+        defer { env.closeTab(sameSiteTab) }
+        XCTAssertEqual(env.tab(sameSiteTab)?.siteProfileID, work.id)
+    }
+
     // MARK: - Deleting
 
     func testDeletingAProfileMovesItsLiveTabsToDefaultAndRemovesIt() throws {

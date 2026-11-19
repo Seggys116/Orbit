@@ -14,12 +14,14 @@ extension ImportableBrowser {
         case .opera: "com.operasoftware.Opera"
         case .firefox: "org.mozilla.firefox"
         case .arc: "company.thebrowser.Browser"
+        case .zen: "app.zen-browser.zen"
         }
     }
 
     /// What the importer brings across, in one short line for the picker row.
     var importSummaryLine: String {
-        importsNativeStructure ? "Spaces, tabs, folders and history" : "Bookmarks and history"
+        if importsWorkspaces { return "Workspaces, pinned tabs, bookmarks and history" }
+        return importsNativeStructure ? "Spaces, tabs, folders and history" : "Bookmarks and history"
     }
 }
 
@@ -87,6 +89,9 @@ struct OnboardingImportStep: View {
     private var description: String {
         guard let source = selection else {
             return "Pick a browser to import bookmarks and history. Passwords are never imported."
+        }
+        if source.importsWorkspaces {
+            return "Imports your Zen workspaces as Spaces, with pinned and essential tabs, open tabs, bookmarks and history. Passwords are not imported."
         }
         guard source.importsNativeStructure else {
             return "Imports bookmarks and history from \(source.displayName). Passwords are not imported."
@@ -170,7 +175,29 @@ struct OnboardingImportStep: View {
         let bookmarks = summary.bookmarksImported
         let folders = summary.foldersCreated
         let history = summary.historyEntriesImported
+        if summary.browser.importsWorkspaces {
+            return zenSummaryLine(summary)
+        }
         return "Imported \(bookmarks) bookmark\(bookmarks == 1 ? "" : "s") into \(folders) folder\(folders == 1 ? "" : "s") and \(history) history entr\(history == 1 ? "y" : "ies") from \(summary.browser.displayName)."
+    }
+}
+
+extension OnboardingImportStep {
+    static func zenSummaryLine(_ summary: BrowserImportSummary) -> String {
+        func count(_ value: Int, _ singular: String, _ plural: String) -> String {
+            "\(value) \(value == 1 ? singular : plural)"
+        }
+        var parts = [
+            count(summary.spacesCreated, "Space", "Spaces"),
+            count(summary.pinnedTabsImported, "pinned tab", "pinned tabs"),
+            count(summary.todayTabsImported, "open tab", "open tabs"),
+        ]
+        if summary.favoritesImported > 0 {
+            parts.append(count(summary.favoritesImported, "favourite", "favourites"))
+        }
+        parts.append(count(summary.bookmarksImported, "bookmark", "bookmarks"))
+        parts.append(count(summary.historyEntriesImported, "history entry", "history entries"))
+        return "Imported " + parts.joined(separator: ", ") + " from \(summary.browser.displayName)."
     }
 }
 

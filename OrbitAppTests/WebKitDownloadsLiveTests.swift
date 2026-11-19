@@ -1,6 +1,7 @@
 //  Page-initiated downloads on system WebKit: attachment and unshowable responses become real
 //  WKDownloads, land on disk, and are reported through the WebContentsDelegate into DownloadStore.
 
+import AppKit
 import Foundation
 import XCTest
 @testable import Orbit
@@ -96,6 +97,73 @@ final class WebKitDownloadsLiveTests: LiveEnvironmentTestCase {
 
     private func record(_ fixture: Fixture) -> DownloadItem? {
         fixture.recorder.downloadID.flatMap { id in env.downloadStore.downloads.first { $0.id == id } }
+    }
+
+    // MARK: - Context menu resources
+
+    private static let pngBytes: Data = {
+        let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 5, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        )!
+        return rep.representation(using: .png, properties: [:])!
+    }()
+
+    private static let pageWithImage = "<!doctype html><img src=\"/photo.png\">"
+
+    func test_savingAnImageTheMenuPointsAtDownloadsItEvenThoughThePageCanShowIt() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 60) {
+            try await self.withFixture(routes: [
+                "/": .init(contentType: "text/html", body: Self.pageWithImage),
+                "/photo.png": .init(contentType: "image/png", data: Self.pngBytes),
+            ]) { fixture in
+                fixture.contents.load(fixture.server.baseURL)
+                try await Self.poll("the page to load") { !fixture.contents.navigationState.isLoading && fixture.contents.navigationState.url != nil }
+
+                fixture.contents.downloadResource(fixture.server.baseURL.appendingPathComponent("photo.png"))
+                try await Self.poll("the image download to complete") { self.record(fixture)?.state == .completed }
+
+                let item = try XCTUnwrap(self.record(fixture))
+                XCTAssertEqual(item.destinationURL.lastPathComponent, "photo.png")
+                XCTAssertEqual(try Data(contentsOf: item.destinationURL), Self.pngBytes)
+                XCTAssertEqual(fixture.contents.navigationState.url?.path, "/", "saving an image must not navigate the page")
+            }
+        }
+    }
+
+    func test_copyingAnImageFetchesItsBytesWithoutLeavingADownloadBehind() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 60) {
+            try await self.withFixture(routes: [
+                "/": .init(contentType: "text/html", body: Self.pageWithImage),
+                "/photo.png": .init(contentType: "image/png", data: Self.pngBytes),
+            ]) { fixture in
+                fixture.contents.load(fixture.server.baseURL)
+                try await Self.poll("the page to load") { !fixture.contents.navigationState.isLoading && fixture.contents.navigationState.url != nil }
+
+                let data = await fixture.contents.loadResourceData(fixture.server.baseURL.appendingPathComponent("photo.png"))
+                XCTAssertEqual(data, Self.pngBytes)
+                XCTAssertNil(fixture.recorder.downloadID, "copying must not add an entry to the Downloads list")
+                XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: fixture.directory.path).isEmpty)
+
+                let pasteboard = NSPasteboard(name: NSPasteboard.Name("orbit-live-copy-image-\(UUID().uuidString)"))
+                defer { pasteboard.releaseGlobally() }
+                XCTAssertTrue(OrbitContextMenuActions.writeImage(try XCTUnwrap(data), sourceURL: nil, to: pasteboard))
+                XCTAssertEqual(pasteboard.data(forType: .png), Self.pngBytes)
+            }
+        }
+    }
+
+    func test_copyingAMissingImageYieldsNothing() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 60) {
+            try await self.withFixture(routes: [
+                "/": .init(contentType: "text/html", body: Self.pageWithImage),
+            ]) { fixture in
+                fixture.contents.load(fixture.server.baseURL)
+                try await Self.poll("the page to load") { !fixture.contents.navigationState.isLoading && fixture.contents.navigationState.url != nil }
+                let data = await fixture.contents.loadResourceData(fixture.server.baseURL.appendingPathComponent("gone.png"))
+                XCTAssertNil(data)
+            }
+        }
     }
 
     // MARK: - Attachments
