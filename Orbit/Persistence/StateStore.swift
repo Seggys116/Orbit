@@ -310,7 +310,7 @@ public actor StateStore {
         let keep = maxBackups
         let onFailure = debouncedSaveFailureHandler
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global(qos: .utility).async {
+            DispatchQueue.global(qos: .default).async {
                 do {
                     try coordinator.writeIfNotSuperseded(scheduledAt: generation) {
                         try Self.write(toSave, stateFileURL: fileURL, backupsDirectory: backups, maxBackups: keep)

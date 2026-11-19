@@ -356,6 +356,9 @@ extension OrbitInspectAgent {
           for (var i = 0; i < lines.length; i++) {
             var line = lines[i];
             var at = line.lastIndexOf("@");
+            // The agent's own frames. Injected into a document that is already loaded, they carry that document's address, so without this the work is charged to the page instead of the script that scheduled it.
+            var fname = at >= 0 ? line.slice(0, at) : "";
+            if (fname === "lh_callerURL" || fname === "wrap" || fname === "measured") continue;
             var loc = (at >= 0 ? line.slice(at + 1) : line).trim().replace(/^\(|\)$/g, "").replace(/:\d+:\d+$/, "");
             if (/^(https?|file):/.test(loc)) return loc.slice(0, 300);
           }

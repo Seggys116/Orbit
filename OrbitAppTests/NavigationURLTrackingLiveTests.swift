@@ -7,10 +7,9 @@ import XCTest
 @testable import Orbit
 
 @MainActor
-final class NavigationURLTrackingLiveTests: XCTestCase {
+final class NavigationURLTrackingLiveTests: LiveEnvironmentTestCase {
 
     private var server: LiveHTTPTestServer!
-    private var env: AppEnvironment!
     private var spaceID: SpaceID!
 
     override func setUpWithError() throws {
@@ -28,19 +27,12 @@ final class NavigationURLTrackingLiveTests: XCTestCase {
             ],
             stallingRoutes: ["/slow"]
         )
-        env = AppEnvironment.demo
         let profileID = env.createDefaultProfileIfNeeded()
         spaceID = env.createSpace(name: "Nav", icon: "circle", iconIsEmoji: false, theme: SpaceTheme(), profileID: profileID)
         env.selectSpace(spaceID)
     }
 
     override func tearDownWithError() throws {
-        if let env {
-            let leftovers = Array(env.webContents.values)
-            _ = try? WebKitLiveEngineHost.runLive { for contents in leftovers where !contents.isClosed { contents.close() } }
-            env._test_engineOverride = nil
-        }
-        env = nil
         server.stop()
         server = nil
         try super.tearDownWithError()

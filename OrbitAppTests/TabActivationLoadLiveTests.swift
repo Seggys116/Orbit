@@ -6,10 +6,9 @@ import XCTest
 @testable import Orbit
 
 @MainActor
-final class TabActivationLoadLiveTests: XCTestCase {
+final class TabActivationLoadLiveTests: LiveEnvironmentTestCase {
 
     private var server: LiveHTTPTestServer!
-    private var env: AppEnvironment!
     private var spaceID: SpaceID!
     private var window: NSWindow?
 
@@ -22,7 +21,6 @@ final class TabActivationLoadLiveTests: XCTestCase {
             )
         }
         server = try LiveHTTPTestServer(routes: routes)
-        env = AppEnvironment.demo
         let profileID = env.createDefaultProfileIfNeeded()
         spaceID = env.createSpace(name: "Activation", icon: "circle", iconIsEmoji: false, theme: SpaceTheme(), profileID: profileID)
         env.selectSpace(spaceID)
@@ -31,14 +29,6 @@ final class TabActivationLoadLiveTests: XCTestCase {
     override func tearDownWithError() throws {
         window?.close()
         window = nil
-        if let env {
-            let leftovers = Array(env.webContents.values)
-            _ = try? WebKitLiveEngineHost.runLive {
-                for contents in leftovers where !contents.isClosed { contents.close() }
-            }
-            env._test_engineOverride = nil
-        }
-        env = nil
         server.stop()
         server = nil
         try super.tearDownWithError()

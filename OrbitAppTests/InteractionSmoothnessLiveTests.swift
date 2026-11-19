@@ -13,7 +13,7 @@ import XCTest
 @testable import Orbit
 
 @MainActor
-final class InteractionSmoothnessLiveTests: XCTestCase {
+final class InteractionSmoothnessLiveTests: LiveEnvironmentTestCase {
 
     private struct Page {
         var path: String
@@ -33,7 +33,6 @@ final class InteractionSmoothnessLiveTests: XCTestCase {
     ]
 
     private var server: LiveHTTPTestServer!
-    private var env: AppEnvironment!
     private var spaceID: SpaceID!
     private var window: NSWindow?
     private var controller: OrbitWindowController?
@@ -56,7 +55,6 @@ final class InteractionSmoothnessLiveTests: XCTestCase {
             )
         }
         server = try LiveHTTPTestServer(routes: routes)
-        env = AppEnvironment.demo
         let profileID = env.createDefaultProfileIfNeeded()
         spaceID = env.createSpace(name: "Smoothness", icon: "circle", iconIsEmoji: false, theme: SpaceTheme(), profileID: profileID)
         env.selectSpace(spaceID)
@@ -72,14 +70,6 @@ final class InteractionSmoothnessLiveTests: XCTestCase {
         controller?.window = nil
         controller = nil
         window = nil
-        if let env {
-            let leftovers = Array(env.webContents.values)
-            _ = try? WebKitLiveEngineHost.runLive {
-                for contents in leftovers where !contents.isClosed { contents.close() }
-            }
-            env._test_engineOverride = nil
-        }
-        env = nil
         server.stop()
         server = nil
         try super.tearDownWithError()

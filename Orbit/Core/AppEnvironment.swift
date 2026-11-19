@@ -2022,7 +2022,7 @@ final class AppEnvironment {
             let width = Int(request.size.width.rounded())
             let height = Int(request.size.height.rounded())
             // Off the main actor: the redraw to 1x is the only real cost here and must not land on a tab switch.
-            let scaled = await Task.detached(priority: .utility) {
+            let scaled = await Task.detached(priority: .userInitiated) {
                 RendererSnapshotCache.downscale(cgImage, width: width, height: height)
             }.value
             guard let self, let scaled else { return }

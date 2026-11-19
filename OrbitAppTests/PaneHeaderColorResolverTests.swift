@@ -738,8 +738,8 @@ final class PageColorObserverScriptTests: XCTestCase {
             "The safety-net cadence must come from PageColorObserverScript.idleReReadInterval, not a literal in the script."
         )
         XCTAssertTrue(
-            observerSource.contains("if (document.hidden) { return; }"),
-            "A tab the user cannot see must cost nothing; visibilitychange re-reads when it comes back."
+            observerSource.contains("if (!document.hidden) { armIdleTimer(); }") && observerSource.contains("clearInterval(idleTimer)"),
+            "A tab the user cannot see must cost nothing, not even a no-op timer; visibilitychange re-arms it and re-reads when it comes back."
         )
     }
 

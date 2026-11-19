@@ -28,7 +28,33 @@ struct SidebarLinkDropDelegate: DropDelegate {
 
 extension View {
     func sidebarLinkDropDestination(environment: AppEnvironment, spaceID: SpaceID) -> some View {
-        onDrop(
+        modifier(SidebarLinkDropDestination(environment: environment, spaceID: spaceID))
+    }
+}
+
+private struct SidebarLinkDropDestination: ViewModifier {
+    var environment: AppEnvironment
+    var spaceID: SpaceID
+
+    #if DEBUG
+    // ImageRenderer paints a drop destination as an artifact over the section, so render tests switch it off, as they do for the sidebar's own drag and drop.
+    @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeDragDisabled
+    #endif
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        if screenshotModeDragDisabled {
+            content
+        } else {
+            destination(content)
+        }
+        #else
+        destination(content)
+        #endif
+    }
+
+    private func destination(_ content: Content) -> some View {
+        content.onDrop(
             of: [.url, .fileURL, .plainText],
             delegate: SidebarLinkDropDelegate(environment: environment, spaceID: spaceID)
         )

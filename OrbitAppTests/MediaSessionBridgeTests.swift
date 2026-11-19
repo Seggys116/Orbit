@@ -364,8 +364,8 @@ final class MediaSessionBridgeTests: XCTestCase {
             "Without a poll, a lazily inserted <video> (an ad, a carousel) would never pick up Orbit's mute state."
         )
         XCTAssertTrue(
-            source.contains("if (document.hidden && !anyLiveMedia()) { return; }"),
-            "A hidden page with nothing playing must not keep scanning for media."
+            source.contains("if (document.hidden && !anyLiveMedia()) { disarmPoll(); return; }"),
+            "A hidden page with nothing playing must not keep scanning for media, and must drop its timer so the web process can nap."
         )
     }
 }
