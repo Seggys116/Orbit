@@ -338,11 +338,42 @@ final class SystemPasswordsMessagesTests: XCTestCase {
         let body: [String: Any] = ["Entries": [
             ["code": "123456", "username": "alice", "domain": "example.com", "source": "Messages"],
             ["code": "12<b>34"],
-            ["username": "nobody"],
+            [:],
         ] as [Any]]
         XCTAssertEqual(SystemPasswordsMessages.oneTimeCodes(from: body), [
             SystemPasswordOneTimeCode(code: "123456", username: "alice", domain: "example.com", source: "Messages"),
         ])
+    }
+
+    func testAnEntryThatNamesACodeButDoesNotCarryItIsHeldBackNotDropped() {
+        let named: [String: Any] = ["Entries": [["username": "alice", "domain": "example.com"]] as [Any]]
+        XCTAssertEqual(SystemPasswordsMessages.oneTimeCodes(from: named).map(\.isHidden), [true])
+        XCTAssertEqual(SystemPasswordsMessages.oneTimeCodes(from: named).first?.username, "alice")
+
+        let guarded: [String: Any] = ["RequiresUserAuthenticationToFill": true, "Entries": [[:]] as [Any]]
+        XCTAssertEqual(SystemPasswordsMessages.oneTimeCodes(from: guarded).map(\.isHidden), [true])
+
+        let numbered: [String: Any] = ["Entry_0": ["guid": "G-1", "code": "Not Included"]]
+        XCTAssertEqual(SystemPasswordsMessages.oneTimeCodes(from: numbered).map(\.isHidden), [true])
+    }
+
+    func testTheReplyShapeNamesKeysAndNeverValues() {
+        let body: [String: Any] = ["STATUS": 0, "Entries": [["code": "123456", "username": "alice"]] as [Any]]
+        let shape = SystemPasswordsMessages.shape(of: body)
+        XCTAssertTrue(shape.contains("entries=1"))
+        XCTAssertTrue(shape.contains("code=6 chars"))
+        XCTAssertFalse(shape.contains("123456"))
+        XCTAssertFalse(shape.contains("alice"))
+    }
+
+    func testTheNewPasswordSheetCapabilityIsReadAndTheRequestAsksOnlyForTheSite() {
+        let message: [String: Any] = ["capabilities": ["canOpenPasswordsAppToNewPasswordSheet": true, "canFillOneTimeCodes": true]]
+        XCTAssertTrue(SystemPasswordsMessages.capabilities(from: message).canOpenNewPasswordSheet)
+        XCTAssertFalse(SystemPasswordsMessages.capabilities(from: ["capabilities": [:]]).canOpenNewPasswordSheet)
+        XCTAssertEqual(
+            text(SystemPasswordsMessages.newAccountBody(host: "example.com")),
+            #"{"ACT":3,"URL":"","USR":"","PWD":"","NURL":"example.com","NUSR":"","NPWD":""}"#
+        )
     }
 }
 

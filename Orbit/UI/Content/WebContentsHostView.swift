@@ -512,8 +512,14 @@ final class SplitPaneDropCatcherView: NSView {
         let current = NSApp.currentEvent
         let age = current.map { ProcessInfo.processInfo.systemUptime - $0.timestamp } ?? 0
         guard bounds.contains(point),
-              Self.claimsHit(duringEvent: current?.type, eventAge: age, dragInFlight: sidebarDragIsActive) else { return nil }
+              Self.claimsHit(duringEvent: current?.type, eventAge: age, dragInFlight: sidebarDragIsActive),
+              Self.dragCarriesSidebarTab(NSPasteboard(name: .drag).types ?? []) else { return nil }
         return self
+    }
+
+    /// A record left from an earlier sidebar drag says nothing about the drag under the pointer now. Only a drag that carries a sidebar tab may be taken here; a file, an image or a link dragged in from another app must reach the page.
+    static func dragCarriesSidebarTab(_ types: [NSPasteboard.PasteboardType]) -> Bool {
+        types.contains(NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier))
     }
 
     // A drop target is only wanted while a drag is moving over the page. A click, a release or a scroll is never part of a drag, so it passes through to the page even if a drag record has been left behind; claiming it would leave every pane of a split unclickable until the next drag.

@@ -802,4 +802,34 @@ final class SplitLayoutMenuTests: XCTestCase {
         )
     }
 
+    // A window of its own keeps its own selection. Choosing the tab the document already holds for the Space used to change nothing in that window, so a split it was showing stayed on screen and marked active.
+    func test_aWindowOfItsOwn_followsAChosenTabTheDocumentAlreadyHolds() {
+        let tabA = makeTab(url: "https://a.example.com")
+        let tabB = makeTab(url: "https://b.example.com")
+        let tabN = makeTab(url: "https://n.example.com")
+        defer { cleanup([tabA.id, tabB.id, tabN.id]) }
+        guard let groupID = env.store.createSplit(with: [tabA.id, tabB.id], axis: .horizontal) else {
+            XCTFail("Failed to create a split group.")
+            return
+        }
+        defer { env.store.dissolveSplit(groupID) }
+        let spaceID = tabA.spaceID
+        env.store.state.activeTabBySpace[spaceID] = tabN.id
+
+        let window = AppEnvironment.makeWindowScoped(sharing: env, activeSpaceID: spaceID, isIndependentStandardWindow: true)
+        defer { window.disposeWindowSession() }
+
+        window.activateTab(tabA.id)
+        XCTAssertEqual(window.activeTabID, tabA.id, "the window shows the split's pane")
+        XCTAssertEqual(env.activeTabID, tabN.id, "the document's own selection is left where it was")
+
+        window.activateTab(tabN.id)
+        XCTAssertEqual(window.activeTabID, tabN.id, "choosing the tab the document already holds still moves this window to it")
+        XCTAssertNil(window.activeSplitGroup, "the split is no longer the active one")
+    }
+    func test_aPressOnTheFloatingSidebar_isNotAPressOnThePaneBeneathIt() {
+        XCTAssertTrue(SplitViewContainer.floatingSidebarCovers(x: 40, windowWidth: 1400, sidebarWidth: 280, isRevealed: true))
+        XCTAssertFalse(SplitViewContainer.floatingSidebarCovers(x: 700, windowWidth: 1400, sidebarWidth: 280, isRevealed: true), "a press well inside the page is still the page's")
+        XCTAssertFalse(SplitViewContainer.floatingSidebarCovers(x: 40, windowWidth: 1400, sidebarWidth: 280, isRevealed: false), "with the sidebar away, the whole width is the page")
+    }
 }

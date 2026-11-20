@@ -692,7 +692,7 @@ final class AppEnvironment {
     func materializeActiveTabIfNeeded() {
         guard let spaceID = activeSpace?.id else { return }
         guard let tab = activeTab(in: spaceID) else { return }
-        materializeWebContents(for: tab.id, url: tab.url)
+        materializeWebContents(for: tab.id, url: tab.url, isWake: true)
     }
 
     @discardableResult
@@ -1020,12 +1020,20 @@ final class AppEnvironment {
             store.openTab(url: url, in: spaceID, section: section, activate: activate)
         }
         if let siteProfileID { _ = store.setSiteProfile(siteProfileID, forTab: tabID) }
-        // History recording schedules its own task. Queuing it before materializeWebContents
-        // puts that task ahead of the deferred load, so the first navigation waits on a database write.
+        // No visit is recorded here: the page's own commit records it, with its final address and its own title. A visit
+        // recorded before the load kept the address as it was asked for (before any redirect) and an empty title.
         materializeWebContents(for: tabID, url: url)
-        recordVisit(url: url, title: "", profileID: profileID(for: spaceID), spaceID: spaceID)
         syncExtensionActiveTab()
         return tabID
+    }
+
+    /// The store moves the document's pointers only when the tab chosen differs from the one they already name, and the window scoping above copies a selection only from such a change. Choosing the tab the document already holds therefore never reached a window of its own, which kept showing the split it was on.
+    private func claimSelectionForThisWindow(_ id: TabID) {
+        guard isWindowScoped, let tab = store.tab(id) else { return }
+        if windowActiveSpaceID != tab.spaceID { windowActiveSpaceID = tab.spaceID }
+        if isIndependentStandardWindow, windowActiveTabBySpace[tab.spaceID] != id {
+            windowActiveTabBySpace[tab.spaceID] = id
+        }
     }
 
     func activateTab(_ id: TabID) {
@@ -1033,11 +1041,16 @@ final class AppEnvironment {
         // A page is on screen in one window only; asking for it here brings that window forward instead of
         // taking the page from it or showing it twice.
         if let owner = otherEnvironmentDisplaying(id) {
+            Self.logger.info("a tab was chosen but another window shows it, so that window was brought forward instead")
             OrbitWindowController.window(for: owner)?.makeKeyAndOrderFront(nil)
             return
         }
         scopingActiveSpaceToThisWindow { store.selectTab(id) }
-        materializeWebContents(for: id, url: tab.url)
+        claimSelectionForThisWindow(id)
+        if activeTabID != id {
+            Self.logger.error("a tab was chosen but is not the active tab afterwards: sectionIsArchived=\(tab.section == .archived) spaceMatches=\(tab.spaceID == self.activeSpace?.id)")
+        }
+        materializeWebContents(for: id, url: tab.url, isWake: true)
         // Selecting the tab is the user asking to see it: a pane left frozen or hidden takes the page back.
         if let contents = webContents[id] { WebContentsPresentation.shared.requestPresentation(of: contents) }
         syncExtensionActiveTab()
@@ -1051,7 +1064,7 @@ final class AppEnvironment {
         guard webContents[id] == nil,
               let tab = store.tab(id), tab.section != .archived,
               otherEnvironmentDisplaying(id) == nil else { return }
-        materializeWebContents(for: id, url: tab.url)
+        materializeWebContents(for: id, url: tab.url, isWake: true)
     }
 
     func closeTab(_ id: TabID, destroyRenderer: Bool = true) {
@@ -1067,7 +1080,7 @@ final class AppEnvironment {
                 activateTab(nowActive)
             } else if let survivor = store.tab(id) {
                 // Closing a pinned tab unpins it, and with nothing else open it stays on screen — it needs the renderer back that was released above.
-                materializeWebContents(for: id, url: survivor.url)
+                materializeWebContents(for: id, url: survivor.url, isWake: true)
             }
         } else if let successor {
             activateTab(successor)
@@ -1094,7 +1107,7 @@ final class AppEnvironment {
     func materializeDisplayedTab(_ tabID: TabID, shownInOwnWindow: Bool = false) {
         guard webContents[tabID] == nil, shownInOwnWindow || isDisplaying(tabID), otherEnvironmentDisplaying(tabID) == nil,
               let tab = store.tab(tabID) else { return }
-        materializeWebContents(for: tabID, url: tab.url)
+        materializeWebContents(for: tabID, url: tab.url, isWake: true)
         syncExtensionActiveTab()
     }
 
@@ -1303,7 +1316,8 @@ final class AppEnvironment {
     // A short-backoff retry turns that race into an invisible delay instead of a permanently blank tab.
     private static let engineUnavailableRetryLimit = 6
 
-    func materializeWebContents(for tabID: TabID, url: URL, retryCount: Int = 0) {
+    /// `isWake` is a page coming back for a tab that already existed (after its renderer was let go, at launch, or when a pane shows it): it is not a new visit, and its saved session, if any, is restored in place of loading the last address.
+    func materializeWebContents(for tabID: TabID, url: URL, retryCount: Int = 0, isWake: Bool = false) {
         guard webContents[tabID] == nil else { return }
 
         // The tab's page may already be live in another window (it was last used there). Moving that page here keeps its
@@ -1366,7 +1380,7 @@ final class AppEnvironment {
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: delayNanoseconds)
                     guard let self, self.state.tabs[tabID] != nil else { return }
-                    self.materializeWebContents(for: tabID, url: url, retryCount: retryCount + 1)
+                    self.materializeWebContents(for: tabID, url: url, retryCount: retryCount + 1, isWake: isWake)
                 }
                 return
             }
@@ -1383,7 +1397,11 @@ final class AppEnvironment {
         // document would otherwise start without them. Content blocking does not: its
         // compile keeps running and applies to requests the page makes after the rules land.
         BoostRuntime.shared.prepareSession(session, env: self)
-        if let hold = firstLoadHold {
+        if isWake { quietLoadTabIDs.insert(tabID) }
+        if isWake, let saved = releasedSessionStates.removeValue(forKey: tabID), contents.restoreSessionState(saved) {
+            // The page and its whole back/forward list are back as they were; loading the last address instead would start a one-entry list.
+            releasedSessionOrder.removeAll { $0 == tabID }
+        } else if let hold = firstLoadHold {
             loadOnceCachedRulesLand(contents, tabID: tabID, url: url, hold: hold)
         } else {
             contents.load(url)
@@ -1485,6 +1503,22 @@ final class AppEnvironment {
     // call is free and so the tab being deactivated can be named.
     private var lastPushedActiveTabID: TabID?
 
+    // The back/forward list of every tab whose renderer was let go, kept for the next time it is shown. Newest last; the oldest are dropped past the limit.
+    @ObservationIgnored private var releasedSessionStates: [TabID: Data] = [:]
+    @ObservationIgnored private var releasedSessionOrder: [TabID] = []
+    private static let releasedSessionLimit = 40
+    // Tabs whose next commit is a page coming back, not a visit.
+    @ObservationIgnored var quietLoadTabIDs: Set<TabID> = []
+
+    private func rememberSessionState(_ data: Data, for tabID: TabID) {
+        releasedSessionStates[tabID] = data
+        releasedSessionOrder.removeAll { $0 == tabID }
+        releasedSessionOrder.append(tabID)
+        while releasedSessionOrder.count > Self.releasedSessionLimit {
+            releasedSessionStates.removeValue(forKey: releasedSessionOrder.removeFirst())
+        }
+    }
+
     // No-op unless this tab has a live WebKit web view. Module-internal: AppEnvironment+TearOff.swift reuses it too.
     func registerExtensionTab(_ tabID: TabID) {
         guard let contents = webContents[tabID] as? WebKitWebContents else { return }
@@ -1585,7 +1619,6 @@ final class AppEnvironment {
         if activate {
             webContents[tabID]?.focus()
         }
-        recordVisit(url: url, title: "", profileID: profileID(for: spaceID), spaceID: spaceID)
         syncExtensionActiveTab()
         return tabID
     }
@@ -1598,7 +1631,6 @@ final class AppEnvironment {
         let tab = Tab(spaceID: spaceID, section: .today, url: url)
         state.tabs[tab.id] = tab
         adoptWebContents(contents, for: tab.id, url: url)
-        recordVisit(url: url, title: "", profileID: space(spaceID)?.profileID ?? state.profiles.first?.id ?? UUID())
         return tab.id
     }
 
@@ -1648,6 +1680,9 @@ final class AppEnvironment {
         (webContents[tabID] as? WebKitWebContents)?.endPictureInPictureForClose()
         if windowClosing, let contents = webContents[tabID] as? WebKitWebContents {
             (engine as? WebKitEngine)?.noteTabWillCloseWithWindow(contents)
+        }
+        if !windowClosing, let state = webContents[tabID]?.captureSessionState() {
+            rememberSessionState(state, for: tabID)
         }
         if destroyRenderer {
             webContents[tabID]?.close()
@@ -2220,6 +2255,23 @@ final class AppEnvironment {
         upsertHistoryCache(recorded.entry, typedCount: recorded.row.typedCount)
         ChromeExtensionAPI.postVisited(recorded.row)
         return recorded.row
+    }
+
+    /// Gives the history row for `url` the title the page has now. A visit is recorded when the page commits, before the page has a title of its own.
+    func noteHistoryTitle(_ title: String, for url: URL, spaceID: SpaceID?) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let historyStore else { return }
+        let profileID = spaceID.flatMap { space($0)?.profileID } ?? state.profiles.first?.id ?? UUID()
+        guard !isPrivateBrowsingContext(spaceID: spaceID, profileID: profileID) else { return }
+        Task { [weak self] in
+            guard (try? await historyStore.updateTitle(trimmed, forURL: url)) == true, let self else { return }
+            var index = self.historyIndex
+            guard let position = index.firstIndex(where: { $0.entry.url == url }), index[position].entry.title != trimmed else { return }
+            var entry = index[position].entry
+            entry.title = trimmed
+            index[position] = PreparedHistoryEntry(entry)
+            self.setHistoryIndex(index)
+        }
     }
 
     private func refreshHistoryCache(query: String = "") async {

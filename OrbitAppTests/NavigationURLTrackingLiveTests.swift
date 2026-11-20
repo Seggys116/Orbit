@@ -131,6 +131,32 @@ final class NavigationURLTrackingLiveTests: LiveEnvironmentTestCase {
         }
     }
 
+    func testATabThatSleptWakesWithItsWholeBackListAndBackGoesOneStep() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 120) {
+            self.env._test_engineOverride = await WebKitLiveEngineHost.sharedEngine()
+            let tab = self.env.openTab(url: self.url("/a"), in: self.spaceID)
+            try await self.waitUntil("a loaded") { self.shown(tab).page == self.url("/a") && self.env.navigationState(for: tab)?.isLoading == false }
+            self.env.loadInTab(tab, url: self.url("/b"))
+            try await self.waitUntil("b loaded") { self.shown(tab).page == self.url("/b") && self.env.navigationState(for: tab)?.isLoading == false }
+            self.env.loadInTab(tab, url: self.url("/c"))
+            try await self.waitUntil("c loaded") { self.shown(tab).page == self.url("/c") && self.env.navigationState(for: tab)?.isLoading == false }
+
+            // The renderer is let go, as it is for a tab left alone long enough.
+            self.env.releaseWebContents(for: tab)
+            XCTAssertNil(self.env.webContents[tab], "the page is gone while the tab sleeps")
+
+            self.env.activateTab(tab)
+            try await self.waitUntil("woke at c") { self.shown(tab).page == self.url("/c") && self.env.navigationState(for: tab)?.isLoading == false }
+            let woke = try XCTUnwrap(self.env.webContents[tab] as? WebKitWebContents)
+            XCTAssertEqual(woke.webView.backForwardList.backList.map(\.url.path), ["/a", "/b"], "the whole back list comes back with the page: \(self.historySummary(woke))")
+            XCTAssertEqual(self.env.tab(tab)?.url, self.url("/c"))
+
+            woke.goBack()
+            try await self.waitUntil("back to b") { self.shown(tab).page == self.url("/b") && self.env.navigationState(for: tab)?.isLoading == false }
+            XCTAssertEqual(self.env.tab(tab)?.url, self.url("/b"), "one Back is one step, and the tab's address follows it")
+        }
+    }
+
     func testNavigatingWhileAnotherLoadIsStillPendingKeepsTheAddressRight() throws {
         try WebKitLiveEngineHost.runLive(timeout: 60) {
             self.env._test_engineOverride = await WebKitLiveEngineHost.sharedEngine()

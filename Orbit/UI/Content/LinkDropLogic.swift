@@ -116,7 +116,21 @@ enum LinkDropLogic {
 
     // MARK: - Pasteboard
 
+    /// Image data or a file promise on the drag belongs to the page: an upload zone or an editor takes it. An image dragged from another app carries its own address beside the picture, so that address alone must not turn the drop into a link.
+    static func offersContentForPage(types: [NSPasteboard.PasteboardType]) -> Bool {
+        let promised: Set<String> = [
+            "com.apple.pasteboard.promised-file-url",
+            "com.apple.pasteboard.promised-file-content-type",
+            "com.apple.NSFilePromiseItemMetaData",
+        ]
+        return types.contains { type in
+            if promised.contains(type.rawValue) { return true }
+            return UTType(type.rawValue)?.conforms(to: .image) == true
+        }
+    }
+
     static func payload(from pasteboard: NSPasteboard) -> LinkDropPayload? {
+        if offersContentForPage(types: pasteboard.types ?? []) { return nil }
         let urlType = NSPasteboard.PasteboardType(UTType.url.identifier)
         let fileType = NSPasteboard.PasteboardType(UTType.fileURL.identifier)
         let urls: [URL] = (pasteboard.pasteboardItems ?? []).flatMap { item -> [URL] in

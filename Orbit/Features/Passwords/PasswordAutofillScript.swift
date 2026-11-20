@@ -38,6 +38,8 @@ enum PasswordAutofillScript {
       var USERNAME = /user|login|log[-_ ]?in|e[-_ ]?mail|account|identifier|sign[-_ ]?in|member|customer|uname|handle|phone|mobile/;
       var NOT_USERNAME = /search|query|coupon|promo|captcha|street|billing|shipping|zip|postal|city|country|first[-_ ]?name|last[-_ ]?name|full[-_ ]?name|company|gift|card|quantity|cvv|cvc|verif/;
       var OTP = /otp|one[-_ ]?time|verification[-_ ]?code|verify[-_ ]?code|2fa|mfa|totp|sms[-_ ]?code|passcode|security[-_ ]?code|authenticator|\bpin\b/;
+      var CODE_WORD = /code|digit/;
+      var NOT_CODE = /coupon|promo|zip|post|gift|card|cvv|cvc|captcha|referral|invite|discount|voucher|country|area|dial|colou?r|source|bar|qr|language|locale|currency|tracking|redeem/;
       var REVEALED_PASSWORD = /pass(word|wd)?\b|pwd/;
       var CONFIRM = /confirm|repeat|retype|verify|again|re[-_ ]?enter|match|password2|pass2/;
       var NEW_PASSWORD = /new[-_ ]?pass|create[-_ ]?pass|choose[-_ ]?pass|set[-_ ]?pass|\bnew\b/;
@@ -112,8 +114,20 @@ enum PasswordAutofillScript {
       function isCandidate(el) {
         if (!el || el.nodeType !== 1 || el.localName !== 'input') { return false; }
         var type = el.type;
+        if (type === 'number') { return looksLikeNumericCode(el); }
         return type === 'password' || type === 'text' || type === 'email' || type === 'tel';
       }
+
+      // A box named for a code that takes a short run of digits: "Enter code", "6-digit code", name="code". Promo, zip, card and similar codes are not one-time codes.
+      function looksLikeNumericCode(el) {
+        var hint = lower(hintText(el));
+        if (!CODE_WORD.test(hint) || NOT_CODE.test(hint)) { return false; }
+        var mode = lower(attr(el, 'inputmode'));
+        var longest = el.maxLength;
+        return el.type === 'number' || mode === 'numeric' || mode === 'decimal' || /\d/.test(attr(el, 'pattern')) || (longest >= 4 && longest <= 8);
+      }
+
+      function declaresOneTimeCode(el) { return autocompleteTokens(el).indexOf('one-time-code') >= 0; }
 
       function isShown(el) {
         if (!el.isConnected || el.getClientRects().length === 0) { return false; }
@@ -131,7 +145,8 @@ enum PasswordAutofillScript {
         var box = el.getBoundingClientRect();
         if (box.width < 6 || box.height < 6) { return false; }
         if (box.right + window.pageXOffset < 0 || box.bottom + window.pageYOffset < 0) { return false; }
-        if (parseFloat(window.getComputedStyle(el).opacity) < 0.05) { return false; }
+        // A code field that declares itself is often one transparent input laid over drawn digit boxes.
+        if (!declaresOneTimeCode(el) && parseFloat(window.getComputedStyle(el).opacity) < 0.05) { return false; }
         var ancestor = el.parentElement;
         for (var depth = 0; ancestor && depth < 8; depth++) {
           if (lower(ancestor.getAttribute('aria-hidden')) === 'true') { return false; }
@@ -182,7 +197,7 @@ enum PasswordAutofillScript {
       function isOneTimeCode(el) {
         if (autocompleteTokens(el).indexOf('one-time-code') >= 0) { return true; }
         if (el.maxLength === 1) { return true; }
-        return OTP.test(lower(hintText(el)));
+        return OTP.test(lower(hintText(el))) || looksLikeNumericCode(el);
       }
 
       // 'username', 'otp' or '' for a text-like field.
@@ -216,7 +231,7 @@ enum PasswordAutofillScript {
       // A one-time code field by name or autocomplete, or one box of a row of at least four one-character boxes.
       function isCodeField(el, fields) {
         if (autocompleteTokens(el).indexOf('one-time-code') >= 0) { return true; }
-        if (OTP.test(lower(hintText(el)))) { return true; }
+        if (OTP.test(lower(hintText(el))) || looksLikeNumericCode(el)) { return true; }
         return el.maxLength === 1 && codeBoxes(fields).length >= 4;
       }
 
@@ -364,7 +379,14 @@ enum PasswordAutofillScript {
         if (filling || seen.has(event)) { return; }
         seen.add(event);
         var target = eventTarget(event);
-        if (isCandidate(target) && focusFollowsInput(target)) { scheduleReport(target, 'focus'); }
+        if (!isCandidate(target)) { return; }
+        // A verification page puts the cursor in its code box itself, so a code field is offered without waiting for a key or a click. Passwords still wait for the person.
+        if (focusFollowsInput(target) || isUnpromptedCodeField(target)) { scheduleReport(target, 'focus'); }
+      }
+
+      function isUnpromptedCodeField(el) {
+        var info = classify(el);
+        return !!info && info.kind === 'oneTimeCode';
       }
 
       function onFocusOut(event) {

@@ -42,6 +42,7 @@ nonisolated enum SystemPasswordsSaveOutcome: Sendable, Equatable {
 nonisolated struct SystemPasswordsUpdate: Sendable, Equatable {
     var state: SystemPasswordsState
     var canFillOneTimeCodes: Bool
+    var canCreateAccount: Bool = false
 }
 
 /// The one conversation with Apple's password helper. It keeps the helper running for the life of the app, because a pairing does not
@@ -98,7 +99,7 @@ actor SystemPasswordsSession {
     private func setState(_ new: SystemPasswordsState) {
         guard new != state else { return }
         state = new
-        updateContinuation.yield(SystemPasswordsUpdate(state: new, canFillOneTimeCodes: capabilities.canFillOneTimeCodes))
+        updateContinuation.yield(SystemPasswordsUpdate(state: new, canFillOneTimeCodes: capabilities.canFillOneTimeCodes, canCreateAccount: capabilities.canOpenNewPasswordSheet))
     }
 
     // MARK: - Lifecycle
@@ -492,6 +493,22 @@ actor SystemPasswordsSession {
         return listed.contains { $0.username == username } ? .saved : .unconfirmed
     }
 
+    /// Has Passwords open its New Password sheet for the site, where the person makes the account's password with Apple's own generator.
+    func startNewAccount(host: String) async throws {
+        await acquire()
+        defer { release() }
+        guard capabilities.canOpenNewPasswordSheet else { throw SystemPasswordsError.notFound }
+        let body = try await encryptedExchange(
+            command: .setPasswordForLoginNameAndURL,
+            replies: [SystemPasswordsCommand.setPasswordForLoginNameAndURL.rawValue, SystemPasswordsCommand.newAccountForURL.rawValue],
+            host: host,
+            query: SystemPasswordsMessages.saveQuery,
+            body: SystemPasswordsMessages.newAccountBody(host: host),
+            timeout: .seconds(20)
+        )
+        Self.logger.info("Passwords was asked to start an account; status=\(SystemPasswordsMessages.status(of: body).map { String($0.rawValue) } ?? "none", privacy: .public)")
+    }
+
     func oneTimeCodes(pageURL: String, username: String?) async throws -> [SystemPasswordOneTimeCode] {
         await acquire()
         defer { release() }
@@ -505,7 +522,9 @@ actor SystemPasswordsSession {
             timeout: .seconds(15)
         )
         if SystemPasswordsMessages.status(of: body) == .noResults { return [] }
-        return SystemPasswordsMessages.oneTimeCodes(from: body)
+        let codes = SystemPasswordsMessages.oneTimeCodes(from: body)
+        Self.logger.info("the Passwords helper listed codes: \(SystemPasswordsMessages.shape(of: body), privacy: .public) kept=\(codes.count)")
+        return codes
     }
 
     /// Asks for the code the person chose. Passwords may ask them to authenticate first, so this waits up to two minutes.

@@ -6,6 +6,8 @@ import Observation
 protocol SystemPasswordsProviding: AnyObject {
     var state: SystemPasswordsState { get }
     var canFillOneTimeCodes: Bool { get }
+    /// True when Passwords can open its New Password sheet for a site from a sign-up form.
+    var canCreateAccount: Bool { get }
     /// Usernames listed for `host` a moment ago, if any; never a password.
     func cachedLogins(forHost host: String) -> [SystemPasswordLogin]?
     func logins(forHost host: String) async throws -> [SystemPasswordLogin]
@@ -17,6 +19,13 @@ protocol SystemPasswordsProviding: AnyObject {
     func didFillOneTimeCode(pageURL: URL, username: String) async
     func requestPairing(over window: NSWindow?)
     func openPasswordsApp()
+    /// Starts a new account for the page's site in Passwords.
+    func createAccount(pageURL: URL) async
+}
+
+extension SystemPasswordsProviding {
+    var canCreateAccount: Bool { false }
+    func createAccount(pageURL: URL) async {}
 }
 
 /// Orbit's link to the passwords and passkeys in iCloud Keychain: the helper session's state for the UI, and the requests page autofill makes.
@@ -31,6 +40,7 @@ final class SystemPasswords: SystemPasswordsProviding {
 
     private(set) var state: SystemPasswordsState = .notStarted
     private(set) var canFillOneTimeCodes = false
+    private(set) var canCreateAccount = false
     private(set) var passkeyState: PasskeyAuthorizationState = .unavailable
     /// A sentence for the person about the last thing that went wrong, cleared by the next attempt.
     private(set) var lastError: String?
@@ -53,6 +63,7 @@ final class SystemPasswords: SystemPasswordsProviding {
     private func apply(_ update: SystemPasswordsUpdate) {
         state = update.state
         canFillOneTimeCodes = update.canFillOneTimeCodes
+        canCreateAccount = update.canCreateAccount
         if update.state != .paired { cache.removeAll() }
     }
 
@@ -133,6 +144,16 @@ final class SystemPasswords: SystemPasswordsProviding {
 
     func oneTimeCodes(pageURL: URL, username: String?) async throws -> [SystemPasswordOneTimeCode] {
         try await session.oneTimeCodes(pageURL: pageURL.absoluteString, username: username)
+    }
+
+    func createAccount(pageURL: URL) async {
+        do {
+            try await session.startNewAccount(host: SystemPasswordPolicy.host(of: pageURL) ?? pageURL.absoluteString)
+        } catch {
+            // The sheet is Passwords' own, so when it will not open from here the app itself is the nearest thing.
+            lastError = Self.message(for: error)
+            openPasswordsApp()
+        }
     }
 
     func revealOneTimeCode(pageURL: URL, username: String?) async throws -> String {

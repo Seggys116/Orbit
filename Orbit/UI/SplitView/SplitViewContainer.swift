@@ -71,6 +71,12 @@ struct SplitViewContainer: View {
         .animation(layoutAnimation, value: tabIDs.count)
     }
 
+    /// The sidebar slid over the page is not part of the page: a press on a row in it must not pick the pane beneath. Picking it moves focus into the page, which sends the sidebar away before the row's click finishes, so the tab the person chose is never selected.
+    static func floatingSidebarCovers(x: CGFloat, windowWidth: CGFloat, sidebarWidth: CGFloat, isRevealed: Bool) -> Bool {
+        guard isRevealed else { return false }
+        return x <= OrbitHoverPanelMetrics.edgeInset + OrbitHoverPanelMetrics.overlayWidth(forSidebarWidth: sidebarWidth, availableWidth: windowWidth)
+    }
+
     /// Each pane's rectangle in the container, top-left origin: the same arithmetic the layout below uses.
     static func paneFrames(group: SplitGroup, size: CGSize) -> [CGRect] {
         let horizontal = group.axis == .horizontal
@@ -135,7 +141,15 @@ struct SplitViewContainer: View {
                     // A plain .onTapGesture here would win the mouse-down/up pair before AppKit routes it to the embedded engine view, swallowing the first click on any page control. SplitPaneFocusObserver observes instead of claiming the click.
                     .background {
                         if mountsFocusObserver, group != nil {
-                            SplitPaneFocusObserver(onClick: { env.focusSplitPane(index: index) })
+                            SplitPaneFocusObserver(
+                                onClick: { env.focusSplitPane(index: index) },
+                                ignores: { point, windowWidth in
+                                    Self.floatingSidebarCovers(
+                                        x: point.x, windowWidth: windowWidth,
+                                        sidebarWidth: env.effectiveSidebarWidth, isRevealed: env.isSidebarHoverRevealed
+                                    )
+                                }
+                            )
                         }
                     }
                     .transition(paneTransition(index: index, orientation: orientation))
@@ -193,6 +207,8 @@ struct SplitDividerView: View {
 
 private struct SplitPaneFocusObserver: NSViewRepresentable {
     var onClick: () -> Void
+    /// A press at this point (window coordinates, with the window's width) that something drawn over the page has taken.
+    var ignores: (CGPoint, CGFloat) -> Bool = { _, _ in false }
 
     #if DEBUG
     @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeRepresentableDisabled
@@ -201,11 +217,13 @@ private struct SplitPaneFocusObserver: NSViewRepresentable {
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
         view.onClick = onClick
+        view.ignores = ignores
         return view
     }
 
     func updateNSView(_ nsView: ObserverView, context: Context) {
         nsView.onClick = onClick
+        nsView.ignores = ignores
         #if DEBUG
         nsView.isArmed = !screenshotModeRepresentableDisabled
         #endif
@@ -213,6 +231,7 @@ private struct SplitPaneFocusObserver: NSViewRepresentable {
 
     final class ObserverView: NSView {
         var onClick: (() -> Void)?
+        var ignores: ((CGPoint, CGFloat) -> Bool)?
         #if DEBUG
         var isArmed = true
         #endif
@@ -229,6 +248,7 @@ private struct SplitPaneFocusObserver: NSViewRepresentable {
                 #endif
                 guard let window = self.window, event.window === window else { return event }
                 let locationInView = self.convert(event.locationInWindow, from: nil)
+                if self.ignores?(event.locationInWindow, window.frame.width) == true { return event }
                 if self.bounds.contains(locationInView) {
                     self.onClick?()
                 }

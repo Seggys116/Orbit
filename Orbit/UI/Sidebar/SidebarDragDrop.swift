@@ -495,7 +495,7 @@ struct SidebarDropTarget<Content: View>: View {
                     .frame(height: OrbitMetrics.sidebarRowHeight * OrbitMetrics.sidebarRowEdgeDropZoneFraction)
                     .contentShape(Rectangle())
                     .sidebarPayloadDropDestination { items, _ in
-                        guard let item = items.first, item.nodeID != rowID else { return false }
+                        guard let item = items.first, !rejects(item) else { return false }
                         onDrop(item, .before(rowID))
                         return true
                     } isTargeted: { targeted in
@@ -512,7 +512,7 @@ struct SidebarDropTarget<Content: View>: View {
                     .frame(height: OrbitMetrics.sidebarRowHeight * OrbitMetrics.sidebarRowEdgeDropZoneFraction)
                     .contentShape(Rectangle())
                     .sidebarPayloadDropDestination { items, _ in
-                        guard let item = items.first, item.nodeID != rowID else { return false }
+                        guard let item = items.first, !rejects(item) else { return false }
                         onDrop(item, .after(rowID))
                         return true
                     } isTargeted: { targeted in

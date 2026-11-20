@@ -50,6 +50,7 @@ nonisolated struct SystemPasswordsCapabilities: Sendable, Equatable {
     var shouldUseBase64 = false
     var secretSessionVersion: Int?
     var canFillOneTimeCodes = false
+    var canOpenNewPasswordSheet = false
     var scanForOTPURI = false
     var operatingSystemName: String?
     var operatingSystemMajorVersion: Int?
@@ -201,6 +202,19 @@ nonisolated enum SystemPasswordsMessages {
         ]).data
     }
 
+    /// Asks Passwords to start a new account for a site: with no username or password given, it opens its own New Password sheet for the address.
+    static func newAccountBody(host: String) -> Data {
+        WireJSON.object([
+            ("ACT", .int(SystemPasswordsAction.addNew.rawValue)),
+            ("URL", .string("")),
+            ("USR", .string("")),
+            ("PWD", .string("")),
+            ("NURL", .string(host)),
+            ("NUSR", .string("")),
+            ("NPWD", .string("")),
+        ]).data
+    }
+
     static func oneTimeCodesBody(pageURL: String, username: String?) -> Data {
         var pairs: [(String, WireJSON)] = [
             ("ACT", .int(SystemPasswordsAction.ghostSearch.rawValue)),
@@ -315,6 +329,7 @@ nonisolated enum SystemPasswordsMessages {
         capabilities.shouldUseBase64 = object["shouldUseBase64"] as? Bool ?? false
         capabilities.secretSessionVersion = integer(object["secretSessionVersion"])
         capabilities.canFillOneTimeCodes = object["canFillOneTimeCodes"] as? Bool ?? false
+        capabilities.canOpenNewPasswordSheet = object["canOpenPasswordsAppToNewPasswordSheet"] as? Bool ?? false
         capabilities.scanForOTPURI = object["scanForOTPURI"] as? Bool ?? false
         if let system = nestedObject(object["operatingSystem"]) {
             capabilities.operatingSystemName = system["name"] as? String
@@ -389,8 +404,12 @@ nonisolated enum SystemPasswordsMessages {
     }
 
     static func oneTimeCodes(from body: [String: Any]) -> [SystemPasswordOneTimeCode] {
-        entries(of: body).compactMap { entry in
-            guard let code = oneTimeCodeText(entry["code"]),
+        let bodyNeedsAuthentication = flag(body["RequiresUserAuthenticationToFill"])
+        return entries(of: body).compactMap { entry in
+            let named = entry["username"] != nil || entry["domain"] != nil || entry["guid"] != nil || entry["source"] != nil
+            // An entry that names a code but does not carry its digits is one Passwords holds back until the person authenticates.
+            let held = flag(entry["RequiresUserAuthenticationToFill"]) || bodyNeedsAuthentication
+            guard let code = oneTimeCodeText(entry["code"]) ?? (named || held ? passwordNotIncluded : nil),
                   code == passwordNotIncluded || PasswordAutofillPolicy.isValidOneTimeCode(code) else { return nil }
             return SystemPasswordOneTimeCode(
                 code: code,
@@ -399,6 +418,17 @@ nonisolated enum SystemPasswordsMessages {
                 source: entry["source"] as? String
             )
         }
+    }
+
+    /// The shape of a reply, never a value: which keys it has and what each entry carries. For the log, so a reply that shows nothing can be explained.
+    static func shape(of body: [String: Any]) -> String {
+        let entries = entries(of: body)
+        let described = entries.map { entry in
+            let code = oneTimeCodeText(entry["code"])
+            let kind = code == nil ? "none" : (code == passwordNotIncluded ? "held" : "\(code?.count ?? 0) chars")
+            return "{\(entry.keys.sorted().joined(separator: ",")) code=\(kind)}"
+        }
+        return "keys=[\(body.keys.sorted().joined(separator: ","))] entries=\(entries.count) \(described.joined(separator: " "))"
     }
 
     /// A code is text, but a helper that sends it as a number still means the digits.

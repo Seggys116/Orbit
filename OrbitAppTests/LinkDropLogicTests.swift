@@ -1,6 +1,7 @@
 //  Dragging a link into the window: which zone a point falls in, which pasteboards carry an openable link, and when the drop catcher takes the drag instead of the page.
 
 import AppKit
+import UniformTypeIdentifiers
 import XCTest
 @testable import Orbit
 
@@ -278,5 +279,28 @@ final class LinkDropLogicTests: XCTestCase {
         XCTAssertEqual(LinkDropLogic.dragOperation(for: .generic), .generic)
         XCTAssertEqual(LinkDropLogic.dragOperation(for: .move), [])
         XCTAssertEqual(LinkDropLogic.dragOperation(for: []), [])
+    }
+    // An image dragged from another app carries its own address beside the picture; the page must get it, not a new tab.
+    func test_anImageCarryingItsAddress_isLeftToThePage() throws {
+        let pasteboard = makePasteboard()
+        let url = try XCTUnwrap(URL(string: "https://example.com/photo.png"))
+        let item = NSPasteboardItem()
+        item.setString(url.absoluteString, forType: NSPasteboard.PasteboardType("public.url"))
+        item.setData(Data([0x89, 0x50, 0x4E, 0x47]), forType: .png)
+        pasteboard.writeObjects([item])
+        XCTAssertNil(LinkDropLogic.payload(from: pasteboard))
+    }
+
+    func test_aFilePromise_isLeftToThePage() {
+        XCTAssertTrue(LinkDropLogic.offersContentForPage(types: [NSPasteboard.PasteboardType("com.apple.NSFilePromiseItemMetaData")]))
+        XCTAssertTrue(LinkDropLogic.offersContentForPage(types: [.tiff]))
+        XCTAssertFalse(LinkDropLogic.offersContentForPage(types: [.string, NSPasteboard.PasteboardType("public.url")]))
+    }
+
+    func test_theSplitCatcherOnlyTakesADragThatCarriesASidebarTab() {
+        let sidebarType = NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)
+        XCTAssertTrue(SplitPaneDropCatcherView.dragCarriesSidebarTab([.string, sidebarType]))
+        XCTAssertFalse(SplitPaneDropCatcherView.dragCarriesSidebarTab([.fileURL, .tiff]))
+        XCTAssertFalse(SplitPaneDropCatcherView.dragCarriesSidebarTab([]))
     }
 }

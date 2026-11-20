@@ -8,7 +8,6 @@ extension AppEnvironment {
         let tab = Tab(spaceID: spaceID, section: .today, url: url)
         state.tabs[tab.id] = tab
         materializeWebContents(for: tab.id, url: url)
-        recordVisit(url: url, title: "", profileID: space(spaceID)?.profileID ?? state.profiles.first?.id ?? UUID())
         return tab.id
     }
 

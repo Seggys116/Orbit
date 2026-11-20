@@ -213,4 +213,29 @@ final class HistoryStoreChromeHistoryRowsTests: XCTestCase {
         XCTAssertNotNil(survivingRow)
     }
 
+    // A visit is recorded when the page commits, before the page has a title; that must not wipe the title already held for the address.
+    func test_aVisitWithNoTitleKeepsTheTitleAlreadyHeld() async throws {
+        let store = try makeStore()
+        try await record(store, "https://a.example/page", title: "Alpha")
+        try await record(store, "https://a.example/page", title: "")
+        let row = try await store.urlRow(forURL: XCTUnwrap(URL(string: "https://a.example/page")))
+        XCTAssertEqual(row?.title, "Alpha")
+        XCTAssertEqual(row?.visitCount, 2)
+    }
+
+    func test_updateTitleGivesAnAddressTheTitleOfItsOwnPage() async throws {
+        let store = try makeStore()
+        let url = try XCTUnwrap(URL(string: "https://a.example/page"))
+        try await record(store, url.absoluteString, title: "")
+        let changed = try await store.updateTitle("Alpha", forURL: url)
+        XCTAssertTrue(changed)
+        let unchanged = try await store.updateTitle("Alpha", forURL: url)
+        XCTAssertFalse(unchanged, "the same title again changes nothing")
+        let missing = try await store.updateTitle("Beta", forURL: XCTUnwrap(URL(string: "https://never.example/")))
+        XCTAssertFalse(missing, "an address that was never visited is not created by a title")
+        let row = try await store.urlRow(forURL: url)
+        XCTAssertEqual(row?.title, "Alpha")
+        XCTAssertEqual(row?.visitCount, 1, "a title is not a visit")
+    }
+
 }

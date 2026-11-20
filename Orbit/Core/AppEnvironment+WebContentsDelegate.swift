@@ -120,6 +120,8 @@ extension AppEnvironment: WebContentsDelegate {
         guard let existing = state.tabs[tabID] else { return }
         var tab = existing
         if let url = contents.navigationState.url, url != tab.url {
+            // The icon belongs to the site the page came from; kept across a move to another host it was shown, and cached, as the new site's.
+            if url.host()?.lowercased() != tab.url.host()?.lowercased() { tab.faviconURL = nil }
             tab.url = url
         }
         if !contents.navigationState.title.isEmpty {
@@ -201,10 +203,19 @@ extension AppEnvironment: WebContentsDelegate {
         applyStoredMuteState(to: contents, tabID: tabID)
         store.noteTabAccessed(tabID)
         guard let tab = state.tabs[tabID] else { return }
-        recordVisit(url: url, title: tab.title, profileID: space(tab.spaceID)?.profileID ?? state.profiles.first?.id ?? UUID(), spaceID: tab.spaceID, wasTyped: kind == .typed)
+        // A page coming back (woken, gone back to, reloaded) is not a new visit: counting it made the page the person left
+        // look like the one they last visited, and put it first in the Command Bar.
+        let wasQuiet = quietLoadTabIDs.remove(tabID) != nil
+        guard !wasQuiet, kind != .backForward, kind != .reload, kind != .restored else { return }
+        // No title here: the committed page has not named itself yet, and the tab still holds the title of the page just left. It is filled in as the page loads.
+        recordVisit(url: url, title: "", profileID: space(tab.spaceID)?.profileID ?? state.profiles.first?.id ?? UUID(), spaceID: tab.spaceID, wasTyped: kind == .typed)
     }
 
-    func webContents(_ contents: WebContents, didFinishLoading url: URL, statusCode: Int) {}
+    func webContents(_ contents: WebContents, didFinishLoading url: URL, statusCode: Int) {
+        guard let tabID = tabID(for: contents), let tab = state.tabs[tabID] else { return }
+        quietLoadTabIDs.remove(tabID)
+        noteHistoryTitle(contents.navigationState.title, for: url, spaceID: tab.spaceID)
+    }
 
     func webContents(_ contents: WebContents, didFailLoading error: EngineError) {
         guard let tabID = tabID(for: contents) else { return }
@@ -225,7 +236,9 @@ extension AppEnvironment: WebContentsDelegate {
     // MARK: Chrome
 
     func webContents(_ contents: WebContents, didChangeTitle title: String) {
-        guard let tabID = tabID(for: contents), var tab = state.tabs[tabID], tab.title != title else { return }
+        guard let tabID = tabID(for: contents), var tab = state.tabs[tabID] else { return }
+        noteHistoryTitle(title, for: contents.navigationState.url ?? tab.url, spaceID: tab.spaceID)
+        guard tab.title != title else { return }
         tab.title = title
         state.tabs[tabID] = tab
     }

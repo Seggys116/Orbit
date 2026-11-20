@@ -107,7 +107,7 @@ extension AppEnvironment {
 
         let orderedIDs = edge.insertsBefore ? [newTabID, existingTabID] : [existingTabID, newTabID]
         guard let groupID = store.createSplit(with: orderedIDs, axis: edge.orientation) else { return nil }
-        materializeWebContents(for: newTabID, url: store.tab(newTabID)?.url ?? URL(string: "orbit://new-tab")!)
+        materializeWebContents(for: newTabID, url: store.tab(newTabID)?.url ?? URL(string: "orbit://new-tab")!, isWake: true)
         activateTab(existingTabID)
         return groupID
     }
@@ -121,7 +121,7 @@ extension AppEnvironment {
         let insertIndex = edge.insertsBefore ? 0 : nil
         guard store.addToSplit(tabID, groupID: groupID, at: insertIndex) else { return groupID }
         store.setSplitAxis(edge.orientation, forGroup: groupID)
-        materializeWebContents(for: tabID, url: store.tab(tabID)?.url ?? URL(string: "orbit://new-tab")!)
+        materializeWebContents(for: tabID, url: store.tab(tabID)?.url ?? URL(string: "orbit://new-tab")!, isWake: true)
         // The pane that just arrived takes focus, as the active tab, when the split is the one on screen.
         if activeSplitGroup?.id == groupID, let index = state.splitGroups[groupID]?.tabIDs.firstIndex(of: tabID) {
             focusedSplitPaneIndex = index

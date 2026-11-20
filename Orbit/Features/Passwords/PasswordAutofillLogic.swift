@@ -257,6 +257,11 @@ nonisolated enum PasswordAutofillPolicy {
         (kind == .username || kind == .currentPassword) && isSecureForFill(origin: frameOrigin)
     }
 
+    /// A sign-up form's new password field is offered the way Passwords makes an account, in a secure frame.
+    static func offersAccountCreation(kind: PasswordFieldKind, frameOrigin: URL) -> Bool {
+        kind == .newPassword && isSecureForFill(origin: frameOrigin)
+    }
+
     static func offersOneTimeCodes(kind: PasswordFieldKind, frameOrigin: URL) -> Bool {
         kind == .oneTimeCode && isSecureForFill(origin: frameOrigin)
     }

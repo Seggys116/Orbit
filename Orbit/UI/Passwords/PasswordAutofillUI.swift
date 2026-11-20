@@ -13,7 +13,9 @@ final class PasswordAutofillUI {
     let savePrompt = PasswordSavePromptPresenter()
 
     /// The system password manager. A test replaces it.
-    var passwords: any SystemPasswordsProviding = SystemPasswords.shared
+    var passwords: any SystemPasswordsProviding = SystemPasswords.shared {
+        didSet { recentCodes.removeAll() }
+    }
     /// Seconds since a fixed point; a test replaces it.
     var now: () -> Date = { Date() }
 
@@ -24,6 +26,9 @@ final class PasswordAutofillUI {
     /// The field whose list is being fetched, so a late answer for a field the user has left is dropped.
     private var awaitedToken: String?
     private var lastFill: SystemPasswordFillRecord?
+    /// Codes listed for a page a moment ago. A page that focuses its code box again and again must not make the person wait on Passwords each time, and an answer must not be lost to the next report for the same field.
+    private var recentCodes: [String: (codes: [SystemPasswordOneTimeCode], fetched: Date)] = [:]
+    private static let codeCacheLifetime: TimeInterval = 20
 
     private init() {
         suggestions.onEscape = { [weak self] token in self?.escapedToken = token }
@@ -47,6 +52,8 @@ final class PasswordAutofillUI {
             offerLogins(for: field, contents: contents)
         } else if PasswordAutofillPolicy.offersOneTimeCodes(kind: field.kind, frameOrigin: field.frameOrigin) {
             offerOneTimeCodes(for: field, contents: contents)
+        } else if PasswordAutofillPolicy.offersAccountCreation(kind: field.kind, frameOrigin: field.frameOrigin) {
+            offerAccountCreation(for: field, contents: contents)
         } else {
             suggestions.dismiss()
         }
@@ -108,20 +115,52 @@ final class PasswordAutofillUI {
         present(rows + [.divider(), openPasswordsEntry()], for: field, contents: contents)
     }
 
+    /// On a sign-up form: one row that has Passwords make the account, so its own generator and its own sheet do the work.
+    private func offerAccountCreation(for field: PasswordFieldFocus, contents: WebContents) {
+        guard passwords.state == .paired, passwords.canCreateAccount else {
+            suggestions.dismiss()
+            return
+        }
+        present([accountCreationRow(for: field, contents: contents)], for: field, contents: contents)
+    }
+
+    private func accountCreationRow(for field: PasswordFieldFocus, contents: WebContents) -> OrbitContextMenuEntry {
+        let pageURL = field.pageURL ?? field.frameOrigin
+        let site = SystemPasswordPolicy.host(of: field.frameOrigin) ?? "this site"
+        return .item(OrbitContextMenuItem(title: "Create Account for \(site) in Passwords…", systemImage: "key.fill") { [weak self] in
+            guard let self else { return }
+            Task { await self.passwords.createAccount(pageURL: pageURL) }
+        })
+    }
+
     private func offerOneTimeCodes(for field: PasswordFieldFocus, contents: WebContents) {
         guard passwords.state == .paired, passwords.canFillOneTimeCodes else {
+            Self.logger.info("a code field was focused but codes are not on offer: paired=\(self.passwords.state == .paired) helperFillsCodes=\(self.passwords.canFillOneTimeCodes)")
             suggestions.dismiss()
             return
         }
         let pageURL = field.pageURL ?? field.frameOrigin
+        let cacheKey = pageURL.absoluteString
+        if let cached = recentCodes[cacheKey], now().timeIntervalSince(cached.fetched) < Self.codeCacheLifetime, !cached.codes.isEmpty {
+            present(cached.codes.map { codeRow($0, field: field, pageURL: pageURL, contents: contents) }, for: field, contents: contents)
+            return
+        }
         awaitedToken = field.token
         Task { [weak self, weak contents] in
             guard let self else { return }
-            let codes = (try? await self.passwords.oneTimeCodes(pageURL: pageURL, username: field.preferredUsername)) ?? []
+            let codes: [SystemPasswordOneTimeCode]
+            do {
+                codes = try await self.passwords.oneTimeCodes(pageURL: pageURL, username: field.preferredUsername)
+            } catch {
+                Self.logger.info("Passwords listed no codes for a field: \(String(describing: error), privacy: .public)")
+                codes = []
+            }
+            if !codes.isEmpty { self.recentCodes[cacheKey] = (codes, self.now()) }
             guard self.awaitedToken == field.token, let contents else { return }
             self.awaitedToken = nil
             let rows = codes.map { code in self.codeRow(code, field: field, pageURL: pageURL, contents: contents) }
             guard !rows.isEmpty else {
+                Self.logger.info("Passwords had no code for this site")
                 self.suggestions.dismiss()
                 return
             }
@@ -137,6 +176,21 @@ final class PasswordAutofillUI {
 
     /// The right-click submenu for a sign-in field, plus the divider that follows it. Empty when Passwords cannot be used.
     func contextMenuEntries(for field: PasswordFieldFocus, contents: WebContents) -> [OrbitContextMenuEntry] {
+        // A code field has no login to list; the person can still ask for its code by hand when the offer did not appear by itself.
+        if PasswordAutofillPolicy.offersOneTimeCodes(kind: field.kind, frameOrigin: field.frameOrigin), passwords.state == .paired {
+            return [
+                .item(OrbitContextMenuItem(title: "AutoFill Code", systemImage: "ellipsis.rectangle") { [weak self, weak contents] in
+                    guard let self, let contents else { return }
+                    self.escapedToken = nil
+                    self.offerOneTimeCodes(for: field, contents: contents)
+                }),
+                .divider(),
+            ]
+        }
+        if PasswordAutofillPolicy.offersAccountCreation(kind: field.kind, frameOrigin: field.frameOrigin),
+           passwords.state == .paired, passwords.canCreateAccount {
+            return [accountCreationRow(for: field, contents: contents), .divider()]
+        }
         guard PasswordAutofillPolicy.offersLogins(kind: field.kind, frameOrigin: field.frameOrigin),
               let host = SystemPasswordPolicy.host(of: field.frameOrigin)
         else { return [] }

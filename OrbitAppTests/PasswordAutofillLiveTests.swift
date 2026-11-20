@@ -280,6 +280,11 @@ final class PasswordAutofillLiveTests: XCTestCase {
         <div id="bare"><input id="bareUser" type="text" name="username"><input id="barePass" type="password" name="pass"></div>
         <input id="search" type="text" name="q" placeholder="Search">
         <input id="otp" type="text" name="code" autocomplete="one-time-code">
+        <input id="otpNumber" type="number" name="verify" placeholder="6-digit code">
+        <input id="otpPlain" type="text" name="code2" placeholder="Enter code" inputmode="numeric" maxlength="6">
+        <input id="otpFaint" type="text" autocomplete="one-time-code" style="opacity:0;width:200px;height:40px">
+        <input id="promo" type="text" name="promo_code" placeholder="Promo code" inputmode="numeric" maxlength="6">
+        <input id="postal" type="text" name="postal_code" inputmode="numeric" maxlength="5">
         </body></html>
         """
         let kinds = try WebKitLiveEngineHost.runLive(timeout: 90) { () -> [String: String] in
@@ -298,7 +303,10 @@ final class PasswordAutofillLiveTests: XCTestCase {
         XCTAssertEqual(kinds["bareUser"], "username", "fields outside any form are found too")
         XCTAssertEqual(kinds["barePass"], "currentPassword")
         XCTAssertEqual(kinds["otp"], "oneTimeCode", "a one-time code field is its own kind, offered codes from Passwords")
-        for ignored in ["hp1", "hp2", "hp3", "hp4", "hp5", "hp6", "search"] {
+        XCTAssertEqual(kinds["otpNumber"], "oneTimeCode", "a numeric input named for a code is a code field")
+        XCTAssertEqual(kinds["otpPlain"], "oneTimeCode", "a box that says 'Enter code' and takes a few digits is a code field")
+        XCTAssertEqual(kinds["otpFaint"], "oneTimeCode", "a code field that declares itself is found even when drawn transparent over digit boxes")
+        for ignored in ["hp1", "hp2", "hp3", "hp4", "hp5", "hp6", "search", "promo", "postal"] {
             XCTAssertEqual(kinds[ignored], "", "\(ignored) is hidden, zero-size, off-page, disabled, read-only, a honeypot or a search box")
         }
     }
@@ -450,6 +458,19 @@ final class PasswordAutofillLiveTests: XCTestCase {
             _ = try await page.contents.evaluateJavaScript("document.activeElement.blur(); true")
             try await self.focus("user", in: page)
             XCTAssertEqual(page.recorder.focuses.first?.kind, .username, "a real click on the field still reports it")
+        }
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAVerificationPageThatFocusesItsCodeBoxItselfIsReported
+
+    func testAVerificationPageThatFocusesItsCodeBoxItselfIsReported() throws {
+        let html = "<html><body><form><input id=\"code\" type=\"text\" autocomplete=\"one-time-code\" inputmode=\"numeric\" maxlength=\"6\"></form></body></html>"
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
+            let page = try await self.openPage(html)
+            defer { page.close() }
+            try await self.scriptFocus("code", in: page.contents)
+            try await Task.sleep(for: .milliseconds(800))
+            XCTAssertEqual(page.recorder.focuses.first?.kind, .oneTimeCode, "a code box the page focused itself is offered codes without a click")
         }
     }
 

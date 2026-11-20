@@ -162,6 +162,21 @@ public actor HistoryStore {
         public var row: HistoryURLRow
     }
 
+    /// Sets the title of an address already in history. False when it is not there or already has that title.
+    @discardableResult
+    public func updateTitle(_ title: String, forURL url: URL) throws -> Bool {
+        let update = try statement("UPDATE urls SET title = ? WHERE url = ? AND title != ?;")
+        sqlite3_reset(update)
+        sqlite3_clear_bindings(update)
+        try bindText(update, 1, title)
+        try bindText(update, 2, url.absoluteString)
+        try bindText(update, 3, title)
+        guard sqlite3_step(update) == SQLITE_DONE else {
+            throw HistoryStoreError.sqlFailed(reason: lastErrorMessage())
+        }
+        return sqlite3_changes(db) > 0
+    }
+
     @discardableResult
     public func record(visit: HistoryVisit) throws -> HistoryEntry {
         try recordReportingRow(visit: visit).entry
@@ -179,7 +194,7 @@ public actor HistoryStore {
             INSERT INTO urls (url, title, host, visit_count, typed_count, last_visit_time, profile_id, space_id)
             VALUES (?, ?, ?, 1, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET
-                title = excluded.title,
+                title = CASE WHEN excluded.title = '' THEN urls.title ELSE excluded.title END,
                 host = excluded.host,
                 visit_count = urls.visit_count + 1,
                 typed_count = urls.typed_count + excluded.typed_count,

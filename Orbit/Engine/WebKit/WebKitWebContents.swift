@@ -431,6 +431,30 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         _ = webView.perform(selector, with: url as NSURL)
     }
 
+    func captureSessionState() -> Data? {
+        guard !isClosed, webView.backForwardList.currentItem != nil, let state = webView.interactionState else { return nil }
+        return state as? Data
+    }
+
+    func restoreSessionState(_ data: Data) -> Bool {
+        guard !isClosed, !data.isEmpty else { return false }
+        engine.flushPendingScriptReinstall()
+        extras.browserInitiatedLoad = true
+        extras.navigationFailureReported = false
+        webView.interactionState = data
+        guard webView.backForwardList.currentItem != nil else { return false }
+        if let url = webView.url ?? webView.backForwardList.currentItem?.url {
+            navigationState.url = url
+            navigationState.isLoading = true
+            navigationState.progress = 0
+            navigationState.security = Self.security(for: url)
+        }
+        navigationState.canGoBack = webView.canGoBack
+        navigationState.canGoForward = webView.canGoForward
+        publishNavigation()
+        return true
+    }
+
     func load(_ url: URL) {
         guard !isClosed else { return }
         // Scripts changed earlier in this turn are coalesced; they must be in place before this navigation starts.
@@ -452,6 +476,17 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             // load() of the committed URL stays the same document, so nothing is requested again.
         } else {
             webView.load(URLRequest(url: resolved))
+        }
+    }
+
+    /// How the page that just committed was reached, so going back, reloading or waking a page is not counted as a new visit.
+    private static func navigationKind(for type: WKNavigationType) -> NavigationKind {
+        switch type {
+        case .backForward: return .backForward
+        case .reload: return .reload
+        case .linkActivated: return .linkActivated
+        case .formSubmitted, .formResubmitted: return .formSubmitted
+        default: return .other
         }
     }
 
@@ -1145,7 +1180,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
                 return
             }
             if mediaState.isMuted { applyMute(true) }
-            delegate?.webContents(self, didCommitNavigationTo: url, kind: .other)
+            delegate?.webContents(self, didCommitNavigationTo: url, kind: Self.navigationKind(for: extras.mainFrameNavigationType))
         }
         publishNavigation()
         engine.extensionController.didChangeTabProperties(.URL, for: self)
@@ -1654,6 +1689,9 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             try? await Task.sleep(for: .milliseconds(300))
             guard let self, !self.isClosed, self.navigationState.isLoading, !self.webView.isLoading else { return }
             self.navigationState.isLoading = false
+            // Nothing replaced the cancelled load, so the address it asked for never became the page's own; left in place it was kept as the tab's address and loaded the next time the tab woke.
+            self.extras.requestedLoadURL = nil
+            if let live = self.webView.url { self.navigationState.url = live }
             self.publishNavigation()
         }
     }
