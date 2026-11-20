@@ -181,7 +181,9 @@ final class PasswordAutofillUI {
 
     private func codeRow(_ code: SystemPasswordOneTimeCode, field: PasswordFieldFocus, pageURL: URL, contents: WebContents) -> OrbitContextMenuEntry {
         let source = code.source ?? code.domain
-        let title = source.map { "\(code.code) from \($0)" } ?? code.code
+        // A code Passwords has not handed over yet is named by whose it is; its digits are fetched when it is chosen.
+        let label = code.isHidden ? (code.username ?? "Verification code") : code.code
+        let title = source.map { "\(label) from \($0)" } ?? label
         return .item(OrbitContextMenuItem(title: title, systemImage: "ellipsis.rectangle") { [weak self, weak contents] in
             guard let self, let contents else { return }
             self.fillCode(code, into: field, pageURL: pageURL, contents: contents)
@@ -229,7 +231,16 @@ final class PasswordAutofillUI {
         let passwords = self.passwords
         Task { @MainActor [weak contents] in
             guard let contents else { return }
-            let outcome = await contents.fillOneTimeCode(code.code, into: field.token, frameOrigin: field.frameOrigin)
+            var digits = code.code
+            if code.isHidden {
+                do {
+                    digits = try await passwords.revealOneTimeCode(pageURL: pageURL, username: code.username)
+                } catch {
+                    Self.logger.info("Passwords gave no code for a fill: \(String(describing: error), privacy: .public)")
+                    return
+                }
+            }
+            let outcome = await contents.fillOneTimeCode(digits, into: field.token, frameOrigin: field.frameOrigin)
             guard outcome.didFill else { return }
             await passwords.didFillOneTimeCode(pageURL: pageURL, username: code.username ?? "")
         }

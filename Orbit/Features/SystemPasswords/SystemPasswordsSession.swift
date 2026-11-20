@@ -508,6 +508,26 @@ actor SystemPasswordsSession {
         return SystemPasswordsMessages.oneTimeCodes(from: body)
     }
 
+    /// Asks for the code the person chose. Passwords may ask them to authenticate first, so this waits up to two minutes.
+    func revealOneTimeCode(pageURL: String, username: String?) async throws -> String {
+        await acquire()
+        defer { release() }
+        guard capabilities.canFillOneTimeCodes else { throw SystemPasswordsError.notFound }
+        let body = try await encryptedExchange(
+            command: .getOneTimeCodes,
+            replies: [SystemPasswordsCommand.getOneTimeCodes.rawValue],
+            host: Self.host(of: pageURL),
+            query: SystemPasswordsMessages.oneTimeCodesQuery,
+            body: SystemPasswordsMessages.oneTimeCodeSearchBody(pageURL: pageURL, username: username),
+            timeout: .seconds(120),
+            isFinal: { SystemPasswordsMessages.revealedOneTimeCode(from: $0, username: username) != .pending }
+        )
+        switch SystemPasswordsMessages.revealedOneTimeCode(from: body, username: username) {
+        case .password(let code): return code
+        case .pending, .notFound: throw SystemPasswordsError.notFound
+        }
+    }
+
     /// Tells Passwords the code was used, so it can tidy up. A missing answer is not an error.
     func didFillOneTimeCode(pageURL: String, username: String) async {
         await acquire()

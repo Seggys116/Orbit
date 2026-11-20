@@ -178,6 +178,38 @@ final class SplitLayoutMenuTests: XCTestCase {
         XCTAssertEqual(env.focusedSplitPaneIndex, 1, "The focused pane moved to index 1, so the focus index must follow it.")
     }
 
+    func test_rearrangedIndex_landsBesideTheTargetWhicheverWayThePaneCameFrom() {
+        // Three panes, indexes 0 1 2. Dropping on the leading edge of a pane puts the dragged one before it, on the trailing edge after it.
+        XCTAssertEqual(AppEnvironment.rearrangedIndex(from: 0, onto: 2, edge: .right), 2, "first pane to the end")
+        XCTAssertEqual(AppEnvironment.rearrangedIndex(from: 0, onto: 2, edge: .left), 1, "first pane to just before the last")
+        XCTAssertEqual(AppEnvironment.rearrangedIndex(from: 2, onto: 0, edge: .left), 0, "last pane to the front")
+        XCTAssertEqual(AppEnvironment.rearrangedIndex(from: 2, onto: 0, edge: .right), 1, "last pane to just after the first")
+        XCTAssertEqual(AppEnvironment.rearrangedIndex(from: 1, onto: 0, edge: .top), 0, "stacked splits use top and bottom the same way")
+        XCTAssertEqual(AppEnvironment.rearrangedIndex(from: 1, onto: 0, edge: .bottom), 1, "dropping on the side it already sits on changes nothing")
+    }
+
+    func test_rearrangePane_movesThePageAndKeepsTheFocusOnIt() {
+        let tabA = makeTab(url: "https://a.example.com")
+        let tabB = makeTab(url: "https://b.example.com")
+        let tabC = makeTab(url: "https://c.example.com")
+        defer { cleanup([tabA.id, tabB.id, tabC.id]) }
+        guard let groupID = env.store.createSplit(with: [tabA.id, tabB.id, tabC.id], axis: .horizontal) else {
+            XCTFail("Failed to create a split group.")
+            return
+        }
+        defer { env.store.dissolveSplit(groupID) }
+        env.store.selectTab(tabA.id)
+
+        XCTAssertTrue(env.rearrangePane(tabA.id, onto: tabC.id, edge: .right))
+        XCTAssertEqual(env.splitGroup(for: tabA.id)?.tabIDs, [tabB.id, tabC.id, tabA.id])
+        XCTAssertEqual(env.activeTabID, tabA.id, "the page that was moved is still the active one")
+        XCTAssertEqual(env.focusedSplitPaneIndex, 2, "and its pane is where the focus border is")
+
+        XCTAssertFalse(env.rearrangePane(tabA.id, onto: tabA.id, edge: .left), "a pane dropped on itself stays")
+        XCTAssertFalse(env.rearrangePane(tabA.id, onto: tabC.id, edge: .right), "a pane dropped where it already is stays")
+        XCTAssertEqual(env.splitGroup(for: tabA.id)?.tabIDs, [tabB.id, tabC.id, tabA.id])
+    }
+
     // MARK: - Axis-aware titles and icons
 
     func test_titles_followTheGroupsAxis() {

@@ -15,6 +15,8 @@ private final class RecordingSystemPasswords: SystemPasswordsProviding {
     var cached: [String: [SystemPasswordLogin]] = [:]
     var passwordsByUsername: [String: String] = [:]
     var codes: [SystemPasswordOneTimeCode] = []
+    var revealedCodes: [String: String] = [:]
+    private(set) var revealRequests: [String] = []
 
     private(set) var listedHosts: [String] = []
     private(set) var passwordRequests: [String] = []
@@ -46,6 +48,11 @@ private final class RecordingSystemPasswords: SystemPasswordsProviding {
         return codes
     }
 
+    func revealOneTimeCode(pageURL: URL, username: String?) async throws -> String {
+        revealRequests.append(username ?? "")
+        guard let code = revealedCodes[username ?? ""] else { throw SystemPasswordsError.notFound }
+        return code
+    }
     func didFillOneTimeCode(pageURL: URL, username: String) async {}
 
     func requestPairing(over window: NSWindow?) { pairingRequests += 1 }
@@ -297,6 +304,23 @@ final class PasswordAutofillUITests: XCTestCase {
         await drain()
         XCTAssertTrue(listed.isEmpty, "a helper that cannot fill codes is not asked")
         XCTAssertEqual(passwords.codeRequests, 1)
+    }
+
+    func testACodePasswordsHasNotHandedOverIsListedByWhoseItIsAndFetchedWhenChosen() async throws {
+        passwords.codes = [SystemPasswordOneTimeCode(code: SystemPasswordsMessages.passwordNotIncluded, username: "alice", domain: "example.com", source: "Passwords")]
+        passwords.revealedCodes = ["alice": "482913"]
+        let contents = attachedContents()
+        ui.fieldFocused(field(.oneTimeCode), contents: contents)
+        await settle { !listed.isEmpty }
+        let entries = try XCTUnwrap(listed.first).entries
+        XCTAssertEqual(titles(entries), ["alice from Passwords"], "the placeholder is never shown as a code")
+        XCTAssertTrue(passwords.revealRequests.isEmpty, "nothing is fetched until the row is chosen")
+        // A click in the first fraction of a second after a list appears is ignored.
+        try await Task.sleep(for: .seconds(PasswordSuggestionPresenter.activationDelay + 0.1))
+        try XCTUnwrap(entries.first(titled: "alice from Passwords")).action?()
+        await settle { !self.passwords.revealRequests.isEmpty }
+        XCTAssertEqual(passwords.revealRequests, ["alice"])
+        withExtendedLifetime(contents) {}
     }
 
     func testNoKeyIsClaimedWhileNothingIsShowing() {

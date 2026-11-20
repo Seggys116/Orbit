@@ -283,7 +283,20 @@ final class AppEnvironment {
 
     // MARK: - Split focus
 
-    var focusedSplitPaneIndex: Int = 0
+    /// The focused pane is the one holding the active tab, so the sidebar's highlight and the pane's border cannot disagree. Setting it selects that pane's tab.
+    var focusedSplitPaneIndex: Int {
+        get {
+            guard let active = activeTabID, let group = splitGroup(for: active) else { return 0 }
+            return group.tabIDs.firstIndex(of: active) ?? 0
+        }
+        set {
+            guard let group = activeSplitGroup, group.tabIDs.indices.contains(newValue) else { return }
+            let target = group.tabIDs[newValue]
+            guard activeTabID != target else { return }
+            activeTabID = target
+            syncExtensionActiveTab()
+        }
+    }
     var activeSplitDropZone: SplitDropZone?
 
     // .zero until the first layout pass, which preferredSplitOrientation(paneCount:) handles explicitly.

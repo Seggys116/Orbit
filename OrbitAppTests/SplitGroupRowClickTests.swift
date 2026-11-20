@@ -172,6 +172,19 @@ final class SplitPaneDropCatcherClaimTests: XCTestCase {
         XCTAssertFalse(SplitPaneDropCatcherView.claimsHit(duringEvent: .mouseMoved, dragInFlight: true))
     }
 
+    func test_theEventThatStartedADragIsNotAClickOnThePage() {
+        for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp, .mouseMoved, .scrollWheel, .keyDown] {
+            XCTAssertTrue(
+                SplitPaneDropCatcherView.claimsHit(duringEvent: type, eventAge: 2, dragInFlight: true),
+                "An old \(type) is how the drag began, not a press on the page."
+            )
+        }
+    }
+
+    func test_holdingCommandMidDragDoesNotHandTheDragBack() {
+        XCTAssertTrue(SplitPaneDropCatcherView.claimsHit(duringEvent: .flagsChanged, eventAge: 0, dragInFlight: true))
+    }
+
     func test_aRealDragOverThePageIsStillClaimed() {
         XCTAssertTrue(SplitPaneDropCatcherView.claimsHit(duringEvent: .leftMouseDragged, dragInFlight: true))
         XCTAssertTrue(SplitPaneDropCatcherView.claimsHit(duringEvent: nil, dragInFlight: true), "Drag-destination lookups can run with no current event.")

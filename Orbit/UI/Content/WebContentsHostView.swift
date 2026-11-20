@@ -509,17 +509,23 @@ final class SplitPaneDropCatcherView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        let current = NSApp.currentEvent
+        let age = current.map { ProcessInfo.processInfo.systemUptime - $0.timestamp } ?? 0
         guard bounds.contains(point),
-              Self.claimsHit(duringEvent: NSApp.currentEvent?.type, dragInFlight: sidebarDragIsActive) else { return nil }
+              Self.claimsHit(duringEvent: current?.type, eventAge: age, dragInFlight: sidebarDragIsActive) else { return nil }
         return self
     }
 
     // A drop target is only wanted while a drag is moving over the page. A click, a release or a scroll is never part of a drag, so it passes through to the page even if a drag record has been left behind; claiming it would leave every pane of a split unclickable until the next drag.
-    static func claimsHit(duringEvent type: NSEvent.EventType?, dragInFlight: Bool) -> Bool {
+    // Only a fresh event can be a click or a key press in the page. While a drag runs, the app keeps reporting the event that started it as current, so an old one says nothing about what is happening now. A modifier change is never a click: holding Command mid-drag must not hand the drag back to the page.
+    static let freshEventWindow: TimeInterval = 0.25
+
+    static func claimsHit(duringEvent type: NSEvent.EventType?, eventAge: TimeInterval = 0, dragInFlight: Bool) -> Bool {
         guard dragInFlight else { return false }
+        guard eventAge < freshEventWindow else { return true }
         switch type {
         case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp,
-             .scrollWheel, .mouseMoved, .keyDown, .keyUp, .flagsChanged:
+             .scrollWheel, .mouseMoved, .keyDown, .keyUp:
             return false
         default:
             return true

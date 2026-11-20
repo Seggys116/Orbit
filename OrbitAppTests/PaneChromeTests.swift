@@ -410,6 +410,8 @@ final class PaneChromeTests: XCTestCase {
             return
         }
         defer { env.store.dissolveSplit(groupID) }
+        // The focused pane is the one holding the active tab, so the split has to be the one on screen.
+        env.store.selectTab(tabA.id)
 
         let size = CGSize(width: 600, height: 200)
         let dividerCount = 1

@@ -32,6 +32,7 @@ private final class LivePasswordsStub: SystemPasswordsProviding {
 
     func save(username: String, password: String, host: String) async throws -> SystemPasswordsSaveOutcome { .saved }
     func oneTimeCodes(pageURL: URL, username: String?) async throws -> [SystemPasswordOneTimeCode] { [] }
+    func revealOneTimeCode(pageURL: URL, username: String?) async throws -> String { throw SystemPasswordsError.notFound }
     func didFillOneTimeCode(pageURL: URL, username: String) async {}
     func requestPairing(over window: NSWindow?) {}
     func openPasswordsApp() {}

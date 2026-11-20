@@ -46,9 +46,48 @@ struct SplitViewContainer: View {
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+            // Hold Command and drag a pane to move it beside another. Absent in screenshot mode with the other AppKit observers.
+            .background {
+                if mountsFocusObserver, let group, group.tabIDs.count > 1 {
+                    PaneRearrangeObserver(
+                        frames: Self.paneFrames(group: group, size: proxy.size),
+                        axis: orientation,
+                        onTarget: { target, edge in
+                            guard let target, let edge else { env.activeSplitDropZone = nil; return }
+                            env.activeSplitDropZone = SplitDropZone(edge: edge, targetTabID: group.tabIDs[target])
+                        },
+                        onDrop: { source, target, edge in
+                            env.activeSplitDropZone = nil
+                            withAnimation(layoutAnimation) {
+                                env.rearrangePane(group.tabIDs[source], onto: group.tabIDs[target], edge: edge)
+                            }
+                        },
+                        onEnd: { env.activeSplitDropZone = nil }
+                    )
+                }
+            }
         }
         // Only a pane arriving animates, and by sliding in. Resizing a live page every frame makes WebKit lay it out every frame and SwiftUI re-allocate the pane's surfaces, which dropped frames.
         .animation(layoutAnimation, value: tabIDs.count)
+    }
+
+    /// Each pane's rectangle in the container, top-left origin: the same arithmetic the layout below uses.
+    static func paneFrames(group: SplitGroup, size: CGSize) -> [CGRect] {
+        let horizontal = group.axis == .horizontal
+        let total = horizontal ? size.width : size.height
+        let count = group.tabIDs.count
+        let available = max(0, total - CGFloat(max(0, count - 1)) * OrbitMetrics.splitDividerThickness)
+        var frames: [CGRect] = []
+        var cursor: CGFloat = 0
+        for index in 0..<count {
+            let fraction = group.fractions.indices.contains(index) ? group.fractions[index] : 1.0 / Double(count)
+            let length = available * CGFloat(fraction)
+            frames.append(horizontal
+                ? CGRect(x: cursor, y: 0, width: length, height: size.height)
+                : CGRect(x: 0, y: cursor, width: size.width, height: length))
+            cursor += length + OrbitMetrics.splitDividerThickness
+        }
+        return frames
     }
 
     private var layoutAnimation: Animation {
@@ -215,5 +254,157 @@ private struct SplitPaneFocusObserver: NSViewRepresentable {
         }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+
+/// Command-drag on a pane of a split moves it. A Command press that never moves is an ordinary click and goes to the page unchanged.
+private struct PaneRearrangeObserver: NSViewRepresentable {
+    var frames: [CGRect]
+    var axis: SplitOrientation
+    /// The pane under the pointer (never the dragged one) and the side of it the drop would land on.
+    var onTarget: (_ target: Int?, _ edge: SplitEdge?) -> Void
+    var onDrop: (_ source: Int, _ target: Int, _ edge: SplitEdge) -> Void
+    var onEnd: () -> Void
+
+    func makeNSView(context: Context) -> ObserverView { ObserverView() }
+
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.frames = frames
+        view.axis = axis
+        view.onTarget = onTarget
+        view.onDrop = onDrop
+        view.onEnd = onEnd
+    }
+
+    final class ObserverView: NSView {
+        var frames: [CGRect] = []
+        var axis: SplitOrientation = .horizontal
+        var onTarget: ((Int?, SplitEdge?) -> Void)?
+        var onDrop: ((Int, Int, SplitEdge) -> Void)?
+        var onEnd: (() -> Void)?
+
+        /// How far the pointer must move after a Command press before it is a drag and not a click.
+        static let dragSlop: CGFloat = 5
+
+        private enum Phase {
+            case idle
+            case pressed(source: Int, down: NSEvent)
+            case dragging(source: Int, target: Int?, edge: SplitEdge?)
+        }
+
+        private var phase = Phase.idle
+        private var monitor: Any?
+        private var replaying = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            removeMonitor()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .keyDown]) { [weak self] event in
+                self?.handle(event) ?? event
+            }
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            super.viewWillMove(toWindow: newWindow)
+            if newWindow == nil { cancel(); removeMonitor() }
+        }
+
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+        }
+
+        private func removeMonitor() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        /// The pointer in the container's own top-left coordinates.
+        private func local(_ event: NSEvent) -> CGPoint {
+            let point = convert(event.locationInWindow, from: nil)
+            return CGPoint(x: point.x, y: isFlipped ? point.y : bounds.height - point.y)
+        }
+
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard !replaying, let window, event.window === window else { return event }
+            switch event.type {
+            case .leftMouseDown:
+                guard event.modifierFlags.contains(.command), frames.count > 1 else { return event }
+                let point = local(event)
+                guard bounds.contains(convert(event.locationInWindow, from: nil)),
+                      let source = frames.firstIndex(where: { $0.contains(point) }) else { return event }
+                phase = .pressed(source: source, down: event)
+                return nil
+            case .leftMouseDragged:
+                switch phase {
+                case .idle:
+                    return event
+                case .pressed(let source, let down):
+                    let moved = hypot(event.locationInWindow.x - down.locationInWindow.x, event.locationInWindow.y - down.locationInWindow.y)
+                    guard moved >= Self.dragSlop else { return nil }
+                    NSCursor.closedHand.push()
+                    phase = .dragging(source: source, target: nil, edge: nil)
+                    update(event, source: source)
+                    return nil
+                case .dragging(let source, _, _):
+                    update(event, source: source)
+                    return nil
+                }
+            case .leftMouseUp:
+                switch phase {
+                case .idle:
+                    return event
+                case .pressed(_, let down):
+                    // Never moved: the page gets the click it would have had, press first.
+                    phase = .idle
+                    replaying = true
+                    NSApp.sendEvent(down)
+                    replaying = false
+                    return event
+                case .dragging(let source, let target, let edge):
+                    phase = .idle
+                    NSCursor.pop()
+                    if let target, let edge { onDrop?(source, target, edge) } else { onEnd?() }
+                    return nil
+                }
+            case .keyDown:
+                guard event.keyCode == 53 else { return event }
+                switch phase {
+                case .dragging:
+                    cancel()
+                    return nil
+                default:
+                    return event
+                }
+            default:
+                return event
+            }
+        }
+
+        private func update(_ event: NSEvent, source: Int) {
+            let point = local(event)
+            var target: Int?
+            var edge: SplitEdge?
+            if let index = frames.firstIndex(where: { $0.contains(point) }), index != source {
+                let frame = frames[index]
+                target = index
+                edge = SplitDropZoneGeometry.edge(
+                    at: CGPoint(x: point.x - frame.minX, y: point.y - frame.minY),
+                    in: frame.size,
+                    allowedOrientation: axis
+                )
+            }
+            phase = .dragging(source: source, target: target, edge: edge)
+            onTarget?(target, edge)
+        }
+
+        private func cancel() {
+            if case .dragging = phase { NSCursor.pop() }
+            phase = .idle
+            onEnd?()
+        }
     }
 }

@@ -8,6 +8,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 import XCTest
 @testable import Orbit
@@ -335,6 +336,217 @@ final class InteractionSmoothnessLiveTests: LiveEnvironmentTestCase {
     /// What the sidebar is showing right now, as the rows it built.
     private func sidebarRows() -> (joined: [[TabID]], single: Set<TabID>) {
         (SidebarRowProbe.joinedRows, SidebarRowProbe.tabsWithTheirOwnRow)
+    }
+
+    /// A real left click, delivered the way the window server would: through NSApp, so the app's event monitors see it too.
+    private func click(at point: NSPoint) async {
+        guard let window else { return }
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            if let event = NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
+            ) {
+                NSApp.sendEvent(event)
+            }
+            await settle(0.05)
+        }
+    }
+
+    private func sidebarCatchers() -> [CGRect] {
+        guard let content = window?.contentView else { return [] }
+        var found: [CGRect] = []
+        func walk(_ view: NSView) {
+            if view is OrbitActionButtonClickCatchingView {
+                let rect = view.convert(view.bounds, to: nil)
+                if rect.minX < env.effectiveSidebarWidth, rect.width > 20 { found.append(rect) }
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(content)
+        return found
+    }
+
+    /// The sidebar rows a person can click, as the click targets the rows really have: the two panes of the split (side by side) and the wide rows below them.
+    private func clickTargets() -> (panes: [CGRect], rows: [CGRect]) {
+        let all = sidebarCatchers()
+        let wide = env.effectiveSidebarWidth * 0.8
+        let rows = all.filter { $0.width > wide && $0.height < 60 }.sorted { $0.midY > $1.midY }
+        let panes = all.filter { $0.width <= wide && $0.height < 60 && $0.width > 60 }.sorted { $0.midX < $1.midX }
+        return (panes, rows)
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testLeavingASplitAndComingBack
+    func testLeavingASplitAndComingBack() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            SidebarRowProbe.reset()
+            try await self.openAllPages()
+            let (a, b, c) = (self.tabs[0], self.tabs[1], self.tabs[2])
+            self.env.createSplit(existingTabID: a, newTabID: b, edge: .right)
+            await self.settle(1.0)
+            let group = try XCTUnwrap(self.env.splitGroup(for: a))
+            XCTAssertEqual(self.env.activeTabID, a)
+            let targets = self.clickTargets()
+            print("LEAVE panes=\(targets.panes.map { "\(Int($0.minX)),\(Int($0.midY)),\(Int($0.width))" }) rows=\(targets.rows.map { "\(Int($0.minX)),\(Int($0.midY)),\(Int($0.width))" })")
+            let panes = targets.panes.filter { abs($0.midY - (targets.panes.first?.midY ?? 0)) < 4 }
+            XCTAssertEqual(panes.count, 2, "the split shows two pane targets in one cell")
+            // The wide rows under the split cell, top to bottom: c, d, e, f.
+            let splitY = panes.first?.midY ?? 0
+            let below = targets.rows.filter { $0.midY < splitY }
+            let rowC = try XCTUnwrap(below.first, "the row for the first tab outside the split")
+            self.writeProof("leave-1-split-active")
+
+            for step in 0..<3 {
+                await self.click(at: NSPoint(x: rowC.midX, y: rowC.midY))
+                await self.settle(0.8)
+                self.writeProof("leave-2-normal-\(step)")
+                XCTAssertEqual(self.env.activeTabID, c, "step \(step): clicking the normal tab selects it")
+                XCTAssertNil(self.env.activeSplitGroup, "step \(step): no split is active while a normal tab is")
+
+                // Back to the split, by its second pane, then by its first.
+                let pane = panes[step % 2]
+                await self.click(at: NSPoint(x: pane.midX, y: pane.midY))
+                await self.settle(0.8)
+                self.writeProof("leave-3-back-\(step)")
+                XCTAssertEqual(self.env.activeTabID, step % 2 == 0 ? a : b, "step \(step): clicking the split's pane selects it")
+                XCTAssertEqual(self.env.activeSplitGroup?.id, group.id, "step \(step): the split is active again")
+                XCTAssertEqual(self.env.focusedSplitPaneIndex, step % 2, "step \(step): the pane with the focus border is the one the sidebar marks active")
+                for tab in [a, b] {
+                    let view = try XCTUnwrap(self.env.webContents[tab]?.view)
+                    XCTAssertTrue(view.window === self.window)
+                    XCTAssertFalse(view.isHiddenOrHasHiddenAncestor, "step \(step): the split's pages are showing")
+                    XCTAssertGreaterThan(view.bounds.width, 60)
+                }
+            }
+        }
+    }
+
+    /// The part of a drag a drop target reads: where it is, and what it carries.
+    private final class FakeDraggingInfo: NSObject, NSDraggingInfo {
+        var location: NSPoint
+        weak var targetWindow: NSWindow?
+        init(location: NSPoint, window: NSWindow) { self.location = location; targetWindow = window }
+        var draggingDestinationWindow: NSWindow? { targetWindow }
+        var draggingSourceOperationMask: NSDragOperation { .every }
+        var draggingLocation: NSPoint { location }
+        var draggedImageLocation: NSPoint { location }
+        var draggedImage: NSImage? { nil }
+        var draggingPasteboard: NSPasteboard { NSPasteboard(name: .drag) }
+        var draggingSource: Any? { nil }
+        var draggingSequenceNumber: Int { 1 }
+        var draggingFormation: NSDraggingFormation = .default
+        var animatesToDestination = false
+        var numberOfValidItemsForDrop = 1
+        var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+        func slideDraggedImage(to screenPoint: NSPoint) {}
+        func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?, classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any], using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+        func resetSpringLoading() {}
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testDroppingASidebarTabOnThePageSplits
+    func testDroppingASidebarTabOnThePageSplits() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 180) {
+            try await self.openAllPages()
+            let (a, b, c) = (self.tabs[0], self.tabs[1], self.tabs[2])
+            self.env.activateTab(a)
+            await self.settle(1.0)
+            let window = try XCTUnwrap(self.window)
+            let content = try XCTUnwrap(window.contentView)
+
+            func catchers() -> [SplitPaneDropCatcherView] {
+                var found: [SplitPaneDropCatcherView] = []
+                func walk(_ view: NSView) {
+                    if let catcher = view as? SplitPaneDropCatcherView { found.append(catcher) }
+                    view.subviews.forEach(walk)
+                }
+                walk(content)
+                return found
+            }
+            let before = catchers()
+            print("DROP catchers=\(before.count) targets=\(before.map { String($0.targetTabID?.uuidString.prefix(4) ?? "nil") }) frames=\(before.map { NSStringFromRect($0.convert($0.bounds, to: nil)) }) hidden=\(before.map(\.isHiddenOrHasHiddenAncestor)) types=\(before.map { $0.registeredDraggedTypes.count })")
+            let catcher = try XCTUnwrap(before.first { $0.targetTabID == a && !$0.isHiddenOrHasHiddenAncestor }, "the visible page has a drop target")
+
+            // A sidebar drag of tab b is in flight, with its payload on the drag pasteboard. All of it runs in one turn: the tear-off detector ends a drag it sees no mouse button held for.
+            let payload = SidebarDragPayload(nodeID: b, kind: .todayTab, spaceID: self.spaceID)
+            let pasteboard = NSPasteboard(name: .drag)
+            let nodeType = NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)
+            pasteboard.clearContents()
+            pasteboard.setData(try JSONEncoder().encode(payload), forType: nodeType)
+            SidebarDragSession.begin(payload)
+            let rect = catcher.convert(catcher.bounds, to: nil)
+            let point = NSPoint(x: rect.maxX - rect.width * 0.2, y: rect.midY)
+            let hit = content.hitTest(content.convert(point, from: nil))
+            XCTAssertTrue(hit is SplitPaneDropCatcherView, "a drag over the page lands on the split drop target, not the page: got \(String(describing: hit))")
+
+            let info = FakeDraggingInfo(location: point, window: window)
+            XCTAssertFalse(catcher.draggingEntered(info).isEmpty, "the target accepts a sidebar tab")
+            XCTAssertNotNil(self.env.activeSplitDropZone, "the drop zone highlights")
+            XCTAssertTrue(catcher.performDragOperation(info), "the drop is taken")
+            await self.settle(1.0)
+            XCTAssertEqual(self.env.splitGroup(for: a)?.tabIDs, [a, b], "the dropped tab joins the page's split on its right")
+
+            // Whatever the layout, each visible page's drop target names that page's own tab.
+            func visibleTargets() -> Set<TabID> {
+                Set(catchers().filter { !$0.isHiddenOrHasHiddenAncestor && $0.bounds.width > 60 }.compactMap(\.targetTabID))
+            }
+            XCTAssertEqual(visibleTargets(), [a, b], "a split's two panes each take drops for their own tab")
+            self.env.activateTab(c)
+            await self.settle(1.0)
+            XCTAssertEqual(visibleTargets(), [c], "after leaving the split the one page takes drops for its own tab")
+            self.env.activateTab(a)
+            await self.settle(1.0)
+            XCTAssertEqual(visibleTargets(), [a, b], "back in the split, both panes again")
+            self.env.separateAllTabs(try XCTUnwrap(self.env.splitGroup(for: a)).id)
+            await self.settle(1.0)
+            XCTAssertEqual(visibleTargets(), [a], "separated, the page shown is a")
+        }
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testCommandDragMovesAPaneWithinASplit
+    func testCommandDragMovesAPaneWithinASplit() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            try await self.openAllPages()
+            let (a, b, c) = (self.tabs[0], self.tabs[1], self.tabs[2])
+            self.env.createSplit(existingTabID: a, newTabID: b, edge: .right)
+            self.env.createSplit(existingTabID: a, newTabID: c, edge: .right)
+            await self.settle(1.2)
+            XCTAssertEqual(self.env.splitGroup(for: a)?.tabIDs, [a, b, c])
+            let window = try XCTUnwrap(self.window)
+            let frames = try (0..<3).map { index -> CGRect in
+                let view = try XCTUnwrap(self.env.webContents[[a, b, c][index]]?.view)
+                return view.convert(view.bounds, to: nil)
+            }
+
+            func send(_ type: NSEvent.EventType, at point: NSPoint, command: Bool = true) {
+                if let event = NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: command ? [.command] : [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1
+                ) { NSApp.sendEvent(event) }
+            }
+
+            // Drag the first pane onto the right edge of the last one.
+            let start = NSPoint(x: frames[0].midX, y: frames[0].midY)
+            let end = NSPoint(x: frames[2].maxX - 20, y: frames[2].midY)
+            send(.leftMouseDown, at: start)
+            for step in 1...8 {
+                let t = CGFloat(step) / 8
+                send(.leftMouseDragged, at: NSPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t))
+                await self.settle(0.02)
+            }
+            XCTAssertNotNil(self.env.activeSplitDropZone, "the target side is highlighted while dragging")
+            send(.leftMouseUp, at: end)
+            await self.settle(1.0)
+            XCTAssertEqual(self.env.splitGroup(for: a)?.tabIDs, [b, c, a], "the first pane now sits last")
+            XCTAssertNil(self.env.activeSplitDropZone, "the highlight is gone after the drop")
+
+            // A Command press that never moves is left alone: the split keeps its order.
+            let page = try XCTUnwrap(self.env.webContents[b]?.view)
+            let click = page.convert(NSPoint(x: page.bounds.midX, y: page.bounds.midY), to: nil)
+            send(.leftMouseDown, at: click)
+            send(.leftMouseUp, at: click)
+            await self.settle(0.3)
+            XCTAssertEqual(self.env.splitGroup(for: a)?.tabIDs, [b, c, a])
+        }
     }
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testSplitTabsShareOneSidebarCell

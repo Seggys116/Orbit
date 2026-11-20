@@ -78,6 +78,9 @@ nonisolated struct SystemPasswordOneTimeCode: Sendable, Equatable, Hashable {
     var username: String?
     var domain: String?
     var source: String?
+
+    /// The list step names a code without handing it over, exactly as it does for a password. The code itself is asked for when the person chooses it.
+    var isHidden: Bool { code == SystemPasswordsMessages.passwordNotIncluded }
 }
 
 nonisolated enum SystemPasswordsProtocolError: Error, Equatable {
@@ -205,6 +208,20 @@ nonisolated enum SystemPasswordsMessages {
             ("frameURLs", .array([.string(pageURL)])),
         ]
         if let username, !username.isEmpty { pairs.append(("username", .string(username))) }
+        return WireJSON.object(pairs).data
+    }
+
+    /// Asks for the code itself, for one username, once the person has chosen it from the list.
+    static func oneTimeCodeSearchBody(pageURL: String, username: String?) -> Data {
+        var pairs: [(String, WireJSON)] = [
+            ("ACT", .int(SystemPasswordsAction.search.rawValue)),
+            ("TYPE", .string("oneTimeCodes")),
+            ("frameURLs", .array([.string(pageURL)])),
+        ]
+        if let username, !username.isEmpty {
+            pairs.append(("USR", .string(username)))
+            pairs.append(("username", .string(username)))
+        }
         return WireJSON.object(pairs).data
     }
 
@@ -373,7 +390,8 @@ nonisolated enum SystemPasswordsMessages {
 
     static func oneTimeCodes(from body: [String: Any]) -> [SystemPasswordOneTimeCode] {
         entries(of: body).compactMap { entry in
-            guard let code = entry["code"] as? String, PasswordAutofillPolicy.isValidOneTimeCode(code) else { return nil }
+            guard let code = oneTimeCodeText(entry["code"]),
+                  code == passwordNotIncluded || PasswordAutofillPolicy.isValidOneTimeCode(code) else { return nil }
             return SystemPasswordOneTimeCode(
                 code: code,
                 username: entry["username"] as? String,
@@ -381,5 +399,26 @@ nonisolated enum SystemPasswordsMessages {
                 source: entry["source"] as? String
             )
         }
+    }
+
+    /// A code is text, but a helper that sends it as a number still means the digits.
+    private static func oneTimeCodeText(_ value: Any?) -> String? {
+        if let text = value as? String { return stripped(text) }
+        if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() { return number.stringValue }
+        return nil
+    }
+
+    /// Codes are shown in groups ("123 456"), and a field wants the digits alone.
+    private static func stripped(_ text: String) -> String {
+        text == passwordNotIncluded ? text : text.filter { !$0.isWhitespace && $0 != "-" }
+    }
+
+    /// The code the helper returned for `username` after the person chose it: still pending while it waits for authentication.
+    static func revealedOneTimeCode(from body: [String: Any], username: String?) -> SystemPasswordLookup {
+        let candidates = oneTimeCodes(from: body)
+        guard !candidates.isEmpty else { return .notFound }
+        let matching = candidates.filter { username == nil || $0.username == username }
+        guard let chosen = matching.first ?? (candidates.count == 1 ? candidates.first : nil) else { return .notFound }
+        return chosen.isHidden ? .pending : .password(chosen.code)
     }
 }

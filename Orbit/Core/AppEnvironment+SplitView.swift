@@ -107,7 +107,6 @@ extension AppEnvironment {
 
         let orderedIDs = edge.insertsBefore ? [newTabID, existingTabID] : [existingTabID, newTabID]
         guard let groupID = store.createSplit(with: orderedIDs, axis: edge.orientation) else { return nil }
-        focusedSplitPaneIndex = orderedIDs.firstIndex(of: newTabID) ?? 0
         materializeWebContents(for: newTabID, url: store.tab(newTabID)?.url ?? URL(string: "orbit://new-tab")!)
         activateTab(existingTabID)
         return groupID
@@ -123,35 +122,39 @@ extension AppEnvironment {
         guard store.addToSplit(tabID, groupID: groupID, at: insertIndex) else { return groupID }
         store.setSplitAxis(edge.orientation, forGroup: groupID)
         materializeWebContents(for: tabID, url: store.tab(tabID)?.url ?? URL(string: "orbit://new-tab")!)
-        focusedSplitPaneIndex = state.splitGroups[groupID]?.tabIDs.firstIndex(of: tabID) ?? 0
+        // The pane that just arrived takes focus, as the active tab, when the split is the one on screen.
+        if activeSplitGroup?.id == groupID, let index = state.splitGroups[groupID]?.tabIDs.firstIndex(of: tabID) {
+            focusedSplitPaneIndex = index
+        }
         return groupID
     }
 
-    // focusedSplitPaneIndex is an index, not a tab — resolve to a tab before
-    // the move and re-find it after, or a reorder silently shifts the focus border.
     @discardableResult
     func movePane(_ tabID: TabID, by offset: Int) -> Bool {
-        var focusedTabID: TabID?
-        if let group = store.splitGroup(for: tabID),
-           group.id == activeSplitGroup?.id,
-           group.tabIDs.indices.contains(focusedSplitPaneIndex) {
-            focusedTabID = group.tabIDs[focusedSplitPaneIndex]
-        }
+        // The focused pane is the one holding the active tab, so it follows the move by itself.
+        store.movePaneInSplit(tabID, by: offset)
+    }
 
-        guard store.movePaneInSplit(tabID, by: offset) else { return false }
+    /// Where a pane lands when it is dropped on `edge` of another pane of its split: just before or after that pane, in the order of the split.
+    static func rearrangedIndex(from source: Int, onto target: Int, edge: SplitEdge) -> Int {
+        var destination = edge.insertsBefore ? target : target + 1
+        if source < destination { destination -= 1 }
+        return destination
+    }
 
-        if let focusedTabID,
-           let moved = store.splitGroup(for: tabID),
-           let index = moved.tabIDs.firstIndex(of: focusedTabID) {
-            focusedSplitPaneIndex = index
-        }
-        return true
+    /// Moves a pane to the side of another pane of the same split. The active tab does not change, so the focus follows the page.
+    @discardableResult
+    func rearrangePane(_ tabID: TabID, onto targetTabID: TabID, edge: SplitEdge) -> Bool {
+        guard tabID != targetTabID, let group = splitGroup(for: tabID), group.tabIDs.contains(targetTabID),
+              let source = group.tabIDs.firstIndex(of: tabID), let target = group.tabIDs.firstIndex(of: targetTabID) else { return false }
+        let destination = Self.rearrangedIndex(from: source, onto: target, edge: edge)
+        guard destination != source else { return false }
+        return movePane(tabID, by: destination - source)
     }
 
     /// Takes the pane out of its split and leaves its page open. The pane's close control is `closeSplitPaneTab`.
     func closeSplitPane(_ tabID: TabID) {
         store.removeFromSplit(tabID)
-        focusedSplitPaneIndex = 0
     }
 
     /// What the close control on a pane does: closes that one page, by the same rule as Close Tab, and leaves
@@ -170,20 +173,13 @@ extension AppEnvironment {
         } else {
             closeTabPreservingBookmark(tabID)
         }
-        focusedSplitPaneIndex = 0
 
         guard wasActive, let survivor, tab(survivor) != nil else { return }
-        if let group = splitGroup(for: survivor), let index = group.tabIDs.firstIndex(of: survivor) {
-            activateTab(survivor)
-            focusedSplitPaneIndex = index
-        } else {
-            activateTab(survivor)
-        }
+        activateTab(survivor)
     }
 
     func separateAllTabs(_ groupID: UUID) {
         store.dissolveSplit(groupID)
-        focusedSplitPaneIndex = 0
     }
 
     @discardableResult
@@ -197,7 +193,6 @@ extension AppEnvironment {
 
     func focusSplitPane(index: Int) {
         guard let group = activeSplitGroup, index >= 0, index < group.tabIDs.count else { return }
-        focusedSplitPaneIndex = index
         let tabID = group.tabIDs[index]
         activateTab(tabID)
         // activateTab does not move AppKit's first responder by itself.

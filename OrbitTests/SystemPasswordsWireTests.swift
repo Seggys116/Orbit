@@ -305,6 +305,35 @@ final class SystemPasswordsMessagesTests: XCTestCase {
         XCTAssertEqual(SystemPasswordsMessages.password(from: ["STATUS": 3], username: "alice"), .notFound)
     }
 
+    func testACodeTheListStepDoesNotHandOverIsKeptAndTheRealOneIsRead() {
+        let hidden = SystemPasswordsMessages.passwordNotIncluded
+        let listed: [String: Any] = ["Entries": [
+            ["code": hidden, "username": "alice", "domain": "example.com", "source": "Passwords"],
+            ["code": hidden, "username": "bob", "domain": "example.com", "source": "Passwords"],
+        ] as [Any]]
+        let codes = SystemPasswordsMessages.oneTimeCodes(from: listed)
+        XCTAssertEqual(codes.map(\.username), ["alice", "bob"])
+        XCTAssertTrue(codes.allSatisfy(\.isHidden))
+        XCTAssertEqual(SystemPasswordsMessages.revealedOneTimeCode(from: listed, username: "alice"), .pending)
+
+        let revealed: [String: Any] = ["Entries": [["code": "482913", "username": "alice"], ["code": "100200", "username": "bob"]] as [Any]]
+        XCTAssertEqual(SystemPasswordsMessages.revealedOneTimeCode(from: revealed, username: "bob"), .password("100200"))
+        XCTAssertEqual(SystemPasswordsMessages.revealedOneTimeCode(from: revealed, username: "carol"), .notFound)
+        XCTAssertEqual(SystemPasswordsMessages.revealedOneTimeCode(from: ["Entries": [] as [Any]], username: "alice"), .notFound)
+    }
+
+    func testACodeSentAsAGroupedStringOrANumberIsStillTheDigits() {
+        let body: [String: Any] = ["Entries": [["code": "123 456"], ["code": 482913]] as [Any]]
+        XCTAssertEqual(SystemPasswordsMessages.oneTimeCodes(from: body).map(\.code), ["123456", "482913"])
+    }
+
+    func testTheCodeRequestForAChosenEntryNamesTheUsername() {
+        XCTAssertEqual(
+            text(SystemPasswordsMessages.oneTimeCodeSearchBody(pageURL: "https://example.com/login", username: "alice")),
+            #"{"ACT":2,"TYPE":"oneTimeCodes","frameURLs":["https://example.com/login"],"USR":"alice","username":"alice"}"#
+        )
+    }
+
     func testOneTimeCodesKeepOnlyCodesThatCouldBeTyped() {
         let body: [String: Any] = ["Entries": [
             ["code": "123456", "username": "alice", "domain": "example.com", "source": "Messages"],

@@ -12,6 +12,8 @@ protocol SystemPasswordsProviding: AnyObject {
     func password(forUsername username: String, host: String) async throws -> String
     func save(username: String, password: String, host: String) async throws -> SystemPasswordsSaveOutcome
     func oneTimeCodes(pageURL: URL, username: String?) async throws -> [SystemPasswordOneTimeCode]
+    /// The code behind a list entry whose code was not handed over.
+    func revealOneTimeCode(pageURL: URL, username: String?) async throws -> String
     func didFillOneTimeCode(pageURL: URL, username: String) async
     func requestPairing(over window: NSWindow?)
     func openPasswordsApp()
@@ -131,6 +133,10 @@ final class SystemPasswords: SystemPasswordsProviding {
 
     func oneTimeCodes(pageURL: URL, username: String?) async throws -> [SystemPasswordOneTimeCode] {
         try await session.oneTimeCodes(pageURL: pageURL.absoluteString, username: username)
+    }
+
+    func revealOneTimeCode(pageURL: URL, username: String?) async throws -> String {
+        try await session.revealOneTimeCode(pageURL: pageURL.absoluteString, username: username)
     }
 
     func didFillOneTimeCode(pageURL: URL, username: String) async {
