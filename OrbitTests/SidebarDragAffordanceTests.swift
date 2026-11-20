@@ -41,29 +41,55 @@ final class SidebarDragAffordanceTests: XCTestCase {
 
     // MARK: - Drag activity decay
 
+    /// Time that moves only when the test says so: a sleeping decay wakes on every advance and looks at the clock again, so nothing here depends on how fast the machine is.
+    @MainActor
+    private final class ManualClock {
+        var now = ContinuousClock.now
+        private var sleepers: [CheckedContinuation<Void, Never>] = []
+
+        func sleep(_ duration: Duration) async {
+            await withCheckedContinuation { sleepers.append($0) }
+        }
+
+        func advance(by duration: Duration) async {
+            now = now + duration
+            let waiting = sleepers
+            sleepers = []
+            waiting.forEach { $0.resume() }
+            // Lets every task that was woken run to its next wait. Counts turns, not time.
+            for _ in 0..<50 { await Task.yield() }
+        }
+    }
+
     // dropUpdated pings on every pointer move; the decay must fire once, after the last ping, not once per ping and not early.
     func test_dragActivityDecay_firesOnceAfterTheLastPingNotAfterTheFirst() async throws {
-        let decay = SidebarDragActivityDecay()
+        let clock = ManualClock()
+        let decay = SidebarDragActivityDecay(now: { clock.now }, sleep: { await clock.sleep($0) })
         var fired = 0
         let nanoseconds: UInt64 = 120_000_000
 
         // Pings every 40ms for 200ms: the first ping's own deadline (120ms) passes mid-stream, and must not fire.
         for _ in 0..<5 {
             decay.ping(decayNanoseconds: nanoseconds) { fired += 1 }
-            try await Task.sleep(nanoseconds: 40_000_000)
+            await clock.advance(by: .milliseconds(40))
         }
         XCTAssertEqual(fired, 0, "A decay that fires while pings are still arriving drops the insertion caret mid-hover.")
 
-        try await Task.sleep(nanoseconds: 400_000_000)
+        await clock.advance(by: .milliseconds(400))
         XCTAssertEqual(fired, 1, "A decay that never fires leaves a stuck caret after a cancelled drag; one that fires per ping is the per-event Task churn it replaced.")
+
+        await clock.advance(by: .seconds(5))
+        XCTAssertEqual(fired, 1, "Once expired it stays quiet until the next ping.")
     }
 
     func test_dragActivityDecay_cancelStopsItFiring() async throws {
-        let decay = SidebarDragActivityDecay()
+        let clock = ManualClock()
+        let decay = SidebarDragActivityDecay(now: { clock.now }, sleep: { await clock.sleep($0) })
         var fired = 0
         decay.ping(decayNanoseconds: 60_000_000) { fired += 1 }
+        await clock.advance(by: .milliseconds(10))
         decay.cancel()
-        try await Task.sleep(nanoseconds: 250_000_000)
+        await clock.advance(by: .seconds(1))
         XCTAssertEqual(fired, 0)
     }
 

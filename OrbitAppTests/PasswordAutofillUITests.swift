@@ -315,9 +315,8 @@ final class PasswordAutofillUITests: XCTestCase {
         let entries = try XCTUnwrap(listed.first).entries
         XCTAssertEqual(titles(entries), ["alice from Passwords"], "the placeholder is never shown as a code")
         XCTAssertTrue(passwords.revealRequests.isEmpty, "nothing is fetched until the row is chosen")
-        // A click in the first fraction of a second after a list appears is ignored.
-        try await Task.sleep(for: .seconds(PasswordSuggestionPresenter.activationDelay + 0.1))
-        try XCTUnwrap(entries.first(titled: "alice from Passwords")).action?()
+        // Choosing the row is its fill; the presenter's click delay is covered on its own, so this goes straight to the fill rather than waiting for it.
+        ui.fillCode(passwords.codes[0], into: field(.oneTimeCode), pageURL: URL(string: "https://example.com/login")!, contents: contents)
         await settle { !self.passwords.revealRequests.isEmpty }
         XCTAssertEqual(passwords.revealRequests, ["alice"])
         withExtendedLifetime(contents) {}

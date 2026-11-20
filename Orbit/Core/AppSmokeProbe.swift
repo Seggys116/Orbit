@@ -289,7 +289,11 @@ enum AppSmokeProbe {
             failRemainingPageChecks("opening a tab on \(url.absoluteString) produced no WebContents at all")
             return tabID
         }
-        host.loadInTab(tabID, url: url)
+        // openTab has already started this load. A second navigation to the same file while it is in flight cancels it, and a failed launch on a loaded CI runner ended with "Cannot open file" for this page at exactly this point, so one is started only if none is under way.
+        let started = host.navigationState(for: tabID)
+        if started?.isLoading != true, !isTarget(started?.url, url) {
+            host.loadInTab(tabID, url: url)
+        }
 
         var waited = 0.0
         while waited < 60.0 {
@@ -297,6 +301,11 @@ enum AppSmokeProbe {
             if state?.isLoading == false, isTarget(state?.url, url) { break }
             await settle(0.25)
             waited += 0.25
+        }
+        // A load that ended in an error is not a page that loaded. Say so now, with the engine's own words, instead of reporting a document that never became ready thirty seconds later.
+        if let loadError = host.tabErrors[tabID] {
+            failRemainingPageChecks("the load of \(url.absoluteString) failed: \(loadError.code) \(loadError.underlyingDescription)")
+            return tabID
         }
         guard let committed = host.navigationState(for: tabID)?.url, isTarget(committed, url),
               host.navigationState(for: tabID)?.isLoading == false else {

@@ -196,18 +196,30 @@ let sidebarDragActivityDecayNanoseconds: UInt64 = 300_000_000
 // One sleeping task per row for the whole of a drag, not one created and cancelled per drop update. dropUpdated fires on every pointer move, so the per-event version allocated and tore down a Task for every row the pointer touched, dozens of times a second, for a deadline that only ever moves forward.
 @MainActor
 final class SidebarDragActivityDecay {
-    private var deadline = ContinuousClock.now
+    private let now: () -> ContinuousClock.Instant
+    private let sleep: (Duration) async -> Void
+    private var deadline: ContinuousClock.Instant
     private var task: Task<Void, Never>?
+
+    /// The clock and the wait are parameters so a test can move time by hand instead of waiting for it.
+    init(
+        now: @escaping () -> ContinuousClock.Instant = { ContinuousClock.now },
+        sleep: @escaping (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+    ) {
+        self.now = now
+        self.sleep = sleep
+        deadline = now()
+    }
 
     /// Pushes the deadline out. `onExpire` runs once, after the deadline has passed without another ping.
     func ping(decayNanoseconds: UInt64 = sidebarDragActivityDecayNanoseconds, onExpire: @escaping @MainActor () -> Void) {
-        deadline = ContinuousClock.now + .nanoseconds(Int64(decayNanoseconds))
+        deadline = now() + .nanoseconds(Int64(decayNanoseconds))
         guard task == nil else { return }
         task = Task { @MainActor [weak self] in
             while let self {
-                let remaining = self.deadline - ContinuousClock.now
+                let remaining = self.deadline - self.now()
                 guard remaining > .zero else { break }
-                try? await Task.sleep(for: remaining)
+                await self.sleep(remaining)
                 if Task.isCancelled { return }
             }
             self?.task = nil
