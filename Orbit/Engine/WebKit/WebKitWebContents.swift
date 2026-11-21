@@ -443,6 +443,8 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         extras.navigationFailureReported = false
         webView.interactionState = data
         guard webView.backForwardList.currentItem != nil else { return false }
+        // The list is back, but WebKit rebuilds the current page from its cache like a Back would. A tab that slept is shown fresh, as it always was, so the page is loaded again over the restored list.
+        webView.reload()
         if let url = webView.url ?? webView.backForwardList.currentItem?.url {
             navigationState.url = url
             navigationState.isLoading = true
