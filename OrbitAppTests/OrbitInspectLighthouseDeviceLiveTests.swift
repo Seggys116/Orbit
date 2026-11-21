@@ -288,7 +288,11 @@ final class OrbitInspectLighthouseDeviceLiveTests: XCTestCase {
                 let now = try await self.tabState(session, contents)
                 return abs(now.innerWidth - before.innerWidth) < 1 && !now.userAgent.contains("iPhone") && !contents.webView.isLoading
             }
-            if case .running = lighthouse.runState { XCTFail("the run is still going after Cancel") }
+            // Cancelling ends the run asynchronously, so the run is waited on rather than sampled the instant the tab looks restored.
+            try await self.waitUntil("the run ends after Cancel", timeout: .seconds(15)) {
+                if case .running = lighthouse.runState { return false }
+                return true
+            }
         }
     }
 }
