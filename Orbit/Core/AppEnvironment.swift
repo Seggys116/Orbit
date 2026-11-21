@@ -1149,7 +1149,8 @@ final class AppEnvironment {
     func closeTabKeepingBookmark(_ id: TabID, destroyRenderer: Bool = true) {
         guard let tab = store.tab(id), tab.section == .pinned else { return }
         if splitGroup(for: id) != nil { closeSplitPane(id) }
-        releaseWebContents(for: id, destroyRenderer: destroyRenderer)
+        // "-" puts the pin back as it was saved, so the page it was left on is not kept to be restored when the tab next opens.
+        releaseWebContents(for: id, destroyRenderer: destroyRenderer, keepingSessionState: false)
         PaneHeaderColorResolver.shared.forget(tab: id)
         store.closeTabKeepingPin(id)
         // Like the document's own pointer, this window's goes empty rather than moving on to a neighbour.
@@ -1511,6 +1512,17 @@ final class AppEnvironment {
     // Tabs whose next commit is a page coming back, not a visit.
     @ObservationIgnored var quietLoadTabIDs: Set<TabID> = []
 
+    /// A tab that slept is also forgotten here, not only one with a live page: the saved copy is what a later wake would put back.
+    func forgetSessionState(for tabID: TabID) {
+        releasedSessionStates.removeValue(forKey: tabID)
+        releasedSessionOrder.removeAll { $0 == tabID }
+    }
+
+    func forgetAllSessionStates() {
+        releasedSessionStates.removeAll()
+        releasedSessionOrder.removeAll()
+    }
+
     private func rememberSessionState(_ data: Data, for tabID: TabID) {
         releasedSessionStates[tabID] = data
         releasedSessionOrder.removeAll { $0 == tabID }
@@ -1653,10 +1665,12 @@ final class AppEnvironment {
     // windowClosing threads through to tabRemoved's own OrbitTabsRemoved
     // push -- true only from disposeWindowSession()'s per-tab loop, when the
     // whole window this tab lives in is going away, not merely this one tab.
-    func releaseWebContents(for tabID: TabID, windowClosing: Bool = false, destroyRenderer: Bool = true) {
+    // `keepingSessionState` is false where the page is being thrown away on purpose (the pin reset, clearing data, a changed site profile): the tab must come back as its address says, not as the page it was left on.
+    func releaseWebContents(for tabID: TabID, windowClosing: Bool = false, destroyRenderer: Bool = true, keepingSessionState: Bool = true) {
+        if !keepingSessionState { forgetSessionState(for: tabID) }
         if webContents[tabID] == nil {
             for holder in otherEnvironmentsHoldingPage(tabID) {
-                holder.releaseWebContents(for: tabID, destroyRenderer: destroyRenderer)
+                holder.releaseWebContents(for: tabID, destroyRenderer: destroyRenderer, keepingSessionState: keepingSessionState)
             }
         }
         // Resumed, never dropped: abandoning strands the task forever. The engine refuses its own half
@@ -1676,7 +1690,7 @@ final class AppEnvironment {
         if windowClosing, let contents = webContents[tabID] as? WebKitWebContents {
             (engine as? WebKitEngine)?.noteTabWillCloseWithWindow(contents)
         }
-        if !windowClosing, let state = webContents[tabID]?.captureSessionState() {
+        if !windowClosing, keepingSessionState, let state = webContents[tabID]?.captureSessionState() {
             rememberSessionState(state, for: tabID)
         }
         if destroyRenderer {

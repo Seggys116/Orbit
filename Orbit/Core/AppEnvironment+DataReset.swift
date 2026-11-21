@@ -249,8 +249,9 @@ extension AppEnvironment {
         for session in sessions {
             await (session as? WebKitSession)?.clearAllWebsiteData()
         }
+        forgetAllSessionStates()
         for tabID in Array(webContents.keys) {
-            releaseWebContents(for: tabID)
+            releaseWebContents(for: tabID, keepingSessionState: false)
         }
         // A store WebKit refuses to remove has still been emptied above, so this is not a failure.
         for session in sessions {
@@ -288,8 +289,9 @@ extension AppEnvironment {
     }
 
     private func resetSpacesAndTabs() -> Bool {
+        forgetAllSessionStates()
         for tabID in Array(webContents.keys) {
-            releaseWebContents(for: tabID)
+            releaseWebContents(for: tabID, keepingSessionState: false)
         }
         removeAllNavigationStates()
         navigationGeneration.removeAll()

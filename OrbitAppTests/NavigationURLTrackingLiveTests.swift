@@ -157,6 +157,33 @@ final class NavigationURLTrackingLiveTests: LiveEnvironmentTestCase {
         }
     }
 
+    // "-" on a pinned tab puts it back as it was pinned. A tab that merely slept keeps the page it was left on, but this one must not: it came back on the last page, and the pin looked as though it had moved there.
+    func testPressingMinusOnAPinnedTabBringsItBackToItsPinnedAddress() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 120) {
+            self.env._test_engineOverride = await WebKitLiveEngineHost.sharedEngine()
+            let tab = self.env.openTab(url: self.url("/a"), in: self.spaceID)
+            try await self.waitUntil("a loaded") { self.shown(tab).page == self.url("/a") && self.env.navigationState(for: tab)?.isLoading == false }
+            self.env.store.pin(tab)
+            XCTAssertEqual(self.env.tab(tab)?.pinnedURL, self.url("/a"))
+            self.env.loadInTab(tab, url: self.url("/b"))
+            try await self.waitUntil("b loaded") { self.shown(tab).page == self.url("/b") && self.env.navigationState(for: tab)?.isLoading == false }
+            self.env.loadInTab(tab, url: self.url("/c"))
+            try await self.waitUntil("c loaded") { self.shown(tab).page == self.url("/c") && self.env.navigationState(for: tab)?.isLoading == false }
+            XCTAssertEqual(self.env.tab(tab)?.pinnedURL, self.url("/a"), "navigating does not move the pin")
+
+            self.env.closeTabKeepingBookmark(tab)
+            XCTAssertNil(self.env.webContents[tab])
+            XCTAssertEqual(self.env.tab(tab)?.url, self.url("/a"), "the tab is back at its pinned address")
+
+            self.env.activateTab(tab)
+            try await self.waitUntil("woke at the pin") { self.shown(tab).page == self.url("/a") && self.env.navigationState(for: tab)?.isLoading == false }
+            let woke = try XCTUnwrap(self.env.webContents[tab] as? WebKitWebContents)
+            XCTAssertEqual(woke.webView.backForwardList.backList.count, 0, "it starts a fresh history: \(self.historySummary(woke))")
+            XCTAssertEqual(self.env.tab(tab)?.url, self.url("/a"))
+            XCTAssertEqual(self.env.tab(tab)?.pinnedURL, self.url("/a"), "and the pin is still the address it was saved with")
+        }
+    }
+
     func testNavigatingWhileAnotherLoadIsStillPendingKeepsTheAddressRight() throws {
         try WebKitLiveEngineHost.runLive(timeout: 60) {
             self.env._test_engineOverride = await WebKitLiveEngineHost.sharedEngine()

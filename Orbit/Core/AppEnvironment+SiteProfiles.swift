@@ -60,7 +60,7 @@ extension AppEnvironment {
         guard wasLive else { return }
 
         navigationGeneration[tabID, default: 0] += 1
-        releaseWebContents(for: tabID)
+        releaseWebContents(for: tabID, keepingSessionState: false)
         removeNavigationState(for: tabID)
         mediaStates.removeValue(forKey: tabID)
         findResultsByTab.removeValue(forKey: tabID)
