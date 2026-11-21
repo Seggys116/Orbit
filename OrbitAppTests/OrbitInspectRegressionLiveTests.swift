@@ -647,6 +647,10 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
     func testConsoleCompletionsDoNotCrash() throws {
         try openInspector { session, _, _ in
             session.select(panel: .console)
+            // Commands to the agent run in a queue, and a completion goes straight to the page, so it must wait for the agent to be there.
+            try await self.waitUntil("agent loaded", timeout: .seconds(8)) {
+                (try await session.evaluate("!!window.__orbitInspect") as? Bool) == true
+            }
             let completions = await session.console.fetchCompletions(path: ["document"], prefix: "getElem")
             XCTAssertTrue(completions.contains("getElementById"), "got \(completions)")
             let quoted = await session.console.fetchCompletions(path: [], prefix: "\"'\\")
@@ -792,6 +796,10 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
             XCTAssertNil(network.richRecord(id: closedID)?.responseBody, "a body was read with the inspector closed")
 
             OrbitDevToolsStore.shared.open(contents, panel: .network, inspectAt: nil, armPicker: false)
+            // The page only reads a body once the agent is in and has been told the inspector is open; both go through the command queue.
+            try await self.waitUntil("agent presented", timeout: .seconds(8)) {
+                (try await session.evaluate("window.__orbitInspect ? window.__orbitInspect.stats().presented : false") as? Bool) == true
+            }
             _ = try await session.evaluate("fetch('/big-open.txt').then(function (r) { return r.text(); }).then(function (t) { window.__bigLength = t.length; }); 1")
             try await self.waitUntil("open fetch body", timeout: .seconds(5)) {
                 network.flushIfDirty()
