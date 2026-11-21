@@ -58,7 +58,6 @@ jobs:
         run: |
           set -o pipefail
           Scripts/live-engine-tests \
-            --suite PageLoadInspectorABLiveTests \
             --results-dir "$RUNNER_TEMP/live-engine-results" \
             -- \
             ARCHS=arm64 \

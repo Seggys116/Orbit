@@ -31,21 +31,21 @@ final class OrbitPerformanceModel: OrbitInspectModule {
             if autoStopTask == nil {
                 autoStopTask = Task { [weak self] in
                     try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 s quiet time
+                    guard !Task.isCancelled else { return }
                     self?.finishRecordingSync()
-                    self?.autoStopTask = nil
                 }
             }
         }
     }
 
     func pageDidReset(preservingLog: Bool) {
+        autoStopTask?.cancel()
+        autoStopTask = nil
         if recordingState != .idle { stopRecording() }
         live.resetPage()
         liveData = PerfRecording()
         liveData.url = session?.pageURL ?? ""
         liveData.title = session?.pageTitle ?? ""
-        autoStopTask?.cancel()
-        autoStopTask = nil
     }
 
     func panelDidAppear(force: Bool) {
@@ -125,11 +125,16 @@ final class OrbitPerformanceModel: OrbitInspectModule {
 
     func stopRecording() {
         guard recordingState != .idle else { return }
+        autoStopTask?.cancel()
+        stopProcessSampling()
+        stopFilmstrip()
         session?.command(["op": "perf.stopSampling"])
         session?.command(["op": "perf.snapshot"])
         // Brief pause: flush the batch that perf.snapshot triggers
-        Task {
+        let startedAt = recordingStartWall
+        autoStopTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled, let self, self.recordingStartWall == startedAt else { return }
             self.finishRecordingSync()
         }
     }
@@ -296,7 +301,7 @@ final class OrbitPerformanceModel: OrbitInspectModule {
         let ts = (Date().timeIntervalSince1970 - recordingStartWall) * 1000
         let size = CGSize(width: 160, height: 100)
         let image = await contents.capturePreview(rect: nil, size: size)
-        guard let image else { return }
+        guard !Task.isCancelled, let image else { return }
         let data: Data? = image.tiffRepresentation
             .flatMap { NSBitmapImageRep(data: $0) }
             .flatMap { $0.representation(using: .png, properties: [:]) }

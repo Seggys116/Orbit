@@ -60,17 +60,21 @@ private struct ResolvedFaviconView: View, Equatable {
                 return
             }
             if let stored = await faviconCache.loadImage(forHost: host) {
+                guard !Task.isCancelled else { return }
                 assign(PreparedFavicon.prepare(stored))
                 return
             }
-            assign(PreparedFavicon.prepare(await faviconCache.image(for: url, host: host)))
+            guard !Task.isCancelled else { return }
+            let fetched = await faviconCache.image(for: url, host: host)
+            guard !Task.isCancelled else { return }
+            assign(PreparedFavicon.prepare(fetched))
         }
     }
 
     private func assign(_ resolved: NSImage) {
         if image !== resolved {
             image = resolved
-            tone = FaviconLegibility.tone(of: resolved)
+            tone = FaviconLegibility.cachedTone(of: resolved)
         }
     }
 }
@@ -106,6 +110,22 @@ enum FaviconLegibility {
     static let lightLuminanceFloor = 0.75
     private static let sampleSide = 16
     private static let minimumOpaqueFraction = 0.04
+
+    private final class ToneResult {
+        let value: Tone?
+        init(_ value: Tone?) { self.value = value }
+    }
+
+    private static let tones = NSMapTable<NSImage, ToneResult>(
+        keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory
+    )
+
+    static func cachedTone(of image: NSImage) -> Tone? {
+        if let result = tones.object(forKey: image) { return result.value }
+        let result = ToneResult(tone(of: image))
+        tones.setObject(result, forKey: image)
+        return result.value
+    }
 
     static func shouldInvert(_ tone: Tone?, onDarkBackground: Bool) -> Bool {
         guard let tone, tone.saturation < monochromeSaturationCeiling else { return false }

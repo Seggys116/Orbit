@@ -82,7 +82,7 @@ final class OrbitDevToolsStore {
         session.isPresented = false
         session.module(for: session.panel).panelDidDisappear()
         session.performance.stopRecording()
-        session.lighthouse.cancelRun()
+        session.lighthouse.cancelRun(restoringPage: !contents.isClosed)
         session.device.deactivate()
         session.picking = false
         session.command(["op": "detach"])

@@ -140,6 +140,55 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
         XCTAssertNil(exception, "the injected agent does not parse: \(exception ?? "")")
     }
 
+    func testLiveMetricsSamplerStopsAndAnOldRunCannotStopItsReplacement() throws {
+        try openInspector { session, _, _ in
+            let first = UUID()
+            let second = UUID()
+            _ = try await session.evaluate(OrbitLivePageSample.script(runID: first, includeNodes: false))
+            _ = try await session.evaluate(OrbitLivePageSample.script(runID: second, includeNodes: false))
+            _ = try await session.evaluate(OrbitLivePageSample.stopScript(runID: first))
+            let activeID = try await session.evaluate("window.__orbitLiveStats?.id") as? String
+            XCTAssertEqual(activeID, second.uuidString)
+
+            _ = try await session.evaluate(OrbitLivePageSample.stopScript(runID: second))
+            let stopped = try await session.evaluate("!window.__orbitLiveStats") as? Bool
+            XCTAssertEqual(stopped, true)
+
+            let live = session.performance.live
+            let polling = Task { await live.run(session: session) }
+            defer { polling.cancel() }
+            try await self.waitUntil("live metrics sampler installed") {
+                try await session.evaluate("!!window.__orbitLiveStats") as? Bool == true
+            }
+            polling.cancel()
+            await polling.value
+            let stoppedOnExit = try await session.evaluate("!window.__orbitLiveStats") as? Bool
+            XCTAssertEqual(stoppedOnExit, true)
+        }
+    }
+
+    func testDockedNetworkPanelCatchesUpAfterTheTabReturns() throws {
+        try openInspector { session, contents, _ in
+            session.setDock(.right)
+            session.select(panel: .network)
+            session.network.flushIfDirty()
+            contents.setVisible(false)
+            XCTAssertFalse(session.isPanelVisible)
+
+            var record = NetRecord(id: "background-request")
+            record.url = "https://example.test/background.js"
+            session.network.nativeRequestSent(record)
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertTrue(session.network.records.contains { $0.id == record.id })
+            XCTAssertFalse(session.network.filteredRecords.contains { $0.id == record.id })
+
+            contents.setVisible(true)
+            XCTAssertTrue(session.isPanelVisible)
+            XCTAssertTrue(session.network.filteredRecords.contains { $0.id == record.id })
+            XCTAssertEqual(session.panel, .network)
+        }
+    }
+
 
     func testClickingARowShowsMatchedRulesFromEveryKindOfStylesheetRule() throws {
         try openInspector { session, _, _ in
