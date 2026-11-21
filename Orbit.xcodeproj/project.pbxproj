@@ -1611,6 +1611,7 @@
 		E726F6A61CA0EF2C35D09C0F /* RelativeTimeFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8ED9CA83F99C74BAA6264EF /* RelativeTimeFormatter.swift */; };
 		E7DDD881403ACB9B45A1C105 /* CorpusLiveTestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B65EE01B5BD4AFDC4D53AB2 /* CorpusLiveTestCase.swift */; };
 		E7EE125D1E000711E5AFC7C8 /* OrbitApplicationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91C82092CDA69238FAA69BC6 /* OrbitApplicationViews.swift */; };
+		E842221F303BB75E0D8F45F0 /* PageVisibilityWatchdogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42C77A3B76773F369FD35EB2 /* PageVisibilityWatchdogTests.swift */; };
 		E848BF7CC810B7643B44644F /* PasskeyAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 531E6EEF138A5923DAB69956 /* PasskeyAuthorization.swift */; };
 		E895BFA9E5E6FC49C32FEE72 /* SystemPasswordsWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 098D5C767C94F32EE6BA84D2 /* SystemPasswordsWire.swift */; };
 		E8C6E06F6B9E60416679F8D2 /* MediaSessionObserverScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C064DDBAE9B3E1AC7787B9C /* MediaSessionObserverScript.swift */; };
@@ -2109,6 +2110,7 @@
 		425ED2DB198F64A44FC70FE1 /* R3ShortcutCoverageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = R3ShortcutCoverageTests.swift; sourceTree = "<group>"; };
 		42898B5ED222B39542358DC5 /* FavoritesGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesGridView.swift; sourceTree = "<group>"; };
 		42BC7DCA3946AA951C78FB8D /* ExtensionAPISchemaSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionAPISchemaSurface.swift; sourceTree = "<group>"; };
+		42C77A3B76773F369FD35EB2 /* PageVisibilityWatchdogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageVisibilityWatchdogTests.swift; sourceTree = "<group>"; };
 		43A295391878446112322F35 /* SpaceSidebarContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceSidebarContent.swift; sourceTree = "<group>"; };
 		43D6910AD79280BF1F08F9D1 /* WebStorePrivateBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebStorePrivateBridgeTests.swift; sourceTree = "<group>"; };
 		43FB44F0F749D0DF0A4B6D72 /* BrowserStore+Performance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrowserStore+Performance.swift"; sourceTree = "<group>"; };
@@ -4163,6 +4165,7 @@
 				D66BC602BAAD7E828CE2DF8C /* PageLoadInspectorABLiveTests.swift */,
 				0D1CDA3A996D9535FF2F60EA /* PageNewWindowAdoptionTests.swift */,
 				44EA4CC88A50411C068E3095 /* PageTopBandColorTests.swift */,
+				42C77A3B76773F369FD35EB2 /* PageVisibilityWatchdogTests.swift */,
 				63CF1CD2A74531D690EE9CEF /* PageZoomPersistenceTests.swift */,
 				CF0400632DB9AA2CF057231F /* PaneChromeTests.swift */,
 				1806E6FE7BC392D3A93AB3DC /* PaneHeaderColorResolverTests.swift */,
@@ -6004,6 +6007,7 @@
 				565EA5615C76BDEDC3C91BF1 /* PageLoadInspectorABLiveTests.swift in Sources */,
 				C6C211D3F33079841C2034C1 /* PageNewWindowAdoptionTests.swift in Sources */,
 				F58A7275AB617554674171FE /* PageTopBandColorTests.swift in Sources */,
+				E842221F303BB75E0D8F45F0 /* PageVisibilityWatchdogTests.swift in Sources */,
 				E22D7BA8240904B767DD3348 /* PageZoomPersistenceTests.swift in Sources */,
 				13646E829CEE5029491D54AF /* PaneChromeTests.swift in Sources */,
 				FC4CF2C198413195588A850C /* PaneHeaderColorResolverTests.swift in Sources */,

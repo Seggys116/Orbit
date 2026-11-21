@@ -1,13 +1,39 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
-#if DEBUG
 import OSLog
-#endif
+
+/// A page that a pane shows must be declared visible to WebKit, or it paints nothing and its loads are slowed as a hidden page's are. The declaration is made by events (a pane building, a window change, a tab swap), and a missed one leaves a grey pane that only an unrelated event, such as opening the inspector, puts right. This is the check that does not depend on an event.
+enum PageVisibilityWatchdog {
+    static let interval: TimeInterval = 1.5
+
+    /// Whether a page its pane owns and shows in an on-screen window has been left declared hidden, or was never declared at all.
+    static func needsRepair(declaredVisible: Bool?, viewIsHidden: Bool, paneIsShowingIt: Bool) -> Bool {
+        guard paneIsShowingIt else { return false }
+        return declaredVisible != true || viewIsHidden
+    }
+}
 
 private final class WebContentsHostContainerView: NSView {
     // Re-runs the embed on window join/leave: SwiftUI builds a representable's view detached, so joining a window is the first reliable on-screen signal.
     var windowDidChange: (() -> Void)?
+
+    /// Runs while the container is in a window. See PageVisibilityWatchdog.
+    var watchdog: (() -> Void)? {
+        didSet { restartWatchdogTimer() }
+    }
+    private var watchdogTimer: Timer?
+
+    private func restartWatchdogTimer() {
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
+        guard watchdog != nil, window != nil else { return }
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: PageVisibilityWatchdog.interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.watchdog?() }
+        }
+    }
+
+    deinit { watchdogTimer?.invalidate() }
 
     private var placeholderColor: NSColor?
 
@@ -33,6 +59,7 @@ private final class WebContentsHostContainerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        restartWatchdogTimer()
         windowDidChange?()
     }
 
@@ -174,6 +201,15 @@ struct WebContentsHostView: View {
                     }
                 } else {
                     FrozenWebContentsView(image: presentation.frozenFrame(for: contents))
+                        // A frozen pane with no picture is a grey screen with nothing behind it, and no live pane in this key window is showing the page. It is never a state to stay in: this window's pane takes the page back.
+                        .task(id: contents.id) {
+                            guard presentation.frozenFrame(for: contents) == nil else { return }
+                            try? await Task.sleep(for: .milliseconds(400))
+                            guard !Task.isCancelled, controlActiveState == .key, !presentation.isOwner(hostID, of: contents),
+                                  presentation.frozenFrame(for: contents) == nil else { return }
+                            Logger(subsystem: "com.orbit.browser", category: "PagePresentation").error("A pane in the key window was left frozen grey with no picture; taking the page back")
+                            presentation.claim(hostID, of: contents)
+                        }
                 }
             }
         }
@@ -221,6 +257,7 @@ struct LiveWebContentsHostView: NSViewRepresentable {
             guard let container else { return }
             onWindowChange(of: container)
         }
+        installWatchdog(on: container)
         return container
     }
 
@@ -231,6 +268,7 @@ struct LiveWebContentsHostView: NSViewRepresentable {
             onWindowChange(of: container)
         }
         container.setPlaceholderColor(placeholderColor)
+        installWatchdog(on: container)
         embedIfEntitled(in: container)
         let coordinator = context.coordinator
         if coordinator.lastContentsID != contents.id {
@@ -240,6 +278,28 @@ struct LiveWebContentsHostView: NSViewRepresentable {
         } else if coordinator.lastPresentationRequest != presentationRequest {
             coordinator.lastPresentationRequest = presentationRequest
             reassertVisible(in: nsView)
+        }
+    }
+
+    private static let presentationLogger = Logger(subsystem: "com.orbit.browser", category: "PagePresentation")
+
+    /// Re-pointed on every update so it always checks the page this pane is showing now.
+    private func installWatchdog(on container: WebContentsHostContainerView) {
+        let page = contents
+        let host = hostID
+        container.watchdog = { [weak container] in
+            guard let container, let window = container.window, window.isVisible, !container.isHiddenOrHasHiddenAncestor,
+                  container.bounds.width > 1, container.bounds.height > 1,
+                  WebContentsPresentation.shared.isOwner(host, of: page),
+                  let slot = container.subviews.compactMap({ $0 as? PageSlotView }).first(where: { $0.contentsID == page.id && $0.contents === page }),
+                  slot.holds(page), !slot.isHidden,
+                  let engineView = page as? WebKitWebContents else { return }
+            let declared = engineView.declaredVisibility
+            guard PageVisibilityWatchdog.needsRepair(declaredVisible: declared, viewIsHidden: engineView.view.isHidden, paneIsShowingIt: true) else { return }
+            Self.presentationLogger.error("A page this pane shows was declared \(String(describing: declared), privacy: .public) with its view hidden \(engineView.view.isHidden, privacy: .public); declaring it visible again")
+            engineView.view.isHidden = false
+            engineView.setVisible(true)
+            engineView.view.needsDisplay = true
         }
     }
 

@@ -194,7 +194,11 @@ final class OrbitWebView: WKWebView {
         unsafeBitCast(implementation, to: Function.self)(self, selector)
     }
 
+    /// What the pane last told this page about being on screen; nil until it has said anything.
+    private(set) var declaredVisibility: Bool?
+
     func declareVisible(_ visible: Bool) {
+        declaredVisibility = visible
         // An off-screen stand-in is still occluded. Painting has to be allowed explicitly.
         setWindowOcclusionDetectionEnabled(!visible)
         if visible, !isInRealWindow {
@@ -729,6 +733,9 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     private(set) var isHiddenFromPane = false
+
+    /// Whether the pane last declared this page visible; nil before it has declared anything.
+    var declaredVisibility: Bool? { (webView as? OrbitWebView)?.declaredVisibility }
 
     func setVisible(_ visible: Bool) {
         (webView as? OrbitWebView)?.declareVisible(visible)
