@@ -32,6 +32,8 @@ nonisolated struct OrbitLivePageSample: Equatable, Sendable {
     var heapTotal: Double?
     var heapLimit: Double?
 
+    private static let samplerKey = "window.__orbitLiveStats"
+
     init?(json: String) {
         guard let data = json.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -56,25 +58,38 @@ nonisolated struct OrbitLivePageSample: Equatable, Sendable {
         return (current.frames - previous.frames) / (elapsed / 1000)
     }
 
-    static func script(includeNodes: Bool) -> String {
+    static func script(runID: UUID, includeNodes: Bool) -> String {
         """
         (function(){
-        var s=window.__orbitLiveStats;
+        var s=\(samplerKey), id='\(runID.uuidString)';
+        if(s&&s.id!==id){s.stop();s=null;}
         if(!s){
-        s=window.__orbitLiveStats={frames:0,stall:0,long:0,longMs:0,observing:false};
-        var loop=function(){s.frames++;requestAnimationFrame(loop)};
-        requestAnimationFrame(loop);
+        s=\(samplerKey)={id:id,frames:0,stall:0,long:0,longMs:0,observer:null};
+        var loop=function(){s.frames++;s.frameHandle=requestAnimationFrame(loop);};
+        s.frameHandle=requestAnimationFrame(loop);
         var expected=performance.now()+50;
-        setInterval(function(){var n=performance.now();var lag=n-expected;if(lag>s.stall)s.stall=lag;expected=n+50;},50);
+        s.interval=setInterval(function(){var n=performance.now();var lag=n-expected;if(lag>s.stall)s.stall=lag;expected=n+50;},50);
+        s.stop=function(){
+        cancelAnimationFrame(s.frameHandle);
+        clearInterval(s.interval);
+        clearTimeout(s.expiration);
+        if(s.observer)s.observer.disconnect();
+        window.removeEventListener('pagehide',s.stop);
+        if(\(samplerKey)===s)delete \(samplerKey);
+        };
+        window.addEventListener('pagehide',s.stop);
         try{
         var types=PerformanceObserver.supportedEntryTypes||[];
         if(types.indexOf('longtask')>=0){
-        new PerformanceObserver(function(list){list.getEntries().forEach(function(e){s.long++;s.longMs+=e.duration;});}).observe({type:'longtask'});
-        s.observing=true;
+        var observer=new PerformanceObserver(function(list){list.getEntries().forEach(function(e){s.long++;s.longMs+=e.duration;});});
+        observer.observe({type:'longtask'});
+        s.observer=observer;
         }
         }catch(e){}
         }
-        var out={t:performance.now(),frames:s.frames,stall:Math.max(0,s.stall),long:s.observing?s.long:null,longMs:s.longMs,hidden:document.hidden};
+        clearTimeout(s.expiration);
+        s.expiration=setTimeout(s.stop,3000);
+        var out={t:performance.now(),frames:s.frames,stall:Math.max(0,s.stall),long:s.observer?s.long:null,longMs:s.longMs,hidden:document.hidden};
         s.stall=0;
         \(includeNodes ? "out.nodes=document.getElementsByTagName('*').length;" : "")
         var m=performance.memory;
@@ -82,6 +97,10 @@ nonisolated struct OrbitLivePageSample: Equatable, Sendable {
         return JSON.stringify(out);
         })()
         """
+    }
+
+    static func stopScript(runID: UUID) -> String {
+        "\(samplerKey)?.id === '\(runID.uuidString)' && \(samplerKey).stop();"
     }
 }
 
@@ -138,13 +157,16 @@ final class OrbitPerformanceLiveModel {
     @ObservationIgnored private var tickCount = 0
 
     func run(session: OrbitInspectSession) async {
+        let runID = UUID()
         baseline = .none
         previousPage = nil
         tickCount = 0
-        while !Task.isCancelled {
-            await tick(session: session)
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        while !Task.isCancelled, session.contents?.isClosed == false {
+            await tick(session: session, runID: runID)
+            try? await Task.sleep(for: .seconds(1))
         }
+        // An in-flight JavaScript reply can cross a stop/start; only stop the sampler this run owns.
+        _ = try? await session.evaluate(OrbitLivePageSample.stopScript(runID: runID))
     }
 
     func resetPage() {
@@ -158,11 +180,12 @@ final class OrbitPerformanceLiveModel {
         jsHeapLimit = nil
     }
 
-    private func tick(session: OrbitInspectSession) async {
+    private func tick(session: OrbitInspectSession, runID: UUID) async {
         guard let webView = session.contents?.webView else { return }
         sampleProcesses(webView: webView)
         gpuDevice.append(OrbitGPUStatistics.deviceUtilizationPercent())
-        await samplePage(session: session)
+        await samplePage(session: session, runID: runID)
+        guard !Task.isCancelled else { return }
         tickCount += 1
     }
 
@@ -184,9 +207,10 @@ final class OrbitPerformanceLiveModel {
         gpuProcessCPU.append(gpu.flatMap { first ? nil : $0.cpuPercent })
     }
 
-    private func samplePage(session: OrbitInspectSession) async {
-        let script = OrbitLivePageSample.script(includeNodes: tickCount % 3 == 0)
+    private func samplePage(session: OrbitInspectSession, runID: UUID) async {
+        let script = OrbitLivePageSample.script(runID: runID, includeNodes: tickCount % 3 == 0)
         let raw = try? await session.evaluate(script) as? String
+        guard !Task.isCancelled else { return }
         guard let raw, let page = OrbitLivePageSample(json: raw) else {
             pageReachable = false
             fps.append(nil)

@@ -78,8 +78,11 @@ final class OrbitDevToolsStore {
     }
 
     func close(_ contents: any WebContents) {
-        guard let session = sessions[ObjectIdentifier(contents)] else { return }
+        guard let session = session(for: contents), session.isPresented else { return }
         session.isPresented = false
+        session.module(for: session.panel).panelDidDisappear()
+        session.performance.stopRecording()
+        session.lighthouse.cancelRun()
         session.device.deactivate()
         session.picking = false
         session.command(["op": "detach"])
@@ -90,13 +93,13 @@ final class OrbitDevToolsStore {
     }
 
     func pageClosed(_ contents: WebKitWebContents) {
-        let key = ObjectIdentifier(contents)
-        sessions[key]?.windowController?.relinquish()
-        sessions.removeValue(forKey: key)
+        close(contents)
+        sessions.removeValue(forKey: ObjectIdentifier(contents))
     }
 
     func receive(_ body: Any, webView: WKWebView?, isMainFrame: Bool, frameURL: String?, frameInfo: WKFrameInfo? = nil) {
-        guard let webView, let contents = WebKitLiveContents.all.first(where: { $0.webView === webView }) else { return }
+        guard let contents = (webView as? OrbitWebView)?.menuOwner,
+              !contents.isClosed, contents.webView === webView else { return }
         guard let object = Self.jsonObject(from: body), let type = object["t"] as? String else { return }
         let session = ensureSession(for: contents)
         if type == "hello", !isMainFrame, let frameInfo { session.noteSubframe(frameInfo) }
@@ -130,6 +133,10 @@ final class OrbitInspectSession {
     var picking = false
     var preserveLog = false
     var agentReady = false
+
+    var isPanelVisible: Bool {
+        isPresented && (dock == .undocked || contents?.isHiddenFromPane == false)
+    }
 
     @ObservationIgnored let elements = OrbitElementsModel()
     @ObservationIgnored let console = OrbitConsoleModel()
@@ -261,8 +268,11 @@ final class OrbitInspectSession {
     }
 
     func select(panel: OrbitInspectPanel) {
-        self.panel = panel
-        OrbitInspectPreferences.panel = panel
+        if self.panel != panel {
+            module(for: self.panel).panelDidDisappear()
+            self.panel = panel
+            OrbitInspectPreferences.panel = panel
+        }
         module(for: panel).panelDidAppear(force: false)
     }
 
@@ -287,12 +297,25 @@ final class OrbitInspectSession {
 
 
     func setDock(_ dock: OrbitInspectDock) {
+        let wasVisible = isPanelVisible
         self.dock = dock
         OrbitInspectPreferences.dock = dock
         if dock == .undocked {
             OrbitInspectWindowController.present(self)
         } else {
             windowController?.relinquish()
+        }
+        panelVisibilityDidChange(from: wasVisible)
+    }
+
+    func panelVisibilityDidChange(from wasVisible: Bool) {
+        let visible = isPanelVisible
+        guard visible != wasVisible else { return }
+        let selected = module(for: panel)
+        if !visible {
+            selected.panelDidDisappear()
+        } else if panel == .application || panel == .frameworks || panel == .network {
+            selected.panelDidAppear(force: false)
         }
     }
 

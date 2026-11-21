@@ -29,6 +29,9 @@ final class PiPController {
     /// Whether the floating tab has been off screen since it started floating. A window the user opened while looking at the tab is left alone until they leave and come back.
     private var floatingLeftScreen = false
 
+    /// Tabs whose window was asked to close and has not yet reported closed.
+    private var closingWindows: Set<TabID> = []
+
     // A floating tab whose window closed while the video kept playing: possibly the window's "return to tab" button, possibly a close that has not paused the video yet.
     private var returnCandidate: TabID?
 
@@ -135,8 +138,12 @@ final class PiPController {
 
     /// A page can float without Orbit asking: from its own video controls, the context menu or the mini player. Its window has the same Return button, so it is tracked from the moment it is seen floating, or Return would leave the person on whatever tab they were looking at.
     private func adoptFloatingTabNobodyAskedFor(env: AppEnvironment) {
+        // A window this controller asked to close still reports as open for a moment; it is not one nobody asked for.
+        closingWindows = closingWindows.filter { env.mediaStates[$0]?.isPictureInPictureActive == true }
         guard pipTabID == nil, pendingRequest == nil else { return }
-        guard let floating = env.mediaStates.first(where: { $0.value.isPictureInPictureActive && env.webContents[$0.key] != nil })?.key else { return }
+        guard let floating = env.mediaStates.first(where: {
+            $0.value.isPictureInPictureActive && env.webContents[$0.key] != nil && !closingWindows.contains($0.key)
+        })?.key else { return }
         pipTabID = floating
         floatingLeftScreen = !Self.isOnScreen(floating, env: env)
     }
@@ -255,6 +262,7 @@ final class PiPController {
         if returnCandidate == tabID { returnCandidate = nil }
         if let contents = env.webContents[tabID], contents.mediaState.isPictureInPictureActive {
             // The toggle is an exit only while the window is open; sent early it would open one.
+            closingWindows.insert(tabID)
             contents.togglePictureInPicture()
             if pendingRequest?.tabID == tabID { pendingRequest = nil }
         } else if var pending = pendingRequest, pending.tabID == tabID {
@@ -275,6 +283,7 @@ final class PiPController {
         pipTabID = nil
         pendingRequest = nil
         returnCandidate = nil
+        closingWindows = []
         floatingLeftScreen = false
         presentApp = { _ in }
     }

@@ -728,9 +728,16 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         delegate?.webContents(self, didChangeMediaState: mediaState)
     }
 
+    private(set) var isHiddenFromPane = false
+
     func setVisible(_ visible: Bool) {
         (webView as? OrbitWebView)?.declareVisible(visible)
         mediaProbeCadenceMayHaveChanged()
+        guard isHiddenFromPane == visible else { return }
+        let inspector = OrbitDevToolsStore.shared.session(for: self)
+        let wasVisible = inspector?.isPanelVisible ?? false
+        isHiddenFromPane = !visible
+        inspector?.panelVisibilityDidChange(from: wasVisible)
     }
 
     func togglePictureInPicture() {

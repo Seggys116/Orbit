@@ -223,9 +223,13 @@ final class OrbitFrameworksModel: OrbitInspectModule {
     }
 
     func panelDidAppear(force: Bool) {
+        guard session?.isPanelVisible == true else { return }
         refresh()
     }
 
+    func panelDidDisappear() {
+        stopPoll()
+    }
 
     func refresh() {
         guard let session else { return }
@@ -740,32 +744,24 @@ final class OrbitFrameworksModel: OrbitInspectModule {
 
 
     private func startPoll() {
-        guard pollTask == nil else { return }
+        guard pollTask == nil, session?.isPanelVisible == true, session?.panel == .frameworks else { return }
         session?.command(["op": "fw.start", "interval": 3000] as [String: Any])
         pollTask = Task { [weak self] in
             var count = 0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                guard !Task.isCancelled else { break }
-                await MainActor.run {
-                    guard let self, self.session != nil else { return }
-                    // The component tree is the costly walk, so it only refreshes while its tab is showing.
-                    if self.session?.panel == .frameworks {
-                        if self.tab == .components { self.session?.command(["op": "fw.tree"]) }
-                        count += 1
-                        if count % 5 == 0 {
-                            self.session?.command(["op": "fw.scan"])
-                            self.refreshDraftMode()
-                        }
-                    }
-                }
+                try? await Task.sleep(for: .seconds(3), tolerance: .milliseconds(300))
+                guard !Task.isCancelled, let self, let session = self.session else { break }
+                if self.tab == .components { session.command(["op": "fw.tree"]) }
+                count += 1
+                if count % 5 == 0 { self.refreshDraftMode() }
             }
         }
     }
 
     private func stopPoll() {
+        guard let pollTask else { return }
+        pollTask.cancel()
+        self.pollTask = nil
         session?.command(["op": "fw.stop"])
-        pollTask?.cancel()
-        pollTask = nil
     }
 }

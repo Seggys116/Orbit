@@ -62,10 +62,10 @@ final class PageLoadInspectorABLiveTests: LiveEnvironmentTestCase {
     }
 
     /// Milliseconds from asking for the page to the engine reporting it finished.
-    private func timedLoad(_ contents: WebKitWebContents, tag: String) async throws -> Double {
+    private func timedLoad(_ tabID: TabID, _ contents: WebKitWebContents, tag: String) async throws -> Double {
         let url = server.baseURL.appendingPathComponent("page").appending(queryItems: [URLQueryItem(name: "r", value: tag)])
         let started = ContinuousClock.now
-        contents.load(url)
+        env.loadInTab(tabID, url: url)
         let deadline = ContinuousClock.now + .seconds(60)
         while true {
             let state = contents.navigationState
@@ -84,10 +84,10 @@ final class PageLoadInspectorABLiveTests: LiveEnvironmentTestCase {
         return sorted[sorted.count / 2]
     }
 
-    private func series(_ contents: WebKitWebContents, label: String, runs: Int) async throws -> [Double] {
+    private func series(_ tabID: TabID, _ contents: WebKitWebContents, label: String, runs: Int) async throws -> [Double] {
         var times: [Double] = []
         for index in 0..<runs {
-            times.append(try await timedLoad(contents, tag: "\(label)-\(index)"))
+            times.append(try await timedLoad(tabID, contents, tag: "\(label)-\(index)"))
             try await Task.sleep(for: .milliseconds(300))
         }
         return times
@@ -109,14 +109,14 @@ final class PageLoadInspectorABLiveTests: LiveEnvironmentTestCase {
             self.env.selectSpace(spaceID)
             let tabID = self.env.openTab(url: self.server.baseURL.appendingPathComponent("page"), in: spaceID)
             let contents = try XCTUnwrap(self.env.webContents[tabID] as? WebKitWebContents)
-            _ = try await self.timedLoad(contents, tag: "warm")
+            _ = try await self.timedLoad(tabID, contents, tag: "warm")
             try await Task.sleep(for: .seconds(1))
 
-            var closed = try await self.series(contents, label: "closed", runs: 8)
+            var closed = try await self.series(tabID, contents, label: "closed", runs: 8)
 
             OrbitDevToolsStore.shared.open(contents, panel: .network, inspectAt: nil, armPicker: false)
             try await Task.sleep(for: .seconds(1))
-            let networkOpen = try await self.series(contents, label: "network", runs: 8)
+            let networkOpen = try await self.series(tabID, contents, label: "network", runs: 8)
 
             OrbitDevToolsStore.shared.open(contents, panel: .performance, inspectAt: nil, armPicker: false)
             try await Task.sleep(for: .seconds(1))
@@ -124,12 +124,12 @@ final class PageLoadInspectorABLiveTests: LiveEnvironmentTestCase {
             let live = OrbitPerformanceLiveModel()
             let sampler = Task { @MainActor in await live.run(session: session) }
             try await Task.sleep(for: .seconds(2))
-            let performanceOpen = try await self.series(contents, label: "performance", runs: 8)
+            let performanceOpen = try await self.series(tabID, contents, label: "performance", runs: 8)
             sampler.cancel()
 
             OrbitDevToolsStore.shared.close(contents)
             try await Task.sleep(for: .seconds(1))
-            closed += try await self.series(contents, label: "closed-again", runs: 8)
+            closed += try await self.series(tabID, contents, label: "closed-again", runs: 8)
 
             @MainActor func line(_ name: String, _ values: [Double]) -> String {
                 "\(name): median \(String(format: "%.0f", Self.median(values))) ms, runs \(values.map { String(format: "%.0f", $0) }.joined(separator: ","))"

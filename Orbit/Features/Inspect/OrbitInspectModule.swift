@@ -20,6 +20,7 @@ protocol OrbitInspectModule: AnyObject {
 
     /// A Refresh (`force` true) must always do real work and re-request everything the panel shows.
     func panelDidAppear(force: Bool)
+    func panelDidDisappear()
 }
 
 extension OrbitInspectModule {
@@ -27,6 +28,7 @@ extension OrbitInspectModule {
     func receive(type: String, object: [String: Any], frame: OrbitInspectFrame) {}
     func pageDidReset(preservingLog: Bool) {}
     func panelDidAppear(force: Bool) {}
+    func panelDidDisappear() {}
 }
 
 enum OrbitInspectPanel: String, CaseIterable, Identifiable {

@@ -115,7 +115,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
     private var isPanelPresented: Bool {
         if let presentationProbe { return presentationProbe() }
         guard let session else { return false }
-        return session.isPresented && session.panel == .network
+        return session.isPanelVisible && session.panel == .network
     }
 
     var messageTypes: Set<String> { ["net.batch", "net.nav", "net.form", "net.body"] }
@@ -175,7 +175,7 @@ final class OrbitNetworkModel: OrbitInspectModule {
 
     func panelDidAppear(force: Bool) {
         // Changes made while the panel was hidden were not projected, so show them now, once.
-        flushIfDirty()
+        if isPanelPresented || force { flushIfDirty() }
         if force {
             session?.command(["op": "net.refresh"])
         }

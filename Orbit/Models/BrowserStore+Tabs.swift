@@ -84,16 +84,18 @@ public extension BrowserStore {
     }
 
     func selectTab(_ id: TabID) {
+        selectTab(id, updatingActiveTab: true, updatingActiveSpace: true)
+    }
+
+    internal func selectTab(_ id: TabID, updatingActiveTab: Bool, updatingActiveSpace: Bool) {
         // Without this the pane shows an archived page the sidebar has no row for — and that pairing persists across a relaunch.
         if state.tabs[id]?.section == .archived { restoreFromArchive(id, to: .today) }
         guard var tab = state.tabs[id] else { return }
         var newState = state
         tab.lastAccessedAt = Date()
         newState.tabs[id] = tab
-        newState.activeTabBySpace[tab.spaceID] = id
-        if newState.activeSpaceID != tab.spaceID {
-            newState.activeSpaceID = tab.spaceID
-        }
+        if updatingActiveTab { newState.activeTabBySpace[tab.spaceID] = id }
+        if updatingActiveSpace { newState.activeSpaceID = tab.spaceID }
         state = newState
     }
 

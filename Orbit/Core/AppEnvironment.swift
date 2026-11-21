@@ -132,6 +132,7 @@ final class AppEnvironment {
     // MARK: - Live web contents, keyed by Tab.id
 
     private(set) var webContents: [TabID: any WebContents] = [:]
+    @ObservationIgnored private var tabIDsByContents: [ObjectIdentifier: TabID] = [:]
 
     // Bumped by loadInTab(_:url:) so materializeWebContents's deferred content-blocking load can tell it has been superseded.
     // Module-internal, not private: AppEnvironment+TearOff.swift reaches into another environment's copy when a tab is torn off.
@@ -1045,7 +1046,7 @@ final class AppEnvironment {
             OrbitWindowController.window(for: owner)?.makeKeyAndOrderFront(nil)
             return
         }
-        scopingActiveSpaceToThisWindow { store.selectTab(id) }
+        store.selectTab(id, updatingActiveTab: !isIndependentStandardWindow, updatingActiveSpace: !isWindowScoped)
         claimSelectionForThisWindow(id)
         if activeTabID != id {
             Self.logger.error("a tab was chosen but is not the active tab afterwards: sectionIsArchived=\(tab.section == .archived) spaceMatches=\(tab.spaceID == self.activeSpace?.id)")
@@ -1476,7 +1477,7 @@ final class AppEnvironment {
     // still exercises the delegate wiring, mirrored state, zoom restore and unloaded-flag clear.
     private func adoptWebContents(_ contents: any WebContents, for tabID: TabID, url: URL) {
         contents.delegate = self
-        webContents[tabID] = contents
+        registerWebContents(contents, for: tabID)
         inheritSiteProfile(from: contents, for: tabID, url: url)
         installForeignSiteCookieMirror(on: contents, tabID: tabID)
         setNavigationState(contents.navigationState, for: tabID)
@@ -1549,15 +1550,9 @@ final class AppEnvironment {
         extensionTabIndex(for: tab.id)
     }
 
-    // Pushes every registered tab's position: Chrome fires no event for a tab merely displaced
-    // by a sibling's insert/close/pin/move, though its index does change — without this it goes stale.
+    // Invalidates extension tab positions after an insert, close, pin or move.
     func pushExtensionTabIndexes() {
         (engine as? WebKitEngine)?.noteTabLayoutChanged()
-        var index = 0
-        for tabID in extensionWindowTabOrder() {
-            guard webContents[tabID] is WebKitWebContents else { continue }
-            index += 1
-        }
     }
 
     // The one place chrome.tabs is told the active tab — every path that changes it must call
@@ -1694,7 +1689,7 @@ final class AppEnvironment {
         } else {
             webContents[tabID]?.close()
         }
-        webContents.removeValue(forKey: tabID)
+        detachWebContents(for: tabID)
         // After the removal, so the closing tab no longer takes an index off
         // everything that followed it in the strip.
         if wasRegistered {
@@ -1712,10 +1707,19 @@ final class AppEnvironment {
     // The one caller that must not close what it removes: tearing a tab off
     // into its own window hands the same live renderer to a second
     // environment rather than destroying it and forcing a reload.
+    @discardableResult
     func detachWebContents(for tabID: TabID) -> (any WebContents)? {
-        guard let contents = webContents[tabID] else { return nil }
-        webContents.removeValue(forKey: tabID)
+        guard let contents = webContents.removeValue(forKey: tabID) else { return nil }
+        tabIDsByContents.removeValue(forKey: ObjectIdentifier(contents))
         return contents
+    }
+
+    private func registerWebContents(_ contents: any WebContents, for tabID: TabID) {
+        if let previous = webContents[tabID] {
+            tabIDsByContents.removeValue(forKey: ObjectIdentifier(previous))
+        }
+        tabIDsByContents[ObjectIdentifier(contents)] = tabID
+        webContents[tabID] = contents
     }
 
     // Does not call materializeWebContents's other setup (zoom restore,
@@ -1723,7 +1727,7 @@ final class AppEnvironment {
     // through all of that in its original session.
     func installTransferredWebContents(_ contents: any WebContents, for tabID: TabID) {
         contents.delegate = self
-        webContents[tabID] = contents
+        registerWebContents(contents, for: tabID)
     }
 
     #if DEBUG
@@ -2212,20 +2216,22 @@ final class AppEnvironment {
     // anywhere in this codebase — resolves the real id via a reverse lookup
     // by reference identity instead. Every WebContentsDelegate callback must use this, not contents.id.
     func tabID(for contents: WebContents) -> TabID? {
-        webContents.first { $0.value === contents }?.key
+        // Track registration changes when a SwiftUI view resolves its tab.
+        access(keyPath: \.webContents)
+        return tabIDsByContents[ObjectIdentifier(contents)]
     }
 
     #if DEBUG
     // MARK: - Test seam
 
     func _test_attachWebContents(_ contents: WebContents, for tabID: TabID) {
-        webContents[tabID] = contents
+        registerWebContents(contents, for: tabID)
         setNavigationState(contents.navigationState, for: tabID)
         mediaStates[tabID] = contents.mediaState
     }
 
     func _test_detachWebContents(for tabID: TabID) {
-        webContents.removeValue(forKey: tabID)
+        detachWebContents(for: tabID)
     }
     #endif
 

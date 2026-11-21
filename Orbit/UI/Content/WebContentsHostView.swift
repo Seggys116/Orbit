@@ -9,6 +9,26 @@ private final class WebContentsHostContainerView: NSView {
     // Re-runs the embed on window join/leave: SwiftUI builds a representable's view detached, so joining a window is the first reliable on-screen signal.
     var windowDidChange: (() -> Void)?
 
+    private var placeholderColor: NSColor?
+
+    func setPlaceholderColor(_ color: NSColor) {
+        guard placeholderColor != color else { return }
+        placeholderColor = color
+        updatePlaceholderColor()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updatePlaceholderColor()
+    }
+
+    private func updatePlaceholderColor() {
+        guard let placeholderColor else { return }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = placeholderColor.cgColor
+        }
+    }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func viewDidMoveToWindow() {
@@ -195,7 +215,7 @@ struct LiveWebContentsHostView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let container = WebContentsHostContainerView()
         container.wantsLayer = true
-        paintPlaceholderBackground(on: container)
+        container.setPlaceholderColor(placeholderColor)
         // Not embedded here: SwiftUI can discard a built NSView, and embedding from makeNSView could move the engine view into a container never installed.
         container.windowDidChange = { [weak container] in
             guard let container else { return }
@@ -205,12 +225,13 @@ struct LiveWebContentsHostView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        (nsView as? WebContentsHostContainerView)?.windowDidChange = { [weak nsView] in
-            guard let nsView else { return }
-            onWindowChange(of: nsView)
+        guard let container = nsView as? WebContentsHostContainerView else { return }
+        container.windowDidChange = { [weak container] in
+            guard let container else { return }
+            onWindowChange(of: container)
         }
-        paintPlaceholderBackground(on: nsView)
-        embedIfEntitled(in: nsView)
+        container.setPlaceholderColor(placeholderColor)
+        embedIfEntitled(in: container)
         let coordinator = context.coordinator
         if coordinator.lastContentsID != contents.id {
             // The pane switched pages; the embed above has just shown the incoming one.
@@ -235,14 +256,7 @@ struct LiveWebContentsHostView: NSViewRepresentable {
     /// What shows for the frame or two between the engine view joining the window and its first paint. Without a
     /// colour of its own that is the window's tinted backdrop, which reads as a grey flash on every tab swap.
     /// The page's own background colour makes the swap read as the page arriving rather than a screen in between.
-    private func paintPlaceholderBackground(on container: NSView) {
-        let color = placeholderColor(in: container)
-        container.effectiveAppearance.performAsCurrentDrawingAppearance {
-            container.layer?.backgroundColor = color.cgColor
-        }
-    }
-
-    private func placeholderColor(in container: NSView) -> NSColor {
+    private var placeholderColor: NSColor {
         guard let environment, let tabID = environment.tabID(for: contents) else { return .textBackgroundColor }
         let resolver = PaneHeaderColorResolver.shared
         let known = environment.documentColors[tabID]
@@ -260,10 +274,10 @@ struct LiveWebContentsHostView: NSViewRepresentable {
             }
             return
         }
-        embedIfEntitled(in: container)
+        embedIfEntitled(in: container, joinedWindow: true)
     }
 
-    private func embedIfEntitled(in container: NSView) {
+    private func embedIfEntitled(in container: NSView, joinedWindow: Bool = false) {
         // Element fullscreen: WebKit moved the page into its own window and restores it on exit; taking it now would end the fullscreen.
         guard !contents.mediaState.isFullscreen else { return }
         dropSlotsNoLongerHeld(in: container)
@@ -274,27 +288,31 @@ struct LiveWebContentsHostView: NSViewRepresentable {
             return
         }
         let slot: PageSlotView
+        let isNewlyShown: Bool
         // The page sits in an InspectorDockHost inside its slot; treating that as "not embedded" rebuilt the host on every SwiftUI update.
         if let held = pageSlot(for: contents, in: container) {
             slot = held
+            isNewlyShown = held.isHidden
             if held.isHidden {
                 reveal(held, in: container)
-            } else if container.window == nil {
-                // Only while this container has no window: WebContentsViewCocoa reads that state as hidden despite the pane holding the view to show it.
+            } else if joinedWindow || container.window == nil {
+                // Reassert after a window change or while the container is waiting to join a window.
                 contents.setVisible(true)
             }
             #if DEBUG
             LiveWebContentsHostView.logSelfCheck(webView: contents.view, container: container, label: "update-already-matched")
             #endif
         } else {
+            isNewlyShown = true
             slot = addSlot(for: contents, in: container)
             embed(contents.view, in: slot, container: container)
         }
-        slot.markShown()
+        if isNewlyShown { slot.markShown() }
         concealPages(otherThan: slot, in: container)
         evictColdPages(in: container)
-        installDropCatcherIfNeeded(in: container)
-        installLinkDropCatcherIfNeeded(in: container)
+        let tabID = environment?.tabID(for: contents)
+        installDropCatcherIfNeeded(in: container, tabID: tabID)
+        installLinkDropCatcherIfNeeded(in: container, tabID: tabID)
         installOverlayIfNeeded(in: container)
     }
 
@@ -359,8 +377,9 @@ struct LiveWebContentsHostView: NSViewRepresentable {
     private func evictColdPages(in container: NSView) {
         let warm = pageSlots(in: container)
             .filter { $0.isHidden && !($0.contents?.mediaState.isFullscreen ?? false) }
-            .sorted { $0.lastShown > $1.lastShown }
-        for slot in warm.dropFirst(PageSlotView.warmPageLimit) {
+        guard warm.count > PageSlotView.warmPageLimit else { return }
+        let oldest = warm.sorted { $0.lastShown < $1.lastShown }
+        for slot in oldest.prefix(warm.count - PageSlotView.warmPageLimit) {
             let page = slot.contents
             let held = page.map { slot.holds($0) } ?? false
             slot.removeFromSuperview()
@@ -370,11 +389,11 @@ struct LiveWebContentsHostView: NSViewRepresentable {
     }
 
     // Above the web view, under the click-through page overlay; SwiftUI's drop destination sits behind WebKit.
-    private func installDropCatcherIfNeeded(in container: NSView) {
+    private func installDropCatcherIfNeeded(in container: NSView, tabID: TabID?) {
         let catcher = container.subviews.compactMap { $0 as? SplitPaneDropCatcherView }.first
             ?? SplitPaneDropCatcherView(frame: container.bounds)
         catcher.environment = environment
-        catcher.targetTabID = environment?.tabID(for: contents)
+        catcher.targetTabID = tabID
         guard catcher.superview !== container else { return }
         catcher.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(catcher)
@@ -387,11 +406,11 @@ struct LiveWebContentsHostView: NSViewRepresentable {
     }
 
     // External link drags: the engine view registers for URL drags itself, so this sits above it and only claims a hit while such a drag is over the page.
-    private func installLinkDropCatcherIfNeeded(in container: NSView) {
+    private func installLinkDropCatcherIfNeeded(in container: NSView, tabID: TabID?) {
         let catcher = container.subviews.compactMap { $0 as? LinkDropCatcherView }.first
             ?? LinkDropCatcherView(frame: container.bounds)
         catcher.environment = environment
-        catcher.targetTabID = environment?.tabID(for: contents)
+        catcher.targetTabID = tabID
         guard catcher.superview !== container else { return }
         catcher.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(catcher)
@@ -409,11 +428,13 @@ struct LiveWebContentsHostView: NSViewRepresentable {
         let overlay = existing ?? PageOverlayHostingView(
             rootView: PageOverlays(contentsID: contents.id, environment: environment, pointerInOverlay: { .zero })
         )
-        overlay.rootView = PageOverlays(
-            contentsID: contents.id,
-            environment: environment,
-            pointerInOverlay: { [weak overlay] in overlay?.pointerInOwnSpace() ?? .zero }
-        )
+        if existing == nil || overlay.rootView.contentsID != contents.id || overlay.rootView.environment !== environment {
+            overlay.rootView = PageOverlays(
+                contentsID: contents.id,
+                environment: environment,
+                pointerInOverlay: { [weak overlay] in overlay?.pointerInOwnSpace() ?? .zero }
+            )
+        }
 
         guard overlay.superview !== container || container.subviews.last !== overlay else { return }
 

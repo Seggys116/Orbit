@@ -117,7 +117,11 @@ final class OrbitApplicationModel: OrbitInspectModule {
     }
 
     // MARK: Sidebar selection
-    var selectedSection: AppSection = .storageOverview
+    var selectedSection: AppSection = .storageOverview {
+        didSet {
+            if selectedSection != oldValue { updatePolling() }
+        }
+    }
 
     // MARK: Local Storage
     var localStorageEntries: [OrbitApplicationLogic.StorageEntry] = []
@@ -416,12 +420,11 @@ final class OrbitApplicationModel: OrbitInspectModule {
         frames = []
         permissions = []
         errors = [:]
-        teardownCookieObserver()
-        pollTask?.cancel()
-        pollTask = nil
+        panelDidDisappear()
     }
 
     func panelDidAppear(force: Bool) {
+        guard session?.isPanelVisible == true else { return }
         setupCookieObserverIfNeeded()
         loadCookiesNative()
         session?.command(["op": "app.getLocalStorage"])
@@ -435,7 +438,13 @@ final class OrbitApplicationModel: OrbitInspectModule {
         session?.command(["op": "app.getPermissions"])
         // Re-load the currently selected section's detailed data
         if force { refreshSelectedSection() }
-        startPolling()
+        updatePolling()
+    }
+
+    func panelDidDisappear() {
+        teardownCookieObserver()
+        pollTask?.cancel()
+        pollTask = nil
     }
 
     // MARK: - Cookie native access
@@ -644,13 +653,20 @@ final class OrbitApplicationModel: OrbitInspectModule {
         cookieObserverAttached = false
     }
 
-    private func startPolling() {
-        pollTask?.cancel()
-        pollTask = Task { @MainActor [weak self] in
+    private func updatePolling() {
+        switch selectedSection {
+        case .localStorage, .sessionStorage, .storageOverview:
+            guard session?.isPanelVisible == true, session?.panel == .application else { return }
+            guard pollTask == nil else { return }
+        default:
+            pollTask?.cancel()
+            pollTask = nil
+            return
+        }
+        pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                guard !Task.isCancelled else { break }
-                guard let self, self.session?.panel == .application else { continue }
+                try? await Task.sleep(for: .seconds(2), tolerance: .milliseconds(200))
+                guard !Task.isCancelled, let self else { break }
                 self.refreshStorageForCurrentSection()
             }
         }
