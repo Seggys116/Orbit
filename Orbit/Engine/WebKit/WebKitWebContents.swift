@@ -443,8 +443,8 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         extras.navigationFailureReported = false
         webView.interactionState = data
         guard webView.backForwardList.currentItem != nil else { return false }
-        // The list is back, but WebKit rebuilds the current page from its cache like a Back would. A tab that slept is shown fresh, as it always was, so the page is loaded again over the restored list.
-        webView.reload()
+        // The list is back, but WebKit rebuilds the current page from its cache, as a Back would. A tab that slept is shown fresh, as it always was, so once that load has finished the page is loaded again over the restored list. A reload asked for now is ignored.
+        extras.reloadAfterRestore = true
         if let url = webView.url ?? webView.backForwardList.currentItem?.url {
             navigationState.url = url
             navigationState.isLoading = true
@@ -459,6 +459,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
 
     func load(_ url: URL) {
         guard !isClosed else { return }
+        extras.reloadAfterRestore = false
         // Scripts changed earlier in this turn are coalesced; they must be in place before this navigation starts.
         engine.flushPendingScriptReinstall()
         let resolved = engine.resolvedExtensionURL(url)
@@ -1190,6 +1191,12 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if extras.reloadAfterRestore {
+            // The restored copy is not what the person should see; the app hears of the load that follows.
+            extras.reloadAfterRestore = false
+            webView.reload()
+            return
+        }
         passwordNavigationFinished()
         rebuildCosmeticScriptsIfNeeded()
         extras.requestedLoadURL = nil
@@ -1707,6 +1714,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
         }
         // The load that was requested has ended without a document.
         extras.requestedLoadURL = nil
+        extras.reloadAfterRestore = false
         // WebKitErrorFrameLoadInterruptedByPolicyChange: the load became a download.
         if nsError.domain == "WebKitErrorDomain" && nsError.code == 102 {
             navigationState.isLoading = false

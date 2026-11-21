@@ -33,6 +33,9 @@ final class WebKitContentsExtras {
     /// response headers arrive, so a connection that never answers has no other pending address.
     var requestedLoadURL: URL?
 
+    /// Set while a restored page is loading from WebKit's cache: once it has finished, it is loaded again, so a page that slept is shown fresh over its restored back list.
+    var reloadAfterRestore = false
+
     /// One answer per host for a main-frame navigation: WebKit repeats a failed trust challenge, and a refusal must not reopen the interstitial.
     var trustDecisions: [String: Task<Bool, Never>] = [:]
 
