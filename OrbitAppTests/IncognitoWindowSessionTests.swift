@@ -198,10 +198,12 @@ final class IncognitoWindowSessionTests: XCTestCase {
         let session = WindowSession.incognito(on: host)
         let incognitoSpaceID = try XCTUnwrap(session.environment.activeSpace?.id)
 
-        session.environment.openTab(
-            url: URL(string: "https://private.example.com/incognito-secret")!,
-            in: incognitoSpaceID
-        )
+        let url = URL(string: "https://private.example.com/incognito-secret")!
+        let tabID = session.environment.openTab(url: url, in: incognitoSpaceID)
+        // A visit is recorded when the page commits, so the page is made to commit.
+        let contents = MockWebContents()
+        session.environment._test_attachWebContents(contents, for: tabID)
+        session.environment.webContents(contents, didCommitNavigationTo: url, kind: .other)
 
         let recorded = await historyContains("incognito-secret", within: 2.0)
         XCTAssertFalse(
@@ -215,7 +217,12 @@ final class IncognitoWindowSessionTests: XCTestCase {
     }
 
     func test_visitsInAnOrdinarySpace_areStillRecorded() async {
-        host.openTab(url: URL(string: "https://public.example.com/ordinary-page")!, in: personalSpaceID)
+        let url = URL(string: "https://public.example.com/ordinary-page")!
+        let tabID = host.openTab(url: url, in: personalSpaceID)
+        // A visit is recorded when the page commits, so the page is made to commit.
+        let contents = MockWebContents()
+        host._test_attachWebContents(contents, for: tabID)
+        host.webContents(contents, didCommitNavigationTo: url, kind: .other)
 
         let recorded = await historyContains("ordinary-page", within: 5.0)
         XCTAssertTrue(

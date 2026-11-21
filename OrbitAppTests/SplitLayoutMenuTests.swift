@@ -821,7 +821,7 @@ final class SplitLayoutMenuTests: XCTestCase {
 
         window.activateTab(tabA.id)
         XCTAssertEqual(window.activeTabID, tabA.id, "the window shows the split's pane")
-        XCTAssertEqual(env.activeTabID, tabN.id, "the document's own selection is left where it was")
+        XCTAssertEqual(env.state.activeTabBySpace[spaceID], tabN.id, "the document's own selection is left where it was")
 
         window.activateTab(tabN.id)
         XCTAssertEqual(window.activeTabID, tabN.id, "choosing the tab the document already holds still moves this window to it")

@@ -229,6 +229,11 @@ public protocol WebContents: AnyObject {
     func fillOneTimeCode(_ code: String, into token: String, frameOrigin: URL) async -> PasswordFillOutcome
 
     func close()
+
+    /// The page and its back/forward list as they are now, so a page whose renderer is let go can be rebuilt exactly. nil when the engine cannot say.
+    func captureSessionState() -> Data?
+    /// Rebuilds the page and its back/forward list from `captureSessionState`. False leaves the page untouched, and the caller loads its address instead.
+    func restoreSessionState(_ data: Data) -> Bool
 }
 
 public extension WebContents {
