@@ -261,6 +261,35 @@ final class PiPControllerTests: XCTestCase {
         XCTAssertEqual(presented, 1, "Orbit must also come to the front.")
     }
 
+    // The page's own video controls, the context menu and the mini player all float a tab without a request from the controller; their window has the same Return button.
+    func test_aTabFoundFloatingThatNobodyAskedFor_isBroughtBackByTheReturnButton() throws {
+        let tabs = try videoTabAndAnother()
+        env.activateTab(tabs.other)
+        reportPictureInPicture(true, for: tabs.video, contents: tabs.contents)
+        controller.tick(env: env)
+        XCTAssertEqual(controller.pipTabID, tabs.video, "it is tracked as soon as it is seen floating")
+        var presented = 0
+        controller.presentApp = { _ in presented += 1 }
+
+        reportPictureInPicture(false, for: tabs.video, contents: tabs.contents)
+        controller.tick(env: env)
+        controller.tick(env: env)
+
+        XCTAssertEqual(env.activeTabID, tabs.video, "Return brings the tab it came from to the front")
+        XCTAssertEqual(presented, 1)
+    }
+
+    func test_leavingATabThatAlreadyFloats_doesNotAskItAgain() throws {
+        let tabs = try videoTabAndAnother()
+        reportPictureInPicture(true, for: tabs.video, contents: tabs.contents)
+        controller.tick(env: env)
+
+        env.activateTab(tabs.other)
+        controller.tick(env: env)
+
+        XCTAssertEqual(tabs.contents.togglePictureInPictureCallCount, 0, "the request is a toggle, so asking a page that floats would close its window")
+    }
+
     func test_closingTheFloatingWindowWithTheVideoPaused_doesNotChangeTheTab() throws {
         let tabs = try videoTabAndAnother()
         floatTheVideoTab(tabs)

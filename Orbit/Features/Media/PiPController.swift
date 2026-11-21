@@ -109,6 +109,7 @@ final class PiPController {
 
     func tick(env: AppEnvironment) {
         settlePendingRequest(env: env)
+        adoptFloatingTabNobodyAskedFor(env: env)
         settleFloatingWindowClosed(env: env)
         dismissIfUserReturned(env: env)
 
@@ -125,9 +126,19 @@ final class PiPController {
            !Self.isOnScreen(losingFocus, env: env),
            pendingRequest?.tabID != losingFocus,
            let state = env.mediaStates[losingFocus], state.isPictureInPictureAvailable, state.isPlaying,
+           // Asking a page that already floats is how a window gets closed: the request is a toggle.
+           !state.isPictureInPictureActive,
            env.webContents[losingFocus] != nil {
             requestPiP(for: losingFocus, env: env)
         }
+    }
+
+    /// A page can float without Orbit asking: from its own video controls, the context menu or the mini player. Its window has the same Return button, so it is tracked from the moment it is seen floating, or Return would leave the person on whatever tab they were looking at.
+    private func adoptFloatingTabNobodyAskedFor(env: AppEnvironment) {
+        guard pipTabID == nil, pendingRequest == nil else { return }
+        guard let floating = env.mediaStates.first(where: { $0.value.isPictureInPictureActive && env.webContents[$0.key] != nil })?.key else { return }
+        pipTabID = floating
+        floatingLeftScreen = !Self.isOnScreen(floating, env: env)
     }
 
     /// Checked every tick, not only when the active tab changes: a request confirmed after the user already came back changes nothing about the active tab, and its window would otherwise stay open over the page it came from.

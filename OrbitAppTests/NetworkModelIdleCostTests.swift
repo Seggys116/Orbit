@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class NetworkModelIdleCostTests: XCTestCase {
 
-    private static func residentBytes() -> Int {
+    static func residentBytes() -> Int {
         var info = mach_task_basic_info()
         var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
         let result = withUnsafeMutablePointer(to: &info) {
@@ -36,7 +36,7 @@ final class NetworkModelIdleCostTests: XCTestCase {
         ("report-to", "{\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=abcdefghijklmnopqrstuvwxyz\"}],\"group\":\"cf-nel\",\"max_age\":604800}"),
     ].map { OrbitHeader(name: $0.0, value: $0.1) }
 
-    private func lifecycle(_ model: OrbitNetworkModel, _ index: Int) {
+    func lifecycle(_ model: OrbitNetworkModel, _ index: Int) {
         let id = String(index + 1000)
         var record = NetRecord(id: id)
         record.url = "https://cdn\(index % 7).example.com/assets/chunk-\(index).js?v=\(index % 13)"
@@ -53,30 +53,43 @@ final class NetworkModelIdleCostTests: XCTestCase {
         model.nativeCompleted(id: id, failed: false, cancelled: false, fromCache: false, completionTimestamp: Double(index) + 0.08, errorMessage: nil)
     }
 
-    func testAnIdleTabsNetworkLogCostsLittlePerRequestAndStaysBounded() {
+    struct Measurement {
+        var perRequestFillMs: Double
+        var perRequestSteadyMs: Double
+        var logCount: Int
+        var residentAtCapacity: Int
+        var residentAfter: Int
+        var summary: String {
+            let megabytes: (Int) -> String = { String(format: "%.1f", Double($0) / 1_048_576) }
+            return "fill \(String(format: "%.3f", perRequestFillMs)) ms/request, steady \(String(format: "%.3f", perRequestSteadyMs)) ms/request, log holds \(logCount), resident +\(megabytes(residentAtCapacity)) MB at capacity, +\(megabytes(residentAfter)) MB after 25000 requests"
+        }
+    }
+
+    /// Fills the log, then keeps going: the cost per request must not grow once it is full.
+    static func measure() -> Measurement {
+        let probe = NetworkModelIdleCostTests()
         let model = OrbitNetworkModel()
         model.presentationProbe = { false }
-        let baseline = Self.residentBytes()
-
-        // Fill the log, then keep going: the cost per request must not grow once it is full.
+        let baseline = residentBytes()
         let fillStart = DispatchTime.now().uptimeNanoseconds
-        for index in 0..<5000 { lifecycle(model, index) }
+        for index in 0..<5000 { probe.lifecycle(model, index) }
         let fillMs = Double(DispatchTime.now().uptimeNanoseconds - fillStart) / 1_000_000
-        let atCapacity = Self.residentBytes()
-
+        let atCapacity = residentBytes()
         let steadyStart = DispatchTime.now().uptimeNanoseconds
-        for index in 5000..<25000 { lifecycle(model, index) }
+        for index in 5000..<25000 { probe.lifecycle(model, index) }
         let steadyMs = Double(DispatchTime.now().uptimeNanoseconds - steadyStart) / 1_000_000
-        let after = Self.residentBytes()
+        let after = residentBytes()
+        return Measurement(perRequestFillMs: fillMs / 5000, perRequestSteadyMs: steadyMs / 20000, logCount: model.records.count,
+                           residentAtCapacity: atCapacity - baseline, residentAfter: after - baseline)
+    }
 
-        let perRequestFill = fillMs / 5000
-        let perRequestSteady = steadyMs / 20000
-        let megabytes: (Int) -> String = { String(format: "%.1f", Double($0) / 1_048_576) }
-        print("NETWORK-IDLE-COST fill: \(String(format: "%.3f", perRequestFill)) ms/request, steady: \(String(format: "%.3f", perRequestSteady)) ms/request, log holds \(model.records.count), resident +\(megabytes(atCapacity - baseline)) MB at capacity, +\(megabytes(after - baseline)) MB after 25000 requests")
+    func testAnIdleTabsNetworkLogCostsLittlePerRequestAndStaysBounded() {
+        let result = Self.measure()
+        print("NETWORK-IDLE-COST \(result.summary)")
 
-        XCTAssertEqual(model.records.count, 5000, "the log is bounded")
-        XCTAssertLessThan(perRequestSteady, 0.5, "each request's three callbacks cost under half a millisecond of main thread")
-        XCTAssertLessThan(perRequestSteady, perRequestFill * 3, "and the cost per request does not grow with the log")
-        XCTAssertLessThan(after - atCapacity, 64 * 1_048_576, "a full log does not keep growing")
+        XCTAssertEqual(result.logCount, 5000, "the log is bounded")
+        XCTAssertLessThan(result.perRequestSteadyMs, 0.5, "each request's three callbacks cost under half a millisecond of main thread")
+        XCTAssertLessThan(result.perRequestSteadyMs, result.perRequestFillMs * 3, "and the cost per request does not grow with the log")
+        XCTAssertLessThan(result.residentAfter - result.residentAtCapacity, 64 * 1_048_576, "a full log does not keep growing")
     }
 }
