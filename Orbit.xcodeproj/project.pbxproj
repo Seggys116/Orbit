@@ -724,6 +724,7 @@
 		6962BFD5E4933998DB22EE82 /* BoostsEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02F7C5037FC30CB51A096671 /* BoostsEditorView.swift */; };
 		699A7819B3770C7ECEFC5F3D /* UpdaterPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = A659ED6860227AAEEEEDE4E2 /* UpdaterPreferences.swift */; };
 		69CD963A0801AE241F002841 /* PendingSiteDataInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9159091AAA5F195488CF96C2 /* PendingSiteDataInstaller.swift */; };
+		69D77D1733F660E9B12A86D1 /* SplitStateTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E921AAD639C0D508104925A2 /* SplitStateTransitionTests.swift */; };
 		69E62012B394AA75D3F39EA9 /* DownloadThumbnail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0070AE1DBF7C23FBC6960E3 /* DownloadThumbnail.swift */; };
 		69E66A3ECA624677EF583567 /* TabRowHoverCloseControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB8D7447F9656BA3D6602DB2 /* TabRowHoverCloseControlTests.swift */; };
 		69FD4287D45FDB2FD281AAF2 /* WebPlatformStreamingLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AB338F9488FFACBBAB7E70 /* WebPlatformStreamingLiveTests.swift */; };
@@ -2870,6 +2871,7 @@
 		E89A922A65FDAD8A946492BF /* ArcAppPreferencesReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcAppPreferencesReaderTests.swift; sourceTree = "<group>"; };
 		E90A65F72ECCDC30A0B3D68B /* FeatureRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureRegistration.swift; sourceTree = "<group>"; };
 		E91AB342AC6414228CD06E7B /* OrbitInspectConsoleModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitInspectConsoleModel.swift; sourceTree = "<group>"; };
+		E921AAD639C0D508104925A2 /* SplitStateTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitStateTransitionTests.swift; sourceTree = "<group>"; };
 		E932EEC9064CA9D826BF7EC8 /* GlyphPlanetMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlyphPlanetMath.swift; sourceTree = "<group>"; };
 		E959E15FE16EF5B92C28BCCB /* MainMenuBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuBuilder.swift; sourceTree = "<group>"; };
 		E977250E8A172A35F2EABA3D /* ArcFaviconReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArcFaviconReaderTests.swift; sourceTree = "<group>"; };
@@ -3339,6 +3341,7 @@
 				D311DC2133FA36EB04801FD9 /* SpaceSwipeScrollPathTests.swift */,
 				506EBDC4BF8EC54BAEEE5067 /* SpaceTitleRowCaretTests.swift */,
 				6CA788F1979EB47AFF4DCB51 /* SplitGroupRowGroupingTests.swift */,
+				E921AAD639C0D508104925A2 /* SplitStateTransitionTests.swift */,
 				59B493597F95E88BDBE14D29 /* SRPTests.swift */,
 				F675B8A3D730432BD397417E /* StoreTests.swift */,
 				9755F7300C6D5DEE12966EFD /* Support */,
@@ -5722,6 +5725,7 @@
 				21E875D752F39D59CDBBF04C /* SpaceSwipeScrollPathTests.swift in Sources */,
 				9F6AE541C03D8806F92E6099 /* SpaceTitleRowCaretTests.swift in Sources */,
 				9F7E8BD3A11FECBF2BF4ADD2 /* SplitGroupRowGroupingTests.swift in Sources */,
+				69D77D1733F660E9B12A86D1 /* SplitStateTransitionTests.swift in Sources */,
 				8AFC2BB45934BE53E42BFB47 /* SRPTests.swift in Sources */,
 				F010DFC5EAE69E8F34C54E63 /* StoreTests.swift in Sources */,
 				F5B74391E0313FFA1A39D8D4 /* ExtensionAPISchemaSurface.swift in Sources */,

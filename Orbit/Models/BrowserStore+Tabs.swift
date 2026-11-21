@@ -56,7 +56,11 @@ public extension BrowserStore {
             switch section {
             case .today:
                 var today = newState.spaces[spaceIndex].today
-                let afterActive = activate ? newState.activeTabBySpace[spaceID].flatMap { today.firstIndex(of: $0) }.map { $0 + 1 } : nil
+                // After the active tab, or after the last pane of its split: a tab slotted between two panes tears the split's one sidebar row in two.
+                let afterActive: Int? = activate ? newState.activeTabBySpace[spaceID].flatMap { activeID in
+                    let members = newState.tabs[activeID]?.splitGroupID.flatMap { newState.splitGroups[$0]?.tabIDs } ?? [activeID]
+                    return members.compactMap { today.firstIndex(of: $0) }.max().map { $0 + 1 }
+                } : nil
                 let clamped = (index ?? afterActive).map { max(0, min($0, today.count)) } ?? today.count
                 today.insert(tab.id, at: clamped)
                 newState.spaces[spaceIndex].today = today

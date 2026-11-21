@@ -420,6 +420,106 @@ final class InteractionSmoothnessLiveTests: LiveEnvironmentTestCase {
         }
     }
 
+    /// The row of each pane of the one split, and the wide rows below it, top to bottom.
+    private func splitTargets() throws -> (panes: [CGRect], rows: [CGRect]) {
+        let targets = clickTargets()
+        let panes = targets.panes.filter { abs($0.midY - (targets.panes.first?.midY ?? 0)) < 4 }
+        XCTAssertEqual(panes.count, 2, "the split shows two pane targets in one cell")
+        let splitY = panes.first?.midY ?? 0
+        return (panes, targets.rows.filter { $0.midY < splitY })
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testALinkThatOpensATabFromASplitLeavesTheSplitWhole
+    func testALinkThatOpensATabFromASplitLeavesTheSplitWhole() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            SidebarRowProbe.reset()
+            try await self.openAllPages()
+            let (a, b) = (self.tabs[0], self.tabs[1])
+            self.env.createSplit(existingTabID: a, newTabID: b, edge: .right)
+            await self.settle(1.0)
+            let group = try XCTUnwrap(self.env.splitGroup(for: a))
+            XCTAssertEqual(self.env.activeTabID, a)
+
+            // A link in the first pane that asks for a new tab, the way the engine reports it.
+            let opener = try XCTUnwrap(self.env.webContents[a])
+            let handled = self.env.webContents(opener, requestsNewContent: NewContentRequest(url: self.url(Self.pages[5]), disposition: .newForegroundTab, isUserGesture: true))
+            XCTAssertTrue(handled)
+            await self.settle(1.5)
+            let opened = try XCTUnwrap(self.env.activeTabID)
+            XCTAssertFalse(group.tabIDs.contains(opened), "the new tab is not a pane of the split")
+            XCTAssertNil(self.env.activeSplitGroup, "no split is active while the new tab is")
+            self.writeProof("link-1-new-tab")
+            XCTAssertTrue(self.sidebarRows().joined.contains([a, b]), "the split is still one cell in the sidebar: \(self.sidebarRows().joined)")
+            XCTAssertFalse(self.sidebarRows().single.contains(a) || self.sidebarRows().single.contains(b), "neither pane has a row of its own")
+
+            for step in 0..<3 {
+                let targets = try self.splitTargets()
+                let pane = targets.panes[step % 2]
+                await self.click(at: NSPoint(x: pane.midX, y: pane.midY))
+                await self.settle(0.8)
+                self.writeProof("link-2-back-\(step)")
+                XCTAssertEqual(self.env.activeTabID, step % 2 == 0 ? a : b, "step \(step): clicking the split's pane selects it")
+                XCTAssertEqual(self.env.activeSplitGroup?.id, group.id, "step \(step): the split is active again")
+                XCTAssertEqual(self.env.focusedSplitPaneIndex, step % 2)
+
+                // Out again, by the new tab's own row (the first wide row below the split).
+                let row = try XCTUnwrap(try self.splitTargets().rows.first, "the new tab's row")
+                await self.click(at: NSPoint(x: row.midX, y: row.midY))
+                await self.settle(0.8)
+                XCTAssertEqual(self.env.activeTabID, opened, "step \(step): clicking the new tab's row selects it")
+                XCTAssertNil(self.env.activeSplitGroup, "step \(step): no split is active with it")
+            }
+        }
+    }
+
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testClickingBetweenTheSplitsPanesAndLeavingItAndComingBack
+    func testClickingBetweenTheSplitsPanesAndLeavingItAndComingBack() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            SidebarRowProbe.reset()
+            try await self.openAllPages()
+            let (a, b, c) = (self.tabs[0], self.tabs[1], self.tabs[2])
+            self.env.createSplit(existingTabID: a, newTabID: b, edge: .right)
+            await self.settle(1.0)
+            let group = try XCTUnwrap(self.env.splitGroup(for: a))
+
+            func centre(of tab: TabID) throws -> NSPoint {
+                let view = try XCTUnwrap(self.env.webContents[tab]?.view)
+                let rect = view.convert(view.bounds, to: nil)
+                return NSPoint(x: rect.midX, y: rect.midY)
+            }
+
+            // Click in the pages themselves, back and forth, as a person working in a split does.
+            for (index, tab) in [b, a, b].enumerated() {
+                await self.click(at: try centre(of: tab))
+                await self.settle(0.5)
+                XCTAssertEqual(self.env.activeTabID, tab, "click \(index): a click in a pane's page makes it the active tab")
+                XCTAssertEqual(self.env.activeSplitGroup?.id, group.id)
+            }
+
+            for round in 0..<3 {
+                let targets = try self.splitTargets()
+                let rowC = try XCTUnwrap(targets.rows.first, "the row below the split")
+                await self.click(at: NSPoint(x: rowC.midX, y: rowC.midY))
+                await self.settle(0.8)
+                XCTAssertEqual(self.env.activeTabID, c, "round \(round): the normal tab is selected")
+                XCTAssertNil(self.env.activeSplitGroup, "round \(round): and the split is not active")
+                self.writeProof("between-\(round)-normal")
+
+                let pane = try self.splitTargets().panes[round % 2]
+                await self.click(at: NSPoint(x: pane.midX, y: pane.midY))
+                await self.settle(0.8)
+                self.writeProof("between-\(round)-back")
+                XCTAssertEqual(self.env.activeTabID, round % 2 == 0 ? a : b, "round \(round): the split's pane is selected again")
+                XCTAssertEqual(self.env.activeSplitGroup?.id, group.id)
+
+                // A click in the other pane's page, then out and back through the sidebar once more.
+                await self.click(at: try centre(of: round % 2 == 0 ? b : a))
+                await self.settle(0.5)
+                XCTAssertEqual(self.env.activeTabID, round % 2 == 0 ? b : a, "round \(round): a click in the other pane's page selects it")
+            }
+        }
+    }
+
     /// The part of a drag a drop target reads: where it is, and what it carries.
     private final class FakeDraggingInfo: NSObject, NSDraggingInfo {
         var location: NSPoint

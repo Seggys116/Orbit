@@ -57,7 +57,10 @@ jobs:
       - name: Run the live WebKit suites
         run: |
           set -o pipefail
+          mkdir -p "$RUNNER_TEMP/live-engine-results/proof"
+          TEST_RUNNER_ORBIT_PROOF_DIR="$RUNNER_TEMP/live-engine-results/proof" \
           Scripts/live-engine-tests \
+            --suite InteractionSmoothnessLiveTests \
             --results-dir "$RUNNER_TEMP/live-engine-results" \
             -- \
             ARCHS=arm64 \
