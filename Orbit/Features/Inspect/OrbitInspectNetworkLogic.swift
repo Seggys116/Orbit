@@ -1030,6 +1030,7 @@ enum OrbitNetworkLogic {
         case "responseType": return "This XMLHttpRequest asked for a non-text response type, which is not captured."
         case "empty": return "The response had no body."
         case "unreadable": return "The response body could not be read by the page hook."
+        case "large": return "The response is large, so it is read again when you select it."
         default: return nil
         }
     }

@@ -68,6 +68,17 @@ enum OrbitInspectAgent {
       try { Object.defineProperty(window, "__orbitInspectEarly", { value: E, configurable: true }); } catch (e) { return; }
       var CAP = 1000;
       var STACK_FREE = 200;
+      // Reading a stack is the dearest part of a console call, and a page in an error loop makes thousands a second. A burst of 200 gets stacks, then 40 a second; the rest are kept without one.
+      E.stackTokens = 200;
+      var lastStackRefill = typeof performance !== "undefined" ? performance.now() : 0;
+      function takeStack() {
+        var at = typeof performance !== "undefined" ? performance.now() : 0;
+        E.stackTokens = Math.min(200, E.stackTokens + (at - lastStackRefill) * 0.04);
+        lastStackRefill = at;
+        if (E.stackTokens < 1) return false;
+        E.stackTokens -= 1;
+        return true;
+      }
       var top = true;
       try { top = window.top === window; } catch (e) { top = false; }
       if (!top) {
@@ -108,7 +119,7 @@ enum OrbitInspectAgent {
               if (name === "clear") { E.con.length = 0; return; }
               if (name === "assert" && arguments[0]) return;
               // The stack is read only when the agent adopts the entry; after the first entries only warnings and errors pay for capturing one.
-              var cheap = E.con.length < STACK_FREE || name === "warn" || name === "error" || name === "trace" || name === "assert";
+              var cheap = (E.con.length < STACK_FREE || name === "warn" || name === "error" || name === "trace" || name === "assert") && takeStack();
               var error = cheap ? new Error() : null;
               var args = [];
               for (var i = 0; i < arguments.length && i < 20; i++) args.push(capture(arguments[i]));
@@ -167,6 +178,51 @@ enum OrbitInspectAgent {
       }, true);
 
       // Same records the Elements panel makes while it is open, so listeners added before it opened can still be listed.
+      // This runs on every page for as long as it lives, so it is bounded. A handler is held weakly (the engine keeps it alive while it is attached), a duplicate the engine ignores is not recorded again, and a target's list is swept as it grows and capped. A page that adds listeners forever (once-only ones the engine removes itself, a handler re-added on every render) then neither leaks the closures nor makes each removal scan a list that only grows.
+      var LISTENER_CAP = 500;
+      var LISTENER_SWEEP_FROM = 64;
+      var LISTENER_DUPLICATE_WINDOW = 8;
+
+      function ListenerRecord(type, capture, passive, once, handler) {
+        this.type = type; this.capture = capture; this.passive = passive; this.once = once;
+        this.handlerSource = ""; this.sourceURL = null; this.sourceLine = null; this.beforeOpen = true;
+        this.ref = null; this.strong = null;
+        var weak = null;
+        try { if (typeof WeakRef === "function") weak = new WeakRef(handler); } catch (e) {}
+        if (weak) this.ref = weak; else this.strong = handler;
+      }
+      try { Object.defineProperty(ListenerRecord.prototype, "handler", { get: function () { return this.ref ? this.ref.deref() : this.strong; } }); } catch (e) {}
+
+      E.record = function (type, capture, passive, once, handler) { return new ListenerRecord(type, capture, passive, once, handler); };
+
+      E.known = function (list, type, capture, handler) {
+        for (var i = list.length - 1, looked = 0; i >= 0 && looked < LISTENER_DUPLICATE_WINDOW; i--, looked++) {
+          var other = list[i];
+          if (other.type === type && other.capture === capture && other.handler === handler) return true;
+        }
+        return false;
+      };
+
+      E.push = function (list, record) {
+        list.push(record);
+        if (list.length < (list.sweepAt || LISTENER_SWEEP_FROM)) return;
+        var kept = 0;
+        for (var i = 0; i < list.length; i++) {
+          if (list[i].handler !== undefined) list[kept++] = list[i];
+        }
+        list.length = kept;
+        if (list.length > LISTENER_CAP) list.splice(0, list.length - LISTENER_CAP);
+        list.sweepAt = Math.max(LISTENER_SWEEP_FROM, list.length * 2);
+      };
+
+      E.pop = function (list, type, handler, capture) {
+        for (var i = list.length - 1; i >= 0; i--) {
+          var record = list[i];
+          if (record.type === type && record.capture === capture && record.handler === handler) { list.splice(i, 1); return true; }
+        }
+        return false;
+      };
+
       var proto = typeof EventTarget !== "undefined" ? EventTarget.prototype : null;
       if (proto) {
         var origAdd = proto.addEventListener;
@@ -178,13 +234,10 @@ enum OrbitInspectAgent {
             var list = E.listeners.get(this);
             if (!list) { list = []; E.listeners.set(this, list); }
             var object = options && typeof options === "object";
-            list.push({
-              type: type,
-              capture: typeof options === "boolean" ? options : !!(object && options.capture),
-              passive: !!(object && options.passive),
-              once: !!(object && options.once),
-              handlerSource: "", sourceURL: null, sourceLine: null, handler: handler, beforeOpen: true
-            });
+            var capture = typeof options === "boolean" ? options : !!(object && options.capture);
+            if (!E.known(list, type, capture, handler)) {
+              E.push(list, E.record(type, capture, !!(object && options.passive), !!(object && options.once), handler));
+            }
           } catch (e) {}
           return result;
         };
@@ -194,12 +247,7 @@ enum OrbitInspectAgent {
           if (!E.paused) {
             try {
               var list = E.listeners.get(this);
-              if (list) {
-                var capture = typeof options === "boolean" ? options : !!(options && options.capture);
-                for (var i = list.length - 1; i >= 0; i--) {
-                  if (list[i].type === type && list[i].handler === handler && list[i].capture === capture) { list.splice(i, 1); break; }
-                }
-              }
+              if (list) E.pop(list, type, handler, typeof options === "boolean" ? options : !!(options && options.capture));
             } catch (e) {}
           }
           return origRemove.apply(this, arguments);

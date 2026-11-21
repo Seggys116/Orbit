@@ -1822,9 +1822,15 @@ extension OrbitInspectAgent {
               var capture = typeof options === "boolean" ? options : !!(options && options.capture);
               var passive = !!(options && typeof options === "object" && options.passive);
               var once    = !!(options && typeof options === "object" && options.once);
+              // The early-capture stub's records are weak, deduplicated and bounded; the same ones are used here so a long-open inspector does not make this list the thing that grows.
+              var early = window.__orbitInspectEarly;
+              var bounded = !!(early && early.record && early.push && early.known);
+              if (bounded && early.known(list, type, capture, handler)) return result;
               if (!state.presented) {
-                list.push({ type: type, capture: capture, passive: passive, once: once,
-                            handlerSource: "", sourceURL: null, sourceLine: null, handler: handler, beforeOpen: true });
+                var quiet = bounded ? early.record(type, capture, passive, once, handler)
+                                    : { type: type, capture: capture, passive: passive, once: once,
+                                        handlerSource: "", sourceURL: null, sourceLine: null, handler: handler, beforeOpen: true };
+                if (bounded) early.push(list, quiet); else list.push(quiet);
                 return result;
               }
               var src = "", url = null, line = null;
@@ -1837,8 +1843,10 @@ extension OrbitInspectAgent {
                   if (lm) { url = lm[1]; line = parseInt(lm[2]); break; }
                 }
               } catch(e3) {}
-              list.push({ type: type, capture: capture, passive: passive, once: once,
-                          handlerSource: src, sourceURL: url, sourceLine: line, handler: handler });
+              var full = bounded ? early.record(type, capture, passive, once, handler)
+                                 : { type: type, capture: capture, passive: passive, once: once, handler: handler };
+              full.handlerSource = src; full.sourceURL = url; full.sourceLine = line; full.beforeOpen = false;
+              if (bounded) early.push(list, full); else list.push(full);
             }
           } catch(e) {}
           return result;
@@ -1852,9 +1860,14 @@ extension OrbitInspectAgent {
             var list = el_listeners.get(this);
             if (list) {
               var capture = typeof options === "boolean" ? options : !!(options && options.capture);
-              for (var i = list.length - 1; i >= 0; i--) {
-                if (list[i].type === type && list[i].handler === handler && list[i].capture === capture) {
-                  list.splice(i, 1); break;
+              var early = window.__orbitInspectEarly;
+              if (early && early.pop) {
+                early.pop(list, type, handler, capture);
+              } else {
+                for (var i = list.length - 1; i >= 0; i--) {
+                  if (list[i].type === type && list[i].handler === handler && list[i].capture === capture) {
+                    list.splice(i, 1); break;
+                  }
                 }
               }
             }

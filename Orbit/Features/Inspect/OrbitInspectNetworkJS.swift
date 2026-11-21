@@ -380,7 +380,10 @@ extension OrbitInspectAgent {
                       if (!state.presented) skip = "closed";
                       else if (self.status === 204 || self.status === 205) skip = "empty";
                       else if (type === "json") {
-                        try { text = self.response === null ? "" : JSON.stringify(self.response); } catch (e) { skip = "unreadable"; }
+                        // The parsed value is turned back into text only to be clipped to net_bodyCap, so a large one is not worth the main-thread time; the panel reads it again if it is selected.
+                        var declared = parseInt(self.getResponseHeader("content-length") || "0", 10);
+                        if (declared > net_bodyCap * 8) skip = "large";
+                        else { try { text = self.response === null ? "" : JSON.stringify(self.response); } catch (e) { skip = "unreadable"; } }
                       } else if (type !== "" && type !== "text") skip = "responseType";
                       else if (!net_wantsBody(ct)) skip = net_skipReason(ct);
                       else text = self.responseText;

@@ -79,7 +79,7 @@ struct NetRecord: Identifiable, Sendable {
     var requestBody: NetRequestBody? = nil
     var responseBody: String? = nil
     var responseBodyTruncated: Bool = false
-    /// The page hook's code for why it did not capture the response body: "closed", "opaque", "stream", "type", "responseType", "empty" or "unreadable".
+    /// The page hook's code for why it did not capture the response body: "closed", "opaque", "stream", "type", "responseType", "empty", "large" or "unreadable".
     var responseBodySkip: String = ""
     /// "fetch", "xhr" or "beacon" when the page's own hook reported the request.
     var jsSource: String = ""

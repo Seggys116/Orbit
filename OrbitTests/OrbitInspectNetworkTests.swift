@@ -688,7 +688,7 @@ final class OrbitInspectNetworkTests: XCTestCase {
     }
 
     func test_captureSkipReason_namesEveryCodeTheHookSends() {
-        for code in ["closed", "opaque", "stream", "type", "responseType", "empty", "unreadable"] {
+        for code in ["closed", "opaque", "stream", "type", "responseType", "empty", "large", "unreadable"] {
             XCTAssertNotNil(OrbitNetworkLogic.captureSkipReason(code: code, mime: "image/png"), code)
         }
         XCTAssertNil(OrbitNetworkLogic.captureSkipReason(code: "", mime: ""))
