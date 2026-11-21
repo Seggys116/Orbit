@@ -57,7 +57,9 @@ enum OrbitMetrics {
     static let sidebarHoverRowOpacity: Double = 0.06
 
     static let sidebarSplitGroupContainerOpacity: Double = 0.04
-    static let sidebarSplitGroupPaneOpacity: Double = sidebarHoverRowOpacity
+    // The row's container and each pane's pill are drawn one over the other, so what the eye reads is the two stacked. At 4% under 6% they came to 9.8%, the fill of the one active row, and a split that was not active looked as selected as the tab that was.
+    static let sidebarSplitRowContainerOpacity: Double = 0.02
+    static let sidebarSplitGroupPaneOpacity: Double = 0.04
     static let sidebarSplitGroupPaneHoverOpacity: Double = (sidebarSplitGroupPaneOpacity + sidebarActiveRowOpacity) / 2
     static let sidebarSplitGroupInnerInset: CGFloat = 3
     static let sidebarSplitGroupPaneCornerRadius: CGFloat = sidebarRowCornerRadius - sidebarSplitGroupInnerInset

@@ -520,6 +520,62 @@ final class InteractionSmoothnessLiveTests: LiveEnvironmentTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTheSplitRoundTripWithTheSidebarSlidOverThePage
+    func testTheSplitRoundTripWithTheSidebarSlidOverThePage() throws {
+        try WebKitLiveEngineHost.runLive(timeout: 240) {
+            SidebarRowProbe.reset()
+            try await self.openAllPages()
+            let (a, b, c) = (self.tabs[0], self.tabs[1], self.tabs[2])
+            self.env.createSplit(existingTabID: a, newTabID: b, edge: .right)
+            await self.settle(1.0)
+            let group = try XCTUnwrap(self.env.splitGroup(for: a))
+            // The setup the person reported: the sidebar hidden, and slid over the page from its edge.
+            let wasVisible = self.env.isSidebarVisible
+            defer { self.env.isSidebarVisible = wasVisible; self.env.isSidebarHoverRevealed = false }
+            self.env.isSidebarVisible = false
+            await self.settle(1.0)
+
+            @MainActor func reveal() async {
+                self.env.isSidebarHoverRevealed = true
+                await self.settle(1.0)
+            }
+            @MainActor func centre(of tab: TabID) throws -> NSPoint {
+                let view = try XCTUnwrap(self.env.webContents[tab]?.view)
+                let rect = view.convert(view.bounds, to: nil)
+                return NSPoint(x: rect.midX, y: rect.midY)
+            }
+
+            for round in 0..<4 {
+                await reveal()
+                let targets = try self.splitTargets()
+                let rowC = try XCTUnwrap(targets.rows.first, "round \(round): the overlay shows the row below the split")
+                await self.click(at: NSPoint(x: rowC.midX, y: rowC.midY))
+                await self.settle(0.8)
+                XCTAssertEqual(self.env.activeTabID, c, "round \(round): the normal tab is selected from the overlay")
+                XCTAssertNil(self.env.activeSplitGroup, "round \(round): and the split is not active")
+                self.writeProof("overlay-\(round)-normal")
+
+                // Focus moved into the page, so the overlay went away; the person brings it back from the edge.
+                self.env.isSidebarHoverRevealed = false
+                await self.settle(0.5)
+                await reveal()
+                let pane = try self.splitTargets().panes[round % 2]
+                await self.click(at: NSPoint(x: pane.midX, y: pane.midY))
+                await self.settle(0.8)
+                self.writeProof("overlay-\(round)-back")
+                XCTAssertEqual(self.env.activeTabID, round % 2 == 0 ? a : b, "round \(round): the split's pane is selected from the overlay")
+                XCTAssertEqual(self.env.activeSplitGroup?.id, group.id, "round \(round): and the split is active again")
+
+                // Work in the split: click the other pane's page, with the overlay still out, as moving off the edge does not always hide it at once.
+                self.env.isSidebarHoverRevealed = false
+                await self.settle(0.3)
+                await self.click(at: try centre(of: round % 2 == 0 ? b : a))
+                await self.settle(0.5)
+                XCTAssertEqual(self.env.activeTabID, round % 2 == 0 ? b : a, "round \(round): a click in the other pane's page selects it")
+            }
+        }
+    }
+
     /// The part of a drag a drop target reads: where it is, and what it carries.
     private final class FakeDraggingInfo: NSObject, NSDraggingInfo {
         var location: NSPoint

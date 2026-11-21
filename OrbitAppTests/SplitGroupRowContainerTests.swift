@@ -209,9 +209,22 @@ final class SplitGroupRowContainerTests: XCTestCase {
         )
     }
 
+    // A split that is not the active tab was drawn as bright as the active tab (4% container under 6% pill is 9.8% against the active row's 10%), so the sidebar showed two selected rows.
+    func test_aSplitThatIsNotActive_isDrawnClearlyDimmerThanTheActiveRow() {
+        func stacked(_ under: Double, _ over: Double) -> Double { 1 - (1 - under) * (1 - over) }
+        let inactivePane = stacked(OrbitMetrics.sidebarSplitRowContainerOpacity, OrbitMetrics.sidebarSplitGroupPaneOpacity)
+        let activePane = stacked(OrbitMetrics.sidebarSplitRowContainerOpacity, OrbitMetrics.sidebarActiveRowOpacity)
+        let hoveredPane = stacked(OrbitMetrics.sidebarSplitRowContainerOpacity, OrbitMetrics.sidebarSplitGroupPaneHoverOpacity)
+
+        XCTAssertLessThan(inactivePane, OrbitMetrics.sidebarActiveRowOpacity - 0.03, "an inactive pane \(inactivePane) must read well below the active row \(OrbitMetrics.sidebarActiveRowOpacity)")
+        XCTAssertLessThan(hoveredPane, OrbitMetrics.sidebarActiveRowOpacity, "a hovered pane must not look active")
+        XCTAssertGreaterThanOrEqual(activePane, OrbitMetrics.sidebarActiveRowOpacity, "the active pane reads at least as strongly as an active row")
+        XCTAssertGreaterThan(activePane - inactivePane, 0.04, "and clearly apart from the other pane of its own split")
+    }
+
     func test_containerFill_staysBelowThePillsItHolds() {
         XCTAssertLessThan(
-            OrbitMetrics.sidebarSplitGroupContainerOpacity,
+            OrbitMetrics.sidebarSplitRowContainerOpacity,
             OrbitMetrics.sidebarSplitGroupPaneOpacity,
             "The container must read as a recessed surface the pane pills sit on."
         )

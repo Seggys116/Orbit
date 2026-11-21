@@ -87,8 +87,6 @@ struct SplitGroupRowView: View {
 
     @State private var hoveredPaneID: TabID?
 
-    private var isGroupActive: Bool { tabs.contains { $0.id == env.activeTabID } }
-
     var body: some View {
         HStack(spacing: OrbitMetrics.sidebarSplitGroupInnerInset) {
             ForEach(tabs) { tab in
@@ -102,13 +100,8 @@ struct SplitGroupRowView: View {
         .frame(height: OrbitMetrics.sidebarRowHeight)
         .background(
             RoundedRectangle(cornerRadius: OrbitMetrics.sidebarRowCornerRadius)
-                .fill(
-                    theme.readableForeground.opacity(
-                        isGroupActive
-                            ? OrbitMetrics.sidebarActiveRowOpacity
-                            : OrbitMetrics.sidebarSplitGroupContainerOpacity
-                    )
-                )
+                // The same whether or not the split is the active tab: the active pane's own pill says which one is, and a container that also lit up stacked with it.
+                .fill(theme.readableForeground.opacity(OrbitMetrics.sidebarSplitRowContainerOpacity))
                 .padding(.horizontal, OrbitMetrics.sidebarHorizontalPadding)
                 .padding(.vertical, OrbitMetrics.sidebarRowPillVerticalInset)
         )
