@@ -99,7 +99,7 @@ final class LinkDropLogicTests: XCTestCase {
         XCTAssertEqual(LinkDropZone.right.splitEdge, .right)
         XCTAssertEqual(LinkDropZone.top.splitEdge, .top)
         XCTAssertEqual(LinkDropZone.bottom.splitEdge, .bottom)
-        XCTAssertEqual(LinkDropZone.center.title, "Open in New Tab")
+        XCTAssertEqual(LinkDropZone.center.title, "Cancel")
         XCTAssertEqual(LinkDropZone.left.title, "Open in Split View")
         XCTAssertEqual(LinkDropZone.right.title, "Open in Split View")
     }
@@ -297,10 +297,33 @@ final class LinkDropLogicTests: XCTestCase {
         XCTAssertFalse(LinkDropLogic.offersContentForPage(types: [.string, NSPasteboard.PasteboardType("public.url")]))
     }
 
-    func test_theSplitCatcherOnlyTakesADragThatCarriesASidebarTab() {
+    func test_theSplitCatcherTakesTheSidebarsOwnDragButLeavesOutsideContentToThePage() {
         let sidebarType = NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)
-        XCTAssertTrue(SplitPaneDropCatcherView.dragCarriesSidebarTab([.string, sidebarType]))
-        XCTAssertFalse(SplitPaneDropCatcherView.dragCarriesSidebarTab([.fileURL, .tiff]))
-        XCTAssertFalse(SplitPaneDropCatcherView.dragCarriesSidebarTab([]))
+        XCTAssertTrue(SplitPaneDropCatcherView.isSidebarDrag(types: [.string, sidebarType], recordMatchesPasteboard: false), "the pasteboard lists the sidebar tab")
+        XCTAssertTrue(SplitPaneDropCatcherView.isSidebarDrag(types: [.fileURL, .tiff], recordMatchesPasteboard: true), "the pasteboard is the one the sidebar's own record was made with")
+        XCTAssertFalse(SplitPaneDropCatcherView.isSidebarDrag(types: [.fileURL, .tiff], recordMatchesPasteboard: false), "an image dragged in from another app")
+        XCTAssertFalse(SplitPaneDropCatcherView.isSidebarDrag(types: [.fileURL], recordMatchesPasteboard: false), "a file dragged in from Finder")
+        XCTAssertFalse(SplitPaneDropCatcherView.isSidebarDrag(types: [NSPasteboard.PasteboardType("public.url"), .string], recordMatchesPasteboard: false), "a link dragged in from another app")
+    }
+
+    func test_aDragWhosePasteboardTypesAreNotListedByNameIsNotTakenForAnOutsideDrag() {
+        XCTAssertTrue(SplitPaneDropCatcherView.isSidebarDrag(types: [], recordMatchesPasteboard: false))
+        XCTAssertTrue(SplitPaneDropCatcherView.isSidebarDrag(types: [NSPasteboard.PasteboardType("dyn.ah62d4rv4gu8yc6durvwwa3xmrvw1gkdusm1044pxqyuha2pxsvw0e55bsmwca7d3sbwu")], recordMatchesPasteboard: false))
+    }
+
+    // Letting go of a link in the middle of the page opened a new tab nobody asked for. The middle is where the drag is taken back, so nothing opens.
+    func test_aLinkLetGoOfInTheMiddleOfThePageOpensNothing() throws {
+        let env = AppEnvironment.demo
+        let spaceID = try XCTUnwrap(env.state.spaces.first?.id)
+        let tab = Orbit.Tab(spaceID: spaceID, section: .today, url: URL(string: "https://example.com")!, title: "")
+        env.state.tabs[tab.id] = tab
+        defer { env.state.tabs.removeValue(forKey: tab.id) }
+        let before = env.state.tabs.count
+
+        LinkDropAction.open(try XCTUnwrap(URL(string: "https://other.example.com")), zone: .center, onto: tab.id, in: env)
+
+        XCTAssertEqual(env.state.tabs.count, before, "no tab is opened")
+        XCTAssertNil(env.splitGroup(for: tab.id), "and no split is made")
+        XCTAssertNil(LinkDropZone.center.splitEdge)
     }
 }

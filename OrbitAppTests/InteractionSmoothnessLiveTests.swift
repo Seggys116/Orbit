@@ -469,11 +469,20 @@ final class InteractionSmoothnessLiveTests: LiveEnvironmentTestCase {
             let payload = SidebarDragPayload(nodeID: b, kind: .todayTab, spaceID: self.spaceID)
             let pasteboard = NSPasteboard(name: .drag)
             let nodeType = NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)
+            let rect = catcher.convert(catcher.bounds, to: nil)
+            let point = NSPoint(x: rect.maxX - rect.width * 0.2, y: rect.midY)
+
+            // A record left over from an earlier sidebar drag, then a file dragged in from Finder: the page takes it.
+            pasteboard.clearContents()
+            pasteboard.setString("file:///tmp/outside-drag.png", forType: .fileURL)
+            pasteboard.setData(Data([0]), forType: .tiff)
+            SidebarDragSession.begin(payload)
+            let outside = content.hitTest(content.convert(point, from: nil))
+            XCTAssertFalse(outside is SplitPaneDropCatcherView, "a file dragged in from outside reaches the page: got \(String(describing: outside))")
+
             pasteboard.clearContents()
             pasteboard.setData(try JSONEncoder().encode(payload), forType: nodeType)
             SidebarDragSession.begin(payload)
-            let rect = catcher.convert(catcher.bounds, to: nil)
-            let point = NSPoint(x: rect.maxX - rect.width * 0.2, y: rect.midY)
             let hit = content.hitTest(content.convert(point, from: nil))
             XCTAssertTrue(hit is SplitPaneDropCatcherView, "a drag over the page lands on the split drop target, not the page: got \(String(describing: hit))")
 

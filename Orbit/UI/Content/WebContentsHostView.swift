@@ -513,13 +513,26 @@ final class SplitPaneDropCatcherView: NSView {
         let age = current.map { ProcessInfo.processInfo.systemUptime - $0.timestamp } ?? 0
         guard bounds.contains(point),
               Self.claimsHit(duringEvent: current?.type, eventAge: age, dragInFlight: sidebarDragIsActive),
-              Self.dragCarriesSidebarTab(NSPasteboard(name: .drag).types ?? []) else { return nil }
+              Self.isSidebarDrag(types: NSPasteboard(name: .drag).types ?? [], recordMatchesPasteboard: SidebarDragSession.current != nil) else { return nil }
         return self
     }
 
-    /// A record left from an earlier sidebar drag says nothing about the drag under the pointer now. Only a drag that carries a sidebar tab may be taken here; a file, an image or a link dragged in from another app must reach the page.
-    static func dragCarriesSidebarTab(_ types: [NSPasteboard.PasteboardType]) -> Bool {
-        types.contains(NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier))
+    /// A record left from an earlier sidebar drag says nothing about the drag under the pointer now: a file, an image or a link dragged in from another app must reach the page. The drag is the sidebar's when the pasteboard is the one the record was made with, or lists the sidebar tab. Pasteboard types that SwiftUI's drag does not list under that name are not taken as proof of an outside drag: only a file, image, link or text on it is.
+    static func isSidebarDrag(types: [NSPasteboard.PasteboardType], recordMatchesPasteboard: Bool) -> Bool {
+        if recordMatchesPasteboard { return true }
+        if types.contains(NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)) { return true }
+        return !offersOutsideContent(types)
+    }
+
+    private static func offersOutsideContent(_ types: [NSPasteboard.PasteboardType]) -> Bool {
+        if LinkDropLogic.offersContentForPage(types: types) { return true }
+        let outside: Set<String> = [
+            NSPasteboard.PasteboardType.fileURL.rawValue, NSPasteboard.PasteboardType.URL.rawValue,
+            NSPasteboard.PasteboardType.string.rawValue, NSPasteboard.PasteboardType.html.rawValue,
+            NSPasteboard.PasteboardType.rtf.rawValue, "NSFilenamesPboardType",
+            UTType.fileURL.identifier, UTType.url.identifier, UTType.plainText.identifier,
+        ]
+        return types.contains { outside.contains($0.rawValue) }
     }
 
     // A drop target is only wanted while a drag is moving over the page. A click, a release or a scroll is never part of a drag, so it passes through to the page even if a drag record has been left behind; claiming it would leave every pane of a split unclickable until the next drag.
@@ -603,7 +616,7 @@ final class SplitPaneDropCatcherView: NSView {
 
     private func payload() -> SidebarDragPayload? {
         if let current = SidebarDragSession.current { return current }
-        return SidebarDragPayload.decodeSynchronously().first
+        return SidebarDragPayload.decodeSynchronously().first ?? SidebarDragSession.inFlightPayload
     }
 
     private func draggedTabID(_ payload: SidebarDragPayload, in environment: AppEnvironment) -> TabID? {

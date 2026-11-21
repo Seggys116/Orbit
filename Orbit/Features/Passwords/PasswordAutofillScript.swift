@@ -61,6 +61,8 @@ enum PasswordAutofillScript {
       var scrollScheduled = false;
       var watchTimer = 0;
       var attributeObserver = null;
+      var activeObserver = null;
+      var activeTimer = 0;
       // Page script can call focus() and dispatch events, so only input the browser itself produced (isTrusted) counts as a person acting.
       var lastPointer = { time: 0, path: [] };
       var lastKeyTime = 0;
@@ -312,12 +314,37 @@ enum PasswordAutofillScript {
 
       // MARK: - Reporting fields
 
+      // Removing or hiding the focused field fires no focusout, so a sign-in step that swaps its fields away would leave the list hanging under nothing. While a field is active its page is watched for exactly that.
+      function setActive(next) {
+        active = next;
+        if (next && !activeObserver) {
+          activeObserver = new MutationObserver(scheduleActiveCheck);
+          activeObserver.observe(document, { attributes: true, subtree: true, attributeFilter: ['style', 'class', 'hidden', 'aria-hidden', 'disabled'] });
+        } else if (!next && activeObserver) {
+          activeObserver.disconnect();
+          activeObserver = null;
+        }
+      }
+
+      function scheduleActiveCheck() {
+        if (!active || activeTimer) { return; }
+        activeTimer = setTimeout(function () { activeTimer = 0; checkActive(); }, 60);
+      }
+
+      function checkActive() {
+        if (!active || filling) { return; }
+        var el = active.el;
+        if (el.isConnected && !el.disabled && isShown(el)) { return; }
+        send({ t: 'blur', token: active.token });
+        setActive(null);
+      }
+
       function report(el, trigger) {
         var info = classify(el);
         if (!info) { return; }
         var token = tokenFor(el);
         var rect = rectOf(el);
-        active = { el: el, token: token, kind: info.kind };
+        setActive({ el: el, token: token, kind: info.kind });
         send({ t: 'focus', token: token, kind: info.kind, trigger: trigger, rect: rect });
         relay(token, rect);
       }
@@ -394,7 +421,7 @@ enum PasswordAutofillScript {
         var target = eventTarget(event);
         if (active && target === active.el) {
           send({ t: 'blur', token: active.token });
-          active = null;
+          setActive(null);
         }
       }
 
@@ -436,6 +463,7 @@ enum PasswordAutofillScript {
         };
         if (window === window.top) {
           childRelayed = true;
+          relayedFrame = frame;
           send({ t: 'rect', token: data.token, rect: rect });
         } else {
           try { window.parent.postMessage({ __orbitPwRect: 1, token: data.token, rect: rect }, '*'); } catch (e) {}
@@ -449,12 +477,12 @@ enum PasswordAutofillScript {
           scrollScheduled = false;
           if (window === window.top && childRelayed) { send({ t: 'scrolled' }); }
           if (!active) { return; }
-          if (!active.el.isConnected) { send({ t: 'blur', token: active.token }); active = null; return; }
+          if (!active.el.isConnected) { send({ t: 'blur', token: active.token }); setActive(null); return; }
           var rect = rectOf(active.el);
           var away = rect.y + rect.h <= 0 || rect.y >= window.innerHeight || rect.x + rect.w <= 0 || rect.x >= window.innerWidth;
           if (away) {
             send({ t: 'blur', token: active.token });
-            active = null;
+            setActive(null);
             return;
           }
           send({ t: 'move', token: active.token, rect: rect });
@@ -627,9 +655,27 @@ enum PasswordAutofillScript {
           }
           if (records[i].removedNodes.length) { removed = true; }
         }
+        if (removed) {
+          scheduleActiveCheck();
+          if (window === window.top && childRelayed) { scheduleFrameCheck(); }
+        }
         if (pendingAdopts.size && !adoptTimer) { adoptTimer = setTimeout(flushAdopts, 0); }
         if (removed && watch) { scheduleWatchCheck(); }
       });
+
+      // A frame's field is placed by the top frame, which is also the one that sees the frame go. Its sign-in step can be replaced without the frame ever reporting a blur.
+      var frameCheckTimer = 0;
+      var relayedFrame = null;
+      function scheduleFrameCheck() {
+        if (frameCheckTimer) { return; }
+        frameCheckTimer = setTimeout(function () {
+          frameCheckTimer = 0;
+          if (!relayedFrame || (relayedFrame.isConnected && isShown(relayedFrame))) { return; }
+          relayedFrame = null;
+          childRelayed = false;
+          send({ t: 'scrolled' });
+        }, 60);
+      }
 
       function flushAdopts() {
         adoptTimer = 0;

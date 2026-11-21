@@ -7,12 +7,9 @@ enum LinkDropAction {
         environment.openTab(url: url, in: spaceID)
     }
 
+    /// Only an edge opens anything. The middle of the page is where a link dragged in is let go of, so dropping it there does nothing: a new tab is one click away for anyone who wants one.
     static func open(_ url: URL, zone: LinkDropZone, onto targetTabID: TabID, in environment: AppEnvironment) {
-        guard let target = environment.tab(targetTabID) else { return }
-        guard let edge = zone.splitEdge else {
-            openInNewTab(url, in: target.spaceID, environment: environment)
-            return
-        }
+        guard let target = environment.tab(targetTabID), let edge = zone.splitEdge else { return }
         let newTabID = environment.openTab(url: url, in: target.spaceID, section: .today, activate: false)
         environment.createSplit(existingTabID: targetTabID, newTabID: newTabID, edge: edge)
         environment.activateTab(newTabID)
@@ -125,7 +122,13 @@ final class LinkDropCatcherView: NSView {
             overlay.dismiss()
             return []
         }
-        overlay.present(zone(for: sender))
+        // Outside the edges there is nothing to drop on, so the drag can be taken back out without opening anything.
+        let landing = zone(for: sender)
+        guard landing.splitEdge != nil else {
+            overlay.dismiss()
+            return []
+        }
+        overlay.present(landing)
         return operation
     }
 
@@ -142,7 +145,9 @@ final class LinkDropCatcherView: NSView {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         defer { overlay.dismiss() }
         guard let environment, let targetTabID, let payload = acceptedPayload(from: sender) else { return false }
-        LinkDropAction.open(payload.url, zone: zone(for: sender), onto: targetTabID, in: environment)
+        let landing = zone(for: sender)
+        guard landing.splitEdge != nil else { return false }
+        LinkDropAction.open(payload.url, zone: landing, onto: targetTabID, in: environment)
         return true
     }
 }

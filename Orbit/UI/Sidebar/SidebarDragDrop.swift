@@ -50,6 +50,9 @@ enum SidebarDragSession {
         return record.payload
     }
 
+    /// The payload of the drag that began in the sidebar and has not ended, whether or not the drag pasteboard can be matched to it yet.
+    static var inFlightPayload: SidebarDragPayload? { record?.payload }
+
     static func end() {
         record = nil
         SidebarTearOffDetector.markConsumed()

@@ -1615,7 +1615,7 @@ final class WebKitWebContents: NSObject, WebContents, WKNavigationDelegate, WKUI
             data = try? await faviconSession.data(from: url).0
         }
         guard let data else { return nil }
-        if let image = NSImage(data: data), image.size.width > 0, image.size.height > 0 { return image }
+        if let image = NSImage(data: data), image.size.width > 0, image.size.height > 0, FaviconCache.hasVisiblePixels(image) { return image }
         return SVGFaviconRasterizer.image(from: data)
     }
 

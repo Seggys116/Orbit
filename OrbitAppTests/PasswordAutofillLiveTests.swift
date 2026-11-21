@@ -881,6 +881,33 @@ final class PasswordAutofillLiveTests: XCTestCase {
         }
     }
 
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAListUnderACodeFieldGoesWhenTheNextStepRemovesOrHidesThatField
+
+    func testAListUnderACodeFieldGoesWhenTheNextStepRemovesOrHidesThatField() throws {
+        let html = """
+        <html><body style="margin:0;font:14px sans-serif">
+        <div id="step"><input id="code" type="text" name="code" autocomplete="one-time-code"></div>
+        <div id="step2"><input id="code2" type="text" name="code2" autocomplete="one-time-code"></div>
+        </body></html>
+        """
+        try WebKitLiveEngineHost.runLive(timeout: 90) {
+            let page = try await self.openPage(html)
+            defer { page.close() }
+
+            // The next step replaces the field without a focusout: removing a focused element fires none.
+            try await self.focus("code", in: page)
+            var dismissed = page.recorder.dismissals
+            _ = try await page.contents.evaluateJavaScript("document.getElementById('step').remove(); true")
+            try await self.waitFor("removing the focused code field left its list up") { page.recorder.dismissals > dismissed }
+
+            // A step that hides the field instead.
+            try await self.focus("code2", in: page)
+            dismissed = page.recorder.dismissals
+            _ = try await page.contents.evaluateJavaScript("document.getElementById('step2').style.display = 'none'; true")
+            try await self.waitFor("hiding the focused code field left its list up") { page.recorder.dismissals > dismissed }
+        }
+    }
+
     // MARK: - Pages that get nothing
 
     func testAPrivateSessionNeverRunsTheScriptOrReportsAField() throws {

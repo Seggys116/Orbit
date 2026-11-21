@@ -57,7 +57,8 @@ public final class FaviconCache {
         let key = host.lowercased()
         guard !negativeHosts.contains(key) else { return nil }
         let url = diskURL(forHost: key)
-        guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) else {
+        guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url), FaviconCache.hasVisiblePixels(image) else {
+            if FileManager.default.fileExists(atPath: url.path) { try? FileManager.default.removeItem(at: url) }
             negativeHosts.insert(key)
             return nil
         }
@@ -75,6 +76,11 @@ public final class FaviconCache {
         let generation = storeGeneration
         let task = Task.detached(priority: .userInitiated) { () -> NSImage? in
             guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) else { return nil }
+            // An icon stored blank by an earlier version is discarded, so the site's real one is fetched in its place.
+            guard FaviconCache.hasVisiblePixels(image) else {
+                try? FileManager.default.removeItem(at: url)
+                return nil
+            }
             image.cacheMode = .always
             _ = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
             return image
@@ -110,6 +116,7 @@ public final class FaviconCache {
 
     // Persists to the real, shared on-disk cache. Test fixtures must use cacheInMemoryOnly instead, or they permanently overwrite real sites' icons.
     public func cache(_ image: NSImage, forHost host: String) {
+        guard FaviconCache.hasVisiblePixels(image) else { return }
         store(image, forHost: host)
     }
 
@@ -189,6 +196,24 @@ public final class FaviconCache {
             return
         }
         for host in hosts { removeCachedImage(forHost: host) }
+    }
+
+    /// Whether the image draws anything. An SVG that takes its colour from a stylesheet (ChatGPT's does) decodes to a full-size picture with nothing in it, and a blank icon is no better than none: it must not stop the next candidate being tried or take the place of one already stored.
+    nonisolated static func hasVisiblePixels(_ image: NSImage) -> Bool {
+        let side = 16
+        guard let context = CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return true }
+        var rect = CGRect(x: 0, y: 0, width: side, height: side)
+        guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { return false }
+        context.draw(cgImage, in: rect)
+        guard let data = context.data else { return true }
+        let pixels = data.bindMemory(to: UInt8.self, capacity: side * side * 4)
+        var drawn = 0
+        for index in 0..<(side * side) where pixels[index * 4 + 3] > 26 { drawn += 1 }
+        return Double(drawn) / Double(side * side) >= 0.02
     }
 
     private nonisolated static func decodedImage(_ data: Data) -> NSImage? {
@@ -283,7 +308,8 @@ public final class FaviconCache {
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                 return nil
             }
-            guard let image = NSImage(data: data), image.size.width > 0, image.size.height > 0 else {
+            guard let image = NSImage(data: data), image.size.width > 0, image.size.height > 0,
+                  FaviconCache.hasVisiblePixels(image) else {
                 return nil
             }
             return image

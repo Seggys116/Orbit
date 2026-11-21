@@ -470,6 +470,60 @@ final class ArcFaviconReaderTests: XCTestCase {
     private func fixtureError(_ message: String) -> NSError {
         NSError(domain: "ArcFaviconReaderTests", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
+
+    // MARK: - An icon that draws nothing is no icon
+
+    func testAnIconThatDrawsNothingIsNotVisibleAndOneThatDoesIs() throws {
+        let blank = try XCTUnwrap(NSImage(data: try pngData(width: 32, height: 32, fill: .clear)))
+        let drawn = try XCTUnwrap(NSImage(data: try pngData(width: 32, height: 32)))
+
+        XCTAssertFalse(FaviconCache.hasVisiblePixels(blank))
+        XCTAssertTrue(FaviconCache.hasVisiblePixels(drawn))
+    }
+
+    // ChatGPT's first icon is an SVG whose colour comes from a stylesheet on a root that says fill="none". It decodes to a full-size image with nothing drawn, which used to be cached as the site's icon and hid the PNG declared after it.
+    func testAStyleSheetColouredSVGDecodesBlankAndIsRejected() throws {
+        let svg = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180" fill="none">
+          <style>:root { fill: #000; } @media (prefers-color-scheme: dark) { :root { fill: #fff; } }</style>
+          <path d="M20 20H160V160H20Z"/>
+        </svg>
+        """
+        let image = try XCTUnwrap(NSImage(data: Data(svg.utf8)), "the system decodes the SVG, which is why the blank result used to be accepted")
+        XCTAssertGreaterThan(image.size.width, 0)
+        XCTAssertFalse(FaviconCache.hasVisiblePixels(image))
+    }
+
+    @MainActor
+    func testABlankIconIsNeverCached() throws {
+        let cache = FaviconCache(diskDirectory: temporaryCacheDirectory())
+        let blank = try XCTUnwrap(NSImage(data: try pngData(width: 32, height: 32, fill: .clear)))
+
+        cache.cache(blank, forHost: "chatgpt.com")
+
+        XCTAssertNil(cache.memoryCachedImage(forHost: "chatgpt.com"))
+        XCTAssertNil(cache.cachedImage(forHost: "chatgpt.com"))
+    }
+
+    @MainActor
+    func testABlankIconFileLeftByAnEarlierVersionIsDiscardedSoTheRealOneIsFetched() async throws {
+        let directory = temporaryCacheDirectory()
+        let writer = FaviconCache(diskDirectory: directory)
+        XCTAssertTrue(writer.cache(imageData: try pngData(width: 32, height: 32), forHost: "chatgpt.com"))
+        await writer._test_awaitPendingWrites()
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "png" }
+        let stored = try XCTUnwrap(files.first, "the icon reached the disk")
+        XCTAssertEqual(files.count, 1)
+        try pngData(width: 32, height: 32, fill: .clear).write(to: stored)
+
+        let relaunched = FaviconCache(diskDirectory: directory)
+        let loaded = await relaunched.loadImage(forHost: "chatgpt.com")
+
+        XCTAssertNil(loaded, "a blank stored icon is treated as missing")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stored.path), "and removed, so it cannot come back on the next launch")
+        XCTAssertFalse(relaunched.hasImage(forHost: "chatgpt.com"))
+    }
 }
 
 @MainActor

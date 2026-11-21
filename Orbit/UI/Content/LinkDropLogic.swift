@@ -18,7 +18,7 @@ enum LinkDropZone: Equatable {
         }
     }
 
-    var title: String { self == .center ? "Open in New Tab" : "Open in Split View" }
+    var title: String { self == .center ? "Cancel" : "Open in Split View" }
 
     var symbolName: String {
         switch self {
