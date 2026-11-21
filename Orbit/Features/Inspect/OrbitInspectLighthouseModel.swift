@@ -156,7 +156,7 @@ final class OrbitLighthouseModel: OrbitInspectModule {
         cancelRun(restoringPage: true)
     }
 
-    func cancelRun(restoringPage: Bool) {
+    private func cancelRun(restoringPage: Bool) {
         runTask?.cancel()
         runTask = nil
         awaitingOwnReload = false

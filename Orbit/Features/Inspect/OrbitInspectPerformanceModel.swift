@@ -41,7 +41,14 @@ final class OrbitPerformanceModel: OrbitInspectModule {
     func pageDidReset(preservingLog: Bool) {
         autoStopTask?.cancel()
         autoStopTask = nil
-        if recordingState != .idle { stopRecording() }
+        if recordingState != .idle {
+            if session?.isPresented == true {
+                stopRecording()
+            } else {
+                // The recording belongs to the previous document. Save what already arrived.
+                finishRecordingSync()
+            }
+        }
         live.resetPage()
         liveData = PerfRecording()
         liveData.url = session?.pageURL ?? ""

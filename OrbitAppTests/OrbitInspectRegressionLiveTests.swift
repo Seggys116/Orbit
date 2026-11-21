@@ -167,6 +167,27 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
         }
     }
 
+    func testClosedInspectorCommitFinishesRecordingWithoutReinjectingAgent() throws {
+        try openInspector { session, contents, _ in
+            let originalURL = session.pageURL
+            let nextURL = try XCTUnwrap(contents.webView.url?.appendingPathComponent("next-document"))
+            let performance = session.performance
+            session.select(panel: .performance)
+            performance.startRecording()
+            XCTAssertEqual(performance.recordingState, .recording)
+
+            OrbitDevToolsStore.shared.close(contents)
+            XCTAssertFalse(session.isPresented)
+            // Deliver the commit in the same main-actor turn as close, while the stop flush is pending.
+            session.documentDidCommit(url: nextURL)
+            XCTAssertFalse(session.agentReady, "a closed inspector must leave the new document on the stub")
+
+            try await self.waitUntil("performance recording finished") { performance.recordingState == .idle }
+            XCTAssertEqual(performance.recordings.count, 1)
+            XCTAssertEqual(performance.selectedRecording?.url, originalURL)
+        }
+    }
+
     func testDockedNetworkPanelCatchesUpAfterTheTabReturns() throws {
         try openInspector { session, contents, _ in
             session.setDock(.right)
@@ -681,32 +702,37 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
             contents.load(server.baseURL)
             try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
 
-            // Never opened: nothing observed or numbered, even after the LCP entry has named its element (held weakly, unnumbered).
-            try await self.waitUntil("the LCP entry", timeout: .seconds(5)) { session.performance.liveData.lcpEntries.last != nil }
-            let before = try await self.agentStats(session)
+            let isStubOnly = "typeof window.__orbitInspectEarly === 'object' && typeof window.__orbitInspect === 'undefined'"
+            let stubOnlyBeforeChurn = try await session.evaluate(isStubOnly) as? Bool
+            XCTAssertEqual(stubOnlyBeforeChurn, true, "ordinary navigation must install only the stub")
             _ = try await session.evaluate("for (var i = 0; i < 500; i++) { var d = document.createElement('div'); d.textContent = i; document.body.appendChild(d); d.setAttribute('data-x', i); d.remove(); } 1")
             try await Task.sleep(for: .milliseconds(200))
-            var stats = try await self.agentStats(session)
-            XCTAssertEqual(stats["presented"] as? Bool, false)
-            XCTAssertEqual(stats["observingDOM"] as? Bool, false)
-            XCTAssertEqual(stats["trackedNodes"] as? Int, before["trackedNodes"] as? Int, "churn with the inspector closed numbered nodes: \(stats)")
-            XCTAssertEqual(stats["trackedNodes"] as? Int, 0, "the inspector numbered nodes while closed: \(stats)")
-            let closedLCPNode = try XCTUnwrap(session.performance.liveData.lcpEntries.last?.nodeID)
-            XCTAssertLessThan(closedLCPNode, 0, "an LCP element seen while closed must be a pending reference, not a node id")
-            let baseline = try XCTUnwrap(stats["disposers"] as? Int)
-            _ = try await session.evaluate("""
+            let stubOnlyAfterChurn = try await session.evaluate(isStubOnly) as? Bool
+            XCTAssertEqual(stubOnlyAfterChurn, true, "DOM churn while closed must leave the page with only the stub")
+            let beforeOpening = try await session.evaluate("""
                 document.getElementById('target').addEventListener('click', function closedHandler() { return 1; });
                 window.addEventListener('beforeunload', function () {});
-                1
-                """)
+                performance.now()
+                """) as? Double
+            let preOpenTime = try XCTUnwrap(beforeOpening)
 
             OrbitDevToolsStore.shared.open(contents, panel: .elements, inspectAt: nil, armPicker: false)
             try await self.waitUntil("tree", timeout: .seconds(5)) { self.node(session, id: "target") != nil }
-            stats = try await self.agentStats(session)
+            var stats = try await self.agentStats(session)
             XCTAssertEqual(stats["presented"] as? Bool, true)
             XCTAssertEqual(stats["observingDOM"] as? Bool, true)
-            session.reveal(nodeID: closedLCPNode)
+            let baseline = try XCTUnwrap(stats["disposers"] as? Int)
+            try await self.waitUntil("buffered LCP from before opening", timeout: .seconds(5)) {
+                session.performance.liveData.lcpEntries.contains { $0.startTime < preOpenTime }
+            }
+            let lcp = try XCTUnwrap(session.performance.liveData.lcpEntries.last { $0.startTime < preOpenTime })
+            session.reveal(nodeID: lcp.nodeID)
             try await self.waitUntil("the closed-time LCP element revealed", timeout: .seconds(5)) { (session.elements.selectedID ?? 0) > 0 }
+            let lcpNode = try XCTUnwrap(session.elements.selectedID.flatMap { session.elements.nodes[$0] })
+            XCTAssertEqual(lcpNode.kind, "el")
+            if !lcp.elementID.isEmpty {
+                XCTAssertEqual(lcpNode.attrs["id"], lcp.elementID)
+            }
             _ = try await session.evaluate("var n = document.createElement('p'); n.id = 'late'; document.body.appendChild(n); 1")
             try await self.waitUntil("added node in the tree", timeout: .seconds(5)) { self.node(session, id: "late") != nil }
 

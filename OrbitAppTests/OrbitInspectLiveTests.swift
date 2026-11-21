@@ -32,15 +32,10 @@ final class OrbitInspectLiveTests: XCTestCase {
                 contents.close()
             }
 
-            // The session exists before the page loads, so hooks see the very first request and console line.
+            // Native network capture and the early console stub record the page load while DevTools is closed.
             let session = OrbitDevToolsStore.shared.ensureSession(for: contents)
             contents.load(server.baseURL)
             try await WebKitLiveEngineHost.waitUntilStoppedLoading(contents)
-
-            try await self.waitUntil("console errors", timeout: .seconds(8)) { session.console.errorCount >= 2 }
-            XCTAssertTrue(session.console.errorMessages.contains { $0.contains("late failure") },
-                          "an uncaught exception must be captured. Got: \(session.console.errorMessages)")
-            XCTAssertGreaterThanOrEqual(session.console.entries.count, 5)
 
             try await self.waitUntil("network records", timeout: .seconds(8)) {
                 session.network.records.contains { $0.url.hasSuffix("/api/data.json") && $0.status == 200 }
@@ -59,8 +54,18 @@ final class OrbitInspectLiveTests: XCTestCase {
             let fetched = try XCTUnwrap(session.network.records.first { $0.url.hasSuffix("/api/data.json") })
             XCTAssertEqual(fetched.requestHeader("X-Fixture"), "yes", "a custom request header must show up")
 
+            try await self.waitUntil("uncaught exception buffered while DevTools is closed", timeout: .seconds(8)) {
+                (try await session.evaluate("""
+                    window.__orbitInspectEarly?.con.some(entry =>
+                        entry.level === 'exception' && entry.args[0].v.includes('late failure')) === true
+                    """) as? Bool) == true
+            }
             OrbitDevToolsStore.shared.open(contents, panel: .elements, inspectAt: nil, armPicker: false)
             XCTAssertTrue(session.isPresented)
+            try await self.waitUntil("historical console errors", timeout: .seconds(8)) { session.console.errorCount >= 2 }
+            XCTAssertTrue(session.console.errorMessages.contains { $0.contains("late failure") },
+                          "an uncaught exception from before opening must appear. Got: \(session.console.errorMessages)")
+            XCTAssertGreaterThanOrEqual(session.console.entries.count, 5)
 
             session.refresh(force: true)
             try await self.waitUntil("elements tree", timeout: .seconds(8)) { !session.elements.visibleRows.isEmpty }
