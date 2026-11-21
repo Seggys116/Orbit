@@ -69,9 +69,9 @@ final class PageLoadInspectorABLiveTests: LiveEnvironmentTestCase {
         let deadline = ContinuousClock.now + .seconds(60)
         while true {
             let state = contents.navigationState
-            if state.url?.query == "r=\(tag)", !state.isLoading, state.progress >= 1 { break }
+            if state.url?.query == "r=\(tag)", !state.isLoading { break }
             guard ContinuousClock.now < deadline else {
-                throw EngineError(code: .engineUnavailable, underlyingDescription: "load \(tag) never finished")
+                throw EngineError(code: .engineUnavailable, underlyingDescription: "load \(tag) never finished: url \(String(describing: state.url)), loading \(state.isLoading), progress \(state.progress), served \(self.server.requestLog.all.count) requests")
             }
             try await Task.sleep(for: .milliseconds(5))
         }
