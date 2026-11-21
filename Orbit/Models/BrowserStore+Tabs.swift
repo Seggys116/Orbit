@@ -365,6 +365,9 @@ public extension BrowserStore {
         tab.section = .archived
         tab.archivedAt = Date()
         tab.isUnloaded = true
+        // the copy predates the split cleanup above
+        tab.splitGroupID = nil
+        tab.splitIndex = 0
         tab.archivedFolderTrail = folderTrail.isEmpty ? nil : folderTrail
         newState.tabs[id] = tab
 

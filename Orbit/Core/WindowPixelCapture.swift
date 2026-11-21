@@ -68,8 +68,14 @@ enum WindowPixelCapture {
         window.orderFrontRegardless()
     }
 
+    static var requestedScreen: NSScreen? {
+        guard let name = ProcessInfo.processInfo.environment["ORBIT_SMOKE_PROBE_SCREEN"], !name.isEmpty else { return nil }
+        return NSScreen.screens.first { $0.localizedName == name }
+    }
+
     static func moveToBestScreen(_ window: NSWindow) {
-        guard let best = NSScreen.screens.max(by: { $0.backingScaleFactor < $1.backingScaleFactor }) else { return }
+        let requested = requestedScreen
+        guard let best = requested ?? NSScreen.screens.max(by: { $0.backingScaleFactor < $1.backingScaleFactor }) else { return }
         guard window.screen !== best else { return }
         let frame = window.frame
         let visible = best.visibleFrame

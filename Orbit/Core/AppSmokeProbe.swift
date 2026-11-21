@@ -92,6 +92,7 @@ enum AppSmokeProbe {
 
     private static var benchOpenedTabs: [TabID] = []
     private static var benchNextSequence = 1
+    private static var benchActivity: NSObjectProtocol?
     private static var benchWatcher: DispatchSourceFileSystemObject?
     private static var benchFallbackTimer: DispatchSourceTimer?
 
@@ -153,6 +154,8 @@ enum AppSmokeProbe {
 
         WindowPixelCapture.moveToBestScreen(window)
         WindowPixelCapture.bringToFront(window)
+        // keeps the system from slowing a measured run that is not frontmost
+        benchActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "interaction probe")
         await settle(0.8)
         let paneBaseline = await WindowPixelCapture.atBackingScale(of: window, log: emit)
 

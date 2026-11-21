@@ -42,15 +42,21 @@ final class OffscreenHelperWindow: NSWindow {
         isReleasedWhenClosed = false
         ignoresMouseEvents = true
         hasShadow = false
+        isOpaque = false
+        backgroundColor = .clear
+        alphaValue = 0.01
         canHide = false
         hidesOnDeactivate = false
         animationBehavior = .none
         isExcludedFromWindowsMenu = true
-        collectionBehavior = [.transient, .ignoresCycle, .stationary, .fullScreenAuxiliary]
+        // not a fullscreen auxiliary: those are pulled onto the screen over fullscreen video
+        collectionBehavior = [.transient, .ignoresCycle, .stationary]
     }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
 enum WebKitMediaPreferences {

@@ -7,6 +7,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import QuartzCore
+import WebKit
 
 @MainActor
 enum AppInteractionProbe {
@@ -23,6 +24,8 @@ enum AppInteractionProbe {
         /// Nothing happens. Its gaps are the noise floor of the machine, not of the app.
         case idle
         case warmSwitch
+        case rapidSwitch
+        case openTab
         case focusPane
         case enterSplitKeyboard
         case enterSplitBlank
@@ -63,11 +66,18 @@ enum AppInteractionProbe {
     }
 
     static func run(request: [String: Any], host: AppEnvironment, tabs: [TabID], window: NSWindow) async -> [String: Any] {
+        if request["scenario"] as? String == "journey" {
+            return await AppJourneyProbe.run(request: request, host: host, window: window)
+        }
+        if request["scenario"] as? String == "elementFullscreen" {
+            return await runElementFullscreen(request: request, host: host, tabs: tabs, window: window)
+        }
         guard let name = request["scenario"] as? String, let scenario = Scenario(rawValue: name) else {
             return ["ok": false, "error": "unknown scenario \(String(describing: request["scenario"])); known: \(Scenario.allCases.map(\.rawValue))"]
         }
         let iterations = max(1, request["iterations"] as? Int ?? 12)
         let capturePixels = request["pixels"] as? Bool ?? false
+        let dumpDirectory = (request["dumpDir"] as? String).map { URL(fileURLWithPath: $0, isDirectory: true) }
         let colours = request["colours"] as? [[Int]] ?? []
         guard tabs.count >= 3, colours.count == tabs.count, colours.allSatisfy({ $0.count == 3 }) else {
             return ["ok": false, "error": "needs at least 3 open pages and one colour per page (have \(tabs.count) pages, \(colours.count) colours)"]
@@ -75,6 +85,8 @@ enum AppInteractionProbe {
         guard let space = host.activeSpace else { return ["ok": false, "error": "no active Space"] }
         let pages = zip(tabs, colours).map { Page(tabID: $0, red: $1[0], green: $1[1], blue: $1[2]) }
         let context = Context(host: host, window: window, pages: pages, spaceID: space.id, capturePixels: capturePixels)
+        context.dumpDirectory = dumpDirectory
+        context.dumpName = name
 
         var results: [[String: Any]] = []
         for iteration in 0..<iterations {
@@ -96,6 +108,119 @@ enum AppInteractionProbe {
         ]
     }
 
+    // MARK: - Element fullscreen
+
+    // enters real element fullscreen and records where the page is, how big, and what its window shows
+    private static func runElementFullscreen(request: [String: Any], host: AppEnvironment, tabs: [TabID], window: NSWindow) async -> [String: Any] {
+        guard let tabID = tabs.first, let contents = host.webContents[tabID] as? WebKitWebContents else {
+            return ["ok": false, "error": "needs an open WebKit page"]
+        }
+        let iterations = max(1, request["iterations"] as? Int ?? 3)
+        let dumpDirectory = (request["dumpDir"] as? String).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let colour = (r: 255, g: 136, b: 0)
+        let pageURL = (request["fullscreenURL"] as? String).flatMap(URL.init(string:))
+        let customScript = request["fullscreenScript"] as? String
+        var runs: [[String: Any]] = []
+        func sleep(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+
+        for iteration in 0..<iterations {
+            host.activateTab(tabID)
+            await sleep(0.6)
+            switch request["variant"] as? String {
+            case "split":
+                if tabs.count > 1 { host.createSplit(existingTabID: tabID, newTabID: tabs[1], edge: .right) }
+                await sleep(1.0)
+                host.focusSplitPane(index: 0)
+            case "splitSecond":
+                if tabs.count > 1 { host.createSplit(existingTabID: tabs[1], newTabID: tabID, edge: .right) }
+                await sleep(1.0)
+                host.focusSplitPane(index: 1)
+            case "pinned":
+                host.pinTab(tabID)
+            case "inspector":
+                _ = host.perform(.inspectElement)
+                await sleep(1.5)
+            default: break
+            }
+            await sleep(0.4)
+            if let pageURL {
+                host.loadInTab(tabID, url: pageURL)
+                await sleep(2)
+                for _ in 0..<60 where contents.navigationState.isLoading { await sleep(0.5) }
+                await sleep(8)
+            }
+            let setup = customScript ?? """
+            (function () {
+              var old = document.getElementById('orbit-fs'); if (old) old.remove();
+              var d = document.createElement('div'); d.id = 'orbit-fs';
+              d.style.cssText = 'position:fixed;left:0;top:0;width:300px;height:200px;background:#ff8800;z-index:99999';
+              document.body.appendChild(d);
+              d.requestFullscreen().catch(function () {});
+              return 1;
+            })()
+            """
+            _ = try? await contents.webView.evaluateJavaScript(setup, withUserGesture: true)
+            var samples: [[String: Any]] = []
+            var entered = false
+            for step in 0..<30 {
+                await sleep(0.1)
+                let view = contents.view
+                let fullscreenWindow = view.window
+                var sample: [String: Any] = [
+                    "t": Double(step + 1) * 0.1,
+                    "isFullscreen": contents.mediaState.isFullscreen,
+                    "windowIsBrowser": fullscreenWindow === window,
+                    "viewFrame": NSStringFromRect(view.frame),
+                    "windowFrame": fullscreenWindow.map { NSStringFromRect($0.frame) } ?? "none",
+                    "windowClass": fullscreenWindow.map { String(describing: type(of: $0)) } ?? "none",
+                    "hidden": view.isHiddenOrHasHiddenAncestor,
+                    "declaredVisible": contents.declaredVisibility.map { $0 as Any } ?? NSNull(),
+                ]
+                sample["strayWindows"] = NSApp.windows.filter { $0 !== window && $0 !== fullscreenWindow }.map { other in
+                    "\(type(of: other)) frame=\(NSStringFromRect(other.frame)) alpha=\(other.alphaValue) opaque=\(other.isOpaque) onScreen=\(other.screen?.localizedName ?? "none") visible=\(other.occlusionState.contains(.visible)) space=\(other.isOnActiveSpace)"
+                }
+                if contents.mediaState.isFullscreen { entered = true }
+                if let fullscreenWindow, fullscreenWindow !== window, let image = WindowPixelCapture.image(of: fullscreenWindow) {
+                    let fraction = WindowPixelCapture.fractionMatching(image, red: colour.r, green: colour.g, blue: colour.b, tolerance: 40)
+                    sample["fullscreenWindowOrange"] = fraction
+                    if [4, 14, 28].contains(step), let directory = dumpDirectory {
+                        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?
+                            .write(to: directory.appendingPathComponent("fullscreen-\(iteration)-\(step).png"))
+                    }
+                }
+                samples.append(sample)
+            }
+            _ = try? await contents.webView.evaluateJavaScript("document.exitFullscreen && document.exitFullscreen(); 1")
+            var returned = false
+            for _ in 0..<40 {
+                await sleep(0.1)
+                let view = contents.view
+                if !contents.mediaState.isFullscreen, view.window === window, !view.isHiddenOrHasHiddenAncestor {
+                    returned = true
+                    break
+                }
+            }
+            await sleep(0.8)
+            var after: [String: Any] = [
+                "returnedToPane": returned,
+                "isFullscreen": contents.mediaState.isFullscreen,
+                "viewFrame": NSStringFromRect(contents.view.frame),
+                "paneFrame": NSStringFromRect(contents.view.superview?.bounds ?? .zero),
+            ]
+            if let full = WindowPixelCapture.image(of: window) {
+                let rect = contents.view.convert(contents.view.bounds, to: nil).insetBy(dx: 14, dy: 14)
+                if let pane = WindowPixelCapture.crop(full, toWindowRect: rect, of: window) {
+                    after["paneAfterNonGrey"] = 1 - WindowPixelCapture.fractionMatching(pane, red: 31, green: 31, blue: 31, tolerance: 8)
+                }
+            }
+            if let group = host.splitGroup(for: tabID) { host.separateAllTabs(group.id) }
+            runs.append(["entered": entered, "samples": samples, "after": after])
+            await sleep(0.5)
+        }
+        return ["ok": true, "scenario": "elementFullscreen", "keyWindow": window.isKeyWindow, "appActive": NSApp.isActive, "runs": runs]
+    }
+
     // MARK: - One run
 
     @MainActor
@@ -105,6 +230,10 @@ enum AppInteractionProbe {
         let pages: [Page]
         let spaceID: SpaceID
         let capturePixels: Bool
+        // first few wrong frames are written here as images
+        var dumpDirectory: URL?
+        var dumpName = ""
+        private var dumped = 0
 
         init(host: AppEnvironment, window: NSWindow, pages: [Page], spaceID: SpaceID, capturePixels: Bool) {
             self.host = host
@@ -152,6 +281,18 @@ enum AppInteractionProbe {
             case .warmSwitch:
                 let target = pages[(iteration % (pages.count - 1)) + 1]
                 return Plan(duration: 0.6, expecting: [target]) { host.activateTab(target.tabID) }
+            case .openTab:
+                let address = host.webContents[first.tabID]?.navigationState.url ?? URL(string: "about:blank")!
+                return Plan(duration: 1.2, expecting: []) { _ = host.openTab(url: address, in: spaceID) }
+            case .rapidSwitch:
+                return Plan(duration: 1.6, expecting: []) {
+                    Task { @MainActor in
+                        for index in 0..<8 {
+                            host.activateTab(pages[(index % (pages.count - 1)) + 1].tabID)
+                            try? await Task.sleep(nanoseconds: 25_000_000)
+                        }
+                    }
+                }
             case .focusPane:
                 host.createSplit(existingTabID: first.tabID, newTabID: pages[1].tabID, edge: .right)
                 await settle(0.8)
@@ -236,6 +377,14 @@ enum AppInteractionProbe {
         func defects(for expected: [Page]) -> [String] {
             let full: CGImage? = capturePixels ? WindowPixelCapture.image(of: window) : nil
             var found: [String] = []
+            defer {
+                if !found.isEmpty, let full, let directory = dumpDirectory, dumped < 6 {
+                    dumped += 1
+                    let bitmap = NSBitmapImageRep(cgImage: full)
+                    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    try? bitmap.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("\(dumpName)-defect-\(dumped).png"))
+                }
+            }
             for page in expected {
                 guard let contents = host.webContents[page.tabID] else { found.append("page missing"); continue }
                 let view = contents.view
@@ -245,7 +394,18 @@ enum AppInteractionProbe {
                 guard rect.width > 60, rect.height > 60 else { found.append("page \(Int(rect.width))x\(Int(rect.height))"); continue }
                 guard let full, let pane = WindowPixelCapture.crop(full, toWindowRect: rect.insetBy(dx: 14, dy: 14), of: window) else { continue }
                 let fraction = WindowPixelCapture.fractionMatching(pane, red: page.red, green: page.green, blue: page.blue, tolerance: 28)
-                if fraction < 0.75 { found.append(String(format: "pane only %.0f%% the page colour", fraction * 100)) }
+                if fraction < 0.75 {
+                    var chain: [String] = []
+                    var current: NSView? = view
+                    for _ in 0..<7 {
+                        guard let node = current else { break }
+                        let bg = node.layer?.backgroundColor.map { String(describing: NSColor(cgColor: $0)) } ?? "no-bg"
+                        let under = (node as? WKWebView).map { " underPage=\(String(describing: $0.underPageBackgroundColor))" } ?? ""
+                        chain.append("\(type(of: node)) \(NSStringFromRect(node.frame)) \(bg)\(under)")
+                        current = node.superview
+                    }
+                    found.append(String(format: "pane only %.0f%% the page colour; ", fraction * 100) + chain.joined(separator: " <- "))
+                }
             }
             return found
         }

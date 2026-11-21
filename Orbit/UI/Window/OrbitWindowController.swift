@@ -173,6 +173,10 @@ final class OrbitWindowController: NSWindowController, NSWindowDelegate {
         window.backgroundColor = .clear
         window.isOpaque = false
         window.center()
+        if DebugFlags.isRunningSmokeProbe, let screen = WindowPixelCapture.requestedScreen {
+            let visible = screen.visibleFrame
+            window.setFrameOrigin(NSPoint(x: visible.midX - window.frame.width / 2, y: visible.midY - window.frame.height / 2))
+        }
         return window
     }
 

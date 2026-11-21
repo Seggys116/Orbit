@@ -35,6 +35,45 @@ final class SplitStateTransitionTests: XCTestCase {
         return (store, space, a, b, c, d)
     }
 
+    // Closing a pane archived it with the split it had just left still on it, so the archived tab claimed a split that no longer listed it, and one of a split of three claimed a group that went on without it.
+    func test_aClosedPaneOfATwoSplit_isFreeOfTheSplit_andTheSurvivorIsToo() {
+        let fixture = makeSplitStore()
+
+        fixture.store.closeTab(fixture.b)
+
+        XCTAssertNil(fixture.store.state.tabs[fixture.b]?.splitGroupID)
+        XCTAssertEqual(fixture.store.state.tabs[fixture.b]?.splitIndex, 0)
+        XCTAssertNil(fixture.store.state.tabs[fixture.a]?.splitGroupID)
+        XCTAssertTrue(fixture.store.state.splitGroups.isEmpty)
+    }
+
+    func test_aClosedPaneOfAThreeSplit_isFreeOfTheSplit_andTheOthersStayTogether() throws {
+        let fixture = makeSplitStore()
+        let groupID = try XCTUnwrap(fixture.store.splitGroup(for: fixture.a)?.id)
+        XCTAssertTrue(fixture.store.addToSplit(fixture.c, groupID: groupID))
+
+        fixture.store.closeTab(fixture.b)
+
+        XCTAssertNil(fixture.store.state.tabs[fixture.b]?.splitGroupID)
+        XCTAssertEqual(fixture.store.splitGroup(for: fixture.a)?.tabIDs, [fixture.a, fixture.c])
+        XCTAssertNil(fixture.store.splitGroup(for: fixture.b), "an archived tab is in no split")
+    }
+
+    func test_everyTabThatNamesASplit_isListedByThatSplit_afterEachWayOfLeavingOne() throws {
+        let fixture = makeSplitStore()
+        let groupID = try XCTUnwrap(fixture.store.splitGroup(for: fixture.a)?.id)
+        XCTAssertTrue(fixture.store.addToSplit(fixture.c, groupID: groupID))
+
+        fixture.store.closeTab(fixture.c)
+        fixture.store.dissolveSplit(groupID)
+        fixture.store.closeTab(fixture.d)
+
+        for tab in fixture.store.state.tabs.values {
+            guard let named = tab.splitGroupID else { continue }
+            XCTAssertTrue(fixture.store.state.splitGroups[named]?.tabIDs.contains(tab.id) ?? false, "a tab names a split that does not list it")
+        }
+    }
+
     private func rows(_ store: BrowserStore, _ space: SpaceID) -> [[TabID]] {
         groupedSidebarRows(store.todayTabs(in: space), splitGroup: { store.splitGroup(for: $0) }).map { row in
             switch row {

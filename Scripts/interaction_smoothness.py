@@ -32,6 +32,8 @@ COLOURS = [(31, 157, 85), (43, 108, 176), (192, 86, 33), (128, 62, 160), (190, 1
 SCENARIOS = [
     ("idle", "Idle (noise floor, no action)"),
     ("warmSwitch", "Switch tab (page kept warm)"),
+    ("openTab", "Open a tab"),
+    ("rapidSwitch", "Switch eight tabs 25ms apart"),
     ("focusPane", "Move focus between panes"),
     ("enterSplitLoaded", "Enter split (two loaded pages)"),
     ("enterSplitBlank", "Enter split (blank pane)"),
@@ -61,8 +63,49 @@ def page_html(index):
     ).encode()
 
 
+def site_html(site, name):
+    """A page of a small site: its own colour, links to its other pages and the other sites, enough text to scroll
+    and lay out, and a script that talks to the server, so loading it exercises more than a static document."""
+    colour = hexed(COLOURS[site % len(COLOURS)])
+    links = "".join(f'<a href="/site/{site}/{other}">{other}</a> ' for other in ("a", "b", "c", "slow"))
+    links += "".join(f'<a href="/site/{other}/a">site {other}</a> ' for other in range(len(COLOURS)))
+    rows = "".join(f"<p>Row {n} of {name}: the quick brown fox jumps over the lazy dog.</p>" for n in range(600))
+    script = (
+        "fetch('/api/ping?site=%d&page=%s').then(r=>r.json()).then(j=>{document.title+=' ok'});"
+        "setInterval(()=>{fetch('/api/ping').catch(()=>{})},1500);" % (site, name)
+    )
+    return (
+        f"<!doctype html><html><head><title>site {site} {name}</title>"
+        f'<meta name="theme-color" content="{colour}">'
+        f"<style>html,body{{margin:0;background:{colour};color:#fff}}p,nav{{margin:0;padding:4px 14px}}a{{color:#fff;margin-right:8px}}</style>"
+        f"</head><body><nav>{links}</nav>{rows}<script>{script}</script></body></html>"
+    ).encode()
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        path = self.path.split("?")[0]
+        if path == "/api/ping":
+            body = b'{"ok":true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path.startswith("/site/"):
+            parts = path.strip("/").split("/")
+            site = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+            name = parts[2] if len(parts) > 2 else "a"
+            if name == "slow":
+                time.sleep(1.5)
+            body = site_html(site, name)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         index = int(self.path.strip("/").split("?")[0] or 0) if self.path.strip("/").split("?")[0].isdigit() else 0
         body = page_html(index % len(COLOURS))
         self.send_response(200)
@@ -75,8 +118,47 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+DISPLAY_NAME = "Orbit Probe Display"
+
+
+class VirtualDisplay:
+    """A display that exists only for the run, so the app's window never opens on a real screen."""
+
+    def __init__(self, output):
+        self.output = output
+        self.process = None
+
+    def start(self):
+        binary = os.path.join(self.output, "virtual-display")
+        source = os.path.join(SCRIPT_DIR, "virtual_display.m")
+        compiled = subprocess.run(
+            ["/usr/bin/clang", "-fobjc-arc", "-framework", "Cocoa", source, "-o", binary], capture_output=True, text=True
+        )
+        if compiled.returncode != 0:
+            raise Fail(f"could not build the virtual display helper: {compiled.stderr.strip()}")
+        self.process = subprocess.Popen([binary, DISPLAY_NAME], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            line = self.process.stdout.readline()
+            if line.startswith("ready"):
+                time.sleep(1.0)
+                return
+            if self.process.poll() is not None:
+                raise Fail(f"the virtual display helper exited: {self.process.stderr.read().strip()}")
+        raise Fail("the virtual display never became ready")
+
+    def stop(self):
+        if self.process is not None and self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+
+
 class Launch:
-    def __init__(self, app_path, directory, timeout):
+    def __init__(self, app_path, directory, timeout, screen=None):
+        self.screen = screen
         self.app_path = app_path
         self.directory = directory
         self.timeout = timeout
@@ -98,6 +180,8 @@ class Launch:
             "ORBIT_SMOKE_PROBE_LABEL": "interaction-smoothness",
             "ORBIT_SMOKE_PROBE_ATTEMPT": "1",
         }
+        if self.screen:
+            environment["ORBIT_SMOKE_PROBE_SCREEN"] = self.screen
         command = ["/usr/bin/open", "-n", "-a", self.app_path, "--stdout", stdout_path, "--stderr", stderr_path]
         for key, value in environment.items():
             command += ["--env", f"{key}={value}"]
@@ -196,6 +280,13 @@ def main(argv):
     parser.add_argument("--settle", type=float, default=25.0, help="seconds to let launch-time work (content blocker compile) finish")
     parser.add_argument("--output", default=os.path.join(REPO_ROOT, "DerivedData-agent", "interaction-smoothness"))
     parser.add_argument("--launch-timeout", type=float, default=90.0)
+    parser.add_argument("--fullscreen", action="store_true", help="enter real element fullscreen and report what the page and its window show")
+    parser.add_argument("--fullscreen-url", default="", help="page to load before entering fullscreen; its player element is made fullscreen")
+    parser.add_argument("--fullscreen-variants", default="plain", help="comma list of: plain, split, splitSecond, pinned, inspector")
+    parser.add_argument("--journey", action="store_true", help="run seeded random journeys through tabs, pins and splits and report what broke")
+    parser.add_argument("--seeds", default="1,2,3", help="comma list of journey seeds")
+    parser.add_argument("--steps", type=int, default=60, help="steps per journey")
+    parser.add_argument("--onscreen", action="store_true", help="open the window on a real screen instead of a virtual display")
     parser.add_argument("--sample", default="", help="scenario to sample the app's main thread during, with /usr/bin/sample")
     options = parser.parse_args(argv)
 
@@ -214,14 +305,57 @@ def main(argv):
 
     wanted = [name for name in options.scenarios.split(",") if name]
     labels = dict(SCENARIOS)
-    launch = Launch(app_path, os.path.join(options.output, f"run-{int(time.time())}"), options.launch_timeout)
+    display = None if options.onscreen else VirtualDisplay(options.output)
+    launch = Launch(
+        app_path, os.path.join(options.output, f"run-{int(time.time())}"), options.launch_timeout,
+        screen=None if display is None else DISPLAY_NAME,
+    )
     results = {}
     try:
+        if display is not None:
+            display.start()
         launch.start()
         launch.command("openTabs", urls=[f"{base}/{index}" for index in range(len(COLOURS))])
         print(f"interaction-smoothness: pages open, letting launch-time work finish ({options.settle:.0f}s)")
         time.sleep(options.settle)
         colours = [list(colour) for colour in COLOURS]
+        if options.journey:
+            failed = 0
+            for seed in [int(value) for value in options.seeds.split(",") if value]:
+                report = launch.command("interact", scenario="journey", base=base, seed=seed, steps=options.steps, dumpDir=os.path.join(options.output, "frames-journey"), timeout=1800.0)
+                path = os.path.join(options.output, f"journey-{seed}.json")
+                with open(path, "w") as handle:
+                    json.dump(report, handle, indent=1)
+                found = report["violations"]
+                delays = [d["ms"] for d in report["paintDelays"]]
+                print(f"seed {seed}: {len(found)} violation(s), {len(report['stalls'])} stall(s) over 250 ms, paint delays {sorted(delays)[-5:]} ms, key window {report['keyWindow']}  ({path})")
+                seen = {}
+                for item in found:
+                    key = item["problem"]
+                    if key not in seen:
+                        seen[key] = [item, 0]
+                    seen[key][1] += 1
+                for item, count in list(seen.values())[:15]:
+                    print(f"   first at step {item['step']} [{item['action']}] x{count}: {item['problem']}")
+                for item in report["stalls"][:6]:
+                    print(f"   stall {item['ms']} ms at step {item['step']} [{item['action']}] (the call itself took {item.get('actionMs', '?')} ms)")
+                failed += len(found)
+            return 1 if failed else 0
+        if options.fullscreen:
+            extra = {}
+            if options.fullscreen_url:
+                extra = {"fullscreenURL": options.fullscreen_url, "fullscreenScript": "(function(){var p=document.getElementById('movie_player')||document.querySelector('video');var v=document.querySelector('video');if(v){v.muted=true;v.play();}p.requestFullscreen().catch(function(){});return 1})()"}
+            for variant in options.fullscreen_variants.split(","):
+                report = launch.command("interact", scenario="elementFullscreen", iterations=2, colours=colours, variant=variant, dumpDir=os.path.join(options.output, f"frames-{variant}"), timeout=600.0, **extra)
+                print(f"--- variant {variant}")
+                for run in report["runs"]:
+                    painted = [s.get("fullscreenWindowOrange", -1) for s in run["samples"]]
+                    sizes = sorted({s["viewFrame"] for s in run["samples"]})
+                    strays = sorted({w for s in run["samples"] for w in s.get("strayWindows", [])})
+                    for w in strays:
+                        print(f"   other window: {w}")
+                    print(f"entered={run['entered']} orange(last)={painted[-1]:.2f} frames={sizes} returned={run['after']['returnedToPane']} paneAfter={run['after']['viewFrame']}")
+            return 0
         for name in wanted:
             sampler = None
             if name == options.sample:
@@ -231,10 +365,12 @@ def main(argv):
             timing = launch.command("interact", scenario=name, iterations=options.iterations, pixels=False, colours=colours)
             if sampler is not None:
                 sampler.wait()
-            pixels = launch.command("interact", scenario=name, iterations=options.pixel_iterations, pixels=True, colours=colours)
+            pixels = launch.command("interact", scenario=name, iterations=options.pixel_iterations, pixels=True, colours=colours, dumpDir=os.path.join(options.output, "frames"))
             results[name] = {"timing": timing, "pixels": pixels}
     finally:
         launch.stop()
+        if display is not None:
+            display.stop()
         server.shutdown()
 
     first = next(iter(results.values()))["timing"]
