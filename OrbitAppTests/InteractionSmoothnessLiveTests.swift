@@ -482,7 +482,7 @@ final class InteractionSmoothnessLiveTests: LiveEnvironmentTestCase {
             await self.settle(1.0)
             let group = try XCTUnwrap(self.env.splitGroup(for: a))
 
-            func centre(of tab: TabID) throws -> NSPoint {
+            @MainActor func centre(of tab: TabID) throws -> NSPoint {
                 let view = try XCTUnwrap(self.env.webContents[tab]?.view)
                 let rect = view.convert(view.bounds, to: nil)
                 return NSPoint(x: rect.midX, y: rect.midY)
