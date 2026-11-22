@@ -414,7 +414,15 @@ def command_check(arguments) -> int:
                 f"the suite degrading, not one test's bad luck: {named}."
             )
 
+    if arguments.max_excluded is not None and total_excluded > arguments.max_excluded:
+        problems.append(
+            f"{total_excluded} test(s) are excluded under '// {CANNOT_RUN_MARKER}', more than the ceiling of "
+            f"{arguments.max_excluded}. An excluded test runs nowhere automated, so the list only shrinks: "
+            f"make the new tests runnable instead of excluding them."
+        )
     print(f"test-verdict: {total_executed} test(s) executed over {len(arguments.target)} target(s)")
+    if arguments.max_excluded is not None and total_excluded < arguments.max_excluded:
+        print(f"test-verdict: {total_excluded} excluded is below the ceiling of {arguments.max_excluded}; lower the ceiling to {total_excluded}")
     if arguments.allow_hosted_runner_exclusions:
         detail = f": {_sample(all_excluded)}" if all_excluded else ""
         print(
@@ -565,6 +573,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--target", action="append", default=[], required=True)
     check.add_argument("--allow-hosted-runner-exclusions", action="store_true")
     check.add_argument("--max-retries-allowed", type=int, default=None)
+    check.add_argument("--max-excluded", type=int, default=None, help="fail when more tests than this are excluded under the hosted-runner marker")
     check.set_defaults(handler=command_check)
 
     live = subparsers.add_parser("live", help="verdict for one Scripts/live-engine-tests configuration")

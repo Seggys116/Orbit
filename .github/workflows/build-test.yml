@@ -114,8 +114,6 @@ jobs:
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
-            -retry-tests-on-failure \
-            -test-iterations 3 \
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 300 \
             -maximum-test-execution-time-allowance 600 \
@@ -148,7 +146,8 @@ jobs:
             --target OrbitTests \
             --target OrbitAppTests \
             --allow-hosted-runner-exclusions \
-            --max-retries-allowed 5
+            --max-retries-allowed 0 \
+            --max-excluded "$(cat Scripts/hosted-runner-exclusion-ceiling)"
 
       - name: Upload the result bundle
         if: failure()
