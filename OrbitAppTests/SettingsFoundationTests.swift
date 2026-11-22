@@ -3,6 +3,9 @@ import SwiftUI
 import XCTest
 @testable import Orbit
 
+// one environment for the whole file: two evaluations of the demo would build two that cannot see each other's state
+@MainActor private let settingsFoundationDemoEnvironment = AppEnvironment.demo
+
 // MARK: - 1. SettingsPalette / SettingsMetrics — pure logic, no rendering
 
 final class SettingsPaletteAndMetricsTests: XCTestCase {
@@ -47,7 +50,7 @@ final class SettingsPaletteAndMetricsTests: XCTestCase {
         XCTAssertGreaterThan(SettingsMetrics.windowDefaultHeight, previousDefaultHeight)
 
         // the root view the window hosts declares its own fixed frame, so its fitting size is the size the window opens at
-        let host = NSHostingView(rootView: SettingsRootView().environment(AppEnvironment.demo))
+        let host = NSHostingView(rootView: SettingsRootView().environment(settingsFoundationDemoEnvironment))
         let fitted = host.fittingSize
         XCTAssertGreaterThan(fitted.height, previousDefaultHeight, "the hosted Settings root view is taller than the previous default")
         XCTAssertEqual(fitted.height, SettingsMetrics.windowDefaultHeight, accuracy: 1, "the hosted Settings root view is exactly the metric's height")
@@ -151,7 +154,7 @@ final class SettingsSidebarRenderTests: XCTestCase {
 @MainActor
 final class SettingsRootViewLayoutTests: XCTestCase {
 
-    private lazy var env: AppEnvironment = AppEnvironment.demo
+    private lazy var env: AppEnvironment = settingsFoundationDemoEnvironment
 
     func test_railFillsFullHeight_evenBesideGeneralPanesTallerContent() {
         SettingsRouter.shared.selectedPane = .general

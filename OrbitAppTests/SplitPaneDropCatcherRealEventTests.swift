@@ -42,20 +42,31 @@ final class SplitPaneDropCatcherRealEventTests: XCTestCase {
 
     func test_aSidebarDragMovingOverThePage_isTakenByTheDropTarget_whenTheAppReportsMouseMoved() throws {
         let (window, catcher, page) = makeWindow()
-        defer { SidebarDragSession.end(); window.close() }
+        SplitPaneDropCatcherView.primaryButtonIsDown = { true }
+        defer { SplitPaneDropCatcherView.primaryButtonIsDown = { NSEvent.pressedMouseButtons & 1 != 0 }; SidebarDragSession.end(); window.close() }
         let point = NSPoint(x: 500, y: 200)
         try writeSidebarDragPasteboard(SidebarDragPayload(nodeID: UUID(), kind: .todayTab, spaceID: UUID()))
-        SidebarDragSession.begin(SidebarDragPayload(nodeID: UUID(), kind: .todayTab, spaceID: UUID()))
-        // the record learns the drag pasteboard's change count one main-queue hop after it begins
-        RunLoop.main.run(mode: .default, before: Date())
-        XCTAssertNotNil(SidebarDragSession.current, "Precondition: the sidebar's drag record matches the drag pasteboard.")
+        // the event is taken before the drag begins and nothing runs the run loop after, so the tear-off timer cannot end the record first
         _ = try nextMovedEvent(in: window, at: point)
+        SidebarDragSession.begin(SidebarDragPayload(nodeID: UUID(), kind: .todayTab, spaceID: UUID()))
         XCTAssertEqual(NSApp.currentEvent?.type, .mouseMoved, "Precondition: the app's current event is the mouseMoved a drag reports.")
-        XCTAssertTrue(SidebarDragSession.hasInFlightDrag, "Precondition: the sidebar drag is still in flight.")
+        XCTAssertTrue(SidebarDragSession.hasInFlightDrag, "Precondition: the sidebar drag is in flight.")
 
         let hit = window.contentView?.hitTest(point)
         XCTAssertTrue(hit === catcher, "Hit \(String(describing: hit.map { type(of: $0) })) instead of the drop target, so the page would take the drop and no split would open.")
         XCTAssertFalse(hit === page)
+    }
+
+    func test_aMouseMovedWithNoLiveDrag_staysWithThePageEvenWhileARecordExists() throws {
+        let (window, _, page) = makeWindow()
+        SplitPaneDropCatcherView.primaryButtonIsDown = { false }
+        defer { SplitPaneDropCatcherView.primaryButtonIsDown = { NSEvent.pressedMouseButtons & 1 != 0 }; SidebarDragSession.end(); window.close() }
+        let point = NSPoint(x: 500, y: 200)
+        try writeSidebarDragPasteboard(SidebarDragPayload(nodeID: UUID(), kind: .todayTab, spaceID: UUID()))
+        _ = try nextMovedEvent(in: window, at: point)
+        SidebarDragSession.begin(SidebarDragPayload(nodeID: UUID(), kind: .todayTab, spaceID: UUID()))
+        XCTAssertNil(SidebarDragSession.current, "Precondition: the record has not matched the drag pasteboard yet, so only the button says a drag is live.")
+        XCTAssertTrue(window.contentView?.hitTest(point) === page, "A hover while a leftover record exists must reach the page.")
     }
 
     func test_withNoSidebarDragInFlight_aMouseMovedOverThePageReachesThePage() throws {

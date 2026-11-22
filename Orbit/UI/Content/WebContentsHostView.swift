@@ -593,7 +593,7 @@ final class SplitPaneDropCatcherView: NSView {
         let current = NSApp.currentEvent
         let age = current.map { ProcessInfo.processInfo.systemUptime - $0.timestamp } ?? 0
         guard bounds.contains(point),
-              Self.claimsHit(duringEvent: current?.type, eventAge: age, dragInFlight: sidebarDragIsActive, dragIsLive: NSEvent.pressedMouseButtons & 1 != 0 || SidebarDragSession.current != nil),
+              Self.claimsHit(duringEvent: current?.type, eventAge: age, dragInFlight: sidebarDragIsActive, dragIsLive: Self.primaryButtonIsDown() || SidebarDragSession.current != nil),
               Self.isSidebarDrag(types: NSPasteboard(name: .drag).types ?? [], recordMatchesPasteboard: SidebarDragSession.current != nil) else { return nil }
         return self
     }
@@ -619,6 +619,9 @@ final class SplitPaneDropCatcherView: NSView {
     // A drop target is only wanted while a drag is moving over the page. A click, a release or a scroll is never part of a drag, so it passes through to the page even if a drag record has been left behind; claiming it would leave every pane of a split unclickable until the next drag.
     // Only a fresh event can be a click or a key press in the page. While a drag runs, the app keeps reporting the event that started it as current, so an old one says nothing about what is happening now. A modifier change is never a click: holding Command mid-drag must not hand the drag back to the page.
     static let freshEventWindow: TimeInterval = 0.25
+
+    // injectable so a test can say the button is held, which a real drag always has and no process can fake in the system's state
+    static var primaryButtonIsDown: () -> Bool = { NSEvent.pressedMouseButtons & 1 != 0 }
 
     // While a drag runs the app reports its movement as mouseMoved (and can report key events), so those only mean "not a drag" when no drag is live: the button is down, or the drag pasteboard is still the sidebar's.
     static func claimsHit(duringEvent type: NSEvent.EventType?, eventAge: TimeInterval = 0, dragInFlight: Bool, dragIsLive: Bool = false) -> Bool {
