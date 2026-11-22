@@ -44,6 +44,7 @@ final class LinkDropCatcherView: NSView {
     var targetTabID: TabID?
 
     private let overlay = LinkDropOverlayView()
+    private let forwarder = PageDragForwarder()
     private var cachedPayload: (changeCount: Int, payload: LinkDropPayload?)?
 
     private static let draggedTypes: [NSPasteboard.PasteboardType] = [
@@ -117,8 +118,14 @@ final class LinkDropCatcherView: NSView {
     }
 
     private func refresh(with sender: NSDraggingInfo) -> NSDragOperation {
+        // Anything that is not a link for this view to open is the page's: a file, an image, text.
+        guard acceptedPayload(from: sender) != nil else {
+            overlay.dismiss()
+            return forwarder.offer(sender, from: self)
+        }
+        forwarder.withdraw(sender)
         let operation = LinkDropLogic.dragOperation(for: sender.draggingSourceOperationMask)
-        guard environment != nil, targetTabID != nil, acceptedPayload(from: sender) != nil, !operation.isEmpty else {
+        guard environment != nil, targetTabID != nil, !operation.isEmpty else {
             overlay.dismiss()
             return []
         }
@@ -136,14 +143,26 @@ final class LinkDropCatcherView: NSView {
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { refresh(with: sender) }
 
-    override func draggingExited(_ sender: NSDraggingInfo?) { overlay.dismiss() }
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        overlay.dismiss()
+        forwarder.withdraw(sender)
+    }
 
-    override func draggingEnded(_ sender: NSDraggingInfo) { overlay.dismiss() }
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        overlay.dismiss()
+        forwarder.end(sender)
+    }
 
-    override func concludeDragOperation(_ sender: NSDraggingInfo?) { overlay.dismiss() }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { forwarder.prepare(sender) ?? true }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        overlay.dismiss()
+        forwarder.conclude(sender)
+    }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         defer { overlay.dismiss() }
+        if let forwarded = forwarder.perform(sender) { return forwarded }
         guard let environment, let targetTabID, let payload = acceptedPayload(from: sender) else { return false }
         let landing = zone(for: sender)
         guard landing.splitEdge != nil else { return false }

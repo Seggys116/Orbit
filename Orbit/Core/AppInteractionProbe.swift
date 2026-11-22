@@ -71,39 +71,78 @@ enum AppInteractionProbe {
         }
     }
 
+    /// Posts a real mouseMoved over the page with a drag pasteboard in place and reports the view that answers the hit test, and the first view up its chain registered for the pasteboard's types: the view AppKit offers the drop to. `drag` is "sidebar" (a tab dragged from the sidebar) or "file" (a file dragged in from another app).
+    private static func runDropTargetEvent(request: [String: Any], host: AppEnvironment, tabs: [TabID], window: NSWindow) async -> [String: Any] {
+        guard let activeID = host.activeTabID, let spaceID = host.activeSpace?.id,
+              let view = host.webContents[activeID]?.view, let root = window.contentView?.superview else { return ["ok": false, "error": "needs an active tab"] }
+        let isFile = request["drag"] as? String == "file"
+        let pasteboard = NSPasteboard(name: .drag)
+        pasteboard.clearContents()
+        var payload: SidebarDragPayload?
+        var scratch: URL?
+        if isFile {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-drop-probe-\(UUID().uuidString)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let file = directory.appendingPathComponent("upload.txt")
+            try? Data("probe".utf8).write(to: file)
+            scratch = directory
+            pasteboard.writeObjects([file as NSURL])
+        } else {
+            guard let other = tabs.first(where: { $0 != activeID }) else { return ["ok": false, "error": "needs an active tab and another"] }
+            let made = SidebarDragPayload(nodeID: other, kind: .todayTab, spaceID: spaceID)
+            payload = made
+            let item = NSPasteboardItem()
+            if let data = try? JSONEncoder().encode(made) { item.setData(data, forType: NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)) }
+            pasteboard.writeObjects([item])
+        }
+        defer {
+            if let scratch { try? FileManager.default.removeItem(at: scratch) }
+            if isFile { pasteboard.clearContents() }
+        }
+        let types = Set(pasteboard.types ?? [])
+        let bounds = view.convert(view.bounds, to: nil)
+        let point = CGPoint(x: bounds.maxX - 40, y: bounds.midY)
+        var seen: [String: Any]?
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { event in
+            if seen == nil {
+                let hit = root.hitTest(point)
+                var chain: [String] = []
+                var destination: NSView?
+                var walker = hit
+                while let current = walker {
+                    chain.append("\(type(of: current))")
+                    if destination == nil, !Set(current.registeredDraggedTypes).isDisjoint(with: types) { destination = current }
+                    walker = current.superview
+                }
+                seen = [
+                    "hit": hit.map { "\(type(of: $0))" } ?? "nil",
+                    "destination": destination.map { "\(type(of: $0))" } ?? "none",
+                    "chain": chain,
+                    "currentEvent": NSApp.currentEvent.map { Int($0.type.rawValue) } ?? -1,
+                    "inFlight": SidebarDragSession.hasInFlightDrag,
+                    "current": SidebarDragSession.current != nil,
+                    "types": types.map(\.rawValue).sorted(),
+                ]
+            }
+            return event
+        }
+        if let payload { SidebarDragSession.begin(payload) }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { continuation.resume() } }
+        if let moved = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) {
+            NSApp.postEvent(moved, atStart: true)
+        }
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        if payload != nil { SidebarDragSession.end() }
+        return ["ok": true, "seen": seen ?? [:]]
+    }
+
     static func run(request: [String: Any], host: AppEnvironment, tabs: [TabID], window: NSWindow) async -> [String: Any] {
         if request["scenario"] as? String == "journey" {
             return await AppJourneyProbe.run(request: request, host: host, window: window)
         }
         if request["scenario"] as? String == "dropTargetEvent" {
-            guard let activeID = host.activeTabID, let spaceID = host.activeSpace?.id,
-                  let other = tabs.first(where: { $0 != activeID }),
-                  let view = host.webContents[activeID]?.view, let root = window.contentView?.superview else { return ["ok": false, "error": "needs an active tab and another"] }
-            let payload = SidebarDragPayload(nodeID: other, kind: .todayTab, spaceID: spaceID)
-            let pasteboard = NSPasteboard(name: .drag)
-            pasteboard.clearContents()
-            let item = NSPasteboardItem()
-            if let data = try? JSONEncoder().encode(payload) { item.setData(data, forType: NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)) }
-            pasteboard.writeObjects([item])
-            let bounds = view.convert(view.bounds, to: nil)
-            let point = CGPoint(x: bounds.maxX - 40, y: bounds.midY)
-            var seen: [String: Any]?
-            let monitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { event in
-                if seen == nil {
-                    let hit = root.hitTest(point)
-                    seen = ["hit": hit.map { "\(type(of: $0))" } ?? "nil", "currentEvent": NSApp.currentEvent.map { Int($0.type.rawValue) } ?? -1, "inFlight": SidebarDragSession.hasInFlightDrag, "current": SidebarDragSession.current != nil]
-                }
-                return event
-            }
-            SidebarDragSession.begin(payload)
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { continuation.resume() } }
-            if let moved = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) {
-                NSApp.postEvent(moved, atStart: true)
-            }
-            try? await Task.sleep(nanoseconds: 60_000_000)
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            SidebarDragSession.end()
-            return ["ok": true, "seen": seen ?? [:]]
+            return await runDropTargetEvent(request: request, host: host, tabs: tabs, window: window)
         }
         if request["scenario"] as? String == "elementFullscreen" {
             return await runElementFullscreen(request: request, host: host, tabs: tabs, window: window)
