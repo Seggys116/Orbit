@@ -33,6 +33,8 @@ SCENARIOS = [
     ("idle", "Idle (noise floor, no action)"),
     ("warmSwitch", "Switch tab (page kept warm)"),
     ("openTab", "Open a tab"),
+    ("openTabBackground", "Open a tab, not activated"),
+    ("openBlankTab", "Open a blank new tab"),
     ("rapidSwitch", "Switch eight tabs 25ms apart"),
     ("focusPane", "Move focus between panes"),
     ("enterSplitLoaded", "Enter split (two loaded pages)"),
@@ -286,7 +288,7 @@ def main(argv):
     parser.add_argument("--journey", action="store_true", help="run seeded random journeys through tabs, pins and splits and report what broke")
     parser.add_argument("--seeds", default="1,2,3", help="comma list of journey seeds")
     parser.add_argument("--steps", type=int, default=60, help="steps per journey")
-    parser.add_argument("--onscreen", action="store_true", help="open the window on a real screen instead of a virtual display")
+    parser.add_argument("--virtual-display", action="store_true", help="open the window on a virtual display instead of a real screen (moves the display arrangement while it exists)")
     parser.add_argument("--sample", default="", help="scenario to sample the app's main thread during, with /usr/bin/sample")
     options = parser.parse_args(argv)
 
@@ -305,7 +307,7 @@ def main(argv):
 
     wanted = [name for name in options.scenarios.split(",") if name]
     labels = dict(SCENARIOS)
-    display = None if options.onscreen else VirtualDisplay(options.output)
+    display = VirtualDisplay(options.output) if options.virtual_display else None
     launch = Launch(
         app_path, os.path.join(options.output, f"run-{int(time.time())}"), options.launch_timeout,
         screen=None if display is None else DISPLAY_NAME,

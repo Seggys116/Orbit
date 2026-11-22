@@ -26,6 +26,8 @@ enum AppInteractionProbe {
         case warmSwitch
         case rapidSwitch
         case openTab
+        case openTabBackground
+        case openBlankTab
         case focusPane
         case enterSplitKeyboard
         case enterSplitBlank
@@ -284,6 +286,11 @@ enum AppInteractionProbe {
             case .openTab:
                 let address = host.webContents[first.tabID]?.navigationState.url ?? URL(string: "about:blank")!
                 return Plan(duration: 1.2, expecting: []) { _ = host.openTab(url: address, in: spaceID) }
+            case .openTabBackground:
+                let address = host.webContents[first.tabID]?.navigationState.url ?? URL(string: "about:blank")!
+                return Plan(duration: 1.2, expecting: []) { _ = host.openTab(url: address, in: spaceID, section: .today, activate: false) }
+            case .openBlankTab:
+                return Plan(duration: 1.2, expecting: []) { _ = host.openTab(url: URL(string: "orbit://new-tab")!, in: spaceID) }
             case .rapidSwitch:
                 return Plan(duration: 1.6, expecting: []) {
                     Task { @MainActor in

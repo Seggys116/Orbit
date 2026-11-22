@@ -5,7 +5,7 @@
 #   Scripts/interaction-smoothness                       build Release, run every scenario
 #   Scripts/interaction-smoothness --skip-build --scenarios enterSplitLoaded,closeTab
 #   Scripts/interaction-smoothness --configuration Debug --iterations 8
-#   Scripts/interaction-smoothness --onscreen            open the window on a real screen (the default is a virtual display)
+#   Scripts/interaction-smoothness --virtual-display     use a virtual display instead of a real screen
 
 set -euo pipefail
 
