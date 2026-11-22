@@ -101,7 +101,18 @@ final class SidebarNewTabRowTests: XCTestCase {
 
     func test_clickCatcher_withNoActionYet_doesNotCrash() {
         let view = OrbitActionButtonClickCatchingView(frame: NSRect(x: 0, y: 0, width: 200, height: 36))
+        var fired = 0
+
         view.mouseDown(with: mouseDownEvent())
+        view.mouseUp(with: mouseDownEvent())
+
+        view.action = { fired += 1 }
+        XCTAssertEqual(fired, 0, "A click that arrived before any action was wired must not be queued and replayed when one is.")
+        XCTAssertEqual(view.frame, NSRect(x: 0, y: 0, width: 200, height: 36), "The click must not resize or move the view.")
+        XCTAssertFalse(view.firesOnRelease)
+
+        view.mouseDown(with: mouseDownEvent())
+        XCTAssertEqual(fired, 1, "Once wired, the next click fires the action exactly once.")
     }
 
     // MARK: - The shipping row really is built from that mechanism

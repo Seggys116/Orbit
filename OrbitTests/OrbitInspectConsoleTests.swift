@@ -609,21 +609,26 @@ final class OrbitInspectConsoleTests: XCTestCase {
     }
 
     func test_filterLevelCounts_matchPerLevelScan() {
-        let entries = [
-            ConEntry.command(id: "a", text: "x", depth: 0),
-            ConEntry.navigation(id: "b", url: "u"),
-            ConEntry.command(id: "c", text: "y", depth: 0),
+        let levels: [ConLevel] = [
+            .log, .info, .warn, .error, .exception, .debug, .resourceError, .navigation, .command,
         ]
-        // Mirrors OrbitConsoleModel.updateDisplay: .all counts every entry, other chips count by `matches`.
-        var counts: [ConFilterLevel: Int] = [.all: entries.count]
-        for entry in entries {
-            for level in ConFilterLevel.allCases where level != .all && level.matches(entry.level) {
-                counts[level, default: 0] += 1
-            }
+        let entries = levels.enumerated().map { index, level -> ConEntry in
+            var entry = ConEntry.command(id: "e\(index)", text: "x", depth: 0)
+            entry.level = level
+            return entry
         }
-        XCTAssertEqual(counts[.all], 3)
-        XCTAssertEqual(counts[.logs], 2, "commands count as logs; navigation separators do not")
-        XCTAssertNil(counts[.errors])
+
+        let counts = OrbitConsoleLogic.levelCounts(of: entries)
+
+        XCTAssertEqual(
+            counts,
+            [.all: 9, .errors: 2, .warnings: 1, .info: 1, .logs: 2, .verbose: 2],
+            "All counts every entry including the navigation separator; errors are error+exception; logs are log+command; verbose is debug+resourceError"
+        )
+    }
+
+    func test_filterLevelCounts_emptyLogHasOnlyTheAllChip() {
+        XCTAssertEqual(OrbitConsoleLogic.levelCounts(of: [ConEntry]()), [.all: 0])
     }
 
     // MARK: - Hostile numbers from the page

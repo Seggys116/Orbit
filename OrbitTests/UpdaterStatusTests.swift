@@ -113,7 +113,24 @@ final class UpdaterStatusTests: XCTestCase {
     }
 
     func test_idle_isEqualOnlyToIdle() {
-        XCTAssertEqual(UpdaterStatus.idle, UpdaterStatus.idle)
+        let others: [UpdaterStatus] = [
+            .checking,
+            .upToDate,
+            .updateAvailable(version: "", releaseNotesHTML: nil, isInformationOnly: false),
+            .updateAvailable(version: "1.0", releaseNotesHTML: "<p>Notes.</p>", isInformationOnly: true),
+            .downloading(fractionCompleted: nil),
+            .downloading(fractionCompleted: 0.5),
+            .extracting(fractionCompleted: 0),
+            .extracting(fractionCompleted: 1),
+            .readyToRelaunch(version: ""),
+            .readyToRelaunch(version: "1.0"),
+            .error(message: ""),
+            .error(message: "failed"),
+        ]
+        for other in others {
+            XCTAssertNotEqual(UpdaterStatus.idle, other, "\(other)")
+            XCTAssertNotEqual(other, UpdaterStatus.idle, "\(other)")
+        }
     }
 
     // MARK: - Manual-check wedge regression guards

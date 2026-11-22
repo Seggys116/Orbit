@@ -35,6 +35,9 @@ SCENARIOS = [
     ("openTab", "Open a tab"),
     ("openTabBackground", "Open a tab, not activated"),
     ("openBlankTab", "Open a blank new tab"),
+    ("activateFreshTab", "Show a tab never shown"),
+    ("activateRightAway", "Make a tab and show it at once"),
+    ("activateAfterBriefWait", "Show a tab 120ms after making it"),
     ("rapidSwitch", "Switch eight tabs 25ms apart"),
     ("focusPane", "Move focus between panes"),
     ("enterSplitLoaded", "Enter split (two loaded pages)"),
@@ -289,6 +292,8 @@ def main(argv):
     parser.add_argument("--seeds", default="1,2,3", help="comma list of journey seeds")
     parser.add_argument("--steps", type=int, default=60, help="steps per journey")
     parser.add_argument("--virtual-display", action="store_true", help="open the window on a virtual display instead of a real screen (moves the display arrangement while it exists)")
+    parser.add_argument("--drop-target", action="store_true", help="check that a sidebar drag over the page lands on the split drop target when the app reports mouseMoved (events are posted inside the app; no cursor is used)")
+    parser.add_argument("--sites", default="", help="comma list of real page addresses (at least three) opened instead of the local colour pages; timing only, since their pixels are not known colours")
     parser.add_argument("--sample", default="", help="scenario to sample the app's main thread during, with /usr/bin/sample")
     options = parser.parse_args(argv)
 
@@ -317,10 +322,13 @@ def main(argv):
         if display is not None:
             display.start()
         launch.start()
-        launch.command("openTabs", urls=[f"{base}/{index}" for index in range(len(COLOURS))])
+        sites = [value for value in options.sites.split(",") if value]
+        if sites and len(sites) < 3:
+            raise Fail("--sites needs at least three addresses")
+        launch.command("openTabs", urls=sites or [f"{base}/{index}" for index in range(len(COLOURS))])
         print(f"interaction-smoothness: pages open, letting launch-time work finish ({options.settle:.0f}s)")
         time.sleep(options.settle)
-        colours = [list(colour) for colour in COLOURS]
+        colours = [list(colour) for colour in (COLOURS if not sites else [(0, 0, 0)] * len(sites))]
         if options.journey:
             failed = 0
             for seed in [int(value) for value in options.seeds.split(",") if value]:
@@ -342,6 +350,22 @@ def main(argv):
                 for item in report["stalls"][:6]:
                     print(f"   stall {item['ms']} ms at step {item['step']} [{item['action']}] (the call itself took {item.get('actionMs', '?')} ms)")
                 failed += len(found)
+            return 1 if failed else 0
+        if options.drop_target:
+            # the app's tear-off timer ends a drag record it sees no button held for, so an attempt only counts while the drag was still in flight
+            counted = failed = 0
+            for _ in range(12):
+                seen = launch.command("interact", scenario="dropTargetEvent")["seen"]
+                print(f"drop target: hit {seen.get('hit')}, current event {seen.get('currentEvent')}, drag in flight {seen.get('inFlight')}")
+                if not seen.get("inFlight"):
+                    continue
+                counted += 1
+                if seen.get("hit") != "SplitPaneDropCatcherView":
+                    failed += 1
+                if counted == 3:
+                    break
+            if counted == 0:
+                raise Fail("no attempt saw the drag still in flight")
             return 1 if failed else 0
         if options.fullscreen:
             extra = {}
@@ -367,7 +391,7 @@ def main(argv):
             timing = launch.command("interact", scenario=name, iterations=options.iterations, pixels=False, colours=colours)
             if sampler is not None:
                 sampler.wait()
-            pixels = launch.command("interact", scenario=name, iterations=options.pixel_iterations, pixels=True, colours=colours, dumpDir=os.path.join(options.output, "frames"))
+            pixels = {"iterations": []} if sites else launch.command("interact", scenario=name, iterations=options.pixel_iterations, pixels=True, colours=colours, dumpDir=os.path.join(options.output, "frames"))
             results[name] = {"timing": timing, "pixels": pixels}
     finally:
         launch.stop()

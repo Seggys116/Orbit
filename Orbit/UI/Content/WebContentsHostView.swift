@@ -593,7 +593,7 @@ final class SplitPaneDropCatcherView: NSView {
         let current = NSApp.currentEvent
         let age = current.map { ProcessInfo.processInfo.systemUptime - $0.timestamp } ?? 0
         guard bounds.contains(point),
-              Self.claimsHit(duringEvent: current?.type, eventAge: age, dragInFlight: sidebarDragIsActive),
+              Self.claimsHit(duringEvent: current?.type, eventAge: age, dragInFlight: sidebarDragIsActive, dragIsLive: NSEvent.pressedMouseButtons & 1 != 0 || SidebarDragSession.current != nil),
               Self.isSidebarDrag(types: NSPasteboard(name: .drag).types ?? [], recordMatchesPasteboard: SidebarDragSession.current != nil) else { return nil }
         return self
     }
@@ -620,13 +620,15 @@ final class SplitPaneDropCatcherView: NSView {
     // Only a fresh event can be a click or a key press in the page. While a drag runs, the app keeps reporting the event that started it as current, so an old one says nothing about what is happening now. A modifier change is never a click: holding Command mid-drag must not hand the drag back to the page.
     static let freshEventWindow: TimeInterval = 0.25
 
-    static func claimsHit(duringEvent type: NSEvent.EventType?, eventAge: TimeInterval = 0, dragInFlight: Bool) -> Bool {
+    // While a drag runs the app reports its movement as mouseMoved (and can report key events), so those only mean "not a drag" when no drag is live: the button is down, or the drag pasteboard is still the sidebar's.
+    static func claimsHit(duringEvent type: NSEvent.EventType?, eventAge: TimeInterval = 0, dragInFlight: Bool, dragIsLive: Bool = false) -> Bool {
         guard dragInFlight else { return false }
         guard eventAge < freshEventWindow else { return true }
         switch type {
-        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp,
-             .scrollWheel, .mouseMoved, .keyDown, .keyUp:
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp, .scrollWheel:
             return false
+        case .mouseMoved, .keyDown, .keyUp:
+            return dragIsLive
         default:
             return true
         }

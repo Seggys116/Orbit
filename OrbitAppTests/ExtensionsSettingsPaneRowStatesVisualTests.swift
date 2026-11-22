@@ -35,16 +35,70 @@ final class ExtensionsSettingsPaneRowStatesVisualTests: XCTestCase {
         id: "host.all", text: "Read and change all your data on all websites", severity: .critical, isGrantedAtInstall: true
     )
 
+    // MARK: - Pixel helpers
+
+    private func assertDimensions(_ image: RenderedImage, _ size: CGSize, _ label: String) {
+        XCTAssertEqual(image.bitmap.pixelsWide, Int(size.width) * 2, "\(label): rendered at the requested width @2x")
+        XCTAssertEqual(image.bitmap.pixelsHigh, Int(size.height) * 2, "\(label): rendered at the requested height @2x")
+    }
+
+    /// Mean of (r + g + b) / 3 over the pixels in `rect` that are at least 30% opaque; nil when none are.
+    private func inkBrightness(_ image: RenderedImage, in rect: CGRect) -> Double? {
+        var total = 0.0
+        var count = 0
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) {
+                let color = image.color(atX: x, y: y)
+                guard color.a >= 0.3 else { continue }
+                total += (color.r + color.g + color.b) / 3
+                count += 1
+            }
+        }
+        return count > 0 ? total / Double(count) : nil
+    }
+
+    private func hasInk(_ image: RenderedImage, in rect: CGRect) -> Bool {
+        image.containsNonBackgroundPixels(in: rect, background: .clear, tolerance: 0.1)
+    }
+
+    /// An opaque, orange-hued pixel: SwiftUI's `.orange` is roughly (1.0, 0.58, 0.0) in light and (1.0, 0.62, 0.04) in dark.
+    private func hasOrangePixel(_ image: RenderedImage, in rect: CGRect) -> Bool {
+        for y in Int(rect.minY)..<Int(rect.maxY) {
+            for x in Int(rect.minX)..<Int(rect.maxX) {
+                let color = image.color(atX: x, y: y)
+                if color.a > 0.8, color.r > 0.85, color.g > 0.4, color.g < 0.75, color.b < 0.3 { return true }
+            }
+        }
+        return false
+    }
+
     // MARK: - Empty state
 
     func test_installedSection_withNoExtensions_rendersTheEmptyStateText() {
+        let size = CGSize(width: SettingsMetrics.contentMaxWidth, height: 80)
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
-            let rendered = render(
-                Self.installedSection(extensions: []),
-                size: CGSize(width: SettingsMetrics.contentMaxWidth, height: 80),
-                appearance: appearance
-            )
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue): the empty-state text painted nothing.")
+            let label = "appearance \(appearance.rawValue)"
+            let rendered = render(Self.installedSection(extensions: []), size: size, appearance: appearance)
+            assertDimensions(rendered, size, label)
+
+            // "No extensions installed." at 12pt is one line, about 140pt wide, at the top left of the canvas
+            guard let box = rendered.boundingBoxOfContent() else {
+                XCTFail("\(label): the empty-state text painted nothing.")
+                continue
+            }
+            XCTAssertLessThanOrEqual(box.minX, 2, "\(label): text starts at the left edge, got \(box)")
+            XCTAssertLessThanOrEqual(box.minY, 4, "\(label): text starts at the top, got \(box)")
+            XCTAssertLessThanOrEqual(box.height, 20, "\(label): a single line of 12pt text, got \(box)")
+            XCTAssertGreaterThan(box.width, 100, "\(label): the sentence is wider than a stray glyph, got \(box)")
+            XCTAssertLessThan(box.width, 200, "\(label): the sentence is not wider than its 24 characters, got \(box)")
+
+            // secondary text is light on dark and dark on light
+            let brightness = inkBrightness(rendered, in: box)
+            if appearance == .darkAqua {
+                XCTAssertGreaterThan(brightness ?? -1, 0.6, "\(label): secondary text reads light in the dark appearance")
+            } else {
+                XCTAssertLessThan(brightness ?? 2, 0.4, "\(label): secondary text reads dark in the light appearance")
+            }
         }
     }
 
@@ -76,9 +130,24 @@ final class ExtensionsSettingsPaneRowStatesVisualTests: XCTestCase {
     }
 
     func test_extensionRow_paintsNonBlankContent_inBothAppearances() {
+        let size = CGSize(width: 420, height: 60)
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
-            let rendered = render(Self.row(ext: Self.makeExtension()), size: CGSize(width: 420, height: 60), appearance: appearance)
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            let label = "appearance \(appearance.rawValue)"
+            let rendered = render(Self.row(ext: Self.makeExtension()), size: size, appearance: appearance)
+            assertDimensions(rendered, size, label)
+
+            // the row is a 28pt icon at the left, the name and version beside it, then a toggle and a Remove button against the right edge
+            guard let box = rendered.boundingBoxOfContent() else {
+                XCTFail("\(label): the row painted nothing")
+                continue
+            }
+            XCTAssertLessThanOrEqual(box.minX, 10, "\(label): the icon sits at the left edge, got \(box)")
+            XCTAssertGreaterThanOrEqual(box.maxX, 410, "\(label): the Remove button sits against the right edge, got \(box)")
+            XCTAssertTrue(hasInk(rendered, in: CGRect(x: 0, y: 4, width: 30, height: 28)), "\(label): the extension icon is drawn")
+            XCTAssertTrue(hasInk(rendered, in: CGRect(x: 38, y: 4, width: 100, height: 15)), "\(label): the name is drawn beside the icon")
+            XCTAssertTrue(hasInk(rendered, in: CGRect(x: 38, y: 20, width: 60, height: 12)), "\(label): the version line is drawn under the name")
+            XCTAssertTrue(hasInk(rendered, in: CGRect(x: 370, y: 4, width: 45, height: 28)), "\(label): the Remove button is drawn")
+            XCTAssertFalse(hasInk(rendered, in: CGRect(x: 200, y: 4, width: 90, height: 28)), "\(label): the Spacer leaves the middle of the row empty")
         }
     }
 
@@ -144,13 +213,22 @@ final class ExtensionsSettingsPaneRowStatesVisualTests: XCTestCase {
     // MARK: - Pending-changes / activation-error banner
 
     func test_pendingChangesBanner_paintsNonBlankContent_inBothAppearances() {
+        let size = CGSize(width: 460, height: 60)
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
-            let rendered = render(
-                ExtensionPendingChangesBanner(lastError: nil, onRestart: {}),
-                size: CGSize(width: 460, height: 60),
-                appearance: appearance
-            )
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            let label = "appearance \(appearance.rawValue)"
+            let rendered = render(ExtensionPendingChangesBanner(lastError: nil, onRestart: {}), size: size, appearance: appearance)
+            assertDimensions(rendered, size, label)
+
+            // an orange icon at the left, one line of message, a Spacer, then the Restart Orbit button against the right edge
+            guard let box = rendered.boundingBoxOfContent() else {
+                XCTFail("\(label): the banner painted nothing")
+                continue
+            }
+            XCTAssertTrue(hasOrangePixel(rendered, in: CGRect(x: 0, y: 0, width: 24, height: size.height)), "\(label): the icon is drawn in orange")
+            XCTAssertTrue(hasInk(rendered, in: CGRect(x: 30, y: 0, width: 200, height: size.height)), "\(label): the message is drawn")
+            XCTAssertFalse(hasInk(rendered, in: CGRect(x: 280, y: 0, width: 40, height: size.height)), "\(label): the Spacer leaves the middle empty")
+            XCTAssertTrue(hasInk(rendered, in: CGRect(x: 380, y: 0, width: 75, height: size.height)), "\(label): the Restart Orbit button is drawn")
+            XCTAssertGreaterThanOrEqual(box.maxX, 450, "\(label): the button sits against the right edge, got \(box)")
         }
     }
 
@@ -171,16 +249,23 @@ final class ExtensionsSettingsPaneRowStatesVisualTests: XCTestCase {
     // MARK: - No engine yet
 
     func test_engineStartingNotice_paintsNonBlankContent_inBothAppearances() {
+        let size = CGSize(width: SettingsMetrics.contentMaxWidth, height: 60)
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
-            let rendered = render(
-                ExtensionsEngineStartingNotice(),
-                size: CGSize(width: SettingsMetrics.contentMaxWidth, height: 60),
-                appearance: appearance
-            )
-            XCTAssertNotNil(
-                rendered.boundingBoxOfContent(),
-                "appearance \(appearance.rawValue): the no-engine notice painted nothing, so the pane's only pre-engine state is blank."
-            )
+            let label = "appearance \(appearance.rawValue)"
+            let rendered = render(ExtensionsEngineStartingNotice(), size: size, appearance: appearance)
+            assertDimensions(rendered, size, label)
+
+            // a small spinner at the left, then one line of sentence, then a Spacer to the right edge
+            guard let box = rendered.boundingBoxOfContent() else {
+                XCTFail("\(label): the no-engine notice painted nothing, so the pane's only pre-engine state is blank.")
+                continue
+            }
+            XCTAssertLessThanOrEqual(box.minX, 4, "\(label): the spinner sits at the left edge, got \(box)")
+            XCTAssertLessThan(box.maxX, size.width - 40, "\(label): the sentence does not run to the right edge, got \(box)")
+            XCTAssertGreaterThan(box.width, 200, "\(label): spinner plus the full sentence, got \(box)")
+            XCTAssertTrue(hasInk(rendered, in: CGRect(x: 0, y: 0, width: 16, height: size.height)), "\(label): the spinner is drawn")
+            XCTAssertTrue(hasInk(rendered, in: CGRect(x: 30, y: 0, width: 200, height: size.height)), "\(label): the sentence is drawn")
+            XCTAssertFalse(hasInk(rendered, in: CGRect(x: size.width - 40, y: 0, width: 40, height: size.height)), "\(label): nothing is drawn at the right edge")
         }
     }
 

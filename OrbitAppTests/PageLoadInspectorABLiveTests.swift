@@ -1,4 +1,4 @@
-//  Does having the inspector open change how fast a page loads? Real window, real engine, a page of 400 subresources from a local server, loaded repeatedly with the inspector closed, with the Network inspector open, and with the Performance panel's live sampler running (its frame and timer loops). The medians are printed; the assertions only check that every load completed and that an open inspector does not make loads much slower.
+//  Does having the inspector open change how fast a page loads? Real window, real engine, a page of 400 subresources from a local server, loaded repeatedly with the inspector closed, with the Network inspector open, and with the Performance panel's live sampler running (its frame and timer loops). The medians are printed; the assertions check that the open Network inspector logged the loads and that an open inspector does not make loads much slower.
 //
 //  Excluded on GitHub-hosted runners: hosts a real window, which needs the app open.
 
@@ -95,8 +95,10 @@ final class PageLoadInspectorABLiveTests: LiveEnvironmentTestCase {
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testTheIdleNetworkLogCostIsReportedOnARealRunner
     func testTheIdleNetworkLogCostIsReportedOnARealRunner() {
-        // The assertions live in NetworkModelIdleCostTests; this prints the same measurement where the live run's log is kept.
-        print("NETWORK-IDLE-COST \(NetworkModelIdleCostTests.measure().summary)")
+        let result = NetworkModelIdleCostTests.measure()
+        print("NETWORK-IDLE-COST \(result.summary)")
+        XCTAssertEqual(result.logCount, 5000, "the log is bounded")
+        XCTAssertLessThan(result.perRequestSteadyMs, 0.5, "each request's three callbacks cost under half a millisecond of main thread")
     }
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN testAHeavyPageLoadsNoSlowerWithTheInspectorOpen
@@ -117,6 +119,10 @@ final class PageLoadInspectorABLiveTests: LiveEnvironmentTestCase {
             OrbitDevToolsStore.shared.open(contents, panel: .network, inspectAt: nil, armPicker: false)
             try await Task.sleep(for: .seconds(1))
             let networkOpen = try await self.series(tabID, contents, label: "network", runs: 8)
+            let networkSession = OrbitDevToolsStore.shared.ensureSession(for: contents)
+            XCTAssertTrue(
+                networkSession.network.records.contains { $0.url.contains("/page?r=network-7") },
+                "the open Network inspector logged the last load it was timing")
 
             OrbitDevToolsStore.shared.open(contents, panel: .performance, inspectAt: nil, armPicker: false)
             try await Task.sleep(for: .seconds(1))

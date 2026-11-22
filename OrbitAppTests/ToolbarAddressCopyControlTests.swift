@@ -100,7 +100,20 @@ final class ToolbarAddressCopyClickCatchingNSViewTests: XCTestCase {
 
     func test_mouseDown_withNoOnClickWired_doesNothingAndDoesNotCrash() {
         let view = ToolbarAddressCopyClickCatchingNSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
+        var hoverReports: [Bool] = []
+        view.onHoverChanged = { hoverReports.append($0) }
+
         view.mouseDown(with: mouseDownEvent())
+
+        var clickCount = 0
+        view.onClick = { clickCount += 1 }
+        XCTAssertEqual(clickCount, 0, "A click that arrived before onClick was wired must not be queued and replayed when it is.")
+        XCTAssertEqual(hoverReports, [], "A click is not a hover transition.")
+        XCTAssertFalse(view.isHovering)
+        XCTAssertEqual(view.frame, NSRect(x: 0, y: 0, width: 16, height: 16))
+
+        view.mouseDown(with: mouseDownEvent())
+        XCTAssertEqual(clickCount, 1, "Once wired, the next click invokes onClick exactly once.")
     }
 
     // MARK: Hit testing — always the frontmost responder for its own bounds

@@ -169,12 +169,8 @@ final class OrbitConsoleModel: OrbitInspectModule {
         let query = OrbitConsoleLogic.parseFilterQuery(filterText)
         var result: [ConEntry] = []
         var collapseStack: [Int] = []
-        var counts: [ConFilterLevel: Int] = [.all: entries.count]
 
         for entry in entries {
-            for level in ConFilterLevel.allCases where level != .all && level.matches(entry.level) {
-                counts[level, default: 0] += 1
-            }
             while let top = collapseStack.last, entry.groupDepth <= top {
                 collapseStack.removeLast()
             }
@@ -190,7 +186,7 @@ final class OrbitConsoleModel: OrbitInspectModule {
             }
         }
         displayEntries = result
-        levelCounts = counts
+        levelCounts = OrbitConsoleLogic.levelCounts(of: entries)
     }
 
     func toggleGroup(_ id: String) {

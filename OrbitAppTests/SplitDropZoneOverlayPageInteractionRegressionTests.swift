@@ -280,6 +280,10 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
 
         let registered = window.contentView.map(anyViewRegistersDraggedTypes) ?? false
         print("[SPLIT-DROPZONE-EVIDENCE] draggedTypesRegistered_noActiveTab=\(registered)")
+        XCTAssertFalse(
+            registered,
+            "With no active tab there is no SplitPaneDropCatcherView, and SplitDropZoneOverlay itself is a pass-through that registers no drag destination, so nothing in this tree should register for dragged types."
+        )
     }
 
     // MARK: - 3. Driving AppKit's real NSDraggingDestination protocol
@@ -337,10 +341,10 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         return pasteboard
     }
 
-    // SwiftUI's own internal drag-destination view, located by class-name
-    // match since it is a SwiftUI-internal type with no public symbol.
+    // The page's split drop target is an AppKit view above the web view (a SwiftUI .onDrop loses the mouse-up to WebKit), so the
+    // destination a sidebar drag is routed to is this catcher, not a SwiftUI-internal view.
     private func platformDraggingDestinationView(in root: NSView) -> NSView? {
-        if "\(type(of: root))" == "_PlatformDraggingDestinationView" { return root }
+        if root is SplitPaneDropCatcherView { return root }
         for subview in root.subviews {
             if let found = platformDraggingDestinationView(in: subview) { return found }
         }
@@ -440,7 +444,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
 
         guard let contentView = window.contentView,
               let destination = platformDraggingDestinationView(in: contentView) else {
-            return XCTFail("Could not find the SwiftUI drag-destination view.")
+            return XCTFail("Could not find the page's split drop catcher.")
         }
 
         let pasteboard = try seedDragPasteboard(with: SidebarDragPayload(nodeID: draggedTab.id, kind: .todayTab, spaceID: draggedTab.spaceID))
@@ -481,7 +485,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
 
         guard let contentView = window.contentView,
               let destination = platformDraggingDestinationView(in: contentView) else {
-            return XCTFail("Could not find the SwiftUI drag-destination view — drag-to-split has no destination to route to at all.")
+            return XCTFail("Could not find the page's split drop catcher — drag-to-split has no destination to route to at all.")
         }
 
         let pasteboard = try seedDragPasteboard(with: SidebarDragPayload(nodeID: draggedTab.id, kind: .todayTab, spaceID: draggedTab.spaceID))
@@ -536,7 +540,7 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
 
         guard let contentView = window.contentView,
               let destination = platformDraggingDestinationView(in: contentView) else {
-            return XCTFail("Could not find the SwiftUI drag-destination view.")
+            return XCTFail("Could not find the page's split drop catcher.")
         }
 
         let pasteboard = try seedDragPasteboard(with: SidebarDragPayload(nodeID: draggedTab.id, kind: .todayTab, spaceID: draggedTab.spaceID))
@@ -555,116 +559,44 @@ final class SplitDropZoneOverlayPageInteractionRegressionTests: XCTestCase {
         XCTAssertEqual(group.tabIDs, [targetTabID, draggedTab.id], "A .right drop must keep the existing tab first (SplitEdge.insertsBefore == false for .right).")
     }
 
-    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_dragSession_withContentShapeRestoredAsControl_behavesIdenticallyToTheFixedTree
+    // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_aDropAtEachEdgeOfTheRealPageTree_createsTheSplitInThatDirection
 
-    func test_dragSession_withContentShapeRestoredAsControl_behavesIdenticallyToTheFixedTree() throws {
+    func test_aDropAtEachEdgeOfTheRealPageTree_createsTheSplitInThatDirection() throws {
         let engine = EngineStandInView()
         let env = AppEnvironment.demo
         let targetTabID = try XCTUnwrap(env.activeTabID)
+        let contents = StandInWebContents(session: MockEngineSession(), standIn: engine)
+        env._test_attachWebContents(contents, for: targetTabID)
         let draggedTab = try makeDraggableTab(env: env, targetTabID: targetTabID)
-        defer { env.state.tabs.removeValue(forKey: draggedTab.id) }
-        XCTAssertNil(env.splitGroup(for: targetTabID), "Precondition: not already split.")
+        defer {
+            env._test_detachWebContents(for: targetTabID)
+            env.state.tabs.removeValue(forKey: draggedTab.id)
+        }
 
-        let window = hostLikeProduction(
-            ZStack {
-                EngineStandInRepresentable(view: engine)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .paneCardChrome(isFocused: false)
-                ControlMirroredDropZone(includeContentShape: true)
-            }
-            .environment(env),
-            size: Self.size
-        )
+        let window = hostLikeProduction(ContentCardView().environment(env), size: Self.size)
         defer { window.orderOut(nil) }
         window.contentView?.layoutSubtreeIfNeeded()
         if let contentView = window.contentView { _ = settleFrameUntilStable(window, of: contentView) }
         window.contentView?.displayIfNeeded()
-
-        guard let contentView = window.contentView,
-              let destination = platformDraggingDestinationView(in: contentView) else {
-            return XCTFail("Could not find the SwiftUI drag-destination view in the WITH-contentShape control tree — nothing to compare against.")
+        guard let contentView = window.contentView, let destination = platformDraggingDestinationView(in: contentView) else {
+            return XCTFail("Could not find the page's split drop catcher.")
         }
 
-        let pasteboard = try seedDragPasteboard(with: SidebarDragPayload(nodeID: draggedTab.id, kind: .todayTab, spaceID: draggedTab.spaceID))
-        let points: [(String, NSPoint, SplitEdge)] = [
-            ("left", NSPoint(x: 20, y: 350), .left),
-            ("right", NSPoint(x: 880, y: 350), .right),
-            ("top", NSPoint(x: 450, y: 690), .top),
-            ("bottom", NSPoint(x: 450, y: 10), .bottom),
+        let cases: [(String, NSPoint, SplitGroup.Axis, Bool)] = [
+            ("left", NSPoint(x: 20, y: 350), .horizontal, true),
+            ("right", NSPoint(x: 880, y: 350), .horizontal, false),
+            ("top", NSPoint(x: 450, y: 690), .vertical, true),
+            ("bottom", NSPoint(x: 450, y: 10), .vertical, false),
         ]
-        let (edges, _) = driveDragSequence(
-            destinationView: destination,
-            window: window,
-            pasteboard: pasteboard,
-            env: env,
-            points: points.map { ($0.0, $0.1) }
-        )
-        for (recorded, expected) in zip(edges, points) {
-            XCTAssertEqual(
-                recorded.1,
-                expected.2,
-                "CONTROL (contentShape restored): near the \(expected.0) edge (\(expected.1)) resolved \(recorded.1.map { "\($0)" } ?? "nil"), expected .\(expected.2)."
-            )
+        for (label, point, axis, draggedFirst) in cases {
+            XCTAssertNil(env.splitGroup(for: targetTabID), "Precondition before the \(label) drop: not split.")
+            let pasteboard = try seedDragPasteboard(with: SidebarDragPayload(nodeID: draggedTab.id, kind: .todayTab, spaceID: draggedTab.spaceID))
+            let (_, performed) = driveDragSequence(destinationView: destination, window: window, pasteboard: pasteboard, env: env, points: [(label, point)])
+            XCTAssertTrue(performed, "A drop at the \(label) edge was not accepted.")
+            let group = try XCTUnwrap(env.splitGroup(for: targetTabID), "No split after a drop at the \(label) edge.")
+            XCTAssertEqual(group.axis, axis, "A \(label) drop lays the split out along the wrong axis.")
+            XCTAssertEqual(group.tabIDs, draggedFirst ? [draggedTab.id, targetTabID] : [targetTabID, draggedTab.id], "A \(label) drop puts the panes in the wrong order.")
+            env.store.dissolveSplit(group.id)
         }
-
-        let (_, performed) = driveDragSequence(
-            destinationView: destination,
-            window: window,
-            pasteboard: pasteboard,
-            env: env,
-            points: [("right", NSPoint(x: 880, y: 350))]
-        )
-        XCTAssertTrue(performed, "CONTROL: performDragOperation returned false.")
-        let group = try XCTUnwrap(env.splitGroup(for: targetTabID), "CONTROL: no SplitGroup after performDragOperation — the two arms disagree, which is exactly the risk this control exists to catch.")
-        XCTAssertEqual(Set(group.tabIDs), Set([targetTabID, draggedTab.id]))
-
-        XCTAssertFalse(
-            reachedEngine(window, at: NSPoint(x: 450, y: 335), engine: engine),
-            "CONTROL: the page was reachable even WITH .contentShape(Rectangle()) present — this mirrored tree is not reproducing the original defect, so its agreement with the fixed tree above proves nothing."
-        )
-    }
-}
-
-private struct ControlMirroredDropZone: View {
-    @Environment(AppEnvironment.self) private var env
-    var includeContentShape: Bool
-
-    var body: some View {
-        GeometryReader { proxy in
-            zone(size: proxy.size)
-        }
-    }
-
-    @ViewBuilder
-    private func zone(size: CGSize) -> some View {
-        if includeContentShape {
-            Color.clear
-                .contentShape(Rectangle())
-                .sidebarPayloadDropDestination(action: { drop(items: $0, location: $1, size: size) }) { targeted in
-                    if !targeted { env.activeSplitDropZone = nil }
-                } onUpdate: { update(location: $0, size: size) }
-        } else {
-            Color.clear
-                .sidebarPayloadDropDestination(action: { drop(items: $0, location: $1, size: size) }) { targeted in
-                    if !targeted { env.activeSplitDropZone = nil }
-                } onUpdate: { update(location: $0, size: size) }
-        }
-    }
-
-    private func drop(items: [SidebarDragPayload], location: CGPoint, size: CGSize) -> Bool {
-        defer { env.activeSplitDropZone = nil }
-        guard let item = items.first, let targetTabID = env.activeTabID, item.nodeID != targetTabID else { return false }
-        let edge = SplitDropZoneGeometry.edge(at: location, in: size, allowedOrientation: env.activeSplitGroup?.axis)
-        env.createSplit(existingTabID: targetTabID, newTabID: item.nodeID, edge: edge)
-        return true
-    }
-
-    private func update(location: CGPoint, size: CGSize) {
-        guard let targetTabID = env.activeTabID else {
-            env.activeSplitDropZone = nil
-            return
-        }
-        let edge = SplitDropZoneGeometry.edge(at: location, in: size, allowedOrientation: env.activeSplitGroup?.axis)
-        env.activeSplitDropZone = SplitDropZone(edge: edge, targetTabID: targetTabID)
     }
 }

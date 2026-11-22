@@ -81,14 +81,18 @@ final class PasteIntoTextFieldTests: XCTestCase {
     func testKeyboardMonitorRepairsTheMenuBarBeforeACommandKeyLooksForItsRow() throws {
         let ours = MainMenuBuilder.build()
         MainMenuKeeper.shared.install(ours)
-        GlobalKeyEventMonitor.shared.start()
+        GlobalKeyEventMonitor.shared.stop()
+
+        // Control: with no monitor installed, a delivered Cmd-V leaves a swapped-in stock menu in place, so the repair below is the monitor's and nothing else's.
         NSApp.mainMenu = NSMenu(title: "Stock")
         XCTAssertFalse(MainMenuKeeper.shared.isIntact)
+        NSApp.sendEvent(try commandV())
+        XCTAssertFalse(MainMenuKeeper.shared.isIntact, "Precondition: nothing but the key monitor repairs the menu bar while a key is delivered.")
 
-        // The monitor's first statement is the repair; dispatching through a real event queue would need a window, so the repair is invoked as the monitor does.
-        MainMenuKeeper.shared.restoreIfReplaced()
-        _ = GlobalKeyEventMonitor.handle(try commandV(), in: .frontmost)
-        XCTAssertTrue(MainMenuKeeper.shared.isIntact)
+        GlobalKeyEventMonitor.shared.start()
+        NSApp.sendEvent(try commandV())
+        XCTAssertTrue(MainMenuKeeper.shared.isIntact, "The installed key monitor did not put Orbit's menu bar back before the command key looked for its row.")
+        XCTAssertTrue(NSApp.mainMenu === ours)
         XCTAssertNotNil(editMenu(of: NSApp.mainMenu)?.items.first { $0.title == "Paste" })
     }
 }

@@ -66,9 +66,17 @@ final class OrbitTitleBarDoubleClickTests: XCTestCase {
         XCTAssertTrue(window.calls.isEmpty, "\"None\" must not zoom or minimize — the user explicitly turned this off.")
     }
 
-    func test_handle_nilWindow_doesNotCrash() {
-        let d = MockPreferences(values: [OrbitTitleBarDoubleClick.preferenceKey: "Maximize"])
-        OrbitTitleBarDoubleClick.handle(on: nil, defaults: d)
+    func test_handle_nilWindow_firesNoActionOnAnyWindow() {
+        let bystander = RecordingWindow()
+        for preference in ["Maximize", "Minimize", "None"] {
+            let d = MockPreferences(values: [OrbitTitleBarDoubleClick.preferenceKey: preference])
+
+            OrbitTitleBarDoubleClick.handle(on: nil, defaults: d)
+        }
+
+        XCTAssertTrue(bystander.calls.isEmpty, "with no window to act on, no other window may be zoomed or minimized in its place")
+        XCTAssertFalse(bystander.isZoomed)
+        XCTAssertFalse(bystander.isMiniaturized)
     }
 }
 

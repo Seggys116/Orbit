@@ -1275,17 +1275,20 @@ final class OrbitInspectLighthouseTests: XCTestCase {
         XCTAssertEqual(OrbitLighthouseLogic.withGuidance(already).howToFix, "Keep this.")
     }
 
-    func testGuidance_isSetOnFailingAuditsInAFullReport() {
+    func testGuidance_isSetOnFailingAuditsInAFullReport() throws {
         var bundle = LHBundle()
         bundle.mode = .snapshot
         bundle.images = [image(natural: (2000, 1000), shown: (500, 250), size: 160_000)]
         bundle.renderBlockers = [LHRenderBlocker(url: "https://example.com/a.css", type: "stylesheet", wastedMs: 80, transferSize: 100)]
         let report = OrbitLighthouseLogic.score(bundle: bundle)
-        for id in ["uses-responsive-images", "render-blocking-resources", "html-has-lang", "document-title", "meta-description"] {
-            guard let audit = report.audits.first(where: { $0.id == id }), audit.status == .fail else { continue }
-            XCTAssertNotNil(audit.howToFix, id)
+        let mustFail = ["uses-responsive-images", "render-blocking-resources", "html-has-lang", "document-title", "meta-description"]
+        let failingIDs = Set(report.audits.filter { $0.status == .fail }.map(\.id))
+        XCTAssertTrue(Set(mustFail).isSubset(of: failingIDs), "missing from the failing audits: \(Set(mustFail).subtracting(failingIDs).sorted())")
+        for id in mustFail {
+            let audit = try XCTUnwrap(report.audits.first { $0.id == id }, id)
+            let fix = try XCTUnwrap(audit.howToFix, id)
+            XCTAssertFalse(fix.isEmpty, id)
         }
-        XCTAssertNotNil(report.audits.first { $0.id == "uses-responsive-images" }?.howToFix)
     }
 
     // MARK: - Reports

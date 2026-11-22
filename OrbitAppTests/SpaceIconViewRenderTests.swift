@@ -281,8 +281,42 @@ final class SpaceIconViewRenderTests: XCTestCase {
         }
     }
 
+    private static let darkBackingColor = RGBA(r: 0.14, g: 0.13, b: 0.17, a: 1)
+
+    private func maxChroma(in image: RenderedImage, region: CGRect) -> Double {
+        var peak = 0.0
+        for y in Int(region.minY.rounded(.down))..<Int(region.maxY.rounded(.up)) {
+            for x in Int(region.minX.rounded(.down))..<Int(region.maxX.rounded(.up)) {
+                let color = image.color(atX: x, y: y)
+                peak = max(peak, max(color.r, color.g, color.b) - min(color.r, color.g, color.b))
+            }
+        }
+        return peak
+    }
+
+    private func headerIconRegion(row: Int) -> CGRect {
+        Self.spaceTitleRowIconRegion.offsetBy(dx: 0, dy: CGFloat(row) * OrbitMetrics.sidebarSpaceNameRowHeight)
+    }
+
+    // The icon slot and the name slot of one header row each hold ink over the backing, and the PNG has the size asked for.
+    private func assertHeaderRowPainted(_ image: RenderedImage, size: CGSize, row: Int, label: String) {
+        XCTAssertEqual(image.bitmap.pixelsWide, Int((size.width * 2).rounded()), "\(label): rendered at the requested width @2x")
+        XCTAssertEqual(image.bitmap.pixelsHigh, Int((size.height * 2).rounded()), "\(label): rendered at the requested height @2x")
+        let leading = OrbitMetrics.sidebarHorizontalPadding + OrbitMetrics.sidebarRowContentInset
+        let nameStart = leading + OrbitMetrics.sidebarSpaceIconSize + OrbitMetrics.sidebarRowContentSpacing
+        let name = CGRect(
+            x: nameStart, y: CGFloat(row) * OrbitMetrics.sidebarSpaceNameRowHeight,
+            width: size.width - nameStart - leading, height: OrbitMetrics.sidebarSpaceNameRowHeight)
+        XCTAssertTrue(
+            image.containsNonBackgroundPixels(in: headerIconRegion(row: row), background: Self.darkBackingColor, tolerance: 0.02),
+            "\(label): the icon slot is empty")
+        XCTAssertTrue(
+            image.containsNonBackgroundPixels(in: name, background: Self.darkBackingColor, tolerance: 0.02),
+            "\(label): the Space name is not drawn")
+    }
+
     // Cropping is asserted by test_spaceTitleRow_emojiIcon_inkHasMarginAndIsCenteredInTheRealHeader
-    // above; this only writes the PNG and smoke-checks that the header drew at all.
+    // above; this writes the PNG and checks the header drew its icon slot and its name, and that an emoji is coloured.
     func test_spaceTitleRow_emojiIcon_writesHeaderPNGForHumanInspection() {
         let space = Space(name: "Reading List", icon: "📚", iconIsEmoji: true, theme: SpaceTheme(), profileID: env.createDefaultProfileIfNeeded())
         let size = CGSize(width: 260, height: OrbitMetrics.sidebarSpaceNameRowHeight)
@@ -291,7 +325,10 @@ final class SpaceIconViewRenderTests: XCTestCase {
             size: size
         )
         image.writeDiagnosticPNG(named: "SpaceTitleRow-emoji")
-        XCTAssertNotNil(image.boundingBoxOfContent(), "the header drew nothing at all")
+        assertHeaderRowPainted(image, size: size, row: 0, label: "emoji header")
+        XCTAssertGreaterThan(
+            maxChroma(in: image, region: headerIconRegion(row: 0)), 0.25,
+            "the books emoji is a colour glyph; a grey icon slot means the emoji did not render as one")
     }
 
     func test_spaceTitleRow_symbolIcon_writesHeaderPNGForHumanInspection() {
@@ -302,7 +339,10 @@ final class SpaceIconViewRenderTests: XCTestCase {
             size: size
         )
         image.writeDiagnosticPNG(named: "SpaceTitleRow-symbol")
-        XCTAssertNotNil(image.boundingBoxOfContent(), "the header drew nothing at all")
+        assertHeaderRowPainted(image, size: size, row: 0, label: "symbol header")
+        XCTAssertLessThan(
+            maxChroma(in: image, region: headerIconRegion(row: 0)), 0.1,
+            "an SF Symbol is drawn in the theme's grey-scale readable foreground, so its slot has no colour")
     }
 
     // Both icon kinds in the same header row's own icon slot, stacked into one PNG for a single
@@ -323,7 +363,10 @@ final class SpaceIconViewRenderTests: XCTestCase {
 
         let image = render(onDarkBacking(content, size: size), size: size)
         image.writeDiagnosticPNG(named: "SpaceTitleRow-emoji-and-symbol")
-        XCTAssertNotNil(image.boundingBoxOfContent(), "the header drew nothing at all")
+        assertHeaderRowPainted(image, size: size, row: 0, label: "stacked emoji row")
+        assertHeaderRowPainted(image, size: size, row: 1, label: "stacked symbol row")
+        XCTAssertGreaterThan(maxChroma(in: image, region: headerIconRegion(row: 0)), 0.25, "the top row's books emoji is coloured")
+        XCTAssertLessThan(maxChroma(in: image, region: headerIconRegion(row: 1)), 0.1, "the bottom row's symbol is grey-scale")
     }
 
     // MARK: - End to end: Create Space with nothing picked really renders the dot

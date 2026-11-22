@@ -254,9 +254,14 @@ final class LinkDropLogicTests: XCTestCase {
     }
 
     func test_claimsHit_neverForClicksScrollsOrKeys() {
-        for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp, .rightMouseDown, .scrollWheel, .mouseMoved, .keyDown] {
+        for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp, .rightMouseDown, .scrollWheel] {
             XCTAssertFalse(claims(event: type, payload: link), "\(type)")
         }
+    }
+
+    func test_claimsHit_aDragsMovementIsMouseMovedWithTheButtonDown() {
+        XCTAssertTrue(claims(event: .mouseMoved, payload: link), "The app reports a drag's movement as mouseMoved; turning it away sent every link drop to the page.")
+        XCTAssertFalse(claims(event: .mouseMoved, down: false, payload: link))
     }
 
     func test_claimsHit_notWithoutButtonDownOrWithAStalePasteboard() {

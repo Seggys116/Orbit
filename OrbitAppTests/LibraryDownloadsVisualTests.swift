@@ -37,8 +37,22 @@ final class LibraryDownloadsVisualTests: XCTestCase {
         seedCompletedDownload(in: env)
         for appearance: NSAppearance.Name in [.aqua, .darkAqua] {
             let rendered = render(LibraryDownloadsView(searchQuery: "").environment(env), size: Self.size, appearance: appearance)
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            assertListedRow(rendered, label: "appearance \(appearance.rawValue)")
         }
+    }
+
+    // The group header and one row: an icon at least rowIconSize tall, and a name and status line beside it.
+    private func assertListedRow(_ rendered: RenderedImage, label: String) {
+        XCTAssertEqual(rendered.bitmap.pixelsWide, Int(Self.size.width) * 2, "\(label): rendered at the requested width @2x")
+        XCTAssertEqual(rendered.bitmap.pixelsHigh, Int(Self.size.height) * 2, "\(label): rendered at the requested height @2x")
+        guard let box = rendered.boundingBoxOfContent() else {
+            XCTFail("\(label): nothing was drawn")
+            return
+        }
+        XCTAssertGreaterThanOrEqual(box.height, LibraryModeMetrics.rowIconSize, "\(label): the row is shorter than its own icon, got \(box)")
+        XCTAssertGreaterThan(box.width, LibraryModeMetrics.rowIconSize + 40, "\(label): only an icon was drawn, with no name or status text beside it, got \(box)")
+        XCTAssertGreaterThanOrEqual(box.minX, 0)
+        XCTAssertLessThanOrEqual(box.maxX, Self.size.width, "\(label): the row content runs past the canvas edge, got \(box)")
     }
 
     // One download driven through all three states: separate seeds would differ in file name and byte count.
@@ -77,11 +91,20 @@ final class LibraryDownloadsVisualTests: XCTestCase {
 
     // No file on disk, so the row must fall back to the suggested name and Retry.
     func test_aDownloadThatFailedWithNoFileOnDisk_stillPaintsARow() {
-        seedInterruptedDownload(in: env)
-        let rendered = render(LibraryDownloadsView(searchQuery: "").environment(env), size: Self.size, appearance: .darkAqua)
-        XCTAssertNotNil(
-            rendered.boundingBoxOfContent(),
-            "A failed download must still be listed — a row the user cannot see is a download they cannot retry or clear."
+        let id = seedInterruptedDownload(in: env)
+        let failed = render(LibraryDownloadsView(searchQuery: "").environment(env), size: Self.size, appearance: .darkAqua)
+        assertListedRow(failed, label: "failed download with no file")
+
+        // same item and same missing file, now marked completed: its status line reads "File no longer on disk" instead of "Failed"
+        env.downloadStore.updateProgress(
+            id: id,
+            progress: DownloadProgress(receivedBytes: 2_000_000, totalBytes: 2_000_000, bytesPerSecond: 0, state: .completed)
+        )
+        let completedMissing = render(LibraryDownloadsView(searchQuery: "").environment(env), size: Self.size, appearance: .darkAqua)
+        assertListedRow(completedMissing, label: "completed download with no file")
+        XCTAssertTrue(
+            Self.rendersDiffer(failed, completedMissing, size: Self.size),
+            "A failed download must show its own Failed status, not the same row as a completed one whose file is gone."
         )
     }
 

@@ -8,10 +8,53 @@ final class BrowserEngineSeamTests: XCTestCase {
     func testAnEngineThatNeverNeedsPumpingIsNotForcedToImplementTick() {
         // SeamTestEngine below declares no `tick()` at all -- if the protocol
         // ever loses its default `tick()` implementation, this file fails to
-        // compile, which is the regression this test exists to catch.
+        // compile; the assertions pin that the default does nothing observable.
         let engine = SeamTestEngine()
+        let activationBefore = engine.extensionActivation
+
         engine.tick()
         engine.tick()
+
+        XCTAssertEqual(engine.calls, [], "the default tick() must not call back into any engine operation")
+        XCTAssertEqual(engine.extensionActivation, activationBefore)
+        XCTAssertTrue(engine.extensionActionStates.snapshots.isEmpty)
+    }
+
+    @MainActor
+    func testTheDefaultUninstallFallsBackToUnloadingTheSameExtension() {
+        let engine = SeamTestEngine()
+        let session = engine.defaultSession
+
+        engine.uninstallExtension(id: "ext-1", session: session)
+
+        XCTAssertEqual(
+            engine.calls, ["unloadExtension(ext-1)"],
+            "an engine that does not wipe stored data must still stop the extension: uninstall defaults to unload with the same id"
+        )
+    }
+
+    @MainActor
+    func testTheDefaultReasonedLoadForwardsToThePlainLoadWhateverTheReason() async throws {
+        let engine = SeamTestEngine()
+        let session = engine.defaultSession
+        let directory = URL(fileURLWithPath: "/tmp/seam-ext")
+
+        for reason in ExtensionLoadReason.allCases {
+            engine.calls.removeAll()
+            let loaded = try await engine.loadExtension(at: directory, session: session, reason: reason)
+
+            XCTAssertEqual(engine.calls, ["loadExtension(/tmp/seam-ext)"], "reason \(reason) must reach the engine's own loadExtension exactly once")
+            XCTAssertEqual(loaded.directory, directory)
+        }
+    }
+
+    @MainActor
+    func testTheDefaultActionStateStoreIsTheSharedInertStore() {
+        let first = SeamTestEngine()
+        let second = SeamTestEngine()
+
+        XCTAssertTrue(first.extensionActionStates === ExtensionActionStateStore.inert)
+        XCTAssertTrue(second.extensionActionStates === first.extensionActionStates)
     }
 
     @MainActor
@@ -50,8 +93,8 @@ final class BrowserEngineSeamTests: XCTestCase {
 
         XCTAssertEqual(nextLaunchShaped.extensionActivation, .nextLaunch)
         XCTAssertEqual(immediateShaped.extensionActivation, .immediate)
+        XCTAssertNotEqual(nextLaunchShaped.extensionActivation, immediateShaped.extensionActivation)
         XCTAssertEqual(type(of: nextLaunchShaped).kind, .webkit)
-        XCTAssertEqual(type(of: immediateShaped).kind, type(of: immediateShaped).kind)
     }
 }
 
@@ -64,13 +107,14 @@ private final class SeamTestEngine: BrowserEngine {
     let manageableContentSettings: Set<PermissionKind> = []
     let extensionActivation: ExtensionActivation
     let versionDescription = "SeamTestEngine"
+    var calls: [String] = []
 
     init(activation: ExtensionActivation = .immediate) {
         self.extensionActivation = activation
     }
 
-    func start() throws {}
-    func shutdown() -> Bool { true }
+    func start() throws { calls.append("start") }
+    func shutdown() -> Bool { calls.append("shutdown"); return true }
     // Deliberately no tick() override -- exercises BrowserEngine's default.
 
     func session(identifier: String, persistent: Bool) throws -> EngineSession {
@@ -88,9 +132,10 @@ private final class SeamTestEngine: BrowserEngine {
     func applyContentBlocker(_ blocker: ContentBlocker?, session: EngineSession) async {}
 
     func loadExtension(at directory: URL, session: EngineSession) async throws -> LoadedExtension {
-        throw EngineError(code: .engineUnavailable, underlyingDescription: "not exercised by these tests")
+        calls.append("loadExtension(\(directory.path))")
+        return LoadedExtension(id: "seam", name: "Seam", version: "1", directory: directory)
     }
-    func unloadExtension(id: String, session: EngineSession) {}
+    func unloadExtension(id: String, session: EngineSession) { calls.append("unloadExtension(\(id))") }
     func loadedExtensions(session: EngineSession) -> [LoadedExtension] { [] }
 }
 

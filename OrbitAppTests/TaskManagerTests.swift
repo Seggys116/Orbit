@@ -140,7 +140,32 @@ final class OrbitProcessMonitorTests: XCTestCase {
             OrbitProcessMonitor.processIdentifiers(attribution: attribution).filter { $0 == own }.count, 1,
             "Orbit's own pid must not be listed twice."
         )
-        XCTAssertEqual(OrbitProcessMonitor.processIdentifiers(), OrbitProcessMonitor.processIdentifiers(attribution: .none))
+    }
+
+    func test_theProcessListIsThisProcessThenItsChildrenThenAttributedServicesSortedOnceEach() throws {
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        child.arguments = ["600"]
+        try child.run()
+        addTeardownBlock {
+            child.terminate()
+            child.waitUntilExit()
+        }
+        let childPID = child.processIdentifier
+        let own = getpid()
+        let low = own &+ 999_000
+        let high = own &+ 1_000_000
+
+        let unattributed = OrbitProcessMonitor.processIdentifiers()
+        XCTAssertEqual(unattributed.first, own, "This process leads the list.")
+        XCTAssertEqual(unattributed.filter { $0 == childPID }.count, 1, "A spawned child is listed exactly once.")
+        XCTAssertFalse(unattributed.contains(low) || unattributed.contains(high), "With no attribution nothing is added.")
+
+        let attribution = WebKitProcessAttribution(roles: [high: .gpu, childPID: .helper, low: .webContent], tabTitles: [:])
+        XCTAssertEqual(
+            OrbitProcessMonitor.processIdentifiers(attribution: attribution), unattributed + [low, high],
+            "Attributed services follow the children in ascending order, and a pid that is already a child is not repeated."
+        )
     }
 
     func test_anAttributedProcessCanBeEndedOnlyWhileTheAttributionNamesIt() {

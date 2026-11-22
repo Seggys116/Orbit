@@ -78,11 +78,20 @@ final class WindowControlsRenderTests: XCTestCase {
         XCTAssertEqual(second.calls, [.zoom])
     }
 
-    func test_actions_toleratesNoWindow() {
-        let actions = WindowControlActions(windowProvider: { nil })
+    func test_actions_withNoWindow_askForTheWindowEachTimeAndFireNothing() {
+        let bystander = RecordingWindow()
+        var lookups = 0
+        let actions = WindowControlActions(windowProvider: { lookups += 1; return nil })
+
         actions.close()
         actions.miniaturize()
         actions.zoom()
+
+        XCTAssertEqual(lookups, 3, "each action must resolve the window itself, once, at call time")
+        XCTAssertTrue(bystander.calls.isEmpty, "with no window resolved, no other window may be closed, minimized or zoomed in its place")
+        XCTAssertFalse(bystander.isZoomed)
+        XCTAssertFalse(bystander.isMiniaturized)
+        XCTAssertFalse(bystander.isVisible, "the bystander was never shown, and nothing may have ordered it front")
     }
 
     // MARK: - 3. Hover reveals glyphs together, over the whole cluster

@@ -28,19 +28,59 @@ final class PaneHeaderPaddingAndIconSizeTests: XCTestCase {
         }
     }
 
+    // The first and one-past-last pixel rows, within the header's own totalHeight, that hold anything other than its background.
+    private func headerInkRows() throws -> (top: Int, bottom: Int) {
+        let tab = makeTab()
+        defer { cleanup([tab.id]) }
+        env.themeColors[tab.id] = ThemeColor(red: 0.22, green: 0.2, blue: 0.26)
+
+        let width: CGFloat = 400
+        let rendered = render(ToolbarView(tab: tab).environment(env), size: CGSize(width: width, height: OrbitToolbarMetrics.totalHeight))
+        let background = rendered.color(atX: 2, y: 1)
+        XCTAssertGreaterThan(background.a, 0.9, "the header paints its own opaque background to its edge")
+
+        var rowsWithInk: [Int] = []
+        // the content divider is painted along the bottom edge on purpose, so it is not content
+        for y in 0..<Int(OrbitToolbarMetrics.totalHeight - OrbitToolbarMetrics.contentDividerThickness) {
+            // clear of the corners, which a pane may round
+            let hasInk = (14..<Int(width) - 14).contains { x in
+                !rendered.color(atX: x, y: y).isApproximately(background, tolerance: 0.06)
+            }
+            if hasInk { rowsWithInk.append(y) }
+        }
+        let first = try XCTUnwrap(rowsWithInk.first, "the header drew no icons or text over its background")
+        let last = try XCTUnwrap(rowsWithInk.last)
+        return (first, last + 1)
+    }
+
     // MARK: - "missing padding on the top"
 
-    func test_R14_topPadding_isPositive() {
+    func test_R14_topPadding_isPositive() throws {
         XCTAssertGreaterThan(
             OrbitToolbarMetrics.topPadding, 0,
             "refs/DEFECTS.md R14: the pane header must have real clearance above its icon row — topPadding regressed to zero (flush against the pane's top edge again)."
         )
+        let rows = try headerInkRows()
+        XCTAssertGreaterThanOrEqual(
+            CGFloat(rows.top), OrbitToolbarMetrics.topPadding,
+            "the header's first icon or text row is painted at y=\(rows.top), inside the \(OrbitToolbarMetrics.topPadding)pt top clearance"
+        )
+        XCTAssertGreaterThan(rows.top, 0, "the header's content touches the top edge of the pane")
     }
 
-    func test_R14_totalHeaderHeight_exceedsTheBareIconRowBand() {
+    func test_R14_totalHeaderHeight_exceedsTheBareIconRowBand() throws {
         XCTAssertGreaterThan(
             OrbitToolbarMetrics.totalHeight, OrbitToolbarMetrics.height,
             "refs/DEFECTS.md R14: the header's total height must exceed the bare icon-row band (`height`) — otherwise the 'missing top padding' fix isn't actually visible."
+        )
+        let rows = try headerInkRows()
+        XCTAssertGreaterThanOrEqual(
+            CGFloat(rows.top), OrbitToolbarMetrics.topPadding,
+            "content starts below the top clearance, so the padding above the band is visible"
+        )
+        XCTAssertLessThanOrEqual(
+            CGFloat(rows.bottom), OrbitToolbarMetrics.topPadding + OrbitToolbarMetrics.height,
+            "content ends inside the icon-row band, so the bottom clearance below it is visible"
         )
     }
 
@@ -251,10 +291,16 @@ final class PaneHeaderPaddingAndIconSizeTests: XCTestCase {
         )
     }
 
-    func test_R14_totalHeaderHeight_comfortablyFitsTheTrailingIconWithPaddingToSpare() {
+    func test_R14_totalHeaderHeight_comfortablyFitsTheTrailingIconWithPaddingToSpare() throws {
         XCTAssertGreaterThan(
             OrbitToolbarMetrics.totalHeight, OrbitToolbarMetrics.trailingIconSize,
             "The header's total height must comfortably exceed a single trailing icon's own tap target, or the icon can't fit inside it at all."
+        )
+        let rows = try headerInkRows()
+        XCTAssertGreaterThanOrEqual(CGFloat(rows.top), OrbitToolbarMetrics.topPadding, "painted content clears the top padding")
+        XCTAssertLessThanOrEqual(
+            CGFloat(rows.bottom), OrbitToolbarMetrics.totalHeight - OrbitToolbarMetrics.bottomPadding,
+            "painted content clears the bottom padding, so the icons fit with padding to spare"
         )
     }
 }

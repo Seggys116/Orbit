@@ -328,24 +328,104 @@ final class MainMenuStructureTests: XCTestCase {
         XCTAssertEqual(menu?.items.map(\.title), ["New Window", "New Incognito Window", "New Tab"])
     }
 
-    func testDumpMenuBarForComparisonWithArcsNib() {
-        func emit(_ menu: NSMenu, _ depth: Int) {
-            for item in menu.items {
-                let pad: String = String(repeating: "  ", count: depth)
-                let mods: UInt = item.keyEquivalentModifierMask.rawValue
-                var key: String = ""
-                if !item.keyEquivalent.isEmpty {
-                    key = "  KEY[" + String(mods) + ":" + item.keyEquivalent + "]"
-                }
-                let title: String = item.isSeparatorItem ? "-----" : item.title
-                print(pad + title + key)
-                if let submenu = item.submenu { emit(submenu, depth + 1) }
+    private struct MenuRow: Equatable, CustomStringConvertible {
+        let title: String
+        let key: String
+        let mask: NSEvent.ModifierFlags
+        var description: String { "\(title) [\(key) \(mask.rawValue)]" }
+    }
+
+    private func rows(of menu: NSMenu) -> [MenuRow] {
+        let significant: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+        return menu.items.filter { !$0.isSeparatorItem }.map { item in
+            MenuRow(
+                title: item is ToolbarVisibilityMenuItem ? "<toolbar visibility>" : item.title,
+                key: item.keyEquivalent,
+                mask: item.keyEquivalent.isEmpty ? [] : item.keyEquivalentModifierMask.intersection(significant)
+            )
+        }
+    }
+
+    func testEveryMenuHoldsExactlyTheRowsAndShortcutsOfArcsBar() throws {
+        typealias Mods = NSEvent.ModifierFlags
+        let c: Mods = [.command], cs: Mods = [.command, .shift], co: Mods = [.command, .option]
+        let cos: Mods = [.command, .option, .shift], ctrl: Mods = [.control]
+        let ctrlShift: Mods = [.control, .shift], ctrlOption: Mods = [.control, .option]
+        let left = "\u{F702}", right = "\u{F703}", up = "\u{F700}", down = "\u{F701}"
+        func r(_ title: String, _ key: String = "", _ mask: Mods = []) -> MenuRow {
+            MenuRow(title: title, key: key, mask: mask)
+        }
+
+        let expected: [String: [MenuRow]] = [
+            "Orbit": [
+                r("About Orbit"), r("Settings…", ",", c), r("Set as Default Browser"), r("Import from Another Browser"),
+                r("Services"), r("Hide Orbit", "h", c), r("Hide Others", "h", cs), r("Show All"), r("Quit Orbit", "q", c),
+            ],
+            "File": [
+                r("New Tab", "t", c), r("New Window", "n", c), r("New Incognito Window", "n", cs),
+                r("New Little Orbit", "n", co), r("Open Tab in Little Orbit", "n", cos), r("Reopen Last Closed Tab", "t", cs),
+                r("Open Command Bar", "l", c), r("New Boost"), r("Edit Boost"),
+                r("New Note", "n", ctrl), r("New Note (in Split)", "n", ctrlOption), r("New Easel", "l", ctrlShift),
+                r("Close Tab / Window", "w", c), r("Share…"), r("Capture…", "2", cs), r("Capture Full Page"),
+                r("Save Page As…", "s", cs), r("Print…", "p", c),
+            ],
+            "Edit": [
+                r("Undo", "z", c), r("Redo", "Z", cs), r("Cut", "x", c), r("Copy", "c", c),
+                r("Copy URL", "c", cs), r("Copy URL as Markdown", "c", cos), r("Paste", "v", c),
+                r("Paste and Match Style", "v", cos), r("Delete"), r("Select All", "a", c), r("Find"),
+                r("Spelling and Grammar"), r("Substitutions"), r("Transformations"), r("Speech"), r("Format"),
+            ],
+            "View": [
+                r("Appearance"), r("Show/Hide Sidebar", "s", c), r("<toolbar visibility>", "d", cs),
+                r("Expand Pinned Section"), r("Collapse Pinned Section"),
+                r("Stop", ".", c), r("Reload", "r", c), r("Hard Refresh", "r", cs),
+                r("Clear Cookies and Refresh"), r("Clear Cache for This Site and Refresh"),
+                r("Add Split", "=", ctrlShift), r("Close Split", "-", ctrlShift),
+                r("Separate Page from Split View"), r("Expand Current Split"),
+                r("Actual Size", "0", c), r("Zoom In", "=", c), r("Zoom Out", "-", c),
+                r("Developer"), r("Toggle Full Screen", "f", [.command, .control]),
+            ],
+            "Spaces": [
+                r("New Space…"), r("Edit Theme…"), r("Rename Space"), r("Change Profile"),
+                r("Next Space", right, co), r("Previous Space", left, co), r("Manage Spaces…"),
+            ],
+            "Tabs": [
+                r("New Tab", "t", c), r("Ask ChatGPT", "g", co), r("Join Meeting", "j", [.control, .command]),
+                r("Pin / Unpin Current Tab", "d", c), r("New Folder…"), r("Duplicate"), r("Rename Current Item"),
+                r("Collapse All Folders"), r("Expand All Folders"),
+                r("Next Tab", down, co), r("Previous Tab", up, co), r("Cycle Recent Tabs", "\t", ctrl),
+                r("Reveal Tab in Sidebar", " ", ctrl), r("Clear All Today Tabs", "k", cs), r("Reset Tab to Original URL"),
+            ],
+            "Archive": [
+                r("Go Back", "[", c), r("Go Forward", "]", c), r("View History", "y", c),
+                r("Show Archived Tabs"), r("Clear Archive"), r("Import from Another Browser"),
+            ],
+            "Extensions": [r("Add Extension…"), r("Manage Extensions…")],
+            "Window": [
+                r("Minimize", "m", c), r("Zoom"), r("View Library", "l", cs), r("View Downloads", "j", cs),
+                r("View Easels & Notes"), r("View Media"), r("View Boosts"), r("Bring All to Front"),
+            ],
+            "Help": [r("Keybinds"), r("About Orbit"), r("Restore Data"), r("Troubleshooting")],
+        ]
+
+        let menus = topLevelMenus()
+        XCTAssertEqual(menus.map(\.title).sorted(), expected.keys.sorted())
+        for menu in menus {
+            var actual = rows(of: menu)
+            let want = try XCTUnwrap(expected[menu.title])
+            if menu.title == "Window" {
+                // AppKit appends one row per open window to the Window menu
+                let owned = Set(want.map(\.title))
+                actual = actual.filter { owned.contains($0.title) }
             }
+            XCTAssertEqual(actual, want, "\(menu.title) menu rows differ")
         }
-        print("=== ORBIT MENU BAR ===")
-        for menu in topLevelMenus() {
-            print(menu.title)
-            emit(menu, 1)
-        }
+
+        XCTAssertEqual(rows(of: try XCTUnwrap(try row(["Help", "Troubleshooting"]).submenu)).map(\.title),
+                       ["Open Task Manager", "Reveal Orbit Data", "Copy Orbit Info"])
+        XCTAssertEqual(rows(of: try XCTUnwrap(try row(["Edit", "Find"]).submenu)).map(\.title),
+                       ["Find or Ask", "Find and Replace", "Find Next", "Find Previous", "Jump to Selection"])
+        XCTAssertEqual(rows(of: try XCTUnwrap(try row(["View", "Developer"]).submenu)).map(\.title),
+                       ["View Source", "Inspect Element", "JavaScript Console", "Toggle Developer Mode", "Toggle Device Toolbar"])
     }
 }

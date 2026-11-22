@@ -190,15 +190,14 @@ final class OrbitInspectSourcesTests: XCTestCase {
         XCTAssertTrue(SourceFuzzyMatcher.matches(query: "", in: "anything"))
     }
 
-    func testFuzzyMatcherRankOrdering() {
+    func testFuzzyMatcherRankOrdering() throws {
         let candidates = ["application.js", "app.js", "api.ts"]
         let results = SourceFuzzyMatcher.rank(query: "app", candidates: candidates)
-        XCTAssertFalse(results.isEmpty)
-        // "app.js" should score higher than "application.js" for prefix match
-        if let appIdx = results.firstIndex(where: { $0.text == "app.js" }),
-           let applicationIdx = results.firstIndex(where: { $0.text == "application.js" }) {
-            XCTAssertLessThan(appIdx, applicationIdx)
-        }
+        let appIdx = try XCTUnwrap(results.firstIndex(where: { $0.text == "app.js" }))
+        let applicationIdx = try XCTUnwrap(results.firstIndex(where: { $0.text == "application.js" }))
+        XCTAssertLessThan(appIdx, applicationIdx)
+        XCTAssertEqual(results.map(\.text), ["app.js", "application.js"], "api.ts has no second p and must not match")
+        XCTAssertEqual(results.map(\.score), [31, 29])
     }
 
     // MARK: - JSON pretty printer
@@ -213,14 +212,16 @@ final class OrbitInspectSourcesTests: XCTestCase {
     func testJSONPrettyPrintIdempotent() {
         let input = #"{"key":"value"}"#
         let once = SourcePrettyPrinter.json(input)
-        XCTAssertFalse(once.text.isEmpty)
+        let twice = SourcePrettyPrinter.json(once.text)
+        XCTAssertEqual(once.text, "{\n  \"key\": \"value\"\n}")
+        XCTAssertEqual(twice.text, once.text)
     }
 
     func testJSONPrettyPrintPreservesStrings() {
         let input = #"{"key":"{\"nested\":true}"}"#
         let result = SourcePrettyPrinter.json(input)
-        // Nested braces inside strings should not mess up indentation
-        XCTAssertFalse(result.text.isEmpty)
+        let expected = ["{", #"  "key": "{\"nested\":true}""#, "}"].joined(separator: "\n")
+        XCTAssertEqual(result.text, expected)
     }
 
     func testJSONPrettyPrintLinemap() {
@@ -233,21 +234,39 @@ final class OrbitInspectSourcesTests: XCTestCase {
     func testCSSPrettyPrintBasic() {
         let input = "body{color:red;font-size:16px;}.title{font-weight:bold;}"
         let result = SourcePrettyPrinter.css(input)
-        XCTAssertTrue(result.text.contains("\n"), "Should have newlines")
-        XCTAssertTrue(result.text.contains("color: red") || result.text.contains("color:red"), "Should contain property")
+        let lines = result.text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        XCTAssertEqual(lines, [
+            "body {",
+            "  color:red;",
+            "  font-size:16px;",
+            "}",
+            ".title {",
+            "  font-weight:bold;",
+            "}",
+        ])
     }
 
     func testCSSPrettyPrintDoesNotCorruptStrings() {
         let input = #"a::before{content:"{"}"#
         let result = SourcePrettyPrinter.css(input)
-        XCTAssertFalse(result.text.isEmpty)
+        let expected = ["a::before {", #"  content:"{""#, "}"].joined(separator: "\n")
+        XCTAssertEqual(result.text, expected)
     }
 
 
     func testJSPrettyPrintBasic() {
         let input = "function f(){var x=1;if(x){return x;}}"
         let result = SourcePrettyPrinter.js(input)
-        XCTAssertTrue(result.text.contains("\n"), "Should have newlines")
+        let lines = result.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        XCTAssertEqual(Array(lines.prefix(4)), [
+            "function f() {",
+            "  var x=1;",
+            "  if(x) {",
+            "    return x;",
+        ])
+        XCTAssertEqual(lines.dropFirst(4).map { $0.trimmingCharacters(in: .whitespaces) }, ["}", "}", ""])
     }
 
     func testJSPrettyPrintPreservesStrings() {

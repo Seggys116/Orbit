@@ -531,6 +531,38 @@ final class ThemeEditorRedesignTests: XCTestCase {
         let view = ThemeEditorView(theme: .constant(theme), onDone: {})
             .background(popoverChrome)
         let rendered = await renderForScreenshot(view, size: CGSize(width: 380, height: 568), appearance: appearance)
+
+        XCTAssertEqual(rendered.bitmap.pixelsWide, 760, "\(name): 380pt @2x")
+        XCTAssertEqual(rendered.bitmap.pixelsHigh, 1136, "\(name): 568pt @2x")
+
+        // the backdrop is read from the render, since the appearance tints the stand-in chrome
+        let chrome = rendered.color(atX: 2, y: 2)
+        XCTAssertGreaterThan(chrome.a, 0.9, "\(name): the corner is opaque chrome")
+
+        // the editor pads its content by 14pt; the canvas border and shadow reach a little way into that, so only the outer 6pt is chrome only
+        for (edge, strip) in [
+            ("left", CGRect(x: 3, y: 0, width: 4, height: 560)),
+            ("right", CGRect(x: 373, y: 0, width: 4, height: 560)),
+            ("top", CGRect(x: 0, y: 0, width: 380, height: 6)),
+        ] {
+            XCTAssertFalse(rendered.containsNonBackgroundPixels(in: strip, background: chrome), "\(name): content spilled into the \(edge) padding")
+        }
+
+        // the stop canvas is 352 by 344pt at (14, 14); with three stops the first two orbs sit at the default stop positions
+        // (0.42, 0.26) and (0.5714, 0.54), each filled with its own stop colour
+        let canvas = CGRect(x: 14, y: 14, width: 352, height: 344)
+        XCTAssertTrue(rendered.containsNonBackgroundPixels(in: canvas, background: chrome), "\(name): the stop canvas painted nothing")
+        let firstOrb = CGRect(x: 14 + 0.42 * 352 - 3, y: 14 + 0.26 * 344 - 3, width: 6, height: 6)
+        let secondOrb = CGRect(x: 14 + 0.5714 * 352 - 3, y: 14 + 0.54 * 344 - 3, width: 6, height: 6)
+        let firstFill = rendered.averageColor(in: firstOrb)
+        let secondFill = rendered.averageColor(in: secondOrb)
+        XCTAssertFalse(firstFill.isApproximately(chrome, tolerance: 0.03), "\(name): the first orb is not drawn at its stop position, got \(firstFill)")
+        XCTAssertFalse(secondFill.isApproximately(chrome, tolerance: 0.03), "\(name): the second orb is not drawn at its stop position, got \(secondFill)")
+        XCTAssertFalse(firstFill.isApproximately(secondFill, tolerance: 0.03), "\(name): the two orbs show the same colour, so one is not filled with its own stop colour: \(firstFill) and \(secondFill)")
+
+        let controls = CGRect(x: 14, y: 14 + 344 + 14, width: 352, height: 150)
+        XCTAssertTrue(rendered.containsNonBackgroundPixels(in: controls, background: chrome), "\(name): the swatch strip and controls under the canvas painted nothing")
+
         let destination = Self.screenshotOutputDirectory.appendingPathComponent("\(name).png")
 
         XCTAssertTrue(rendered.writePNG(to: destination), "Expected to write \(name).png to \(destination.path).")

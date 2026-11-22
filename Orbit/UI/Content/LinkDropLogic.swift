@@ -103,7 +103,7 @@ enum LinkDropLogic {
         dragBeganInThisPage: Bool
     ) -> Bool {
         guard primaryButtonDown, dragPasteboardChanged, !sidebarDragInFlight else { return false }
-        guard SplitPaneDropCatcherView.claimsHit(duringEvent: eventType, dragInFlight: true) else { return false }
+        guard SplitPaneDropCatcherView.claimsHit(duringEvent: eventType, dragInFlight: true, dragIsLive: primaryButtonDown) else { return false }
         return accepts(payload, dragBeganInThisPage: dragBeganInThisPage)
     }
 

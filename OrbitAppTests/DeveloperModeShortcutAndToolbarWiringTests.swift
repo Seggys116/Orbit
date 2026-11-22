@@ -40,6 +40,35 @@ final class DeveloperModeShortcutAndToolbarWiringTests: XCTestCase {
         XCTAssertFalse(DeveloperModeSettings.isEnabled, "⌃D must turn Developer Mode back off — it is a toggle, not a one-way switch.")
     }
 
+    func test_aRealCtrlDDeliveredToTheAppTogglesTheRealPersistedFlagThroughTheInstalledMonitor() throws {
+        func ctrlD() throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [.control], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0,
+                context: nil, characters: "d", charactersIgnoringModifiers: "d", isARepeat: false, keyCode: 2
+            ))
+        }
+        XCTAssertFalse(DeveloperModeSettings.isEnabled, "test precondition: off in the scratch suite")
+
+        let savedMenu = NSApp.mainMenu
+        NSApp.mainMenu = NSMenu(title: "Bare")
+        GlobalKeyEventMonitor.shared.stop()
+        defer {
+            GlobalKeyEventMonitor.shared.stop()
+            NSApp.mainMenu = savedMenu
+        }
+
+        // Control: with no monitor and no menu rows, the key event alone does nothing, so the toggle below is the monitor's.
+        NSApp.sendEvent(try ctrlD())
+        XCTAssertFalse(DeveloperModeSettings.isEnabled, "test precondition: delivering the key with no monitor installed must not toggle Developer Mode.")
+
+        GlobalKeyEventMonitor.shared.start()
+        NSApp.sendEvent(try ctrlD())
+        XCTAssertTrue(DeveloperModeSettings.isEnabled, "A real ⌃D delivered to the app must turn Developer Mode on through the installed key monitor.")
+
+        NSApp.sendEvent(try ctrlD())
+        XCTAssertFalse(DeveloperModeSettings.isEnabled, "A second real ⌃D must turn Developer Mode back off.")
+    }
+
     // MARK: - 2. F12 actually opens DevTools
 
     private func makeActiveTab(url: String = "https://example.com/") -> (TabID, MockWebContents) {

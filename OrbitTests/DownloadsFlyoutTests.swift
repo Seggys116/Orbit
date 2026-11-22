@@ -227,15 +227,21 @@ final class DownloadsFlyoutTests: XCTestCase {
         )
     }
 
-    func testRowsMaxHeightLeavesRoomForTheChromeAndNeverGoesNegative() {
+    func testRowsMaxHeightLeavesRoomForTheChromeAndNeverGoesNegative() throws {
+        let inset = OrbitMetrics.sidebarBottomBarHorizontalPadding
+        let gap: CGFloat = 4
+        let chrome: CGFloat = 56
         for spaceAbove in stride(from: CGFloat(0), through: 900, by: 5) {
             let panelMax = DownloadsPreviewLayout.maxHeight(spaceAbove: spaceAbove)
             let rowsMax = DownloadsPreviewLayout.rowsMaxHeight(panelMaxHeight: panelMax)
-            XCTAssertGreaterThanOrEqual(rowsMax ?? 0, 0)
-            if let panelMax, let rowsMax {
-                XCTAssertLessThanOrEqual(rowsMax + DownloadsPreviewLayout.chromeHeightBound, max(panelMax, DownloadsPreviewLayout.chromeHeightBound))
-            }
+            XCTAssertEqual(panelMax, max(0, spaceAbove - inset - gap), "panel room above the bar at \(spaceAbove)")
+            XCTAssertEqual(rowsMax, max(0, spaceAbove - inset - gap - chrome), "rows room above the bar at \(spaceAbove)")
+            let rows = try XCTUnwrap(rowsMax)
+            XCTAssertGreaterThanOrEqual(rows, 0)
         }
+        XCTAssertEqual(DownloadsPreviewLayout.rowsMaxHeight(panelMaxHeight: 0), 0, "No panel room leaves no room for rows, never a negative height.")
+        XCTAssertEqual(DownloadsPreviewLayout.rowsMaxHeight(panelMaxHeight: 30), 0, "A panel shorter than its chrome clamps rows to zero.")
+        XCTAssertEqual(DownloadsPreviewLayout.rowsMaxHeight(panelMaxHeight: 156), 100)
         XCTAssertNil(DownloadsPreviewLayout.rowsMaxHeight(panelMaxHeight: nil), "An unknown bar position applies no cap.")
     }
 

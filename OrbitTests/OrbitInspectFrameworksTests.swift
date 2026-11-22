@@ -398,16 +398,19 @@ class FWRouteTreeTests: XCTestCase {
 
 class FWHydrationDiffTests: XCTestCase {
 
-    func testReact18HydrationDiff() {
+    func testReact18HydrationDiff() throws {
         let msg = """
         Warning: Text content did not match. Server: "Hello" Client: "World"
         Server: <div>Hello</div>
         Client: <div>World</div>
         """
-        let diff = OrbitFrameworksLogic.parseHydrationDiff(msg)
-        XCTAssertNotNil(diff)
-        XCTAssertNotNil(diff?.serverTree)
-        XCTAssertNotNil(diff?.clientTree)
+        let diff = try XCTUnwrap(OrbitFrameworksLogic.parseHydrationDiff(msg))
+        XCTAssertEqual(diff.serverTree, "\"Hello\"")
+        let clientTree = try XCTUnwrap(diff.clientTree)
+        XCTAssertTrue(clientTree.hasPrefix("\"World\""), "client tree starts at the first Client: heading")
+        XCTAssertEqual(diff.summary, "Warning: Text content did not match")
+        XCTAssertEqual(diff.rawMessage, msg)
+        XCTAssertEqual(diff.reactVersion, 18)
     }
 
     func testNonHydrationMessageReturnsNil() {

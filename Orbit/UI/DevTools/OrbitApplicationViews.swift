@@ -379,7 +379,7 @@ struct AppCookieTableView: View {
             cookieHeaderCell("Expires", width: 100)
             cookieHeaderCell("Size", width: 50)
             cookieHeaderCell("H", width: 22)
-                .help("HttpOnly cookies are listed here via the browser's native cookie store. They are never exposed to page JavaScript.")
+                .orbitTooltip("HttpOnly cookies are listed here via the browser's native cookie store. They are never exposed to page JavaScript.")
             cookieHeaderCell("S", width: 22)
             cookieHeaderCell("SameSite", width: 60)
         }

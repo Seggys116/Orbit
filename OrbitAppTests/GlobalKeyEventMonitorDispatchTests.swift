@@ -175,6 +175,34 @@ final class GlobalKeyEventMonitorDispatchTests: XCTestCase {
         XCTAssertFalse(env.todayTabs(in: spaceID).contains { $0.id == tabID })
     }
 
+    // MARK: - A real key event through the installed monitor
+
+    func testARealCommandWDeliveredToTheAppDismissesAPeekThroughTheInstalledMonitorAndLeavesTheTab() {
+        let spaceID = scratchSpaceID!
+        let underlying = env.openTab(url: URL(string: "https://example.com/underlying")!, in: spaceID, section: .today, activate: true)
+        presentPeek(over: underlying)
+        XCTAssertNotNil(PeekState.shared.activePreview, "Test precondition: a Peek is up.")
+
+        let savedMenu = NSApp.mainMenu
+        NSApp.mainMenu = NSMenu(title: "Bare")
+        GlobalKeyEventMonitor.shared.stop()
+        defer {
+            GlobalKeyEventMonitor.shared.stop()
+            NSApp.mainMenu = savedMenu
+        }
+
+        // Control: with no monitor and no menu rows, the key event alone does nothing, so the dismissal below is the monitor's.
+        NSApp.sendEvent(keyDown(for: .closeTabOrWindow))
+        XCTAssertNotNil(PeekState.shared.activePreview, "Test precondition: delivering the key with no monitor installed must not dismiss the Peek.")
+
+        GlobalKeyEventMonitor.shared.start()
+        NSApp.sendEvent(keyDown(for: .closeTabOrWindow))
+
+        XCTAssertNil(PeekState.shared.activePreview, "A real ⌘W delivered to the app did not reach the Peek through the installed key monitor.")
+        XCTAssertNotNil(env.tab(underlying), "A real ⌘W over a Peek destroyed the tab underneath it.")
+        XCTAssertEqual(env.tab(underlying)?.section, .today, "A real ⌘W meant for the Peek archived the tab underneath it.")
+    }
+
     // MARK: - ⌘O over a Peek
 
     func testCommandOWithPeekPresentedPromotesThePreviewIntoTheActiveSpace() {

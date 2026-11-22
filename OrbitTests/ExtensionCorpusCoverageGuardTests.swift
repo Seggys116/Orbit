@@ -50,7 +50,7 @@ final class ExtensionCorpusCoverageGuardTests: XCTestCase {
         for name in try FileManager.default.contentsOfDirectory(atPath: Self.liveTestsDirectory.path).sorted()
         where name.hasSuffix("LiveTests.swift") {
             let url = Self.liveTestsDirectory.appendingPathComponent(name)
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let text = try String(contentsOf: url, encoding: .utf8)
             for identifier in identifiers where text.contains(identifier) {
                 claims[identifier, default: []].append(name)
             }
@@ -120,24 +120,74 @@ final class ExtensionCorpusCoverageGuardTests: XCTestCase {
 
     func test_everyCorpusSuiteResolvesItsSubjectThroughTheVendoredCorpus() throws {
         let claims = try suitesNamingEachExtension()
-        var unpinned: [String] = []
-        for name in Set(claims.values.flatMap { $0 }).sorted() {
-            guard Self.unpinnedDriverExceptions[name] == nil else { continue }
-            let text = (try? String(contentsOf: Self.liveTestsDirectory.appendingPathComponent(name), encoding: .utf8)) ?? ""
-            if !text.contains("ExtensionCorpus") { unpinned.append(name) }
-        }
+        let driverSuites = Set(claims.values.flatMap { $0 }).sorted()
+        XCTAssertFalse(driverSuites.isEmpty, "found no corpus driver suites at all, so this guard would pass vacuously")
+        let unpinned = try Self.suitesNotResolvingThroughCorpus(
+            driverSuites, exceptions: Self.unpinnedDriverExceptions, in: Self.liveTestsDirectory
+        )
         XCTAssertEqual(
             unpinned, [],
             "these suites drive a pinned corpus extension without resolving it through ExtensionCorpus, so they load bytes nobody verified against the manifest's SHA-256. Pinning exists because an extension that silently updates turns the suite into a flake generator; a driver that ignores the pin gets the flakiness back and the reassurance of a hash."
         )
-        let repaired = Self.unpinnedDriverExceptions.keys.filter { name in
-            let text = (try? String(contentsOf: Self.liveTestsDirectory.appendingPathComponent(name), encoding: .utf8)) ?? ""
-            return text.contains("ExtensionCorpus")
-        }.sorted()
+        let repaired = try Self.staleExceptions(Self.unpinnedDriverExceptions, in: Self.liveTestsDirectory)
         XCTAssertEqual(
             repaired, [],
             "these suites now resolve through ExtensionCorpus and are still listed as exceptions. Delete their entries from unpinnedDriverExceptions — an exception list that outlives its reason stops being read."
         )
+    }
+
+    private static func suiteText(_ name: String, in directory: URL) throws -> String {
+        try String(contentsOf: directory.appendingPathComponent(name), encoding: .utf8)
+    }
+
+    private static func suitesNotResolvingThroughCorpus(
+        _ names: [String], exceptions: [String: String], in directory: URL
+    ) throws -> [String] {
+        try names.filter { exceptions[$0] == nil }.filter { name in
+            let text = try suiteText(name, in: directory)
+            return !text.contains("ExtensionCorpus")
+        }
+    }
+
+    private static func staleExceptions(_ exceptions: [String: String], in directory: URL) throws -> [String] {
+        try exceptions.keys.filter { name in
+            let text = try suiteText(name, in: directory)
+            return text.contains("ExtensionCorpus")
+        }.sorted()
+    }
+
+    func test_theUnpinnedDriverCheckFlagsSuitesAndStaleExceptionsAndFailsOnAnUnreadableFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrbitTests-CorpusGuard-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try "let pinned = ExtensionCorpus.resolve()".write(to: directory.appendingPathComponent("PinnedLiveTests.swift"), atomically: true, encoding: .utf8)
+        try "let loose = URL(fileURLWithPath: \"/Users/someone/ext\")".write(to: directory.appendingPathComponent("LooseLiveTests.swift"), atomically: true, encoding: .utf8)
+        try "let excused = 1".write(to: directory.appendingPathComponent("ExcusedLiveTests.swift"), atomically: true, encoding: .utf8)
+
+        let suites = ["ExcusedLiveTests.swift", "LooseLiveTests.swift", "PinnedLiveTests.swift"]
+        let exceptions = ["ExcusedLiveTests.swift": "reason", "PinnedLiveTests.swift": "reason"]
+
+        XCTAssertEqual(
+            try Self.suitesNotResolvingThroughCorpus(suites, exceptions: exceptions, in: directory),
+            ["LooseLiveTests.swift"],
+            "an excused suite is skipped, a pinned one passes, and only the loose one is reported"
+        )
+        XCTAssertEqual(
+            try Self.suitesNotResolvingThroughCorpus(["PinnedLiveTests.swift", "LooseLiveTests.swift"], exceptions: [:], in: directory),
+            ["LooseLiveTests.swift"],
+            "with no exceptions, a suite naming ExtensionCorpus passes and one that does not is reported"
+        )
+        XCTAssertEqual(
+            try Self.staleExceptions(exceptions, in: directory),
+            ["PinnedLiveTests.swift"],
+            "an exception whose suite now resolves through ExtensionCorpus is stale; one that still does not is not"
+        )
+        XCTAssertThrowsError(
+            try Self.suitesNotResolvingThroughCorpus(["MissingLiveTests.swift"], exceptions: [:], in: directory),
+            "an unreadable suite must fail the guard, not read as empty text"
+        )
+        XCTAssertThrowsError(try Self.staleExceptions(["MissingLiveTests.swift": "reason"], in: directory))
     }
 
     func test_everyExpectationTheSuiteCannotYetReachNamesWhatBlocksIt() throws {
@@ -165,7 +215,7 @@ final class ExtensionCorpusCoverageGuardTests: XCTestCase {
 
         var wrongBase: [String] = []
         for name in files {
-            let text = (try? String(contentsOf: Self.liveTestsDirectory.appendingPathComponent(name), encoding: .utf8)) ?? ""
+            let text = try Self.suiteText(name, in: Self.liveTestsDirectory)
             if !text.contains(": CorpusLiveTestCase {") { wrongBase.append(name) }
         }
         XCTAssertEqual(
@@ -177,7 +227,7 @@ final class ExtensionCorpusCoverageGuardTests: XCTestCase {
     func test_everyCorpusSuiteUnloadsEveryExtensionItLoads() throws {
         var unbalanced: [String] = []
         for name in try corpusSuiteFiles() {
-            let text = (try? String(contentsOf: Self.liveTestsDirectory.appendingPathComponent(name), encoding: .utf8)) ?? ""
+            let text = try Self.suiteText(name, in: Self.liveTestsDirectory)
             let loads = text.components(separatedBy: ".loadExtension(at:").count - 1
             let unloads = text.components(separatedBy: ".unloadExtension(id:").count - 1
             if loads != unloads { unbalanced.append("\(name): \(loads) load(s), \(unloads) unload(s)") }
@@ -197,8 +247,7 @@ final class ExtensionCorpusCoverageGuardTests: XCTestCase {
 
         var offenders: [String] = []
         for name in corpusFiles.sorted() {
-            let url = Self.liveTestsDirectory.appendingPathComponent(name)
-            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let text = try Self.suiteText(name, in: Self.liveTestsDirectory)
             if text.contains("OrbitDataRoot.production") || text.contains("EngineStorageDirectory.productionProfile") {
                 offenders.append(name)
             }

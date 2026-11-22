@@ -338,6 +338,39 @@ final class SpaceThemePaletteTests: XCTestCase {
         let view = SpaceThemePalettePreviewGrid(themes: SpaceThemePalette.presets)
         let size = SpaceThemePalettePreviewGrid.size(forCount: SpaceThemePalette.presets.count)
         let rendered = await renderForScreenshot(view, size: size, appearance: appearance)
+
+        let count = SpaceThemePalette.presets.count
+        let rows = (count + 1) / 2
+        XCTAssertEqual(size.width, 2 * 320 + 16 + 2 * 16, "two 320pt swatches, a 16pt gap and 16pt margins")
+        XCTAssertEqual(size.height, CGFloat(rows) * 190 + CGFloat(rows - 1) * 16 + 2 * 16)
+        XCTAssertEqual(rendered.bitmap.pixelsWide, Int(size.width) * 2, "\(name): rendered at the requested width @2x")
+        XCTAssertEqual(rendered.bitmap.pixelsHigh, Int(size.height) * 2, "\(name): rendered at the requested height @2x")
+
+        let black = RGBA(r: 0, g: 0, b: 0, a: 1)
+        for corner in [CGPoint(x: 8, y: 8), CGPoint(x: size.width - 8, y: 8), CGPoint(x: 8, y: size.height - 8), CGPoint(x: size.width - 8, y: size.height - 8)] {
+            XCTAssertTrue(rendered.color(atX: Int(corner.x), y: Int(corner.y)).isApproximately(black), "\(name): the 16pt margin around the swatches is the black backdrop at \(corner)")
+        }
+
+        // the band between the title lines and the sample text holds only the swatch's own background
+        var bands: [RGBA] = []
+        for index in 0..<count {
+            let origin = CGPoint(x: 16 + CGFloat(index % 2) * 336, y: 16 + CGFloat(index / 2) * 206)
+            let band = CGRect(x: origin.x + 20, y: origin.y + 70, width: 280, height: 40)
+            XCTAssertTrue(rendered.containsNonBackgroundPixels(in: band, background: black), "\(name): preset \(index)'s swatch painted nothing but the backdrop")
+            let average = rendered.averageColor(in: band)
+            XCTAssertGreaterThan(average.a, 0.99, "\(name): preset \(index)'s swatch is opaque")
+            bands.append(average)
+        }
+        if count % 2 == 1 {
+            let emptyCell = CGRect(x: 16 + 336 + 20, y: 16 + CGFloat(rows - 1) * 206 + 70, width: 280, height: 40)
+            XCTAssertFalse(rendered.containsNonBackgroundPixels(in: emptyCell, background: black), "\(name): the unused last cell stays the backdrop")
+        }
+        for i in 0..<bands.count {
+            for j in (i + 1)..<bands.count {
+                XCTAssertFalse(bands[i].isApproximately(bands[j], tolerance: 0.005), "\(name): presets \(i) and \(j) painted the same colour \(bands[i]) vs \(bands[j])")
+            }
+        }
+
         let destination = Self.screenshotOutputDirectory.appendingPathComponent("\(name).png")
         let wrote = rendered.writePNG(to: destination)
         XCTAssertTrue(wrote, "Expected to write \(name).png to \(destination.path).")

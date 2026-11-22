@@ -766,16 +766,34 @@ final class ContentBlockingWebKitLiveTests: XCTestCase {
         }
     }
 
+    // The control: whether this WebKit compiles a redirect rule, asked of WebKit directly and not of the engine's own report.
+    private func webKitCompilesRedirectRules() async throws -> Bool {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("orbit-cb-control-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try XCTUnwrap(WKContentRuleListStore(url: directory))
+        let json = #"[{"trigger":{"url-filter":"orbit-control"},"action":{"type":"redirect","redirect":{"url":"data:text/plain,"}}}]"#
+        let list = try? await store.compileContentRuleList(forIdentifier: "orbit-redirect-control", encodedContentRuleList: json)
+        return list != nil
+    }
+
     func testRedirectStubLoadsWhenWebKitAcceptsItOtherwiseTheRequestIsBlocked() throws {
         try live("||localhost/tp.js$script,redirect=noopjs\n") { engine, _, server in
+            let webKitAccepts = try await self.webKitCompilesRedirectRules()
             let report = engine.contentBlocking.lastReport
+            XCTAssertEqual(report.redirectStubs > 0, webKitAccepts, "the engine's redirect capability must match what WebKit compiles")
             try await self.withTab(engine) { contents in
                 let outcome = try await self.visit(contents, server)
-                if report.redirectStubs > 0 {
+                if webKitAccepts {
+                    XCTAssertEqual(report.redirectStubs, 1)
+                    XCTAssertEqual(report.redirectsBlockedInstead, 0)
                     XCTAssertTrue(outcome.loaded.contains("tp"), "the stub must stand in for the blocked script")
+                    XCTAssertFalse(outcome.failed.contains("tp"))
                 } else {
+                    XCTAssertEqual(report.redirectStubs, 0)
                     XCTAssertEqual(report.redirectsBlockedInstead, 1)
-                    XCTAssertTrue(outcome.failed.contains("tp"))
+                    XCTAssertTrue(outcome.failed.contains("tp"), "without redirect support the rule must still block")
+                    XCTAssertFalse(outcome.loaded.contains("tp"))
                 }
             }
         }

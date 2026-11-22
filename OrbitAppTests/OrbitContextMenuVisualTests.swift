@@ -66,7 +66,27 @@ final class OrbitContextMenuVisualTests: XCTestCase {
             let rendered = renderFlagged(
                 OrbitContextMenuView(entries: entries, onSelect: {}), size: Self.canvasSize, appearance: appearance
             )
-            XCTAssertNotNil(rendered.boundingBoxOfContent(), "appearance \(appearance.rawValue)")
+            let label = "appearance \(appearance.rawValue)"
+            XCTAssertEqual(rendered.bitmap.pixelsWide, 800, "\(label): 400pt @2x")
+            XCTAssertEqual(rendered.bitmap.pixelsHigh, 800, "\(label): 400pt @2x")
+
+            // two rows and one divider: the divider is its thickness plus padding above and below
+            let dividerHeight = OrbitMetrics.contextMenuDividerThickness + 2 * OrbitMetrics.contextMenuDividerVerticalPadding
+            let box = rendered.boundingBoxOfContent()
+            XCTAssertEqual(box?.width ?? -1, OrbitMetrics.contextMenuWidth, accuracy: 1, "\(label): menu width")
+            XCTAssertEqual(box?.height ?? -1, Self.containerHeight(rowCount: 2) + dividerHeight, accuracy: 1, "\(label): menu height")
+            XCTAssertLessThanOrEqual(box?.minX ?? -1, 1, "\(label): menu sits at the canvas's left edge")
+            XCTAssertLessThanOrEqual(box?.minY ?? -1, 1, "\(label): menu sits at the canvas's top edge")
+
+            let surface = surface(for: appearance)
+            let backRow = CGRect(x: 30, y: OrbitMetrics.contextMenuVerticalPadding + 4, width: 55, height: OrbitMetrics.contextMenuRowHeight - 8)
+            let reloadRow = backRow.offsetBy(dx: 0, dy: OrbitMetrics.contextMenuRowHeight + dividerHeight)
+            XCTAssertTrue(rendered.containsNonBackgroundPixels(in: backRow, background: surface, tolerance: 0.03), "\(label): the Back row's title is drawn")
+            XCTAssertTrue(rendered.containsNonBackgroundPixels(in: reloadRow, background: surface, tolerance: 0.03), "\(label): the Reload row's title is drawn")
+            let dividerLine = CGRect(
+                x: 120, y: OrbitMetrics.contextMenuVerticalPadding + OrbitMetrics.contextMenuRowHeight + OrbitMetrics.contextMenuDividerVerticalPadding,
+                width: 40, height: OrbitMetrics.contextMenuDividerThickness)
+            XCTAssertFalse(rendered.averageColor(in: dividerLine).isApproximately(surface, tolerance: 0.015), "\(label): the divider line is drawn between the rows")
         }
     }
 
@@ -99,7 +119,15 @@ final class OrbitContextMenuVisualTests: XCTestCase {
                 OrbitContextMenuView(entries: rightClick, onSelect: {}, selection: selection),
                 size: CGSize(width: 300, height: 360), appearance: appearance
             )
-            XCTAssertNotNil(contextRendered.boundingBoxOfContent(), "right-click menu, \(suffix)")
+            // eight rows and two dividers
+            let dividerHeight = OrbitMetrics.contextMenuDividerThickness + 2 * OrbitMetrics.contextMenuDividerVerticalPadding
+            let contextBox = contextRendered.boundingBoxOfContent()
+            XCTAssertEqual(contextBox?.width ?? -1, OrbitMetrics.contextMenuWidth, accuracy: 1, "right-click menu width, \(suffix)")
+            XCTAssertEqual(contextBox?.height ?? -1, Self.containerHeight(rowCount: 8) + 2 * dividerHeight, accuracy: 1, "right-click menu height, \(suffix)")
+            let highlighted = CGRect(x: 185, y: OrbitMetrics.contextMenuVerticalPadding + 2 * OrbitMetrics.contextMenuRowHeight + 6, width: 45, height: 20)
+            XCTAssertFalse(
+                contextRendered.averageColor(in: highlighted).isApproximately(surface(for: appearance), tolerance: 0.02),
+                "the selected Copy Link row is highlighted, \(suffix)")
             contextRendered.writeDiagnosticPNG(named: "OrbitContextMenu-rightclick-\(suffix)")
 
             let plusRendered = renderFlagged(
@@ -109,7 +137,10 @@ final class OrbitContextMenuVisualTests: XCTestCase {
                 ),
                 size: CGSize(width: 300, height: 300), appearance: appearance
             )
-            XCTAssertNotNil(plusRendered.boundingBoxOfContent(), "+ menu, \(suffix)")
+            let plusBox = plusRendered.boundingBoxOfContent()
+            XCTAssertEqual(plusBox?.width ?? -1, OrbitMetrics.contextMenuWidth, accuracy: 1, "+ menu width, \(suffix)")
+            let plusRows = CGFloat(plusMenu.flattenedItems.count) * OrbitMetrics.contextMenuRowHeight
+            XCTAssertGreaterThanOrEqual(plusBox?.height ?? -1, min(plusRows, 300 - OrbitMetrics.contextMenuArrowHeight), "+ menu is at least as tall as its rows, \(suffix)")
             plusRendered.writeDiagnosticPNG(named: "OrbitContextMenu-plus-\(suffix)")
         }
     }

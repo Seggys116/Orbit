@@ -7,6 +7,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import QuartzCore
+import UniformTypeIdentifiers
 import WebKit
 
 @MainActor
@@ -28,6 +29,9 @@ enum AppInteractionProbe {
         case openTab
         case openTabBackground
         case openBlankTab
+        case activateFreshTab
+        case activateRightAway
+        case activateAfterBriefWait
         case focusPane
         case enterSplitKeyboard
         case enterSplitBlank
@@ -70,6 +74,36 @@ enum AppInteractionProbe {
     static func run(request: [String: Any], host: AppEnvironment, tabs: [TabID], window: NSWindow) async -> [String: Any] {
         if request["scenario"] as? String == "journey" {
             return await AppJourneyProbe.run(request: request, host: host, window: window)
+        }
+        if request["scenario"] as? String == "dropTargetEvent" {
+            guard let activeID = host.activeTabID, let spaceID = host.activeSpace?.id,
+                  let other = tabs.first(where: { $0 != activeID }),
+                  let view = host.webContents[activeID]?.view, let root = window.contentView?.superview else { return ["ok": false, "error": "needs an active tab and another"] }
+            let payload = SidebarDragPayload(nodeID: other, kind: .todayTab, spaceID: spaceID)
+            let pasteboard = NSPasteboard(name: .drag)
+            pasteboard.clearContents()
+            let item = NSPasteboardItem()
+            if let data = try? JSONEncoder().encode(payload) { item.setData(data, forType: NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)) }
+            pasteboard.writeObjects([item])
+            let bounds = view.convert(view.bounds, to: nil)
+            let point = CGPoint(x: bounds.maxX - 40, y: bounds.midY)
+            var seen: [String: Any]?
+            let monitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { event in
+                if seen == nil {
+                    let hit = root.hitTest(point)
+                    seen = ["hit": hit.map { "\(type(of: $0))" } ?? "nil", "currentEvent": NSApp.currentEvent.map { Int($0.type.rawValue) } ?? -1, "inFlight": SidebarDragSession.hasInFlightDrag, "current": SidebarDragSession.current != nil]
+                }
+                return event
+            }
+            SidebarDragSession.begin(payload)
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { continuation.resume() } }
+            if let moved = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) {
+                NSApp.postEvent(moved, atStart: true)
+            }
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            SidebarDragSession.end()
+            return ["ok": true, "seen": seen ?? [:]]
         }
         if request["scenario"] as? String == "elementFullscreen" {
             return await runElementFullscreen(request: request, host: host, tabs: tabs, window: window)
@@ -291,6 +325,22 @@ enum AppInteractionProbe {
                 return Plan(duration: 1.2, expecting: []) { _ = host.openTab(url: address, in: spaceID, section: .today, activate: false) }
             case .openBlankTab:
                 return Plan(duration: 1.2, expecting: []) { _ = host.openTab(url: URL(string: "orbit://new-tab")!, in: spaceID) }
+            case .activateFreshTab:
+                let address = host.webContents[first.tabID]?.navigationState.url ?? URL(string: "about:blank")!
+                let fresh = host.openTab(url: address, in: spaceID, section: .today, activate: false)
+                await settle(1.2)
+                return Plan(duration: 1.0, expecting: []) { host.activateTab(fresh) }
+            case .activateRightAway:
+                let address = host.webContents[first.tabID]?.navigationState.url ?? URL(string: "about:blank")!
+                return Plan(duration: 1.2, expecting: []) {
+                    let fresh = host.openTab(url: address, in: spaceID, section: .today, activate: false)
+                    host.activateTab(fresh)
+                }
+            case .activateAfterBriefWait:
+                let address = host.webContents[first.tabID]?.navigationState.url ?? URL(string: "about:blank")!
+                let fresh = host.openTab(url: address, in: spaceID, section: .today, activate: false)
+                await settle(0.12)
+                return Plan(duration: 1.0, expecting: []) { host.activateTab(fresh) }
             case .rapidSwitch:
                 return Plan(duration: 1.6, expecting: []) {
                     Task { @MainActor in

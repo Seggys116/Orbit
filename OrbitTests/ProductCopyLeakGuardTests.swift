@@ -186,6 +186,12 @@ final class ProductCopyLeakGuardTests: XCTestCase {
         "unlock your keychain",
         "keychain couldn't be unlocked",
         "upgrade-insecure-requests",
+        // an interpolated variable name, not copy
+        "plan.searchEngine",
+        // upgrading a vulnerable web library is a software update, not a feature tier
+        "Upgrade each listed library",
+        // macOS shows the pairing code only while the Mac itself is unlocked
+        "only while this Mac is unlocked",
     ]
 
     // ORBIT-HOSTED-RUNNER: CANNOT-RUN test_noUserFacingStringLiteralDescribesFeaturesAsPlanOrTier

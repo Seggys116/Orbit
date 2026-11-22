@@ -159,6 +159,11 @@ final class DropDestinationHitTestEvidenceTests: XCTestCase {
         XCTContext.runActivity(named: "RANK 4 supporting evidence: registeredDraggedTypes with allowsHitTesting=true: \(registeredWhenHitTestable), with allowsHitTesting=false: \(registeredWhenNotHitTestable)") { _ in }
         addEvidence(key: "draggedTypesRegistered_hitTestable", value: registeredWhenHitTestable)
         addEvidence(key: "draggedTypesRegistered_notHitTestable", value: registeredWhenNotHitTestable)
+        XCTAssertTrue(registeredWhenHitTestable, "A .dropDestination view must register its dragged types with AppKit, or no system drag can ever reach it.")
+        XCTAssertTrue(
+            registeredWhenNotHitTestable,
+            "`.allowsHitTesting(false)` is what lets clicks through to the page; it must not also remove the AppKit drag-destination registration the drop needs."
+        )
     }
 
     private func addEvidence(key: String, value: Bool) {

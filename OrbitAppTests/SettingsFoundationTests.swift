@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import XCTest
 @testable import Orbit
@@ -40,9 +41,17 @@ final class SettingsPaletteAndMetricsTests: XCTestCase {
         XCTAssertFalse(SettingsWindowController.windowStyleMask.contains(.resizable), "The Settings window is laid out for one size and must not be resizable.")
     }
 
+    @MainActor
     func test_windowDefaultHeight_isTallerThanThePreviousDefault() {
         let previousDefaultHeight: CGFloat = 480
         XCTAssertGreaterThan(SettingsMetrics.windowDefaultHeight, previousDefaultHeight)
+
+        // the root view the window hosts declares its own fixed frame, so its fitting size is the size the window opens at
+        let host = NSHostingView(rootView: SettingsRootView().environment(AppEnvironment.demo))
+        let fitted = host.fittingSize
+        XCTAssertGreaterThan(fitted.height, previousDefaultHeight, "the hosted Settings root view is taller than the previous default")
+        XCTAssertEqual(fitted.height, SettingsMetrics.windowDefaultHeight, accuracy: 1, "the hosted Settings root view is exactly the metric's height")
+        XCTAssertEqual(fitted.width, SettingsMetrics.windowDefaultWidth, accuracy: 1, "and exactly the metric's width")
     }
 }
 

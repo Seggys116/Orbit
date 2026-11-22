@@ -168,8 +168,34 @@ final class SplitPaneDropCatcherClaimTests: XCTestCase {
     }
 
     func test_scrollsAndHoversPassThroughToo() {
-        XCTAssertFalse(SplitPaneDropCatcherView.claimsHit(duringEvent: .scrollWheel, dragInFlight: true))
-        XCTAssertFalse(SplitPaneDropCatcherView.claimsHit(duringEvent: .mouseMoved, dragInFlight: true))
+        XCTAssertFalse(SplitPaneDropCatcherView.claimsHit(duringEvent: .scrollWheel, dragInFlight: true, dragIsLive: true))
+        XCTAssertFalse(SplitPaneDropCatcherView.claimsHit(duringEvent: .mouseMoved, dragInFlight: true, dragIsLive: false), "A hover with no drag live is not a drag.")
+        XCTAssertFalse(SplitPaneDropCatcherView.claimsHit(duringEvent: .keyDown, dragInFlight: true, dragIsLive: false))
+    }
+
+    // A real drag over the page was recorded event by event in the running app (button, drag record, current event, age).
+    // The app reported the drag's movement as mouseMoved, which this used to turn away, so the page took every drop.
+    func test_theEventsOfARealSidebarDrag_areClaimedOnceTheDragIsLive() {
+        struct Frame { var type: NSEvent.EventType; var age: TimeInterval; var buttonDown: Bool; var recordMatches: Bool }
+        let recorded: [Frame] = [
+            Frame(type: .keyDown, age: 1.0, buttonDown: true, recordMatches: true),
+            Frame(type: .keyUp, age: 1.0, buttonDown: true, recordMatches: true),
+            Frame(type: .mouseMoved, age: 0.05, buttonDown: true, recordMatches: true),
+            Frame(type: .mouseMoved, age: 0.05, buttonDown: true, recordMatches: true),
+            Frame(type: .mouseMoved, age: 0.05, buttonDown: true, recordMatches: true),
+            Frame(type: .mouseMoved, age: 0.05, buttonDown: false, recordMatches: true),
+        ]
+        for (index, frame) in recorded.enumerated() {
+            XCTAssertTrue(
+                SplitPaneDropCatcherView.claimsHit(duringEvent: frame.type, eventAge: frame.age, dragInFlight: true, dragIsLive: frame.buttonDown || frame.recordMatches),
+                "frame \(index) of a real drag (\(frame.type), button down \(frame.buttonDown)) was turned away"
+            )
+        }
+    }
+
+    func test_aFreshClickStaysWithThePage_evenWhenTheButtonIsDown() {
+        XCTAssertFalse(SplitPaneDropCatcherView.claimsHit(duringEvent: .leftMouseDown, eventAge: 0.01, dragInFlight: true, dragIsLive: true))
+        XCTAssertFalse(SplitPaneDropCatcherView.claimsHit(duringEvent: .leftMouseUp, eventAge: 0.01, dragInFlight: true, dragIsLive: true))
     }
 
     func test_theEventThatStartedADragIsNotAClickOnThePage() {

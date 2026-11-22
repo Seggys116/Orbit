@@ -751,8 +751,9 @@ final class ExtensionInstallFlowVisualTests: XCTestCase {
                 background: sectionFill,
                 in: CGRect(x: 62, y: 50, width: 438, height: 26)
             )
-            XCTAssertGreaterThan(
-                message?.width ?? 0, 300,
+            // "WebKit is starting. Extensions appear here shortly." at 12pt, one line, is about 260pt wide
+            XCTAssertTrue(
+                (230...300).contains(message?.width ?? 0) && (message?.height ?? 0) < 20,
                 "In \(appearance.rawValue) the notice's row is \(String(describing: message)) of text over its section fill \(sectionFill) -- only the section chrome painted, not the message."
             )
             XCTAssertFalse(

@@ -96,7 +96,47 @@ final class WebKitEngineLaunchTests: XCTestCase {
         XCTAssertTrue(result.contains("\"permanent\""), result)
         XCTAssertTrue(result.contains("https://www.google.com"), result)
         XCTAssertFalse(result.contains("__orbitError"), result)
-        XCTAssertFalse(canonical.isEmpty)
+
+        // getTree answers a one-element array holding the root; the expectation is built from the environment's own spaces and favourites
+        let actualTree = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(result.utf8)) as? [[String: Any]], result)
+        XCTAssertEqual(
+            actualTree as NSArray, [Self.expectedBookmarkRoot(for: environment.state)] as NSArray,
+            "chrome.bookmarks.getTree must return the root, a node per space, and under each its Favourites and Pinned folders"
+        )
+    }
+
+    /// Spaces by order, then creation date, then id; each holds a Favourites folder of its favourites and an empty Pinned folder.
+    private static func expectedBookmarkRoot(for state: OrbitState) -> [String: Any] {
+        func milliseconds(_ date: Date) -> Int { Int((date.timeIntervalSince1970 * 1000).rounded()) }
+        let spaces = state.spaces.sorted {
+            if $0.order != $1.order { return $0.order < $1.order }
+            if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        let spaceNodes: [[String: Any]] = spaces.enumerated().map { index, space in
+            let id = space.id.uuidString.lowercased()
+            let favourites: [[String: Any]] = space.favorites.enumerated().map { position, favourite in
+                [
+                    "id": "b:" + favourite.id.uuidString.lowercased(), "parentId": "f:" + id, "index": position,
+                    "title": favourite.title, "syncing": false, "url": favourite.url.absoluteString,
+                ]
+            }
+            let children: [[String: Any]] = [
+                [
+                    "id": "f:" + id, "parentId": "s:" + id, "index": 0, "title": "Favourites",
+                    "syncing": false, "permanent": true, "children": favourites,
+                ],
+                [
+                    "id": "p:" + id, "parentId": "s:" + id, "index": 1, "title": "Pinned",
+                    "syncing": false, "permanent": true, "children": [] as [[String: Any]],
+                ],
+            ]
+            return [
+                "id": "s:" + id, "parentId": "0", "index": index, "title": space.name, "syncing": false,
+                "permanent": true, "dateAdded": milliseconds(space.createdAt), "children": children,
+            ]
+        }
+        return ["id": "0", "title": "", "permanent": true, "syncing": false, "children": spaceNodes]
     }
 
     func testCosmeticAndStylesheetCSSStayData() async throws {
@@ -136,21 +176,27 @@ final class WebKitEngineLaunchTests: XCTestCase {
             equals: "orbit-webkit-fixture-text"
         )
         XCTAssertEqual(text, "orbit-webkit-fixture-text")
-        let css = try await waitForText(
+        let stylesJSON = try await waitForText(
             contents,
-            script: "Array.from(document.querySelectorAll('style')).map(function(node){return node.textContent||'';}).join('\\n')",
+            script: "JSON.stringify(Array.from(document.querySelectorAll('style')).map(function(node){return node.textContent||'';}))",
             equals: "pending-style"
         ) { latest in
             latest.contains("__orbitPwned") && latest.contains("__orbitSheet")
         }
-        XCTAssertFalse(css.isEmpty)
+        let styles = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(stylesJSON.utf8)) as? [String],
+            "the page's style elements did not come back as a JSON array: \(stylesJSON)"
+        )
+        // the user stylesheet is injected verbatim; the cosmetic rule is one hide rule built from its selector
+        XCTAssertEqual(styles.filter { $0.contains("__orbitSheet") }, ["${window.__orbitSheet=1}"])
+        XCTAssertEqual(styles.filter { $0.contains("__orbitPwned") }, ["${window.__orbitPwned=1} { display: none !important; }\n"])
+        // typeof, so a script that never ran reads differently from one that ran and set nothing
         let flags = try await waitForText(
             contents,
-            script: "String(window.__orbitPwned||'') + String(window.__orbitSheet||'')",
-            equals: ""
+            script: "'flags:' + typeof window.__orbitPwned + ',' + typeof window.__orbitSheet",
+            equals: "flags:undefined,undefined"
         )
-        XCTAssertEqual(flags, "")
-        XCTAssertTrue(css.contains("__orbitPwned") || css.contains("__orbitSheet"))
+        XCTAssertEqual(flags, "flags:undefined,undefined", "the ${...} bodies must reach the page as CSS text and never be evaluated")
         engine.shutdown()
     }
 

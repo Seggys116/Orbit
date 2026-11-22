@@ -652,9 +652,16 @@ final class OrbitInspectRegressionLiveTests: XCTestCase {
                 (try await session.evaluate("!!window.__orbitInspect") as? Bool) == true
             }
             let completions = await session.console.fetchCompletions(path: ["document"], prefix: "getElem")
-            XCTAssertTrue(completions.contains("getElementById"), "got \(completions)")
+            XCTAssertEqual(completions, [
+                "getElementById", "getElementsByName", "getElementsByTagName",
+                "getElementsByClassName", "getElementsByTagNameNS",
+            ])
             let quoted = await session.console.fetchCompletions(path: [], prefix: "\"'\\")
-            XCTAssertNotNil(quoted)
+            XCTAssertEqual(quoted, [])
+
+            _ = try await session.evaluate(#"window["k\"'\\y"] = { zed: 1, zebra: 2 }; 1"#)
+            let throughQuotedKey = await session.console.fetchCompletions(path: ["k\"'\\y"], prefix: "ze")
+            XCTAssertEqual(throughQuotedKey, ["zed", "zebra"])
 
             _ = try await session.evaluate("console.log({ alpha: 1, beta: [2, 3] }); 1")
             try await self.waitUntil("logged object", timeout: .seconds(5)) {

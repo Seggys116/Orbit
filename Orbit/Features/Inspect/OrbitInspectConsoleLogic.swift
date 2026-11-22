@@ -671,6 +671,20 @@ public enum OrbitConsoleLogic {
         }
     }
 
+    // MARK: Filter chip counts
+
+    public static func levelCounts<Entries: Collection>(of entries: Entries) -> [ConFilterLevel: Int]
+        where Entries.Element == ConEntry
+    {
+        var counts: [ConFilterLevel: Int] = [.all: entries.count]
+        for entry in entries {
+            for level in ConFilterLevel.allCases where level != .all && level.matches(entry.level) {
+                counts[level, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
     // MARK: Input completeness
 
     public static func isInputComplete(_ js: String) -> Bool {
