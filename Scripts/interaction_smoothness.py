@@ -295,6 +295,7 @@ def main(argv):
     parser.add_argument("--drop-target", action="store_true", help="check that a sidebar drag over the page lands on the split drop target when the app reports mouseMoved (events are posted inside the app; no cursor is used)")
     parser.add_argument("--file-drop", action="store_true", help="check that a file dragged in from another app is offered to the page itself and not to a view that would turn it away (events are posted inside the app; no cursor is used)")
     parser.add_argument("--sidebar-click", action="store_true", help="press and release over every click target in the sidebar with events sent through the window (no cursor) and report which tab each click opened; two of the pages are split first")
+    parser.add_argument("--raise-window", action="store_true", help="bring the test window above other windows (without activating the app or touching the cursor) when WebKit cannot see it; pixel checks are only valid while it is visible")
     parser.add_argument("--sites", default="", help="comma list of real page addresses (at least three) opened instead of the local colour pages; timing only, since their pixels are not known colours")
     parser.add_argument("--sample", default="", help="scenario to sample the app's main thread during, with /usr/bin/sample")
     options = parser.parse_args(argv)
@@ -334,13 +335,13 @@ def main(argv):
         if options.journey:
             failed = 0
             for seed in [int(value) for value in options.seeds.split(",") if value]:
-                report = launch.command("interact", scenario="journey", base=base, seed=seed, steps=options.steps, dumpDir=os.path.join(options.output, "frames-journey"), timeout=1800.0)
+                report = launch.command("interact", scenario="journey", base=base, seed=seed, steps=options.steps, dumpDir=os.path.join(options.output, "frames-journey"), timeout=1800.0, **{"raise": options.raise_window})
                 path = os.path.join(options.output, f"journey-{seed}.json")
                 with open(path, "w") as handle:
                     json.dump(report, handle, indent=1)
                 found = report["violations"]
                 delays = [d["ms"] for d in report["paintDelays"]]
-                print(f"seed {seed}: {len(found)} violation(s), {len(report['stalls'])} stall(s) over 250 ms, paint delays {sorted(delays)[-5:]} ms, key window {report['keyWindow']}  ({path})")
+                print(f"seed {seed}: {len(found)} violation(s), {len(report['stalls'])} stall(s) over 250 ms, paint delays {sorted(delays)[-5:]} ms, key window {report['keyWindow']}, window visible to WebKit at the end {report.get('windowVisibleToWebKit')}, pixel checks skipped while hidden {report.get('pixelChecksSkippedWindowHidden')}  ({path})")
                 seen = {}
                 for item in found:
                     key = item["problem"]
@@ -407,10 +408,10 @@ def main(argv):
                 sample_path = os.path.join(options.output, f"sample-{name}.txt")
                 sampler = subprocess.Popen(["/usr/bin/sample", str(launch.pid), str(int(options.iterations * 2.2) + 2), "1", "-file", sample_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 time.sleep(1.0)
-            timing = launch.command("interact", scenario=name, iterations=options.iterations, pixels=False, colours=colours)
+            timing = launch.command("interact", scenario=name, iterations=options.iterations, pixels=False, colours=colours, **{"raise": options.raise_window})
             if sampler is not None:
                 sampler.wait()
-            pixels = {"iterations": []} if sites else launch.command("interact", scenario=name, iterations=options.pixel_iterations, pixels=True, colours=colours, dumpDir=os.path.join(options.output, "frames"))
+            pixels = {"iterations": []} if sites else launch.command("interact", scenario=name, iterations=options.pixel_iterations, pixels=True, colours=colours, dumpDir=os.path.join(options.output, "frames"), **{"raise": options.raise_window})
             results[name] = {"timing": timing, "pixels": pixels}
     finally:
         launch.stop()
@@ -422,14 +423,19 @@ def main(argv):
     print()
     print(
         f"{options.configuration} build, {first['refreshHz']}Hz display, key window: {first['keyWindow']}, "
-        f"app active: {first['appActive']}"
+        f"app active: {first['appActive']}, window visible to WebKit: {first.get('windowVisibleToWebKit')}, on screen: {first.get('windowOnScreen')}, frame {first.get('windowFrame')}"
     )
+    if first.get("windowVisibleToWebKit") is False:
+        print("WARNING: WebKit cannot see the test window, so it does not paint pages in it. The bad frames column below measures unpainted panes, not the app; run again with --raise-window.")
     header = f"{'interaction':36} {'action':>7} {'gap median':>10} {'p90':>7} {'worst':>7} {'hitches/run':>11} {'cpu burst':>10} {'bad frames*':>12}"
     print(header)
     print("-" * len(header))
     for name in wanted:
         timing = results[name]["timing"]["iterations"]
         pixel = results[name]["pixels"]["iterations"]
+        broken = [run for run in timing if "longestGapMs" not in run]
+        if broken:
+            raise Fail(f"{name}: {len(broken)} of {len(timing)} runs reported no frame timing; first: {json.dumps(broken[0])[:600]}")
         gaps = [run["longestGapMs"] for run in timing]
         hitches = statistics.mean(run["hitches"] for run in timing)
         action = statistics.median(run["actionMs"] for run in timing)

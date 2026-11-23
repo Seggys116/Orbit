@@ -195,6 +195,11 @@ enum AppInteractionProbe {
     }
 
     static func run(request: [String: Any], host: AppEnvironment, tabs: [TabID], window: NSWindow) async -> [String: Any] {
+        if request["raise"] as? Bool == true, !window.occlusionState.contains(.visible) {
+            // above the other windows without activating the app: WebKit paints a page only while its window is visible, so a hidden window makes every pixel check read an unpainted pane
+            window.orderFrontRegardless()
+            try? await Task.sleep(nanoseconds: 800_000_000)
+        }
         if request["scenario"] as? String == "journey" {
             return await AppJourneyProbe.run(request: request, host: host, window: window)
         }
@@ -239,6 +244,9 @@ enum AppInteractionProbe {
             "refreshHz": window.screen?.maximumFramesPerSecond ?? 0,
             "keyWindow": window.isKeyWindow,
             "appActive": NSApp.isActive,
+            "windowVisibleToWebKit": window.occlusionState.contains(.visible),
+            "windowOnScreen": window.isVisible,
+            "windowFrame": NSStringFromRect(window.frame),
             "iterations": results,
         ]
     }

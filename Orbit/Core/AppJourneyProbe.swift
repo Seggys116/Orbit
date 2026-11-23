@@ -48,6 +48,7 @@ enum AppJourneyProbe {
         var generator = Generator(state: seed)
         var trace: [String] = []
         var violations: [[String: Any]] = []
+        var pixelChecksSkipped = 0
         var paintDelays: [[String: Any]] = []
         var stalls: [[String: Any]] = []
         var pinnedExpectation: [TabID: URL] = [:]
@@ -133,6 +134,8 @@ enum AppJourneyProbe {
                 let rect = view.convert(view.bounds, to: nil)
                 if rect.width < 60 || rect.height < 60 { found.append("a shown page is \(Int(rect.width))x\(Int(rect.height))"); continue }
                 if contents.navigationState.url?.scheme == "orbit" { continue }
+                // WebKit paints only while the window is visible, so a hidden window reads as grey panes; those checks are skipped and counted
+                guard window.occlusionState.contains(.visible) else { pixelChecksSkipped += 1; continue }
                 guard let full, let pane = WindowPixelCapture.crop(full, toWindowRect: rect.insetBy(dx: 14, dy: 14), of: window) else { continue }
                 let grey = WindowPixelCapture.fractionMatching(pane, red: 31, green: 31, blue: 31, tolerance: 7)
                 if grey > 0.2 { found.append(String(format: "a shown page's pane is %.0f%% grey", grey * 100)) }
@@ -318,7 +321,9 @@ enum AppJourneyProbe {
             "seed": Int(seed),
             "steps": steps,
             "keyWindow": window.isKeyWindow,
+            "windowVisibleToWebKit": window.occlusionState.contains(.visible),
             "violations": violations,
+            "pixelChecksSkippedWindowHidden": pixelChecksSkipped,
             "paintDelays": paintDelays,
             "stalls": stalls,
             "trace": trace,

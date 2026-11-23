@@ -781,6 +781,7 @@
 		703A2039C0EB67758FC9A014 /* SafariContentRuleModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88746E2D0DE6392D4663E3A /* SafariContentRuleModel.swift */; };
 		704CA9B65AEFCB349CD6EF6F /* BookmarkMutationRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B05EF8AA3361DA49E30D3D2 /* BookmarkMutationRouter.swift */; };
 		707088BB9FBA84ABA0B994DC /* HostingViewWindowSizingMechanismTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8447BB6DB462D900428956E6 /* HostingViewWindowSizingMechanismTests.swift */; };
+		7083A009EA16883BAB352EF0 /* SplitNavigationLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3D42BF671AC3BB6663B005 /* SplitNavigationLiveTests.swift */; };
 		708DA71E771B625E468080DA /* FilterListStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88320D7BD0828854C6AA7008 /* FilterListStore.swift */; };
 		708F46CE1C61F24BFC182111 /* PasswordAutofillScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20E52583D6073988126EB63 /* PasswordAutofillScript.swift */; };
 		709CD3DBB0710007C1322BF1 /* SidebarNodeRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2387A54C0F259B05CE2A0A /* SidebarNodeRow.swift */; };
@@ -2522,6 +2523,7 @@
 		9A90EBFF67B659F8271D381D /* OrbitToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitToggle.swift; sourceTree = "<group>"; };
 		9AE38C542B01F9C6B8E66B13 /* AddExtensionMenuRowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddExtensionMenuRowTests.swift; sourceTree = "<group>"; };
 		9AF06A8D4AC75E19FDCDBEA2 /* LibraryComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryComponents.swift; sourceTree = "<group>"; };
+		9B3D42BF671AC3BB6663B005 /* SplitNavigationLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitNavigationLiveTests.swift; sourceTree = "<group>"; };
 		9B476D0AFED29D0CE62C13F0 /* ZipArchiveExtractorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZipArchiveExtractorTests.swift; sourceTree = "<group>"; };
 		9B4B80FDF479294C71060D03 /* OrbitDefaultsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitDefaultsTests.swift; sourceTree = "<group>"; };
 		9B4D95584BDA791F1D310B6C /* LinkPreviewCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkPreviewCardView.swift; sourceTree = "<group>"; };
@@ -4250,6 +4252,7 @@
 				16369C57BB1EE55349EC7DDC /* SplitGroupRowContainerTests.swift */,
 				A926095149DB68CD4851E894 /* SplitLayoutMenuTests.swift */,
 				E16D6CB7459B584EE39B77CD /* SplitMemberAdjacencyTests.swift */,
+				9B3D42BF671AC3BB6663B005 /* SplitNavigationLiveTests.swift */,
 				D58D6F3806A28F3EEAAF7D7C /* SplitPaneCloseControlTests.swift */,
 				8ABF0D35265343AD100DEA1D /* SplitPaneDropCatcherRealEventTests.swift */,
 				A208EF8FE8E328F4C83897CE /* Support */,
@@ -6099,6 +6102,7 @@
 				96709A5A7CFE21BBF1AC431D /* SplitGroupRowContainerTests.swift in Sources */,
 				98B8F65BB3EA2AD65A2F5695 /* SplitLayoutMenuTests.swift in Sources */,
 				ABB83BFBDF512EEAD8790881 /* SplitMemberAdjacencyTests.swift in Sources */,
+				7083A009EA16883BAB352EF0 /* SplitNavigationLiveTests.swift in Sources */,
 				29A52E0AD5E50210E4750E6D /* SplitPaneCloseControlTests.swift in Sources */,
 				4D6D62AF210B606AA885C0E4 /* SplitPaneDropCatcherRealEventTests.swift in Sources */,
 				E3DC64A1FE33B89C0FC7B61B /* CapabilityProbe.swift in Sources */,
