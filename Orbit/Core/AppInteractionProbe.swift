@@ -149,7 +149,7 @@ enum AppInteractionProbe {
             let made = SidebarDragPayload(nodeID: other, kind: .todayTab, spaceID: spaceID)
             payload = made
             let item = NSPasteboardItem()
-            if let data = try? JSONEncoder().encode(made) { item.setData(data, forType: NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)) }
+            if let data = try? JSONEncoder().encode(made) { item.setData(data, forType: NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier.lowercased())) }
             pasteboard.writeObjects([item])
         }
         defer {

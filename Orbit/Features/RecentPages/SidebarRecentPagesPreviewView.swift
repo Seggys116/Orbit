@@ -145,9 +145,14 @@ struct SidebarRecentPagesPreviewModifier: ViewModifier {
                 }
             }
             .onDisappear { dismiss() }
+            .onReceive(NotificationCenter.default.publisher(for: .orbitSidebarDragBegan)) { _ in dismiss() }
     }
 
     private func refresh() {
+        guard SidebarHoverPreviewGate.mayOpen else {
+            controller.dismiss()
+            return
+        }
         let isServiceRow = SidebarRecentPagesPreviewController.service(for: tab) != nil
         let isSpacePersistent = !isIncognitoSpace(tab.spaceID)
 

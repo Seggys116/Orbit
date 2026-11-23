@@ -580,13 +580,9 @@ final class SplitPaneDropCatcherView: NSView {
     var environment: AppEnvironment?
     var targetTabID: TabID?
 
-    private var dragType: NSPasteboard.PasteboardType {
-        NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)
-    }
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        registerForDraggedTypes([dragType])
+        registerForDraggedTypes(SidebarDragPasteboardType.spellings)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -601,7 +597,7 @@ final class SplitPaneDropCatcherView: NSView {
     /// A record left from an earlier sidebar drag says nothing about the drag under the pointer now: a file, an image or a link dragged in from another app must reach the page. The drag is the sidebar's when the pasteboard is the one the record was made with, or lists the sidebar tab. Pasteboard types that SwiftUI's drag does not list under that name are not taken as proof of an outside drag: only a file, image, link or text on it is.
     static func isSidebarDrag(types: [NSPasteboard.PasteboardType], recordMatchesPasteboard: Bool) -> Bool {
         if recordMatchesPasteboard { return true }
-        if types.contains(NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)) { return true }
+        if SidebarDragPasteboardType.isOffered(in: types) { return true }
         return !offersOutsideContent(types)
     }
 

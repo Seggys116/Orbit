@@ -24,6 +24,32 @@ struct SidebarDragPayload: Codable, Transferable, Equatable {
     }
 }
 
+extension Notification.Name {
+    /// Posted when a drag starts from the sidebar, so a hover preview already open beside a row closes instead of covering the page the drag is headed for.
+    static let orbitSidebarDragBegan = Notification.Name("com.orbit.sidebarDragBegan")
+}
+
+/// A hover preview opens beside a row, over the page. While a button is held or a sidebar drag is running it must not: the drop target under it would be covered and the drop would land on the preview.
+@MainActor
+enum SidebarHoverPreviewGate {
+    static var primaryButtonIsDown: () -> Bool = { NSEvent.pressedMouseButtons & 1 != 0 }
+
+    static var mayOpen: Bool { !SidebarDragSession.hasInFlightDrag && !primaryButtonIsDown() }
+}
+
+/// The name of the sidebar tab on the drag pasteboard. SwiftUI writes a dragged item's type identifier in lower case (`com.orbit.browser.sidebarnode`), and AppKit compares the types a view registers for with the pasteboard's as exact strings, so a view registered for the identifier as declared is never offered a drag the sidebar started. Both spellings are registered and looked up.
+enum SidebarDragPasteboardType {
+    static let spellings: [NSPasteboard.PasteboardType] = {
+        let declared = UTType.orbitSidebarNode.identifier
+        let names = declared == declared.lowercased() ? [declared] : [declared, declared.lowercased()]
+        return names.map { NSPasteboard.PasteboardType($0) }
+    }()
+
+    static func isOffered(in types: [NSPasteboard.PasteboardType]) -> Bool {
+        types.contains { spellings.contains($0) }
+    }
+}
+
 @MainActor
 enum SidebarDragSession {
     private static var record: (payload: SidebarDragPayload, changeCount: Int?)?
@@ -39,6 +65,7 @@ enum SidebarDragSession {
             record?.changeCount = NSPasteboard(name: .drag).changeCount
         }
         SidebarTearOffDetector.begin(payload)
+        NotificationCenter.default.post(name: .orbitSidebarDragBegan, object: nil)
     }
 
     /// True from `begin` until the drag is consumed or discarded; `current` is nil on the first turn.
@@ -341,10 +368,9 @@ extension SidebarDragPayload {
 
     static func decodeSynchronously() -> [SidebarDragPayload] {
         let pasteboard = NSPasteboard(name: .drag)
-        let type = NSPasteboard.PasteboardType(UTType.orbitSidebarNode.identifier)
         let items = pasteboard.pasteboardItems ?? []
         return items.compactMap { item in
-            guard let data = item.data(forType: type) else { return nil }
+            guard let data = SidebarDragPasteboardType.spellings.lazy.compactMap({ item.data(forType: $0) }).first else { return nil }
             return try? JSONDecoder().decode(SidebarDragPayload.self, from: data)
         }
     }

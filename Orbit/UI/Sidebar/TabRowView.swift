@@ -305,13 +305,22 @@ private struct TabRowChrome: View, Equatable {
             }
         }
         .sidebarRecentPagesPreview(tab: tab)
+        .onReceive(NotificationCenter.default.publisher(for: .orbitSidebarDragBegan)) { _ in
+            previewTask?.cancel()
+            showPreview = false
+        }
     }
 
     // Behind the close control and favicon, which keep their own clicks; the title does not hit-test, so a click on the words lands here, and the whole row pitch is the target.
     private var rowActivationCatcher: some View {
         // On release: a press that turns into a drag must not switch tabs first.
         // The page is built on the press so a released tab is already loading by the time the click lands; a press that turns into a drag simply leaves it built.
-        OrbitNSActionButton(onClickCount: { handleRowClick($0) }, onPress: { env.prefetchRenderer(for: tab.id) }, firesOnRelease: true) {
+        OrbitNSActionButton(onClickCount: { handleRowClick($0) }, onPress: {
+            env.prefetchRenderer(for: tab.id)
+            // a press may become a drag: the preview must not come up over the page it is headed for
+            previewTask?.cancel()
+            showPreview = false
+        }, firesOnRelease: true) {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -493,6 +502,7 @@ private struct TabRowChrome: View, Equatable {
     private func handleHoverPreview(_ hovering: Bool) {
         previewTask?.cancel()
         guard hovering,
+              SidebarHoverPreviewGate.mayOpen,
               !isVisibleInContent,
               TabRowView.shouldAttemptHoverPreview(section: tab.section),
               SidebarRecentPagesPreviewController.service(for: tab) == nil,
@@ -521,7 +531,7 @@ private struct TabRowChrome: View, Equatable {
                 return first
             }
 
-            guard !Task.isCancelled, let image else { return }
+            guard !Task.isCancelled, let image, SidebarHoverPreviewGate.mayOpen else { return }
             previewImage = image
             showPreview = true
         }
@@ -737,6 +747,10 @@ struct PinnedFolderRowView: View {
             if expanded { showPreview = false }
         }
         .orbitRightClickMenu { folderMenuEntries }
+        .onReceive(NotificationCenter.default.publisher(for: .orbitSidebarDragBegan)) { _ in
+            previewTask?.cancel()
+            showPreview = false
+        }
     }
 
     private var folderMenuEntries: [OrbitContextMenuEntry] {
@@ -906,7 +920,8 @@ struct PinnedFolderRowView: View {
                 in: env.pinnedNodes(in: spaceID),
                 resolveTab: env.tab
             )
-            guard Self.shouldPresentFolderPreview(state: state, isRenaming: isRenaming, isExpanded: folder.isExpanded) else { return }
+            guard SidebarHoverPreviewGate.mayOpen,
+                  Self.shouldPresentFolderPreview(state: state, isRenaming: isRenaming, isExpanded: folder.isExpanded) else { return }
             previewState = state
             showPreview = true
         }
