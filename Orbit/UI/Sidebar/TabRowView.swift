@@ -531,7 +531,8 @@ private struct TabRowChrome: View, Equatable {
                 return first
             }
 
-            guard !Task.isCancelled, let image, SidebarHoverPreviewGate.mayOpen else { return }
+            guard !Task.isCancelled, let image else { return }
+            guard SidebarHoverPreviewGate.mayOpen else { return }
             previewImage = image
             showPreview = true
         }
