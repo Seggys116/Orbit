@@ -102,7 +102,7 @@ extension AppEnvironment {
         guard store.tab(existingTabID) != nil, store.tab(newTabID) != nil else { return nil }
 
         if let existingGroup = store.splitGroup(for: existingTabID) {
-            return addToSplit(tabID: newTabID, groupID: existingGroup.id, edge: edge)
+            return addToSplit(tabID: newTabID, groupID: existingGroup.id, edge: edge, beside: existingTabID)
         }
 
         let orderedIDs = edge.insertsBefore ? [newTabID, existingTabID] : [existingTabID, newTabID]
@@ -116,9 +116,15 @@ extension AppEnvironment {
     // perpendicular edge without this would silently lay out along the
     // group's existing axis instead of the one the drop highlight showed.
     @discardableResult
-    func addToSplit(tabID: TabID, groupID: UUID, edge: SplitEdge) -> UUID? {
-        guard state.splitGroups[groupID] != nil else { return nil }
-        let insertIndex = edge.insertsBefore ? 0 : nil
+    func addToSplit(tabID: TabID, groupID: UUID, edge: SplitEdge, beside anchorTabID: TabID? = nil) -> UUID? {
+        guard let group = state.splitGroups[groupID] else { return nil }
+        // Dropped on a pane of the split, the new pane goes beside that pane, on the side that was shown; with no pane named (the layout menu, the keyboard) it goes at that end of the split.
+        let insertIndex: Int?
+        if let anchorTabID, let anchorIndex = group.tabIDs.firstIndex(of: anchorTabID) {
+            insertIndex = edge.insertsBefore ? anchorIndex : anchorIndex + 1
+        } else {
+            insertIndex = edge.insertsBefore ? 0 : nil
+        }
         guard store.addToSplit(tabID, groupID: groupID, at: insertIndex) else { return groupID }
         store.setSplitAxis(edge.orientation, forGroup: groupID)
         materializeWebContents(for: tabID, url: store.tab(tabID)?.url ?? URL(string: "orbit://new-tab")!, isWake: true)
