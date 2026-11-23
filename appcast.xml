@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
 --><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><title>Orbit</title><item>
+            <title>2.6.1</title>
+            <pubDate>Mon, 23 Nov 2026 19:32:47 +0000</pubDate>
+            <sparkle:version>39</sparkle:version>
+            <sparkle:shortVersionString>2.6.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.4</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/Seggys116/Orbit/releases/download/v2.6.1/Orbit-2.6.1-arm64.dmg" length="14113781" type="application/octet-stream" sparkle:edSignature="/RoeTK7Zq3uW/+gn9UnS2aOs4Ynul2whCGC7rWQhO7RpUuuL6f0SFVvzQbRmW17l8eivdujYP93SsAMYJCh+Ag=="></enclosure>
+        </item>
+    <item>
             <title>2.6.0</title>
             <pubDate>Sun, 22 Nov 2026 19:22:17 +0000</pubDate>
             <sparkle:version>38</sparkle:version>
@@ -81,16 +90,7 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/Seggys116/Orbit/releases/download/v2.4.0/Orbit-2.4.0-arm64.dmg" length="13371814" type="application/octet-stream" sparkle:edSignature="fjr3Egb0q3qwyaT4DH13gSm3gaT3v44hTI9ZKj2iBDYdFFYEl+5fMe7FOsziaFdsRnvQIykBYPTT08LnI612AA=="></enclosure>
         </item>
-    <item>
-            <title>2.3.1</title>
-            <pubDate>Mon, 16 Nov 2026 09:58:18 +0000</pubDate>
-            <sparkle:version>27</sparkle:version>
-            <sparkle:shortVersionString>2.3.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.4</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/Seggys116/Orbit/releases/download/v2.3.1/Orbit-2.3.1-arm64.dmg" length="12707766" type="application/octet-stream" sparkle:edSignature="s6YkuRkHcE3SmnyZ8iy0ZhFcUWB9rFGkwzCnPrewxuKe1G00VB2SNaVFs+eObLgJe4FXaeic2OEHbvevUpQdBA=="></enclosure>
-        </item>
     </channel></rss><!-- sparkle-signatures:
-edSignature: bSdgi5PNyBPd0mTxPQ1/80ujmBWCa/mEt4nktcC+pQHiCU7uFO7z6XNMWnIjUAK/u4noPkNQJPH9OGBHJducCA==
+edSignature: ORDTP96t0fzubcOBrqli+bfC/4AYiaKjSB6m6KdkyjwBoYtT99IjgbnqJZ95xsSznO7sN/EJAcYPMn7JVyfzCA==
 length: 7323
 -->
