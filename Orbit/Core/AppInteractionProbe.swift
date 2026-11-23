@@ -71,6 +71,63 @@ enum AppInteractionProbe {
         }
     }
 
+    /// Splits two pages, then presses and releases the primary button over every click target in the real sidebar with events sent through the window's own event path (no cursor), and reports which tab each click made active. A click that changes nothing is reported with the view the window handed it to.
+    private static func runSidebarClick(request: [String: Any], host: AppEnvironment, tabs: [TabID], window: NSWindow) async -> [String: Any] {
+        guard tabs.count >= 3, let root = window.contentView?.superview else { return ["ok": false, "error": "needs three open pages"] }
+        let clicks = max(1, request["clicks"] as? Int ?? 1)
+        host.createSplit(existingTabID: tabs[1], newTabID: tabs[2], edge: .right)
+        host.activateTab(tabs[0])
+        try? await Task.sleep(nanoseconds: 700_000_000)
+
+        func catchers(in view: NSView) -> [OrbitActionButtonClickCatchingView] {
+            var found: [OrbitActionButtonClickCatchingView] = []
+            if let catcher = view as? OrbitActionButtonClickCatchingView, catcher.firesOnRelease { found.append(catcher) }
+            for sub in view.subviews { found += catchers(in: sub) }
+            return found
+        }
+        func index(of id: TabID?) -> Int { id.flatMap { tabs.firstIndex(of: $0) } ?? -1 }
+        func send(_ type: NSEvent.EventType, at point: NSPoint) {
+            guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0) else { return }
+            window.sendEvent(event)
+        }
+
+        // from two different starting pages, so a row for the page that was already showing is not taken for a click that did nothing
+        var results: [[String: Any]] = []
+        for catcher in catchers(in: root) where !catcher.isHiddenOrHasHiddenAncestor {
+            let frame = catcher.convert(catcher.bounds, to: nil)
+            guard frame.width > 20, frame.height > 10 else { continue }
+            let point = NSPoint(x: frame.midX, y: frame.midY)
+            var outcomes: [[Int]] = []
+            for start in [tabs[0], tabs[tabs.count - 1]] {
+                host.activateTab(start)
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                let before = index(of: host.activeTabID)
+                for _ in 0..<clicks {
+                    send(.leftMouseDown, at: point)
+                    send(.leftMouseUp, at: point)
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                outcomes.append([before, index(of: host.activeTabID)])
+            }
+            let hit = root.hitTest(point)
+            let timingStart = CACurrentMediaTime()
+            for _ in 0..<200 { _ = root.hitTest(point) }
+            let hitMicroseconds = (CACurrentMediaTime() - timingStart) / 200 * 1_000_000
+            results.append([
+                "hitMicroseconds": Int(hitMicroseconds),
+                "frame": "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))",
+                "hit": hit.map { "\(type(of: $0))" } ?? "nil",
+                "hitIsThisCatcher": hit === catcher,
+                "chain": { () -> [String] in var names: [String] = []; var walker: NSView? = catcher; while let current = walker { names.append("\(type(of: current))"); walker = current.superview }; return names }(),
+                "outcomes": outcomes,
+                "opensSomething": outcomes.contains { $0[0] != $0[1] },
+            ])
+        }
+        host.activateTab(tabs[0])
+        return ["ok": true, "results": results]
+    }
+
     /// Posts a real mouseMoved over the page with a drag pasteboard in place and reports the view that answers the hit test, and the first view up its chain registered for the pasteboard's types: the view AppKit offers the drop to. `drag` is "sidebar" (a tab dragged from the sidebar) or "file" (a file dragged in from another app).
     private static func runDropTargetEvent(request: [String: Any], host: AppEnvironment, tabs: [TabID], window: NSWindow) async -> [String: Any] {
         guard let activeID = host.activeTabID, let spaceID = host.activeSpace?.id,
@@ -140,6 +197,9 @@ enum AppInteractionProbe {
     static func run(request: [String: Any], host: AppEnvironment, tabs: [TabID], window: NSWindow) async -> [String: Any] {
         if request["scenario"] as? String == "journey" {
             return await AppJourneyProbe.run(request: request, host: host, window: window)
+        }
+        if request["scenario"] as? String == "sidebarClick" {
+            return await runSidebarClick(request: request, host: host, tabs: tabs, window: window)
         }
         if request["scenario"] as? String == "dropTargetEvent" {
             return await runDropTargetEvent(request: request, host: host, tabs: tabs, window: window)

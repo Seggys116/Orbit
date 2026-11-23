@@ -294,6 +294,7 @@ def main(argv):
     parser.add_argument("--virtual-display", action="store_true", help="open the window on a virtual display instead of a real screen (moves the display arrangement while it exists)")
     parser.add_argument("--drop-target", action="store_true", help="check that a sidebar drag over the page lands on the split drop target when the app reports mouseMoved (events are posted inside the app; no cursor is used)")
     parser.add_argument("--file-drop", action="store_true", help="check that a file dragged in from another app is offered to the page itself and not to a view that would turn it away (events are posted inside the app; no cursor is used)")
+    parser.add_argument("--sidebar-click", action="store_true", help="press and release over every click target in the sidebar with events sent through the window (no cursor) and report which tab each click opened; two of the pages are split first")
     parser.add_argument("--sites", default="", help="comma list of real page addresses (at least three) opened instead of the local colour pages; timing only, since their pixels are not known colours")
     parser.add_argument("--sample", default="", help="scenario to sample the app's main thread during, with /usr/bin/sample")
     options = parser.parse_args(argv)
@@ -368,6 +369,17 @@ def main(argv):
             if counted == 0:
                 raise Fail("no attempt saw the drag still in flight")
             return 1 if failed else 0
+        if options.sidebar_click:
+            report = launch.command("interact", scenario="sidebarClick", clicks=3)
+            bad = 0
+            for item in report["results"]:
+                print(f"click at {item['frame']}: window handed it to {item['hit']} (the catcher itself: {item['hitIsThisCatcher']}); active page before -> after {item['outcomes']}")
+                print(f"   one hit test takes {item['hitMicroseconds']} microseconds here")
+                print(f"   catcher sits in: {' > '.join(item['chain'][:12])}")
+                if not item["opensSomething"]:
+                    bad += 1
+            print(f"{len(report['results'])} click targets, {bad} where a click opened nothing")
+            return 1 if bad else 0
         if options.file_drop:
             seen = launch.command("interact", scenario="dropTargetEvent", drag="file")["seen"]
             print(f"file drop: hit {seen.get('hit')}, offered to {seen.get('destination')}, current event {seen.get('currentEvent')}")

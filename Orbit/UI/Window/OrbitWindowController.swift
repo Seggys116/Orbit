@@ -311,12 +311,14 @@ final class OrbitWindowContentView: NSView {
         return OrbitWindowContentView.topmostClickCatcher(in: self, atPointInWindow: convert(point, to: nil)) ?? resolved
     }
 
-    // NSHostingView<...> and _NSGraphicsView are SwiftUI internals with no public symbol
-    // to reference, hence the name match.
+    // Any view SwiftUI itself owns can be what AppKit's walk lands on: NSHostingView<...>, _NSGraphicsView, and the
+    // PlatformGroupContainer it puts around a row that has a drag source. None has a public symbol to reference, so the
+    // framework the class lives in is the test, with the two long-standing names kept for stand-ins in tests.
     static func isSwiftUIContainer(_ view: NSView?) -> Bool {
         guard let view else { return false }
         let name = "\(type(of: view))"
-        return name.hasPrefix("NSHostingView") || name == "_NSGraphicsView"
+        if name.hasPrefix("NSHostingView") || name == "_NSGraphicsView" { return true }
+        return Bundle(for: type(of: view)).bundleIdentifier == "com.apple.SwiftUI"
     }
 
     static func topmostClickCatcher(in root: NSView, atPointInWindow pointInWindow: NSPoint) -> NSView? {
