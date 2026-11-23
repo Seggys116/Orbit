@@ -36,6 +36,8 @@ enum AppInteractionProbe {
         case enterSplitKeyboard
         case enterSplitBlank
         case enterSplitLoaded
+        case enterSplitLeft
+        case enterSplitMiddle
         case leaveSplitClose
         case leaveSplitSeparate
         case closeTab
@@ -227,6 +229,7 @@ enum AppInteractionProbe {
         let context = Context(host: host, window: window, pages: pages, spaceID: space.id, capturePixels: capturePixels)
         context.dumpDirectory = dumpDirectory
         context.dumpName = name
+        context.dumpAllFrames = request["dumpFrames"] as? Bool ?? false
 
         var results: [[String: Any]] = []
         for iteration in 0..<iterations {
@@ -376,6 +379,9 @@ enum AppInteractionProbe {
         // first few wrong frames are written here as images
         var dumpDirectory: URL?
         var dumpName = ""
+        /// Saves every frame of the interaction, to look at a motion and not only to count faults.
+        var dumpAllFrames = false
+        private var framesSaved = 0
         private var dumped = 0
 
         init(host: AppEnvironment, window: NSWindow, pages: [Page], spaceID: SpaceID, capturePixels: Bool) {
@@ -474,6 +480,16 @@ enum AppInteractionProbe {
                 return Plan(duration: 1.0, expecting: [first], action: {
                     host.createSplit(existingTabID: first.tabID, newTabID: pages[1].tabID, edge: .right)
                 }, cleanup: { [self] in await settle(0.3) })
+            case .enterSplitMiddle:
+                host.createSplit(existingTabID: first.tabID, newTabID: pages[1].tabID, edge: .right)
+                await settle(0.9)
+                return Plan(duration: 1.0, expecting: [first, pages[1]], action: {
+                    host.createSplit(existingTabID: first.tabID, newTabID: pages[2].tabID, edge: .right)
+                }, cleanup: { [self] in await settle(0.3) })
+            case .enterSplitLeft:
+                return Plan(duration: 1.0, expecting: [first], action: {
+                    host.createSplit(existingTabID: first.tabID, newTabID: pages[1].tabID, edge: .left)
+                }, cleanup: { [self] in await settle(0.3) })
             case .leaveSplitClose:
                 _ = host.perform(.addSplit)
                 await settle(0.9)
@@ -540,6 +556,11 @@ enum AppInteractionProbe {
         /// What is wrong with a pane showing `expected`: the page is missing, hidden, or not the page's colour.
         func defects(for expected: [Page]) -> [String] {
             let full: CGImage? = capturePixels ? WindowPixelCapture.image(of: window) : nil
+            if dumpAllFrames, let full, let directory = dumpDirectory, framesSaved < 40 {
+                framesSaved += 1
+                try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try? NSBitmapImageRep(cgImage: full).representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent(String(format: "%@-frame-%02d.png", dumpName, framesSaved)))
+            }
             var found: [String] = []
             defer {
                 if !found.isEmpty, let full, let directory = dumpDirectory, dumped < 6 {

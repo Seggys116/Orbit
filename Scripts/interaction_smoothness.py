@@ -41,6 +41,8 @@ SCENARIOS = [
     ("rapidSwitch", "Switch eight tabs 25ms apart"),
     ("focusPane", "Move focus between panes"),
     ("enterSplitLoaded", "Enter split (two loaded pages)"),
+    ("enterSplitLeft", "Enter split on the left edge"),
+    ("enterSplitMiddle", "Drop a third page between two"),
     ("enterSplitBlank", "Enter split (blank pane)"),
     ("enterSplitKeyboard", "Enter split (keyboard)"),
     ("leaveSplitClose", "Leave split (close one pane)"),
@@ -296,6 +298,7 @@ def main(argv):
     parser.add_argument("--file-drop", action="store_true", help="check that a file dragged in from another app is offered to the page itself and not to a view that would turn it away (events are posted inside the app; no cursor is used)")
     parser.add_argument("--sidebar-click", action="store_true", help="press and release over every click target in the sidebar with events sent through the window (no cursor) and report which tab each click opened; two of the pages are split first")
     parser.add_argument("--raise-window", action="store_true", help="bring the test window above other windows (without activating the app or touching the cursor) when WebKit cannot see it; pixel checks are only valid while it is visible")
+    parser.add_argument("--dump-frames", action="store_true", help="save every frame of the pixel runs (up to 40 each) beside the other frames, to look at a motion")
     parser.add_argument("--sites", default="", help="comma list of real page addresses (at least three) opened instead of the local colour pages; timing only, since their pixels are not known colours")
     parser.add_argument("--sample", default="", help="scenario to sample the app's main thread during, with /usr/bin/sample")
     options = parser.parse_args(argv)
@@ -411,7 +414,7 @@ def main(argv):
             timing = launch.command("interact", scenario=name, iterations=options.iterations, pixels=False, colours=colours, **{"raise": options.raise_window})
             if sampler is not None:
                 sampler.wait()
-            pixels = {"iterations": []} if sites else launch.command("interact", scenario=name, iterations=options.pixel_iterations, pixels=True, colours=colours, dumpDir=os.path.join(options.output, "frames"), **{"raise": options.raise_window})
+            pixels = {"iterations": []} if sites else launch.command("interact", scenario=name, iterations=options.pixel_iterations, pixels=True, colours=colours, dumpDir=os.path.join(options.output, "frames"), dumpFrames=options.dump_frames, **{"raise": options.raise_window})
             results[name] = {"timing": timing, "pixels": pixels}
     finally:
         launch.stop()

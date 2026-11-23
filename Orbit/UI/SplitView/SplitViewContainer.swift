@@ -19,6 +19,9 @@ struct SplitViewContainer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var rootTabID: TabID
 
+    /// Which slot of the layout each page sits in. A page keeps its slot, and so its host, when panes arrive before it or leave ahead of it.
+    @State private var slots = SplitPaneSlots()
+
     #if DEBUG
     // ImageRenderer cannot flatten a representable and paints a corruption artifact instead; the artifact would land precisely in the seam a render test measures, so the view must be absent from the render entirely, not merely disarmed.
     @Environment(\.orbitScreenshotModeDragDisabled) private var screenshotModeRepresentableDisabled
@@ -100,11 +103,37 @@ struct SplitViewContainer: View {
         reduceMotion ? OrbitMotion.fade : OrbitMotion.standard
     }
 
-    /// A pane arriving slides in from its own edge. One leaving is simply gone, since its space is taken by the neighbour at once and a fade there would play over the page that replaced it.
-    private func paneTransition(index: Int, orientation: SplitOrientation) -> AnyTransition {
-        if reduceMotion { return .asymmetric(insertion: .opacity, removal: .identity) }
-        let edge: Edge = orientation == .horizontal ? (index == 0 ? .leading : .trailing) : (index == 0 ? .top : .bottom)
-        return .asymmetric(insertion: .move(edge: edge).combined(with: .opacity), removal: .identity)
+    /// What a pane is doing while a pane arrives in the split. The layout is already final. Every pane is drawn where it was and eases to where it lands: the panes squeeze toward their new places, and the arriving pane fades up in the room they make, so a drop on the left, on the top, or between two panes of a split all read as the page being pushed aside from the side it was dropped on. What is drawn wider than its place overflows it instead of moving its neighbours. One leaving is simply gone, since its space is taken by the neighbour at once and a fade there would play over the page that replaced it.
+    struct PaneMotion: Equatable {
+        /// Where the pane is drawn, from its place, along the split's axis.
+        var shift: CGFloat = 0
+        var opacity: Double = 1
+        /// How much longer than its place the pane is drawn, along the split's axis.
+        var extraLength: CGFloat = 0
+        var isMoving: Bool { shift != 0 || extraLength != 0 }
+    }
+
+    /// A page is laid out again for every frame it is resized, and with several in motion that costs more than a frame, so only a pane that is the one other page in the layout is squeezed (its length eased); with more, the panes keep their length and are slid aside, which only moves what is drawn.
+    static let squeezedPaneLimit = 2
+
+    /// `lengths` are the panes' lengths along the axis now, `divider` the thickness between them. Before the arrival the other panes shared the same span evenly.
+    static func paneMotion(
+        motion: SplitMotion?, index: Int, tabIDs: [TabID], lengths: [CGFloat], divider: CGFloat, reduceMotion: Bool
+    ) -> PaneMotion {
+        guard let motion, let arrivingIndex = tabIDs.firstIndex(of: motion.arrivingTabID), tabIDs.count > 1,
+              lengths.count == tabIDs.count, lengths.indices.contains(index) else { return PaneMotion() }
+        let remaining = max(0, min(1, 1 - motion.progress))
+        if index == arrivingIndex { return PaneMotion(opacity: Double(min(1, motion.progress * 1.6))) }
+        guard !reduceMotion else { return PaneMotion() }
+
+        let before = tabIDs.count - 1
+        let span = lengths.reduce(0, +) + CGFloat(tabIDs.count - 1) * divider
+        let oldLength = max(0, (span - CGFloat(before - 1) * divider) / CGFloat(before))
+        let oldIndex = index < arrivingIndex ? index : index - 1
+        let oldStart = CGFloat(oldIndex) * (oldLength + divider)
+        let newStart = lengths[..<index].reduce(0) { $0 + $1 + divider }
+        let squeezes = tabIDs.count <= squeezedPaneLimit
+        return PaneMotion(shift: (oldStart - newStart) * remaining, extraLength: squeezes ? (oldLength - lengths[index]) * remaining : 0)
     }
 
     @ViewBuilder
@@ -112,11 +141,23 @@ struct SplitViewContainer: View {
         let dividerCount = max(0, tabIDs.count - 1)
         let available = max(0, total - CGFloat(dividerCount) * OrbitMetrics.splitDividerThickness)
         let lastIndex = tabIDs.count - 1
-        ForEach(Array(tabIDs.enumerated()), id: \.offset) { index, tabID in
+        let lengths = tabIDs.indices.map { i -> CGFloat in
+            available * CGFloat(group.map { $0.fractions.indices.contains(i) ? $0.fractions[i] : 1.0 / Double(tabIDs.count) } ?? 1.0)
+        }
+        let keys = slots.keys(for: tabIDs)
+        let entries = tabIDs.enumerated().map { PaneEntry(index: $0.offset, tabID: $0.element, key: keys[$0.offset]) }
+        ForEach(entries, id: \.key) { entry in
+            let index = entry.index
+            let tabID = entry.tabID
             if let tab = env.tab(tabID) {
                 let fraction = group.map { $0.fractions.indices.contains(index) ? $0.fractions[index] : 1.0 / Double(tabIDs.count) } ?? 1.0
                 let length = available * CGFloat(fraction)
+                let motion = Self.paneMotion(motion: env.splitMotion, index: index, tabIDs: tabIDs, lengths: lengths, divider: OrbitMetrics.splitDividerThickness, reduceMotion: reduceMotion)
                 // Padding applied before .frame(width:), not after: SwiftUI's .padding() adds to a view's ideal size, so padding an already-fixed view would overflow the total width instead of shrinking the inner content.
+                let leadingGap = (orientation == .horizontal && index > 0) ? OrbitSplitPaneMetrics.paneGap : 0
+                let trailingGap = (orientation == .horizontal && index < lastIndex) ? OrbitSplitPaneMetrics.paneGap : 0
+                let topGap = (orientation == .vertical && index > 0) ? OrbitSplitPaneMetrics.paneGap : 0
+                let bottomGap = (orientation == .vertical && index < lastIndex) ? OrbitSplitPaneMetrics.paneGap : 0
                 SingleTabContentView(tab: tab, isFocusedPane: group == nil || env.focusedSplitPaneIndex == index)
                     .transformEnvironment(\.paneCardFlushEdges) { edges in
                         let innerLeading = orientation == .horizontal && index > 0
@@ -128,16 +169,25 @@ struct SplitViewContainer: View {
                         if innerTop { edges.remove(.top) }
                         if innerBottom { edges.remove(.bottom) }
                     }
-                    .padding(.leading, (orientation == .horizontal && index > 0) ? OrbitSplitPaneMetrics.paneGap : 0)
-                    .padding(.trailing, (orientation == .horizontal && index < lastIndex) ? OrbitSplitPaneMetrics.paneGap : 0)
-                    .padding(.top, (orientation == .vertical && index > 0) ? OrbitSplitPaneMetrics.paneGap : 0)
-                    .padding(.bottom, (orientation == .vertical && index < lastIndex) ? OrbitSplitPaneMetrics.paneGap : 0)
+                    // The page is given its own length plus the motion's extra, and the place it takes in the row stays `length` below: what overflows the place is drawn over the neighbour.
+                    .frame(
+                        width: orientation == .horizontal ? max(0, length - leadingGap - trailingGap + motion.extraLength) : nil,
+                        height: orientation == .vertical ? max(0, length - topGap - bottomGap + motion.extraLength) : nil,
+                        alignment: orientation == .horizontal ? .leading : .top
+                    )
+                    .padding(.leading, leadingGap)
+                    .padding(.trailing, trailingGap)
+                    .padding(.top, topGap)
+                    .padding(.bottom, bottomGap)
                     .frame(
                         width: orientation == .horizontal ? length : nil,
-                        height: orientation == .vertical ? length : nil
+                        height: orientation == .vertical ? length : nil,
+                        alignment: orientation == .horizontal ? .leading : .top
                     )
-                    // The page already there takes its new size in one step. Only the arriving pane's transition animates.
+                    // The page already there takes its new size in one step; what moves is the arrival's motion, below, which only transforms what is drawn.
                     .animation(nil, value: tabIDs.count)
+                    .offset(x: orientation == .horizontal ? motion.shift : 0, y: orientation == .vertical ? motion.shift : 0)
+                    .opacity(motion.opacity)
                     // A plain .onTapGesture here would win the mouse-down/up pair before AppKit routes it to the embedded engine view, swallowing the first click on any page control. SplitPaneFocusObserver observes instead of claiming the click.
                     .background {
                         if mountsFocusObserver, group != nil {
@@ -152,12 +202,45 @@ struct SplitViewContainer: View {
                             )
                         }
                     }
-                    .transition(paneTransition(index: index, orientation: orientation))
+                    .transition(.identity)
             }
             if index < lastIndex, let group {
                 SplitDividerView(group: group, dividerIndex: index, orientation: orientation, totalLength: available)
             }
         }
+    }
+}
+
+/// A pane of the layout: where it sits now, which page, and the slot that page holds.
+private struct PaneEntry {
+    var index: Int
+    var tabID: TabID
+    var key: Int
+}
+
+/// Remembers which slot of the layout each page occupies, so a page keeps its host (and is not re-embedded) when panes arrive in front of it, between it and another, or leave ahead of it. Panes were keyed by position, which moved every later page into a different host and showed it blank until WebKit painted it again.
+///
+/// A page that was in the layout keeps its slot. A page that takes the place of one that left (a lone pane showing another tab) takes that slot, so switching tabs still swaps the page inside the same host. Any other page gets a new slot.
+final class SplitPaneSlots {
+    private var slots: [(key: Int, tab: TabID)] = []
+    private var nextKey = 0
+
+    func keys(for tabIDs: [TabID]) -> [Int] {
+        let previous = slots
+        var vacated = previous.filter { !tabIDs.contains($0.tab) }.map(\.key)
+        var assigned: [(key: Int, tab: TabID)] = []
+        for tab in tabIDs {
+            if let kept = previous.first(where: { $0.tab == tab }) {
+                assigned.append(kept)
+            } else if !vacated.isEmpty {
+                assigned.append((vacated.removeFirst(), tab))
+            } else {
+                assigned.append((nextKey, tab))
+                nextKey += 1
+            }
+        }
+        slots = assigned
+        return assigned.map(\.key)
     }
 }
 

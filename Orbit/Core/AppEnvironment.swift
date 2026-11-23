@@ -299,6 +299,8 @@ final class AppEnvironment {
         }
     }
     var activeSplitDropZone: SplitDropZone?
+    /// The motion of a pane arriving in a split: which pane, from which edge, and how far along it is (0 as it starts, 1 when it has landed). Nil when nothing is arriving.
+    var splitMotion: SplitMotion?
 
     // .zero until the first layout pass, which preferredSplitOrientation(paneCount:) handles explicitly.
     var contentAreaSize: CGSize = .zero

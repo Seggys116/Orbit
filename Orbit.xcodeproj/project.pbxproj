@@ -1187,6 +1187,7 @@
 		A6F1BAA10018F7B0F1A90F4F /* WebKitDownloadsLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2974D501709942D80E64AA24 /* WebKitDownloadsLiveTests.swift */; };
 		A71A16DD0181B90A8D7F8C25 /* EaselTeardownRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E2B4464249BDB0984E3B938 /* EaselTeardownRegressionTests.swift */; };
 		A7287518FE9D97697B92AF1D /* AppSmokeProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF0D49257F30FF350CC07851 /* AppSmokeProbe.swift */; };
+		A74C005C721C2437EF3100B8 /* SplitPaneSlotsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01BA1D9E9578525386A2A7B /* SplitPaneSlotsTests.swift */; };
 		A7618C9BBE4B2D5C726B7BF2 /* OrbitHoverPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D923BC840C63E8A09BC909A /* OrbitHoverPopover.swift */; };
 		A776467AC4492094C952EDB0 /* OrbitScreenshotFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A324AFFB0313B151D866B9 /* OrbitScreenshotFixtures.swift */; };
 		A788A8BB592C3D377CFC8F08 /* LibraryPreviewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1C3D258A1EE6E1B0ADC47B /* LibraryPreviewModel.swift */; };
@@ -2868,6 +2869,7 @@
 		DFF31B789ADA00E28EA9EF42 /* OrbitSecurityPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitSecurityPane.swift; sourceTree = "<group>"; };
 		E00C27776983470DA2E50649 /* PendingSiteDataInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSiteDataInstaller.swift; sourceTree = "<group>"; };
 		E01A3A4D6DFAFD3B2B46B642 /* TabActivationLoadLiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabActivationLoadLiveTests.swift; sourceTree = "<group>"; };
+		E01BA1D9E9578525386A2A7B /* SplitPaneSlotsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneSlotsTests.swift; sourceTree = "<group>"; };
 		E04224F2A5A839156F68994A /* OrbitAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitAppDelegate.swift; sourceTree = "<group>"; };
 		E0F66A7939841356676BF868 /* CloseTabSuccessorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloseTabSuccessorTests.swift; sourceTree = "<group>"; };
 		E0FDF540740AE891C38E8D38 /* ShortcutModifierMaskingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutModifierMaskingTests.swift; sourceTree = "<group>"; };
@@ -4264,6 +4266,7 @@
 				9B3D42BF671AC3BB6663B005 /* SplitNavigationLiveTests.swift */,
 				D58D6F3806A28F3EEAAF7D7C /* SplitPaneCloseControlTests.swift */,
 				8ABF0D35265343AD100DEA1D /* SplitPaneDropCatcherRealEventTests.swift */,
+				E01BA1D9E9578525386A2A7B /* SplitPaneSlotsTests.swift */,
 				A208EF8FE8E328F4C83897CE /* Support */,
 				58995320B0B37486112AE1FD /* SyncBackCompatDecodingTests.swift */,
 				2C192A217045E5CD26C56AA2 /* SyncProblemTests.swift */,
@@ -6117,6 +6120,7 @@
 				7083A009EA16883BAB352EF0 /* SplitNavigationLiveTests.swift in Sources */,
 				29A52E0AD5E50210E4750E6D /* SplitPaneCloseControlTests.swift in Sources */,
 				4D6D62AF210B606AA885C0E4 /* SplitPaneDropCatcherRealEventTests.swift in Sources */,
+				A74C005C721C2437EF3100B8 /* SplitPaneSlotsTests.swift in Sources */,
 				E3DC64A1FE33B89C0FC7B61B /* CapabilityProbe.swift in Sources */,
 				E7DDD881403ACB9B45A1C105 /* CorpusLiveTestCase.swift in Sources */,
 				EA8DE4DFD91C501DE15D0192 /* ExtensionCommandKeyEvents.swift in Sources */,

@@ -672,7 +672,7 @@ final class InteractionSmoothnessLiveTests: LiveEnvironmentTestCase {
             try await self.openAllPages()
             let (a, b, c) = (self.tabs[0], self.tabs[1], self.tabs[2])
             self.env.createSplit(existingTabID: a, newTabID: b, edge: .right)
-            self.env.createSplit(existingTabID: a, newTabID: c, edge: .right)
+            self.env.createSplit(existingTabID: b, newTabID: c, edge: .right)
             await self.settle(1.2)
             XCTAssertEqual(self.env.splitGroup(for: a)?.tabIDs, [a, b, c])
             let window = try XCTUnwrap(self.window)

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 typealias SplitOrientation = SplitGroup.Axis
 
@@ -42,6 +43,14 @@ struct SplitDropZone: Equatable {
 }
 
 // Single destination partitioned by its own diagonals: separate .dropDestinations positioned with .position(x:y:) would each register over the whole card since that modifier doesn't shrink the hit area.
+/// A pane arriving in a split. The layout is already in its final shape when this starts; the view moves the arriving pane in from `edge` and gives the pane beside it a squeeze, both as progress goes from 0 to 1, so the page is laid out once and only compositing moves.
+struct SplitMotion: Equatable {
+    var id = UUID()
+    var arrivingTabID: TabID
+    var edge: SplitEdge
+    var progress: CGFloat
+}
+
 enum SplitDropZoneGeometry {
     static func edge(
         at location: CGPoint,
@@ -106,10 +115,28 @@ extension AppEnvironment {
         }
 
         let orderedIDs = edge.insertsBefore ? [newTabID, existingTabID] : [existingTabID, newTabID]
-        guard let groupID = store.createSplit(with: orderedIDs, axis: edge.orientation) else { return nil }
+        beginSplitMotion(arriving: newTabID, edge: edge)
+        guard let groupID = store.createSplit(with: orderedIDs, axis: edge.orientation) else {
+            splitMotion = nil
+            return nil
+        }
         materializeWebContents(for: newTabID, url: store.tab(newTabID)?.url ?? URL(string: "orbit://new-tab")!, isWake: true)
         activateTab(existingTabID)
         return groupID
+    }
+
+    /// Starts a pane's arrival at progress 0 in the same turn as the layout change, so the first frame already shows it at its start, and eases progress to 1 on the next turn. The motion is cleared once it has landed, so a settled split carries no transform.
+    func beginSplitMotion(arriving tabID: TabID, edge: SplitEdge) {
+        let motion = SplitMotion(arrivingTabID: tabID, edge: edge, progress: 0)
+        splitMotion = motion
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.splitMotion?.id == motion.id else { return }
+            withAnimation(OrbitMotion.standard) { self.splitMotion?.progress = 1 }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+            guard let self, self.splitMotion?.id == motion.id else { return }
+            self.splitMotion = nil
+        }
     }
 
     // Sets the group's axis to edge's own orientation — a pane added from a
@@ -118,6 +145,7 @@ extension AppEnvironment {
     @discardableResult
     func addToSplit(tabID: TabID, groupID: UUID, edge: SplitEdge, beside anchorTabID: TabID? = nil) -> UUID? {
         guard let group = state.splitGroups[groupID] else { return nil }
+        beginSplitMotion(arriving: tabID, edge: edge)
         // Dropped on a pane of the split, the new pane goes beside that pane, on the side that was shown; with no pane named (the layout menu, the keyboard) it goes at that end of the split.
         let insertIndex: Int?
         if let anchorTabID, let anchorIndex = group.tabIDs.firstIndex(of: anchorTabID) {
@@ -125,7 +153,10 @@ extension AppEnvironment {
         } else {
             insertIndex = edge.insertsBefore ? 0 : nil
         }
-        guard store.addToSplit(tabID, groupID: groupID, at: insertIndex) else { return groupID }
+        guard store.addToSplit(tabID, groupID: groupID, at: insertIndex) else {
+            splitMotion = nil
+            return groupID
+        }
         store.setSplitAxis(edge.orientation, forGroup: groupID)
         materializeWebContents(for: tabID, url: store.tab(tabID)?.url ?? URL(string: "orbit://new-tab")!, isWake: true)
         // The pane that just arrived takes focus, as the active tab, when the split is the one on screen.
