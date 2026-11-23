@@ -1014,6 +1014,8 @@ final class OrbitLighthouseModel: OrbitInspectModule {
     }
 
     private func setStep(_ text: String, progress: Double) {
+        // A cancelled run keeps going until it next checks, and passes steps on the way: it must not put the panel back to running, with nothing left to end it.
+        guard !Task.isCancelled else { return }
         runState = .running(step: text, progress: progress)
     }
 
