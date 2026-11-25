@@ -824,6 +824,81 @@ final class CloudSyncEngineTests: XCTestCase {
         XCTAssertEqual(second._test_cachedRecordNames, cached)
     }
 
+    private func makeEngine(
+        store: any SyncableStore,
+        transport: RecordingSyncTransport,
+        cacheWriteDelay: Duration
+    ) -> CloudSyncEngine {
+        CloudSyncEngine(
+            store: store,
+            transport: transport,
+            rootDirectory: scratch,
+            pushDebounce: .milliseconds(20),
+            cacheWriteDelay: cacheWriteDelay
+        )
+    }
+
+    func testTheCachesAreNotRewrittenForEachChangeButFlushWritesThemAtOnce() async throws {
+        let fixture = makeFixture(includeIncognito: false)
+        let store = StubSyncableStore(state: fixture.state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(
+            store: store, transport: transport, cacheWriteDelay: .seconds(3600)
+        )
+        engine.reconcile()
+        acceptQueuedSaves(engine: engine, transport: transport)
+        XCTAssertFalse(engine._test_cachedRecordNames.isEmpty, "Nothing was cached, so nothing was waiting to be written.")
+        let recordCache = scratch.appendingPathComponent("record-cache.json")
+
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: recordCache.path),
+            "A change wrote the whole cache at once, which is what made every tab change cost a full rewrite."
+        )
+
+        engine.flushPendingCacheWrites()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recordCache.path))
+    }
+
+    func testTheCachesAreWrittenOnTheirOwnOnceTheDelayHasPassed() async throws {
+        let fixture = makeFixture(includeIncognito: false)
+        let store = StubSyncableStore(state: fixture.state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(
+            store: store, transport: transport, cacheWriteDelay: .milliseconds(100)
+        )
+        engine.reconcile()
+        acceptQueuedSaves(engine: engine, transport: transport)
+        XCTAssertFalse(engine._test_cachedRecordNames.isEmpty, "Nothing was cached, so nothing was waiting to be written.")
+        let recordCache = scratch.appendingPathComponent("record-cache.json")
+
+        var waited = 0
+        while !FileManager.default.fileExists(atPath: recordCache.path), waited < 100 {
+            try await Task.sleep(for: .milliseconds(50))
+            waited += 1
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recordCache.path), "The delayed write never happened without a flush.")
+    }
+
+    func testClearingLocalCachesCancelsAWriteStillWaitingForItsDelay() {
+        let fixture = makeFixture(includeIncognito: false)
+        let store = StubSyncableStore(state: fixture.state)
+        let transport = RecordingSyncTransport()
+        let engine = makeEngine(
+            store: store, transport: transport, cacheWriteDelay: .seconds(3600)
+        )
+        engine.reconcile()
+        acceptQueuedSaves(engine: engine, transport: transport)
+        XCTAssertFalse(engine._test_cachedRecordNames.isEmpty, "Nothing was cached, so nothing was waiting to be written.")
+
+        engine.clearLocalCaches()
+        engine.flushPendingCacheWrites()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scratch.appendingPathComponent("record-cache.json").path))
+    }
+
     func testSwitchingICloudAccountsClearsWhatThisDeviceThoughtItHadAlreadyPushed() {
         let fixture = makeFixture(includeIncognito: false)
         let store = StubSyncableStore(state: fixture.state)

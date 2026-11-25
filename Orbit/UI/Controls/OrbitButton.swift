@@ -65,11 +65,21 @@ struct OrbitButton: View {
 
     private var foreground: Color {
         switch kind {
-        case .primary: return .white
+        case .primary: return Self.primaryForeground(onAccent: accentColor)
         case .secondary: return OrbitControlColor.primaryForeground(for: colorScheme)
         case .destructive: return isHovering ? .white : Color.red
         case .ghost: return isHovering ? OrbitControlColor.primaryForeground(for: colorScheme) : OrbitControlColor.secondaryForeground(for: colorScheme)
         }
+    }
+
+    // white text on a light accent (a dark theme's near-white accent) is unreadable, so dark text is used past this brightness.
+    static let darkTextLuminanceThreshold = 0.5
+
+    static func primaryForeground(onAccent accent: Color) -> Color {
+        let c = accent.srgbComponents
+        func linear(_ v: Double) -> Double { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        let luminance = 0.2126 * linear(c.red) + 0.7152 * linear(c.green) + 0.0722 * linear(c.blue)
+        return luminance > darkTextLuminanceThreshold ? Color.black.opacity(0.85) : .white
     }
 
     @ViewBuilder

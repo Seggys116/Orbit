@@ -43,10 +43,20 @@ final class WebKitExtensionServices {
     let nativeMessaging = WebKitNativeMessaging()
     private(set) lazy var system = WebKitExtensionSystemAPIs(services: self)
     private(set) var entries: [String: WebKitExtensionEntry] = [:] {
-        didSet { anyExtensionMayUseWebRequest = entries.values.contains(where: Self.mayUseWebRequest) }
+        didSet {
+            anyExtensionMayUseWebRequest = entries.values.contains(where: Self.mayUseWebRequest)
+            anyExtensionMayUseCookies = entries.values.contains(where: Self.mayUseCookies)
+        }
     }
     /// False means no loaded extension can hold webRequest, so a per-request report has nobody to tell and skips building its details.
     private(set) var anyExtensionMayUseWebRequest = false
+    // false when no loaded extension can hold chrome.cookies
+    private(set) var anyExtensionMayUseCookies = false {
+        didSet {
+            if oldValue != anyExtensionMayUseCookies { onCookieWatchNeedChanged?(anyExtensionMayUseCookies) }
+        }
+    }
+    var onCookieWatchNeedChanged: (@MainActor (Bool) -> Void)?
     private var loadOrder: [String] = []
     private var pendingLifecycle: [String: [[String: Any]]] = [:]
     private var observers: [NSObjectProtocol] = []
@@ -67,6 +77,12 @@ final class WebKitExtensionServices {
         entry.webKitPermissions.contains("webRequest")
             || entry.declaredPermissions.contains("webRequest")
             || entry.optionalPermissions.contains("webRequest")
+    }
+
+    static func mayUseCookies(_ entry: WebKitExtensionEntry) -> Bool {
+        entry.webKitPermissions.contains("cookies")
+            || entry.declaredPermissions.contains("cookies")
+            || entry.optionalPermissions.contains("cookies")
     }
 
     func entry(for context: WKWebExtensionContext) -> WebKitExtensionEntry? {

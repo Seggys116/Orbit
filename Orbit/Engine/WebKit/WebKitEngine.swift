@@ -103,6 +103,7 @@ final class WebKitEngine: NSObject, BrowserEngine {
             .appendingPathComponent("ExtensionState", isDirectory: true)
         let services = WebKitExtensionServices(stateDirectory: directory)
         services.engine = self
+        services.onCookieWatchNeedChanged = { [weak self] needed in self?.updateCookieWatching(needed: needed) }
         return services
     }()
     private let navigationEventBridge = WebKitNavigationEventBridge()
@@ -559,7 +560,13 @@ final class WebKitEngine: NSObject, BrowserEngine {
         session.onCookieChanged = { [weak self] cookie, removed in
             self?.services.reportBrowserCookieChange(cookie, removed: removed)
         }
-        session.startWatchingCookies()
+        if services.anyExtensionMayUseCookies { session.startWatchingCookies() }
+    }
+
+    private func updateCookieWatching(needed: Bool) {
+        for session in sessions.values {
+            if needed { session.startWatchingCookies() } else { session.stopWatchingCookies() }
+        }
     }
 
     var defaultSession: EngineSession {

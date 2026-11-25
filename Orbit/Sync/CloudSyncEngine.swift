@@ -63,6 +63,8 @@ public final class CloudSyncEngine {
     private var pendingNoteAssetFiles: [URL] = []
 
     private let pushDebounce: Duration
+    private let cacheWriteDelay: Duration
+    private var cachePersistTask: Task<Void, Never>?
 
     nonisolated(unsafe) private var accountChangeObservationTask: Task<Void, Never>?
     nonisolated(unsafe) private var retryTask: Task<Void, Never>?
@@ -74,8 +76,10 @@ public final class CloudSyncEngine {
         store: (any SyncableStore)? = nil,
         transport: (any SyncTransport)? = nil,
         rootDirectory: URL? = nil,
-        pushDebounce: Duration = .milliseconds(750)
+        pushDebounce: Duration = .milliseconds(750),
+        cacheWriteDelay: Duration = .seconds(2)
     ) {
+        self.cacheWriteDelay = cacheWriteDelay
         self.transport = transport ?? CloudKitSyncTransport(
             containerIdentifier: Self.containerIdentifier,
             subscriptionID: Self.subscriptionID
@@ -389,8 +393,20 @@ public final class CloudSyncEngine {
         }
     }
 
+    // both files hold every record: a burst is written once after the delay, and flush writes at once
     private func persistCaches() {
         tombstones.prune()
+        guard cachePersistTask == nil else { return }
+        let delay = cacheWriteDelay
+        cachePersistTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            self.cachePersistTask = nil
+            self.writeCaches()
+        }
+    }
+
+    private func writeCaches() {
         let records = recordCache
         let log = tombstones
         cacheWriter.write(to: recordCacheURL) { SyncCacheWriter.encode(records) }
@@ -399,6 +415,11 @@ public final class CloudSyncEngine {
 
     /// Blocks until every queued cache write and delete has reached disk.
     public func flushPendingCacheWrites() {
+        if let task = cachePersistTask {
+            task.cancel()
+            cachePersistTask = nil
+            writeCaches()
+        }
         cacheWriter.flush()
     }
 
@@ -1226,6 +1247,8 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
     // serialised state. Nothing is deleted from iCloud.
     public func clearLocalCaches() {
         resetForAccountSwitch()
+        cachePersistTask?.cancel()
+        cachePersistTask = nil
         cacheWriter.remove([recordCacheURL, tombstoneLogURL, stateSerializationURL])
     }
 

@@ -70,14 +70,20 @@ final class WebKitSession: EngineSession {
     private var knownCookies: [String: HTTPCookie] = [:]
     private var cookieObserver: CookieStoreObserver?
     private var cookieWatchStarted = false
+    private var cookieWatchGeneration = 0
+    private var cookieFetchInFlight = false
+    private var cookieFetchDirty = false
 
+    // each change report costs a read of the whole store, so this runs only while an extension can hold chrome.cookies
     func startWatchingCookies() {
         guard !cookieWatchStarted else { return }
         cookieWatchStarted = true
+        cookieWatchGeneration += 1
+        let generation = cookieWatchGeneration
         let store = dataStore.httpCookieStore
         store.getAllCookies { [weak self] cookies in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.cookieWatchGeneration == generation, self.cookieWatchStarted else { return }
                 self.knownCookies = Self.indexCookies(cookies)
                 let observer = CookieStoreObserver(session: self)
                 self.cookieObserver = observer
@@ -85,6 +91,43 @@ final class WebKitSession: EngineSession {
             }
         }
     }
+
+    func stopWatchingCookies() {
+        guard cookieWatchStarted else { return }
+        cookieWatchStarted = false
+        cookieWatchGeneration += 1
+        cookieFetchInFlight = false
+        cookieFetchDirty = false
+        if let observer = cookieObserver { dataStore.httpCookieStore.remove(observer) }
+        cookieObserver = nil
+        knownCookies = [:]
+    }
+
+    // one store read at a time, so a burst of changes costs one more read when it ends, not one each
+    fileprivate func cookiesMayHaveChanged() {
+        guard cookieWatchStarted else { return }
+        guard !cookieFetchInFlight else {
+            cookieFetchDirty = true
+            return
+        }
+        cookieFetchInFlight = true
+        let generation = cookieWatchGeneration
+        dataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+            Task { @MainActor in
+                guard let self, self.cookieWatchGeneration == generation else { return }
+                self.noteCookies(cookies)
+                try? await Task.sleep(for: Self.cookieReadSpacing)
+                guard self.cookieWatchGeneration == generation else { return }
+                self.cookieFetchInFlight = false
+                if self.cookieFetchDirty {
+                    self.cookieFetchDirty = false
+                    self.cookiesMayHaveChanged()
+                }
+            }
+        }
+    }
+
+    static let cookieReadSpacing: Duration = .milliseconds(250)
 
     fileprivate func noteCookies(_ cookies: [HTTPCookie]) {
         var next: [String: HTTPCookie] = [:]
@@ -362,10 +405,8 @@ private final class CookieStoreObserver: NSObject, WKHTTPCookieStoreObserver {
     }
 
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
-        cookieStore.getAllCookies { [weak self] cookies in
-            Task { @MainActor in
-                self?.session?.noteCookies(cookies)
-            }
+        Task { @MainActor [weak self] in
+            self?.session?.cookiesMayHaveChanged()
         }
     }
 }
