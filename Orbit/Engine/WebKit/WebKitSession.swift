@@ -103,7 +103,7 @@ final class WebKitSession: EngineSession {
         knownCookies = [:]
     }
 
-    // one store read at a time, so a burst of changes costs one more read when it ends, not one each
+    // one store read at a time, repeated while reads still find changes, so a burst costs a few reads, not one per change
     fileprivate func cookiesMayHaveChanged() {
         guard cookieWatchStarted else { return }
         guard !cookieFetchInFlight else {
@@ -115,11 +115,11 @@ final class WebKitSession: EngineSession {
         dataStore.httpCookieStore.getAllCookies { [weak self] cookies in
             Task { @MainActor in
                 guard let self, self.cookieWatchGeneration == generation else { return }
-                self.noteCookies(cookies)
+                let changed = self.noteCookies(cookies)
                 try? await Task.sleep(for: Self.cookieReadSpacing)
                 guard self.cookieWatchGeneration == generation else { return }
                 self.cookieFetchInFlight = false
-                if self.cookieFetchDirty {
+                if self.cookieFetchDirty || changed {
                     self.cookieFetchDirty = false
                     self.cookiesMayHaveChanged()
                 }
@@ -129,19 +129,24 @@ final class WebKitSession: EngineSession {
 
     static let cookieReadSpacing: Duration = .milliseconds(250)
 
-    fileprivate func noteCookies(_ cookies: [HTTPCookie]) {
+    @discardableResult
+    fileprivate func noteCookies(_ cookies: [HTTPCookie]) -> Bool {
+        var changed = false
         var next: [String: HTTPCookie] = [:]
         for cookie in cookies {
             let key = Self.cookieKey(cookie)
             next[key] = cookie
             if knownCookies[key] == nil {
+                changed = true
                 onCookieChanged?(cookie, false)
             }
         }
         for (key, cookie) in knownCookies where next[key] == nil {
+            changed = true
             onCookieChanged?(cookie, true)
         }
         knownCookies = next
+        return changed
     }
 
     private static func cookieKey(_ cookie: HTTPCookie) -> String {
