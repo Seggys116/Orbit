@@ -10,6 +10,8 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
     // OrbitDemoAppDelegate overrides it, and .shared would build the real environment in the demo process.
     var host: AppEnvironment { .shared }
 
+    private var dockDownloadProgress: DockDownloadProgress?
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         if !SingleInstanceGuard.claim() {
@@ -37,6 +39,8 @@ class OrbitAppDelegate: NSObject, NSApplicationDelegate {
 
         // Before anything else can name AppEnvironment.shared by accident.
         AppEnvironment.processRoot = host
+
+        dockDownloadProgress = DockDownloadProgress(store: host.downloadStore)
 
         // Before the first window opens, so no surface ever paints a stock 17pt scroller first.
         OrbitScrollerInstaller.start()
@@ -314,5 +318,130 @@ final class DockWindowMenuItem: NSMenuItem {
         NSApp.activate(ignoringOtherApps: true)
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
+    }
+}
+
+
+/// Draws downloads on the Dock icon: a progress bar across the bottom of the app icon, a count badge when more than one is running, and a single bounce when one finishes while Orbit is in the background.
+@MainActor
+final class DockDownloadProgress {
+    private let store: DownloadStore
+    private let tile: NSDockTile
+    private let iconView = DockProgressIconView(frame: NSRect(x: 0, y: 0, width: 128, height: 128))
+    private var observers: [NSObjectProtocol] = []
+    private var sweepTimer: Timer?
+
+    init(store: DownloadStore, tile: NSDockTile = NSApp.dockTile) {
+        self.store = store
+        self.tile = tile
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: .orbitDownloadActivityChanged, object: store, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        })
+        observers.append(center.addObserver(forName: .orbitDownloadFinished, object: store, queue: .main) { [weak self] note in
+            let destination = (note.userInfo?["item"] as? DownloadItem)?.destinationURL
+            MainActor.assumeIsolated { self?.downloadFinished(destination: destination) }
+        })
+        refresh()
+    }
+
+    private func refresh() {
+        let activity = store.activity
+        guard activity.isActive else {
+            sweepTimer?.invalidate()
+            sweepTimer = nil
+            tile.badgeLabel = nil
+            tile.contentView = nil
+            tile.display()
+            return
+        }
+        iconView.fraction = activity.fraction
+        tile.badgeLabel = activity.activeCount > 1 ? "\(activity.activeCount)" : nil
+        if tile.contentView !== iconView { tile.contentView = iconView }
+        updateSweep(indeterminate: activity.fraction == nil)
+        tile.display()
+    }
+
+    // An unknown size has no fraction to show, so the bar runs a short segment back and forth instead.
+    private func updateSweep(indeterminate: Bool) {
+        guard indeterminate, !OrbitMotion.prefersReducedMotion else {
+            sweepTimer?.invalidate()
+            sweepTimer = nil
+            iconView.sweepPhase = 0
+            return
+        }
+        guard sweepTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.iconView.sweepPhase = (self.iconView.sweepPhase + 0.035).truncatingRemainder(dividingBy: 2)
+                self.tile.display()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        sweepTimer = timer
+    }
+
+    private func downloadFinished(destination: URL?) {
+        if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
+        // The same signal Safari sends, so the Downloads stack in the Dock bounces and shows the new file.
+        if let destination, let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first,
+           destination.standardizedFileURL.path.hasPrefix(downloads.standardizedFileURL.path + "/") {
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("com.apple.DownloadFileFinished"),
+                object: destination.path,
+                userInfo: nil,
+                deliverImmediately: true
+            )
+        }
+    }
+}
+
+/// The Dock tile's content while a download runs: the app icon with the progress bar over it.
+final class DockProgressIconView: NSView {
+    var fraction: Double? { didSet { needsDisplay = true } }
+    /// 0 ..< 2, used only when `fraction` is nil: the segment travels right across 0 ..< 1 and back across 1 ..< 2.
+    var sweepPhase: Double = 0 { didSet { needsDisplay = true } }
+    var icon: NSImage? = NSApp.applicationIconImage
+
+    override var isFlipped: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        icon?.draw(in: bounds)
+        let side = bounds.width
+        let barHeight = side * 0.105
+        let inset = side * 0.14
+        let bar = NSRect(x: inset, y: side * 0.1, width: side - inset * 2, height: barHeight)
+        let radius = barHeight / 2
+
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.45)
+        shadow.shadowBlurRadius = side * 0.03
+        shadow.shadowOffset = NSSize(width: 0, height: -side * 0.012)
+        shadow.set()
+        NSColor(white: 0.12, alpha: 0.82).setFill()
+        NSBezierPath(roundedRect: bar, xRadius: radius, yRadius: radius).fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        let track = bar.insetBy(dx: side * 0.012, dy: side * 0.012)
+        let trackRadius = track.height / 2
+        NSBezierPath(roundedRect: track, xRadius: trackRadius, yRadius: trackRadius).addClip()
+
+        NSColor(white: 1, alpha: 0.16).setFill()
+        track.fill()
+
+        let fill: NSRect
+        if let fraction {
+            fill = NSRect(x: track.minX, y: track.minY, width: track.width * max(0.04, min(1, fraction)), height: track.height)
+        } else {
+            let segment = track.width * 0.32
+            let travel = sweepPhase <= 1 ? sweepPhase : 2 - sweepPhase
+            fill = NSRect(x: track.minX + (track.width - segment) * travel, y: track.minY, width: segment, height: track.height)
+        }
+        NSColor.controlAccentColor.setFill()
+        NSBezierPath(roundedRect: fill, xRadius: trackRadius, yRadius: trackRadius).fill()
+        let sheen = NSGradient(colors: [NSColor(white: 1, alpha: 0.35), NSColor(white: 1, alpha: 0)])
+        sheen?.draw(in: NSRect(x: fill.minX, y: fill.midY, width: fill.width, height: fill.height / 2), angle: 90)
     }
 }

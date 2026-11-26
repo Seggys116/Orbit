@@ -281,7 +281,79 @@ final class CommandBarRankingTests: XCTestCase {
         XCTAssertNotNil(tabIndex)
         XCTAssertNotNil(historyIndex)
         if let tabIndex, let historyIndex {
-            XCTAssertLessThan(tabIndex, historyIndex, "An open tab should rank above the equivalent history entry (spec §3.3).")
+            XCTAssertLessThan(historyIndex, tabIndex, "A visited address leads an open tab that merely matches the text.")
+        }
+    }
+
+    // MARK: - Addresses lead tabs
+
+    private func makeTwoSpaceEnvironment() -> (env: AppEnvironment, profile: Profile, home: Space, other: Space) {
+        let env = AppEnvironment()
+        let profile = Profile(name: "Personal")
+        env.state.profiles = [profile]
+        let home = Space(name: "Home", profileID: profile.id)
+        let other = Space(name: "Work", profileID: profile.id)
+        env.state.spaces = [home, other]
+        env.state.activeSpaceID = home.id
+        return (env, profile, home, other)
+    }
+
+    func test_results_aTabInAnotherSpaceNeverLeadsAVisitedAddress() {
+        let (env, profile, _, other) = makeTwoSpaceEnvironment()
+        let tab = Tab(spaceID: other.id, section: .today, url: URL(string: "https://github.com/pulls")!, title: "GitHub - Pull Requests")
+        env.state.tabs[tab.id] = tab
+        env.historyEntries = [
+            HistoryEntry(url: URL(string: "https://github.com")!, title: "GitHub", visitedAt: Date().addingTimeInterval(-3600), profileID: profile.id),
+        ]
+
+        let results = CommandBarEngine.results(query: "github", mode: .newTab, env: env, suggestions: [])
+
+        let tabIndex = results.firstIndex { if case .tabInOtherSpace = $0.kind { return true }; return false }
+        let historyIndex = results.firstIndex { if case .history = $0.kind { return true }; return false }
+        XCTAssertNotNil(tabIndex, "the other Space's tab should still be offered; results were \(results.map(\.title))")
+        XCTAssertNotNil(historyIndex, "the visited address should be offered; results were \(results.map(\.title))")
+        if let tabIndex, let historyIndex {
+            XCTAssertLessThan(historyIndex, tabIndex)
+        }
+        if case .tabInOtherSpace = results.first?.kind {
+            XCTFail("Enter on typed text must not move the user to another Space")
+        }
+    }
+
+    func test_results_anOpenTabInThisSpaceStillFollowsTheSiteRoot() {
+        let (env, profile, home, _) = makeTwoSpaceEnvironment()
+        let tab = Tab(spaceID: home.id, section: .today, url: URL(string: "https://github.com/pulls")!, title: "GitHub - Pull Requests")
+        env.state.tabs[tab.id] = tab
+        env.historyEntries = [
+            HistoryEntry(url: URL(string: "https://github.com")!, title: "GitHub", visitedAt: Date().addingTimeInterval(-3600), profileID: profile.id),
+        ]
+
+        let results = CommandBarEngine.results(query: "github", mode: .newTab, env: env, suggestions: [])
+
+        let tabIndex = results.firstIndex { if case .openTab = $0.kind { return true }; return false }
+        let historyIndex = results.firstIndex { if case .history = $0.kind { return true }; return false }
+        XCTAssertNotNil(tabIndex)
+        XCTAssertNotNil(historyIndex)
+        if let tabIndex, let historyIndex {
+            XCTAssertLessThan(historyIndex, tabIndex)
+        }
+    }
+
+    func test_results_aSpaceNamedExactlyStillLeadsWithItsTab() {
+        let (env, profile, _, other) = makeTwoSpaceEnvironment()
+        let tab = Tab(spaceID: other.id, section: .today, url: URL(string: "https://workday.example.com/home")!, title: "Workday")
+        env.state.tabs[tab.id] = tab
+        env.historyEntries = [
+            HistoryEntry(url: URL(string: "https://workday.example.com")!, title: "Workday", visitedAt: Date().addingTimeInterval(-3600), profileID: profile.id),
+        ]
+
+        let results = CommandBarEngine.results(query: "work", mode: .newTab, env: env, suggestions: [])
+
+        let tabIndex = results.firstIndex { if case .tabInOtherSpace = $0.kind { return true }; return false }
+        let historyIndex = results.firstIndex { if case .history = $0.kind { return true }; return false }
+        XCTAssertNotNil(tabIndex)
+        if let tabIndex, let historyIndex {
+            XCTAssertLessThan(tabIndex, historyIndex, "a query that is exactly a Space's name is a request to go there")
         }
     }
 
@@ -416,9 +488,21 @@ final class CommandBarRankingTests: XCTestCase {
             "The verbatim row must be reserved rank 0 or 1 so it is always visible without scrolling — it was at \(verbatimIndex) of \(results.count)."
         )
 
-        guard case .openTab = results.first?.kind else {
-            XCTFail("A clearly-matching open tab must still be the top result, got \(String(describing: results.first?.kind)).")
-            return
+        switch results.first?.kind {
+        case .history, .favorite, .searchSuggestion:
+            break
+        default:
+            XCTFail("An address must lead the open tab that merely matches, got \(String(describing: results.first?.kind)).")
+        }
+        let firstTab = results.firstIndex { if case .openTab = $0.kind { return true }; return false }
+        let firstAddress = results.firstIndex { result in
+            switch result.kind {
+            case .history, .favorite: return true
+            default: return false
+            }
+        }
+        if let firstTab, let firstAddress {
+            XCTAssertLessThan(firstAddress, firstTab, "the open tab follows the addresses the user has been to")
         }
     }
 

@@ -466,7 +466,7 @@ nonisolated enum CommandBarEngine {
                 title: title,
                 subtitle: spaceName.map { "\($0) · \(host)" } ?? host,
                 symbolName: "square.on.square",
-                // +30 lets an open tab outrank equivalent history/suggestions; another Space's tab earns it only when the query is exactly that Space's name.
+                // +30 lets an open tab outrank suggestions and actions; history and favourites still lead it (see the clamp below), and another Space's tab earns the boost only when the query is exactly that Space's name.
                 score: !isElsewhere || namesSpaceExactly ? score + 30 : score,
                 faviconURL: tab.faviconURL ?? faviconGuessURL(for: tab.url),
                 faviconHost: host
@@ -519,10 +519,32 @@ nonisolated enum CommandBarEngine {
         let keptHistory = rankedHistory.filter { !siteRoots.absorbedIDs.contains($0.entry.entry.id) }.prefix(max(historyRowBudget - siteRoots.rows.count, 0))
         items.append(contentsOf: keptHistory.map { historyRow($0.entry, score: $0.score) })
 
-        let lowestHistoryScore = items.filter { if case .history = $0.kind { return true } else { return false } }.map(\.score).min()
-        if let lowestHistoryScore {
-            for index in items.indices where crossSpaceTabIDs.contains(items[index].id) {
-                items[index].score = min(items[index].score, lowestHistoryScore - 0.001)
+        // An address the user has been to (a site root, a visited page or a favourite) always leads a tab row: typing a site means going to it, and a tab that merely matches is the second answer. A tab in another Space sits below every such row, so Enter can never move the user between Spaces while a page they have visited is on offer. Only a query that is exactly a Space's name lets that Space's tab lead.
+        var bestHistoryScore: Double?
+        var bestFavoriteScore: Double?
+        var lowestAddressScore: Double?
+        for item in items {
+            switch item.kind {
+            case .history:
+                bestHistoryScore = max(bestHistoryScore ?? item.score, item.score)
+            case .favorite:
+                bestFavoriteScore = max(bestFavoriteScore ?? item.score, item.score)
+            default:
+                continue
+            }
+            lowestAddressScore = min(lowestAddressScore ?? item.score, item.score)
+        }
+        let sameSpaceCeiling = [bestHistoryScore, bestFavoriteScore].compactMap { $0 }.min()
+        if let sameSpaceCeiling, let lowestAddressScore {
+            for index in items.indices {
+                switch items[index].kind {
+                case .openTab, .pinnedTab:
+                    items[index].score = min(items[index].score, sameSpaceCeiling - 0.001)
+                case .tabInOtherSpace where crossSpaceTabIDs.contains(items[index].id):
+                    items[index].score = min(items[index].score, lowestAddressScore - 0.001)
+                default:
+                    break
+                }
             }
         }
 

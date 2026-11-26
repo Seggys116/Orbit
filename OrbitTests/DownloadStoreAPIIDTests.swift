@@ -50,6 +50,60 @@ final class DownloadStoreAPIIDTests: XCTestCase {
 
     private func makeStore() -> DownloadStore { DownloadStore(fileURL: storeFileURL) }
 
+    // MARK: - Activity (sidebar ring and Dock bar)
+
+    func testActivityCombinesTheProgressOfEveryRunningDownload() {
+        let store = DownloadStore(fileURL: storeFileURL)
+        XCTAssertEqual(store.activity, DownloadActivity())
+
+        let first = store.beginDownload(sourceURL: URL(string: "https://example.com/a.zip")!, destinationURL: scratchRoot.appendingPathComponent("a.zip"), suggestedFileName: "a.zip", totalBytes: 1_000)
+        let second = store.beginDownload(sourceURL: URL(string: "https://example.com/b.zip")!, destinationURL: scratchRoot.appendingPathComponent("b.zip"), suggestedFileName: "b.zip", totalBytes: 3_000)
+        XCTAssertEqual(store.activity, DownloadActivity(activeCount: 2, fraction: 0))
+
+        store.updateProgress(id: first.id, progress: DownloadProgress(receivedBytes: 1_000, totalBytes: 1_000, state: .inProgress))
+        store.updateProgress(id: second.id, progress: DownloadProgress(receivedBytes: 1_000, totalBytes: 3_000, state: .inProgress))
+        XCTAssertEqual(store.activity.activeCount, 2)
+        XCTAssertEqual(try XCTUnwrap(store.activity.fraction), 0.5, accuracy: 0.0001, "2,000 of 4,000 bytes")
+
+        store.updateProgress(id: first.id, progress: DownloadProgress(receivedBytes: 1_000, totalBytes: 1_000, state: .completed))
+        XCTAssertEqual(store.activity.activeCount, 1)
+        XCTAssertEqual(try XCTUnwrap(store.activity.fraction), 0.33, accuracy: 0.0001, "only the second download is left, a third done, truncated to whole percent")
+    }
+
+    func testActivityHasNoFractionWhileNoRunningDownloadKnowsItsSize() {
+        let store = DownloadStore(fileURL: storeFileURL)
+        let item = store.beginDownload(sourceURL: URL(string: "https://example.com/stream.bin")!, destinationURL: scratchRoot.appendingPathComponent("stream.bin"), suggestedFileName: "stream.bin")
+        XCTAssertEqual(store.activity, DownloadActivity(activeCount: 1, fraction: nil))
+
+        store.cancel(item.id)
+        XCTAssertEqual(store.activity, DownloadActivity())
+    }
+
+    func testFinishingADownloadPostsOnceAndStampsTheCompletion() {
+        let store = DownloadStore(fileURL: storeFileURL)
+        let item = store.beginDownload(sourceURL: URL(string: "https://example.com/a.zip")!, destinationURL: scratchRoot.appendingPathComponent("a.zip"), suggestedFileName: "a.zip", totalBytes: 10)
+        XCTAssertNil(store.lastCompletedAt)
+
+        var posts = 0
+        let observer = NotificationCenter.default.addObserver(forName: .orbitDownloadFinished, object: store, queue: nil) { _ in posts += 1 }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        store.updateProgress(id: item.id, progress: DownloadProgress(receivedBytes: 10, totalBytes: 10, state: .completed))
+        store.updateProgress(id: item.id, progress: DownloadProgress(receivedBytes: 10, totalBytes: 10, state: .completed))
+
+        XCTAssertEqual(posts, 1)
+        XCTAssertNotNil(store.lastCompletedAt)
+        XCTAssertFalse(store.activity.isActive)
+    }
+
+    func testARecordSavedAsRunningDoesNotCountAsActivityAfterARelaunch() throws {
+        try writeRecords([record(startedAt: Date(timeIntervalSince1970: 1_000), state: .inProgress)])
+        let store = makeStore()
+
+        XCTAssertEqual(store.downloads.first?.state, .inProgress, "the saved state is left as it was")
+        XCTAssertEqual(store.activity, DownloadActivity(), "no transfer survives a relaunch, so nothing is running")
+    }
+
     // MARK: - Backfill
 
     func testBackfillAssignsIDsInAscendingStartedAtOrder() throws {

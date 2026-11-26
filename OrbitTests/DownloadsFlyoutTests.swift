@@ -504,4 +504,55 @@ final class DownloadsFlyoutTests: XCTestCase {
         try png.write(to: url)
         return url
     }
+
+    // MARK: - Download progress on the Library button and the Dock icon
+
+    private func attach(_ rep: NSBitmapImageRep, named name: String) {
+        guard let png = rep.representation(using: .png, properties: [:]) else { return }
+        let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    func testLibraryRingRendersEachStateAndLabelsItself() throws {
+        let theme = SpaceTheme(style: .solid, colors: [ThemeColor(red: 0.16, green: 0.14, blue: 0.22)], followsSystemAppearance: false)
+        XCTAssertEqual(SidebarBottomBar.libraryAccessibilityLabel(activity: DownloadActivity()), "Library")
+        XCTAssertEqual(SidebarBottomBar.libraryAccessibilityLabel(activity: DownloadActivity(activeCount: 1, fraction: nil)), "Library, 1 download in progress")
+        XCTAssertEqual(SidebarBottomBar.libraryAccessibilityLabel(activity: DownloadActivity(activeCount: 3, fraction: 0.42)), "Library, 3 downloads in progress, 42 percent")
+
+        func image(_ activity: DownloadActivity) throws -> NSBitmapImageRep {
+            let content = ZStack {
+                Image(systemName: "archivebox")
+                    .font(.system(size: OrbitMetrics.iconFavicon, weight: .medium))
+                    .foregroundStyle(theme.readableForeground)
+                LibraryDownloadRing(activity: activity, completedAt: nil, color: theme.readableForeground, reduceMotion: true)
+            }
+            .frame(width: 24, height: 24)
+            .padding(8)
+            .background(Color(red: 0.16, green: 0.14, blue: 0.22))
+            let renderer = ImageRenderer(content: content)
+            renderer.scale = 4
+            let cg = try XCTUnwrap(renderer.cgImage)
+            return NSBitmapImageRep(cgImage: cg)
+        }
+
+        let idle = try image(DownloadActivity())
+        let half = try image(DownloadActivity(activeCount: 1, fraction: 0.5))
+        let full = try image(DownloadActivity(activeCount: 1, fraction: 1))
+        func lit(_ rep: NSBitmapImageRep) -> Int {
+            var count = 0
+            for y in 0..<rep.pixelsHigh {
+                for x in 0..<rep.pixelsWide {
+                    if (rep.colorAt(x: x, y: y)?.brightnessComponent ?? 0) > 0.6 { count += 1 }
+                }
+            }
+            return count
+        }
+        XCTAssertGreaterThan(lit(half), lit(idle) + 100, "a running download draws a ring around the icon")
+        XCTAssertGreaterThan(lit(full), lit(half) + 100, "the ring grows with the progress")
+        attach(idle, named: "library-idle")
+        attach(half, named: "library-50-percent")
+        attach(full, named: "library-100-percent")
+    }
 }

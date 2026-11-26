@@ -137,7 +137,15 @@ struct SidebarBottomBar: View {
                             .fill(theme.readableForeground.opacity(OrbitMetrics.sidebarActiveRowOpacity))
                     }
                 }
-                .accessibilityLabel("Library")
+                .overlay {
+                    LibraryDownloadRing(
+                        activity: env.downloadStore.activity,
+                        completedAt: env.downloadStore.lastCompletedAt,
+                        color: theme.readableForeground,
+                        reduceMotion: reduceMotion
+                    )
+                }
+                .accessibilityLabel(Self.libraryAccessibilityLabel(activity: env.downloadStore.activity))
                 .accessibilityAddTraits(env.isLibraryMode ? .isSelected : [])
         }
         .onHover { hovering in
@@ -145,6 +153,13 @@ struct SidebarBottomBar: View {
             scheduleDownloadsPreview(hovering: hovering)
             scheduleDownloadsPreviewClose()
         }
+    }
+
+    static func libraryAccessibilityLabel(activity: DownloadActivity) -> String {
+        guard activity.isActive else { return "Library" }
+        let noun = activity.activeCount == 1 ? "download" : "downloads"
+        guard let fraction = activity.fraction else { return "Library, \(activity.activeCount) \(noun) in progress" }
+        return "Library, \(activity.activeCount) \(noun) in progress, \(Int((fraction * 100).rounded())) percent"
     }
 
     static let downloadsPreviewIntentDelay: UInt64 = 350_000_000
@@ -666,4 +681,89 @@ extension EnvironmentValues {
 
 extension Notification.Name {
     static let orbitPresentBoostsEditor = Notification.Name("OrbitPresentBoostsEditor")
+}
+
+
+/// A ring drawn around the Library button while a download runs: it fills as the transfer advances, turns a quarter-arc when the size is unknown, and ends with a short checkmark when one finishes.
+struct LibraryDownloadRing: View {
+    var activity: DownloadActivity
+    var completedAt: Date?
+    var color: Color
+    var reduceMotion: Bool
+
+    @State private var showsCompletion = false
+    @State private var completionHide: Task<Void, Never>?
+    @State private var isSpinning = false
+
+    static let diameter = OrbitMetrics.sidebarBottomBarIconSize - 3
+    static let lineWidth: CGFloat = 2
+    static let completionDuration: UInt64 = 1_800_000_000
+    /// A completion older than this when it is first seen (the sidebar was not on screen) is not announced.
+    static let completionFreshness: TimeInterval = 2
+
+    var body: some View {
+        ZStack {
+            if activity.isActive {
+                Circle()
+                    .stroke(color.opacity(0.2), lineWidth: Self.lineWidth)
+                if let fraction = activity.fraction {
+                    Circle()
+                        .trim(from: 0, to: max(fraction, 0.03))
+                        .stroke(color, style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(OrbitMotion.resolved(OrbitMotion.standard, reduceMotion: reduceMotion), value: fraction)
+                } else {
+                    Circle()
+                        .trim(from: 0, to: 0.28)
+                        .stroke(color, style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(isSpinning ? 270 : -90))
+                }
+            } else if showsCompletion {
+                Circle()
+                    .stroke(color.opacity(0.9), lineWidth: Self.lineWidth)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: Self.diameter, height: Self.diameter)
+        .overlay(alignment: .bottomTrailing) {
+            if showsCompletion && !activity.isActive {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(color)
+                    .offset(x: 5, y: 5)
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
+            }
+        }
+        .animation(OrbitMotion.resolved(OrbitMotion.quick, reduceMotion: reduceMotion), value: activity.isActive)
+        .animation(OrbitMotion.resolved(OrbitMotion.quick, reduceMotion: reduceMotion), value: showsCompletion)
+        .allowsHitTesting(false)
+        .onAppear { updateSpin() }
+        .onChange(of: activity.fraction == nil && activity.isActive) { _, _ in updateSpin() }
+        .onChange(of: completedAt) { _, finished in
+            guard let finished, Date().timeIntervalSince(finished) < Self.completionFreshness else { return }
+            announceCompletion()
+        }
+        .onDisappear { completionHide?.cancel() }
+    }
+
+    private func updateSpin() {
+        let indeterminate = activity.isActive && activity.fraction == nil
+        guard indeterminate, !reduceMotion else {
+            withAnimation(nil) { isSpinning = false }
+            return
+        }
+        isSpinning = false
+        withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { isSpinning = true }
+    }
+
+    private func announceCompletion() {
+        showsCompletion = true
+        completionHide?.cancel()
+        completionHide = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.completionDuration)
+            guard !Task.isCancelled else { return }
+            showsCompletion = false
+        }
+    }
 }

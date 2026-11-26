@@ -33,11 +33,65 @@ nonisolated public struct DownloadsFile: Codable, Sendable {
     }
 }
 
+/// What the sidebar button and the Dock icon show about downloads in flight.
+extension DownloadState {
+    var isActive: Bool {
+        switch self {
+        case .pending, .inProgress, .paused: return true
+        case .completed, .cancelled, .interrupted: return false
+        }
+    }
+}
+
+nonisolated public struct DownloadActivity: Equatable, Sendable {
+    public var activeCount = 0
+    /// Combined progress of every active download whose size is known, in whole percent steps so observers fire a hundred times a download at most; nil when none has a known size.
+    public var fraction: Double?
+
+    public init(activeCount: Int = 0, fraction: Double? = nil) {
+        self.activeCount = activeCount
+        self.fraction = fraction
+    }
+
+    public var isActive: Bool { activeCount > 0 }
+
+    static func summarising(_ items: [DownloadItem], excluding excluded: Set<UUID> = []) -> DownloadActivity {
+        var count = 0
+        var received: Int64 = 0
+        var total: Int64 = 0
+        for item in items where !excluded.contains(item.id) {
+            switch item.state {
+            case .pending, .inProgress, .paused:
+                count += 1
+                if item.totalBytes > 0 {
+                    received += min(max(item.receivedBytes, 0), item.totalBytes)
+                    total += item.totalBytes
+                }
+            case .completed, .cancelled, .interrupted:
+                continue
+            }
+        }
+        guard count > 0 else { return DownloadActivity() }
+        guard total > 0 else { return DownloadActivity(activeCount: count, fraction: nil) }
+        return DownloadActivity(activeCount: count, fraction: (Double(received) / Double(total) * 100).rounded(.down) / 100)
+    }
+}
+
 @MainActor
 @Observable
 public final class DownloadStore {
 
     public private(set) var downloads: [DownloadItem] = []
+
+    /// Updated only when it changes, so a view reading it is not redrawn for every byte of a download.
+    public private(set) var activity = DownloadActivity()
+
+    // No transfer survives a relaunch, so a record that was saved as running was cut off by the quit. It keeps its saved state but is left out of `activity`, or the sidebar button and the Dock icon would show a download that is not happening.
+    @ObservationIgnored
+    private var staleActiveIDs: Set<UUID> = []
+
+    /// When a download last finished successfully; lets the sidebar button show a brief completion mark.
+    public private(set) var lastCompletedAt: Date?
 
     private let writer: AtomicJSONFileWriter<DownloadsFile>
 
@@ -60,6 +114,7 @@ public final class DownloadStore {
         self.writer = AtomicJSONFileWriter(fileURL: fileURL)
         let file = writer.loadNow(default: DownloadsFile())
         self.downloads = file.items
+        self.staleActiveIDs = Set(file.items.filter { $0.state.isActive }.map(\.id))
         // max, not the stored counter alone: a hand-edited or restored-from-backup file must skip ids, never reuse one.
         self.nextAPIID = max(file.nextAPIID, (file.items.compactMap(\.apiID).max() ?? 0) + 1)
         if !backfillAPIIDsOnLoad(), file.isLegacyShape {
@@ -67,6 +122,7 @@ public final class DownloadStore {
         }
         verifyFilesExistOnLoad()
         reindex()
+        refreshActivity()
     }
 
     public nonisolated static var defaultFileURL: URL { OrbitDataRoot.processDefault.downloadsFile }
@@ -146,6 +202,7 @@ public final class DownloadStore {
         )
         downloads.insert(item, at: 0)
         reindex()
+        refreshActivity()
         persist()
         NotificationCenter.default.post(name: .orbitDownloadCreated, object: self, userInfo: ["item": item])
         return item
@@ -175,6 +232,7 @@ public final class DownloadStore {
 
     public func updateProgress(id: UUID, progress: DownloadProgress) {
         guard let index = indexOfDownload(id) else { return }
+        staleActiveIDs.remove(id)
         let nextTotal = progress.totalBytes > 0 ? progress.totalBytes : downloads[index].totalBytes
         // Byte ticks that change nothing still copied the whole list into the debounced snapshot.
         switch progress.state {
@@ -198,7 +256,12 @@ public final class DownloadStore {
         case .pending, .inProgress, .paused:
             downloads[index].finishedAt = nil
         }
+        refreshActivity()
         persist()
+        if previous != .completed, downloads[index].state == .completed {
+            lastCompletedAt = Date()
+            NotificationCenter.default.post(name: .orbitDownloadFinished, object: self, userInfo: ["item": downloads[index]])
+        }
         if previous != downloads[index].state, let apiID = downloads[index].apiID {
             let chromeState = DownloadItemProjection.chromeState(for: downloads[index].state)
             NotificationCenter.default.post(
@@ -214,6 +277,7 @@ public final class DownloadStore {
         let previous = downloads[index].state
         downloads[index].state = .cancelled
         downloads[index].finishedAt = Date()
+        refreshActivity()
         persist()
         if previous != .cancelled, let apiID = downloads[index].apiID {
             let chromeState = DownloadItemProjection.chromeState(for: .cancelled)
@@ -229,6 +293,7 @@ public final class DownloadStore {
         let apiID = indexOfDownload(id).flatMap { downloads[$0].apiID }
         downloads.removeAll { $0.id == id }
         reindex()
+        refreshActivity()
         persist()
         if let apiID {
             NotificationCenter.default.post(name: .orbitDownloadErased, object: self, userInfo: ["id": apiID])
@@ -243,6 +308,7 @@ public final class DownloadStore {
             }
         }
         reindex()
+        refreshActivity()
         persist()
     }
 
@@ -251,6 +317,7 @@ public final class DownloadStore {
         guard !downloads.isEmpty else { return }
         downloads.removeAll()
         indexByID.removeAll()
+        refreshActivity()
         persist()
     }
 
@@ -355,6 +422,13 @@ public final class DownloadStore {
         return index
     }
 
+    private func refreshActivity() {
+        let next = DownloadActivity.summarising(downloads, excluding: staleActiveIDs)
+        guard next != activity else { return }
+        activity = next
+        NotificationCenter.default.post(name: .orbitDownloadActivityChanged, object: self)
+    }
+
     /// First match wins, matching `firstIndex`.
     private func reindex() {
         var index: [UUID: Int] = [:]
@@ -395,6 +469,8 @@ public final class DownloadStore {
 
 extension Notification.Name {
     static let orbitDownloadCreated = Notification.Name("orbit.download.created")
+    static let orbitDownloadActivityChanged = Notification.Name("orbit.download.activityChanged")
+    static let orbitDownloadFinished = Notification.Name("orbit.download.finished")
     static let orbitDownloadChanged = Notification.Name("orbit.download.changed")
     static let orbitDownloadErased = Notification.Name("orbit.download.erased")
 }
